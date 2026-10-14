@@ -1,7 +1,7 @@
 import { sound, type AudioSettings } from '@jc/audio';
 import { AUTO_REBUY_MAX_TIMES, type ChatMessage, type TableView } from '@jc/types';
 import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -121,7 +121,9 @@ export function TopUpModal({
   const [times, setTimes] = useState(1);
   const [consent, setConsent] = useState(false);
 
-  useEffect(() => {
+  // A layout effect, so the dialog never shows (or lets anyone move) the amount left from the last time it was open:
+  // a passive effect could run after a quick pick and replace it with the suggestion.
+  useLayoutEffect(() => {
     if (!open) return;
     setAmount(clamp(bigBlind * 100 - stack, lo, Math.max(lo, hi)));
     setRebuyAmount(clamp(bigBlind * 100, minBuyIn, maxBuyIn));
