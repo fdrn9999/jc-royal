@@ -1,13 +1,17 @@
 // E2E server: fresh local D1/DO state + real workerd (api + game workers) serving the built web app.
 // Requires `pnpm --filter @jc/web build` (done by the Playwright config's webServer command).
 import { spawn, spawnSync } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = process.cwd();
 const state = resolve(root, 'tests/.state/e2e');
 const wrangler = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
 rmSync(state, { recursive: true, force: true });
+for (const app of ['apps/api', 'apps/game-worker']) {
+  const target = resolve(root, app, '.dev.vars');
+  if (!existsSync(target)) copyFileSync(resolve(root, app, '.dev.vars.example'), target);
+}
 const run = (args) => {
   const r = spawnSync(process.execPath, [wrangler, ...args], { cwd: root, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr || r.stdout);

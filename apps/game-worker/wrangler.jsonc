@@ -31,6 +31,7 @@
         }
       ],
       "durable_objects": { "bindings": [{ "name": "TABLES", "class_name": "TableRoom" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TableRoom"] }],
       "vars": { "ENVIRONMENT": "production" }
     }
   }

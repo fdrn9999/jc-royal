@@ -7,16 +7,17 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm -r --filter ./packages/** --filter ./apps/** run build",
     "typecheck": "pnpm -r run typecheck",
-    "test": "pnpm -r --filter ./packages/** run test",
+    "test": "pnpm --filter @jc/poker-engine test",
+    "test:integration": "vitest run --config tests/vitest.config.ts",
+    "test:e2e": "playwright test -c tests/playwright.config.ts",
+    "build": "pnpm --filter @jc/web build && pnpm --filter @jc/admin build",
     "db:generate": "pnpm --filter @jc/db run generate",
     "db:migrate:local": "wrangler d1 migrations apply jc-royal-db --local --persist-to .wrangler/state -c apps/api/wrangler.jsonc",
-    "dev:workers": "wrangler dev -c apps/api/wrangler.jsonc -c apps/game-worker/wrangler.jsonc --persist-to .wrangler/state",
+    "db:seed:local": "wrangler d1 execute jc-royal-db --local --persist-to .wrangler/state -c apps/api/wrangler.jsonc --file packages/db/seed/dev-tables.sql",
+    "dev:workers": "wrangler dev -c apps/api/wrangler.jsonc -c apps/game-worker/wrangler.jsonc --persist-to .wrangler/state --port 8787",
     "dev:web": "pnpm --filter @jc/web dev",
-    "dev:admin": "pnpm --filter @jc/admin dev",
-    "test:integration": "vitest run --config tests/vitest.config.ts",
-    "test:e2e": "playwright test -c tests/playwright.config.ts"
+    "dev:admin": "pnpm --filter @jc/admin dev"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261014.1",

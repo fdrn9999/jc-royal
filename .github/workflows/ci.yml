@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Engine rules + property tests
+        run: pnpm --filter @jc/poker-engine test
+      - name: Build web + admin
+        run: pnpm --filter @jc/web build && pnpm --filter @jc/admin build
+      - name: Integration tests (wrangler dev / workerd, local D1 + Durable Objects)
+        run: pnpm test:integration
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: E2E (Playwright)
+        run: pnpm test:e2e
+      - name: Dry-run production bundles
+        run: |
+          pnpm exec wrangler deploy --dry-run --env production -c apps/game-worker/wrangler.jsonc --outdir .dry/game
+          pnpm exec wrangler deploy --dry-run --env production -c apps/api/wrangler.jsonc --outdir .dry/api
+          pnpm exec wrangler deploy --dry-run --env production -c apps/admin/wrangler.jsonc --outdir .dry/admin
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7

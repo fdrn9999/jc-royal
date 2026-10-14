@@ -21,3 +21,4 @@ tests/.state/
 tests/visual/out/
 tests/visual/out-admin/
 tests/visual/out-community/
+.dry/

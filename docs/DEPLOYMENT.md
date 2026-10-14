@@ -1,0 +1,84 @@
+# Cloudflare 배포 가이드
+
+## 1. 리소스 만들기(최초 1회)
+
+```bash
+pnpm exec wrangler login
+pnpm exec wrangler d1 create jc-royal-db-prod     # 출력된 database_id를 아래 두 파일의 env.production에 입력
+#   apps/api/wrangler.jsonc        env.production.d1_databases[0].database_id
+#   apps/game-worker/wrangler.jsonc env.production.d1_databases[0].database_id
+```
+
+도메인은 예시(`jcroyal.example`)를 실제 값으로 바꾼다.
+
+- `apps/api/wrangler.jsonc` → `env.production.vars.ALLOWED_ORIGINS`, `ADMIN_ORIGIN`
+
+## 2. 시크릿
+
+```bash
+# 두 Worker에 같은 값(32바이트 이상 무작위)을 넣어야 API ↔ 게임 룸 내부 호출이 통과한다
+openssl rand -base64 48 | pnpm exec wrangler secret put INTERNAL_SECRET --env production -c apps/api/wrangler.jsonc
+#   (같은 값을) pnpm exec wrangler secret put INTERNAL_SECRET --env production -c apps/game-worker/wrangler.jsonc
+pnpm exec wrangler secret put ADMIN_BOOTSTRAP_TOKEN --env production -c apps/api/wrangler.jsonc   # 최초 관리자 생성 후 삭제
+```
+
+## 3. 배포 순서
+
+```bash
+pnpm install && pnpm build
+pnpm exec wrangler d1 migrations apply jc-royal-db-prod --remote --env production -c apps/api/wrangler.jsonc
+pnpm exec wrangler deploy --env production -c apps/game-worker/wrangler.jsonc   # ① DO 클래스(SQLite 저장소)
+pnpm exec wrangler deploy --env production -c apps/api/wrangler.jsonc           # ② API + 사용자 사이트
+pnpm exec wrangler deploy --env production -c apps/admin/wrangler.jsonc         # ③ 관리자 콘솔(서비스 바인딩)
+```
+
+- **자동 배포**: GitHub Actions의 `Deploy` 워크플로(수동 실행)가 같은 순서로 배포한다.
+- **필요한 저장소 시크릿**: `CLOUDFLARE_API_TOKEN`(Workers Scripts·D1 편집 권한), `CLOUDFLARE_ACCOUNT_ID`.
+- **CI**: push와 PR마다 `CI` 워크플로가 실행된다. 타입 검사, 엔진·통합·E2E 테스트, 운영 번들 dry-run을 한다.
+
+## 4. 커스텀 도메인
+
+Cloudflare에 등록된 도메인(zone)이 있다면, 각 Worker의 `env.production`에 아래 설정을 추가하고 다시 배포한다.
+
+```jsonc
+// apps/api/wrangler.jsonc
+"routes": [{ "pattern": "jcroyal.example", "custom_domain": true }]
+// apps/admin/wrangler.jsonc
+"routes": [{ "pattern": "admin.jcroyal.example", "custom_domain": true }]
+```
+
+- 게임 Worker에는 공개 경로가 없다(`workers_dev: false`). API가 DO 바인딩으로만 접근한다.
+- 관리자 도메인에는 Cloudflare Access를 붙이는 것을 권장한다(`docs/ADMIN_SECURITY.md`).
+
+## 5. 비용과 한도 검토
+
+> 아래 수치는 2026년 기준으로 알려진 Cloudflare 공시 가격이다. **배포 전에 https://developers.cloudflare.com/workers/platform/pricing/ 등 공식 페이지에서 다시 확인할 것.** 무료 한도는 무제한이 아니다.
+
+| 항목 | 무료 플랜 | Workers Paid($5/월) | JC ROYAL 사용 패턴 |
+|---|---|---|---|
+| Workers 요청 | 일 100,000 | 월 1,000만 포함 | REST 호출, WS 업그레이드, 정적 자산(자산 요청은 무료) |
+| Workers CPU | 호출당 **10ms** | 호출당 최대 30초(기본), 월 3,000만 CPU-ms 포함 | **PBKDF2 10만 회(가입·로그인)는 10ms를 넘을 수 있다 → 운영은 유료 플랜 권장** |
+| Durable Objects | SQLite 백엔드 사용 가능. 요청·실행시간 일일 한도 | 요청 월 100만 포함, 실행시간 월 40만 GB-s 포함 | 테이블당 DO 1개. WS 수신 메시지는 20개를 요청 1회로 과금. Hibernation으로 유휴 연결 실행시간 최소화. 알람은 턴·다음 핸드마다 |
+| DO 저장소 | SQLite 저장량·행 쓰기 한도 | 포함량 초과 시 과금 | 액션마다 `room`·`hand` 쓰기(핸드당 수십 회). 9인 장기 핸드 로그 약 101KiB(값 한도 2MiB 이내) |
+| D1 | 일 읽기 500만 행, 쓰기 10만 행, 5GB | 월 읽기 250억 행, 쓰기 5,000만 행 포함 | 핸드 종료마다 batch 1회(hands + hand_players), 바이인·환급마다 원장 기록. 레이트 리밋 카운터도 D1에 기록(쓰기 발생) |
+
+**대략적인 부하 예시**(가정: 6인 테이블 1개가 시간당 60핸드, 핸드당 액션 20회, 관전 2명)
+
+- **DO 요청**: WS 메시지 약 1,200건/시간 → 요청 환산 약 60회/시간 + 알람 약 60회/시간
+- **DO 저장소 쓰기**: 약 1,300회/시간
+- **D1 쓰기**: 핸드당 약 8행 → 약 500행/시간
+
+테이블 수십 개 수준에서는 유료 플랜 포함량 안에 들어갈 가능성이 높다. 정확한 값은 Cloudflare 대시보드의 사용량으로 확인해야 한다.
+
+**외부 유료 서비스**: 필요 없다.
+
+- 선택 사항: 비밀번호 재설정 메일(예: Resend 무료 월 3,000통)
+- 선택 사항: Cloudflare Access(50명까지 무료)
+
+## 6. 운영 점검표
+
+- [ ] D1 `database_id` 입력, 마이그레이션 적용(`0000_init`, `0001_community`, `0002_comment_replies`)
+- [ ] 두 Worker에 같은 `INTERNAL_SECRET`, 최초 관리자 생성 후 `ADMIN_BOOTSTRAP_TOKEN` 삭제
+- [ ] `ALLOWED_ORIGINS`·`ADMIN_ORIGIN`을 실제 도메인으로 변경
+- [ ] 관리자 콘솔에서 테이블 생성(운영 DB에는 개발용 시드 테이블을 넣지 않는다)
+- [ ] 대시보드 서버 상태, 정합성 검사 실행으로 확인

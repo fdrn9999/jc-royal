@@ -1,6 +1,6 @@
 /** Starts/stops a real `wrangler dev` (workerd) instance with both workers and persistent local state. */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // import.meta.dirname is percent-encoded for non-ASCII paths under vitest; tests run from the repo root.
@@ -77,7 +77,16 @@ async function waitHealthy(url: string, ms: number) {
   throw new Error(`worker did not become healthy at ${url}`);
 }
 
+/** Local secrets come from .dev.vars (gitignored); create them from the examples when absent (e.g. CI). */
+export function ensureDevVars() {
+  for (const app of ['apps/api', 'apps/game-worker']) {
+    const target = resolve(root, app, '.dev.vars');
+    if (!existsSync(target)) copyFileSync(resolve(root, app, '.dev.vars.example'), target);
+  }
+}
+
 export async function startWorker(port: number, state: string): Promise<RunningWorker> {
+  ensureDevVars();
   const child = spawn(
     process.execPath,
     [
