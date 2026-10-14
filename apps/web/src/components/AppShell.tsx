@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { useUnread } from '../lib/unread';
 
 export function LangToggle() {
   const { locale, setLocale } = useI18n();
@@ -30,6 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const { t } = useI18n();
   const nav = useNavigate();
+  const unread = useUnread();
   const link = ({ isActive }: { isActive: boolean }) =>
     `px-3 py-2 text-sm font-semibold tracking-wide transition ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
   return (
@@ -43,12 +45,21 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink to="/" end className={link}>
               {t('nav.lobby')}
             </NavLink>
+            <NavLink to="/board" className={link}>
+              {t('nav.board')}
+            </NavLink>
             <NavLink to="/me" className={link}>
               {t('nav.me')}
             </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
             {me && <BalancePill amount={me.balance} />}
+            {me && (
+              <Link to="/messages" className="relative rounded-full p-2 text-ink-200 hover:text-ivory" aria-label={`${t('nav.messages')}${unread ? ` (${unread})` : ''}`} data-testid="inbox-link">
+                <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
+                {unread > 0 && <span className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-bold text-white" data-testid="unread-badge">{unread > 99 ? '99+' : unread}</span>}
+              </Link>
+            )}
             <span className="hidden md:inline"><LangToggle /></span>
             {me && (
               <button
@@ -66,9 +77,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 sm:pb-10">{children}</main>
       {/* Mobile bottom navigation */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-2 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
         <NavLink to="/" end className={({ isActive }) => `py-3 text-center text-sm font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
           {t('nav.lobby')}
+        </NavLink>
+        <NavLink to="/board" className={({ isActive }) => `py-3 text-center text-sm font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
+          {t('nav.board')}
         </NavLink>
         <NavLink to="/me" className={({ isActive }) => `py-3 text-center text-sm font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
           {t('nav.me')}

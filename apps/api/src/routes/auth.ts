@@ -13,6 +13,7 @@ import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv, AuthUser } from '../env';
 import { requireUser } from '../lib/auth';
+import { sendMessages } from '../lib/community';
 import { DUMMY_HASH, hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
@@ -71,6 +72,12 @@ export const authRoutes = new Hono<AppEnv>()
     if (grant > 0) {
       await applyLedger(c.env.DB, { userId: id, type: 'signup_grant', amount: grant, idempotencyKey: `signup:${id}`, memo: 'welcome chips' });
     }
+    await sendMessages(db, {
+      userIds: [id],
+      category: 'system',
+      title: 'JC ROYAL에 오신 것을 환영합니다',
+      body: `가입 축하 가상 칩 ${grant.toLocaleString('en-US')}개가 지급되었습니다. 모든 칩은 현금 가치가 없는 플레이 전용 가상 칩입니다.`,
+    });
     await createSession(c, id, 'user');
     return c.json(await loadMe(c, id), 201);
   })

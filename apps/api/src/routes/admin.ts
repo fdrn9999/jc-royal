@@ -14,6 +14,8 @@ import { requireAdmin, requireRecentReauth, requireSuperAdmin } from '../lib/aut
 import { randomToken, sha256 } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { adminAuthRoutes, audit, requireAdminOrigin } from './admin-auth';
+import { adminCommunityRoutes } from './admin-community';
+import { sendMessages } from '../lib/community';
 import { INTERNAL_HEADER } from './tables';
 
 async function roomCall(c: Context<AppEnv>, tableId: string, action: 'status' | 'reload' | 'close'): Promise<Record<string, unknown> | null> {
@@ -104,12 +106,19 @@ const admin = new Hono<AppEnv>()
       c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: body.reason, updatedAt: Date.now() }).where(eq(schema.users.id, id)),
       c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
     ]);
+    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', title: '계정 이용 제한 안내', body: `운영 정책에 따라 계정 이용이 제한되었습니다.
+사유: ${body.reason}`, senderId: c.var.user!.id });
     await audit(c, 'user.suspend', { type: 'user', id }, body);
     return c.json({ ok: true });
   })
   .post('/users/:id/unsuspend', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
-    await c.var.db.update(schema.users).set({ status: 'active', suspendedReason: null, updatedAt: Date.now() }).where(and(eq(schema.users.id, id), eq(schema.users.status, 'suspended')));
+    const lifted = await c.var.db
+      .update(schema.users)
+      .set({ status: 'active', suspendedReason: null, updatedAt: Date.now() })
+      .where(and(eq(schema.users.id, id), eq(schema.users.status, 'suspended')))
+      .returning({ id: schema.users.id });
+    if (lifted[0]) await sendMessages(c.var.db, { userIds: [id], category: 'sanction', title: '계정 이용 제한 해제 안내', body: '계정 이용 제한이 해제되었습니다. 다시 JC ROYAL을 이용하실 수 있습니다.', senderId: c.var.user!.id });
     await audit(c, 'user.unsuspend', { type: 'user', id });
     return c.json({ ok: true });
   })
@@ -137,7 +146,18 @@ const admin = new Hono<AppEnv>()
       memo: body.memo,
     });
     if (r.status === 'insufficient') fail(409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
-    if (r.status === 'applied') await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
+    if (r.status === 'applied') {
+      await sendMessages(c.var.db, {
+        userIds: [id],
+        category: body.amount > 0 ? 'event' : 'admin',
+        title: body.amount > 0 ? '가상 칩 지급 안내' : '가상 칩 조정 안내',
+        body: `${body.amount > 0 ? '+' : ''}${body.amount.toLocaleString('en-US')} 가상 칩이 ${body.amount > 0 ? '지급' : '차감'}되었습니다.
+사유: ${body.memo}
+현재 잔액: ${r.balanceAfter.toLocaleString('en-US')}`,
+        senderId: c.var.user!.id,
+      });
+      await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
+    }
     return c.json({ ok: true, duplicate: r.status === 'duplicate', balanceAfter: r.balanceAfter });
   })
   /** Issues a one-time password reset link (no mail provider is configured). */
@@ -354,4 +374,4 @@ const admin = new Hono<AppEnv>()
     return c.json({ ok: true });
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin);
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes));

@@ -23,6 +23,7 @@ export interface TestTable {
 /** Tables seeded for integration tests (admin API arrives in Phase 7). */
 export const TABLES: TestTable[] = [
   { id: 'it-admin-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-board-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
   { id: 'it-admin-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
   ...Array.from({ length: 12 }, (_, i) => ({ id: `it-hu-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000 })),
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-six-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 2000 })),

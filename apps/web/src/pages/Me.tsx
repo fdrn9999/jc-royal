@@ -1,4 +1,4 @@
-import { handLabelKey, NICKNAME_RE, type HandSummaryDto, type LedgerEntryDto, type MeDto, type StatsDto } from '@jc/types';
+import { handLabelKey, NICKNAME_RE, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -36,6 +36,8 @@ export function MePage() {
   const stats = useLoad<StatsDto>('/api/me/stats');
   const hands = useLoad<HandSummaryDto[]>('/api/me/hands?limit=15');
   const ledger = useLoad<LedgerEntryDto[]>('/api/me/ledger?limit=20');
+  const myPosts = useLoad<PostListItemDto[]>('/api/me/posts');
+  const myComments = useLoad<MyCommentDto[]>('/api/me/comments');
   const sessions = useLoad<{ id: string; createdAt: number; lastSeenAt: number; userAgent: string | null; current: boolean }[]>('/api/auth/me/sessions');
   const [nickname, setNickname] = useState(me?.nickname ?? '');
   const [avatarUrl, setAvatarUrl] = useState(me?.avatarUrl ?? '');
@@ -174,6 +176,33 @@ export function MePage() {
                   <div className={`font-mono font-semibold tabular-nums ${l.amount >= 0 ? 'text-[#9fd8b6]' : 'text-ink-100'}`}>{signed(l.amount)}</div>
                   <div className="font-mono text-xs text-ink-400">{formatChips(l.balanceAfter)}</div>
                 </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className="text-xs text-gold-300 hover:underline">{t('board.write')}</Link>}>
+          {myPosts.data && myPosts.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+          <ul className="divide-y divide-white/5" data-testid="my-posts">
+            {myPosts.data?.map((p) => (
+              <li key={p.id} className="flex items-center gap-3 py-2.5 text-sm">
+                <Link to={`/board/${p.id}`} className="min-w-0 flex-1 truncate hover:text-gold-300">{p.title}</Link>
+                {p.commentCount > 0 && <span className="text-xs text-gold-400">[{p.commentCount}]</span>}
+                <span className="shrink-0 text-xs text-ink-400">{formatDate(p.createdAt, locale)}</span>
+                <Link to={`/board/${p.id}/edit`} className="shrink-0 text-xs text-gold-300">{t('board.edit')}</Link>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+        <Panel title={t('me.myComments')}>
+          {myComments.data && myComments.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+          <ul className="divide-y divide-white/5" data-testid="my-comments">
+            {myComments.data?.map((c) => (
+              <li key={c.id} className="py-2.5 text-sm">
+                <Link to={`/board/${c.postId}`} className="block truncate text-ink-100 hover:text-gold-300">{c.body}</Link>
+                <div className="mt-0.5 truncate text-xs text-ink-400">{c.postTitle} · {formatDate(c.createdAt, locale)}</div>
               </li>
             ))}
           </ul>

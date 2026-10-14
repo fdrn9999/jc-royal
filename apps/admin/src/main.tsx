@@ -5,6 +5,7 @@ import { createBrowserRouter, NavLink, Outlet, RouterProvider } from 'react-rout
 import { setLocale, useT, type Key } from './i18n';
 import './index.css';
 import { AdminProvider, useAdmin } from './lib';
+import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { AuditPage, DashboardPage, HandDetailPage, HandsPage, LedgerPage, ReconcilePage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
@@ -14,6 +15,8 @@ const NAV: [string, Key][] = [
   ['/tables', 'tables'],
   ['/hands', 'hands'],
   ['/ledger', 'ledger'],
+  ['/board', 'board'],
+  ['/messages', 'messages'],
   ['/reconcile', 'reconcile'],
   ['/audit', 'audit'],
 ];
@@ -90,6 +93,8 @@ const router = createBrowserRouter([
       { path: '/ledger', element: <LedgerPage /> },
       { path: '/reconcile', element: <ReconcilePage /> },
       { path: '/audit', element: <AuditPage /> },
+      { path: '/board', element: <BoardAdminPage /> },
+      { path: '/messages', element: <MessagesAdminPage /> },
     ],
   },
 ]);

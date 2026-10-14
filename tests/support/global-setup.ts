@@ -14,6 +14,13 @@ export async function setup() {
   await prepareState(state);
   worker = await startWorker(Number(process.env.TEST_PORT ?? 8799), state);
   process.env.TEST_BASE_URL = worker.url;
+  // One super admin shared by all test files (bootstrap succeeds only once per database).
+  const email = 'super-admin@test.dev';
+  const reg = await fetch(`${worker.url}/api/auth/register`, { method: 'POST', headers: { Origin: 'http://localhost:5173', 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'password123', nickname: 'superadmin' }) });
+  if (reg.status !== 201) throw new Error(`admin register failed: ${reg.status}`);
+  const boot = await fetch(`${worker.url}/api/admin/auth/bootstrap`, { method: 'POST', headers: { Origin: 'http://localhost:5174', 'Content-Type': 'application/json' }, body: JSON.stringify({ token: 'test-bootstrap-token-0123456789', email }) });
+  if (boot.status !== 200) throw new Error(`bootstrap failed: ${boot.status} ${await boot.text()}`);
+  process.env.TEST_ADMIN_EMAIL = email;
 }
 
 export async function teardown() {

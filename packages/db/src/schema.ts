@@ -195,3 +195,68 @@ export const rateLimits = sqliteTable('rate_limits', {
   count: integer('count').notNull(),
 });
 
+
+// ------------------------------------------------------------------ community
+
+/** Board posts. Notices (is_notice) are written by admins and pinned above regular posts. */
+export const posts = sqliteTable(
+  'posts',
+  {
+    id: text('id').primaryKey(),
+    authorId: text('author_id').notNull().references(() => users.id),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    isNotice: integer('is_notice', { mode: 'boolean' }).notNull().default(false),
+    status: text('status', { enum: ['visible', 'hidden', 'deleted'] }).notNull().default('visible'),
+    commentCount: integer('comment_count').notNull().default(0),
+    viewCount: integer('view_count').notNull().default(0),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('posts_list_idx').on(t.status, t.isNotice, t.createdAt), index('posts_author_idx').on(t.authorId, t.createdAt)],
+);
+
+/** Hands attached to a post for hand review (author must have played them). */
+export const postHands = sqliteTable(
+  'post_hands',
+  {
+    postId: text('post_id').notNull().references(() => posts.id),
+    handId: text('hand_id').notNull().references(() => hands.id),
+    sort: integer('sort').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.postId, t.handId] })],
+);
+
+export const comments = sqliteTable(
+  'comments',
+  {
+    id: text('id').primaryKey(),
+    postId: text('post_id').notNull().references(() => posts.id),
+    authorId: text('author_id').notNull().references(() => users.id),
+    body: text('body').notNull(),
+    status: text('status', { enum: ['visible', 'hidden', 'deleted'] }).notNull().default('visible'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('comments_post_idx').on(t.postId, t.createdAt), index('comments_author_idx').on(t.authorId, t.createdAt)],
+);
+
+/** One-way messages from administrators / the system to a user. */
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id),
+    category: text('category', { enum: ['system', 'event', 'sanction', 'notice', 'admin'] }).notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    /** Admin who sent it; null for automatic system messages. */
+    senderId: text('sender_id'),
+    /** Groups one manual send to several recipients. */
+    batchId: text('batch_id'),
+    readAt: integer('read_at'),
+    deletedAt: integer('deleted_at'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('messages_user_idx').on(t.userId, t.createdAt), index('messages_batch_idx').on(t.batchId)],
+);

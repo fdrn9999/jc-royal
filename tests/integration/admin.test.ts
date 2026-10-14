@@ -18,16 +18,16 @@ async function adminClient(email: string, password = 'password123') {
 let superAdmin: { c: Client; email: string; id: string };
 
 beforeAll(async () => {
+  // The first super admin was bootstrapped by the global setup (asserted there).
   const u = await newUser();
   const anon = new Client(ADMIN_ORIGIN);
   expect((await anon.post('/api/admin/auth/bootstrap', { token: 'wrong-token-wrong-token', email: u.email })).status).toBe(403);
-  const b = await anon.post('/api/admin/auth/bootstrap', { token: BOOTSTRAP, email: u.email });
-  expect(b.status, JSON.stringify(b.body)).toBe(200);
-  const again = await anon.post('/api/admin/auth/bootstrap', { token: BOOTSTRAP, email: u.email });
-  expect(again.status).toBe(409);
-  const { c, r } = await adminClient(u.email);
+  expect((await anon.post('/api/admin/auth/bootstrap', { token: BOOTSTRAP, email: u.email })).status).toBe(409);
+  const email = process.env.TEST_ADMIN_EMAIL!;
+  const { c, r } = await adminClient(email);
   expect(r.status).toBe(200);
-  superAdmin = { c, email: u.email, id: u.me.id };
+  const me = await c.get('/api/admin/auth/me');
+  superAdmin = { c, email, id: me.body.user.id };
 });
 
 async function reauth(c: Client, password = 'password123') {
