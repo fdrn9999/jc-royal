@@ -1,0 +1,39 @@
+import { createDb } from '@jc/db';
+import { Hono } from 'hono';
+import type { AppEnv } from './env';
+import { HttpError, csrfGuard, securityHeaders } from './lib/http';
+import { authRoutes } from './routes/auth';
+import { meRoutes } from './routes/me';
+import { tableRoutes, tableSocket } from './routes/tables';
+
+const app = new Hono<AppEnv>();
+
+app.use('*', securityHeaders);
+app.use('*', async (c, next) => {
+  c.set('db', createDb(c.env.DB));
+  return next();
+});
+app.use('/api/*', csrfGuard);
+
+app.get('/api/health', (c) => c.json({ ok: true, env: c.env.ENVIRONMENT, at: Date.now() }));
+app.route('/api/auth', authRoutes);
+app.route('/api/me', meRoutes);
+app.route('/api/tables', tableRoutes);
+app.get('/ws/tables/:id', tableSocket);
+
+app.notFound(async (c) => {
+  if (c.req.path.startsWith('/api/')) return c.json({ error: { code: 'not_found', message: 'not found' } }, 404);
+  // SPA fallback is handled by Workers Static Assets (not_found_handling).
+  if (c.env.ASSETS) return c.env.ASSETS.fetch(c.req.raw);
+  return c.text('not found', 404);
+});
+
+app.onError((err, c) => {
+  if (err instanceof HttpError) {
+    return c.json({ error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) } }, err.status);
+  }
+  console.error('unhandled', err instanceof Error ? err.message : String(err));
+  return c.json({ error: { code: 'internal', message: 'internal error' } }, 500);
+});
+
+export default app;

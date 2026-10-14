@@ -17,3 +17,4 @@ playwright-report/
 .fablize/
 .DS_Store
 Thumbs.db
+tests/.state/

@@ -1,0 +1,29 @@
+{
+  "name": "jc-royal",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.7",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter ./packages/** --filter ./apps/** run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r --filter ./packages/** run test",
+    "db:generate": "pnpm --filter @jc/db run generate",
+    "db:migrate:local": "wrangler d1 migrations apply jc-royal-db --local --persist-to .wrangler/state -c apps/api/wrangler.jsonc",
+    "dev:workers": "wrangler dev -c apps/api/wrangler.jsonc -c apps/game-worker/wrangler.jsonc --persist-to .wrangler/state",
+    "dev:web": "pnpm --filter @jc/web dev",
+    "dev:admin": "pnpm --filter @jc/admin dev",
+    "test:integration": "vitest run --config tests/vitest.config.ts",
+    "test:e2e": "playwright test -c tests/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261014.1",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.5",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.150.0"
+  }
+}
