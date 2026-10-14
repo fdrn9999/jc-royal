@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import type { MessageDto } from '@jc/types';
+import type { MessageDto, UnreadCountsDto } from '@jc/types';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { alias } from 'drizzle-orm/sqlite-core';
@@ -24,9 +24,18 @@ export const messageRoutes = new Hono<AppEnv>()
     const out: MessageDto[] = rows.map(({ m, from }) => ({ id: m.id, category: m.category, title: m.title, body: m.body, fromAdmin: m.senderId ? (from ?? 'admin') : null, readAt: m.readAt, createdAt: m.createdAt }));
     return c.json(out);
   })
+  /** Header badges: inbox, 1:1 messages and received friend requests in one poll. */
   .get('/unread-count', async (c) => {
-    const r = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM messages WHERE user_id = ?1 AND read_at IS NULL AND deleted_at IS NULL`).bind(c.var.user!.id).first<{ n: number }>();
-    return c.json({ unread: r?.n ?? 0 });
+    const r = await c.env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM messages WHERE user_id = ?1 AND read_at IS NULL AND deleted_at IS NULL) AS unread,
+              (SELECT COUNT(*) FROM direct_messages d JOIN users u ON u.id = d.sender_id
+                WHERE d.recipient_id = ?1 AND d.read_at IS NULL AND u.status != 'deleted') AS dmUnread,
+              (SELECT COUNT(*) FROM friendships f JOIN users u ON u.id = f.requester_id
+                WHERE (f.user_a = ?1 OR f.user_b = ?1) AND f.status = 'pending' AND f.requester_id != ?1 AND u.status != 'deleted') AS friendRequests`,
+    )
+      .bind(c.var.user!.id)
+      .first<UnreadCountsDto>();
+    return c.json({ unread: r?.unread ?? 0, dmUnread: r?.dmUnread ?? 0, friendRequests: r?.friendRequests ?? 0 } satisfies UnreadCountsDto);
   })
   .post('/read-all', async (c) => {
     await c.var.db.update(schema.messages).set({ readAt: Date.now() }).where(and(eq(schema.messages.userId, c.var.user!.id), isNull(schema.messages.readAt)));

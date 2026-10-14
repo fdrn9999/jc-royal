@@ -1,21 +1,23 @@
+import type { UnreadCountsDto } from '@jc/types';
 import { useEffect, useSyncExternalStore } from 'react';
 import { api } from './api';
 
-/** Unread message counter shared by the header badge and the inbox. */
-let unread = 0;
+/** Unread counters (inbox, 1:1 messages, friend requests) shared by the header badges and the pages. */
+let counts: UnreadCountsDto = { unread: 0, dmUnread: 0, friendRequests: 0 };
 const subs = new Set<() => void>();
 
 export async function refreshUnread() {
   try {
-    const r = await api<{ unread: number }>('/api/messages/unread-count');
-    unread = r.unread;
+    const r = await api<UnreadCountsDto>('/api/messages/unread-count');
+    if (r.unread === counts.unread && r.dmUnread === counts.dmUnread && r.friendRequests === counts.friendRequests) return;
+    counts = r;
     subs.forEach((f) => f());
   } catch {
     /* logged out or offline */
   }
 }
 
-export function useUnread(pollMs = 30_000): number {
+export function useUnread(pollMs = 30_000): UnreadCountsDto {
   useEffect(() => {
     void refreshUnread();
     const h = setInterval(refreshUnread, pollMs);
@@ -26,6 +28,6 @@ export function useUnread(pollMs = 30_000): number {
       subs.add(cb);
       return () => subs.delete(cb);
     },
-    () => unread,
+    () => counts,
   );
 }

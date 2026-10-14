@@ -84,4 +84,34 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   expect(csv).toContain(member.email);
   expect(csv.trimEnd().split('\r\n')).toHaveLength(n + 1);
   await expect(page.getByRole('status').filter({ hasText: new RegExp(`${n}명의 정보를 내보냈습니다|Exported ${n} members`) })).toBeVisible();
+
+  // Reports: the member's post is reported from the player site; the admin hides it while resolving.
+  const postId = await member.page.evaluate(async () => {
+    const r = await fetch('/api/board/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'E2E 신고 처리 글', body: '신고될 본문' }) });
+    return ((await r.json()) as { id: string }).id;
+  });
+  const filed = await owner.page.evaluate(async (id) => {
+    const r = await fetch('/api/reports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetType: 'post', targetId: id, reason: 'spam', detail: 'E2E 신고 사유' }) });
+    return r.status;
+  }, postId);
+  expect(filed).toBe(201);
+  await page.getByRole('link', { name: /^신고 관리$|^Reports$/ }).click();
+  const item = page.getByTestId('report-item').filter({ hasText: 'E2E 신고 처리 글' });
+  await expect(item).toContainText('E2E 신고 사유');
+  await expect(item).toContainText(member.nickname);
+  await item.getByTestId('report-hide').check();
+  await item.getByLabel(/처리 내용|Resolution note/).fill('광고 글 숨김');
+  await item.getByTestId('report-resolve').click();
+  await expect(page.getByRole('status').filter({ hasText: /1건|1 report/ })).toBeVisible();
+  await expect(item).toHaveCount(0);
+  await page.getByTestId('report-status').selectOption('resolved');
+  await expect(item).toContainText('광고 글 숨김');
+  await expect(item).toContainText('hidden');
+  await member.page.goto(`/board/${postId}`);
+  await expect(member.page.getByTestId('post-title')).toHaveCount(0);
+  // Member detail links to the reports about that member.
+  await item.getByRole('link', { name: member.nickname }).click();
+  await page.getByTestId('user-reports').click();
+  await expect(page.getByTestId('report-user-filter')).toContainText(member.nickname);
+  await expect(page.getByTestId('report-item')).toHaveCount(1);
 });

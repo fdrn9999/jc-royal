@@ -30,6 +30,7 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-fast-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 2 })),
   { id: 'it-private', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'royal-777' },
   { id: 'it-nospec', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, allowSpectators: false },
+  { id: 'it-report-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-restart-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
 ];
 

@@ -323,3 +323,66 @@ export const academyStats = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.kind, t.itemId] })],
 );
+
+// ------------------------------------------------------------------ social
+
+/**
+ * Friend links, one row per pair with user_a < user_b. A row is a pending request
+ * until the other side accepts; declining, cancelling and unfriending delete it.
+ */
+export const friendships = sqliteTable(
+  'friendships',
+  {
+    userA: text('user_a').notNull().references(() => users.id),
+    userB: text('user_b').notNull().references(() => users.id),
+    requesterId: text('requester_id').notNull(),
+    status: text('status', { enum: ['pending', 'accepted'] }).notNull().default('pending'),
+    createdAt: integer('created_at').notNull().default(now),
+    acceptedAt: integer('accepted_at'),
+  },
+  (t) => [primaryKey({ columns: [t.userA, t.userB] }), index('friendships_b_idx').on(t.userB)],
+);
+
+/** 1:1 messages between friends. pair_key is the two user ids sorted and joined with ':'. */
+export const directMessages = sqliteTable(
+  'direct_messages',
+  {
+    id: text('id').primaryKey(),
+    pairKey: text('pair_key').notNull(),
+    senderId: text('sender_id').notNull().references(() => users.id),
+    recipientId: text('recipient_id').notNull().references(() => users.id),
+    body: text('body').notNull(),
+    readAt: integer('read_at'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('dm_pair_idx').on(t.pairKey, t.createdAt), index('dm_unread_idx').on(t.recipientId, t.readAt)],
+);
+
+/** Reports of board content or of a player at a table, reviewed by admins. */
+export const reports = sqliteTable(
+  'reports',
+  {
+    id: text('id').primaryKey(),
+    reporterId: text('reporter_id').notNull().references(() => users.id),
+    targetType: text('target_type', { enum: ['post', 'comment', 'player'] }).notNull(),
+    /** Post or comment id; the user id for player reports. */
+    targetId: text('target_id').notNull(),
+    /** Author of the content, or the reported player. */
+    targetUserId: text('target_user_id').notNull().references(() => users.id),
+    reason: text('reason', { enum: ['spam', 'abuse', 'inappropriate', 'cheating', 'other'] }).notNull(),
+    detail: text('detail'),
+    /** Evidence captured by the server at report time (content snapshot, table chat, hand), JSON. */
+    context: text('context'),
+    status: text('status', { enum: ['open', 'resolved', 'dismissed'] }).notNull().default('open'),
+    handledBy: text('handled_by'),
+    handledAt: integer('handled_at'),
+    note: text('note'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [
+    index('reports_status_idx').on(t.status, t.createdAt),
+    index('reports_target_user_idx').on(t.targetUserId, t.createdAt),
+    // One open report per reporter and target; a new one is possible after review.
+    uniqueIndex('reports_open_uq').on(t.reporterId, t.targetType, t.targetId).where(sql`status = 'open'`),
+  ],
+);

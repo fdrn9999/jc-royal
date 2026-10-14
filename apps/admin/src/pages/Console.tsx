@@ -283,6 +283,7 @@ export function UserDetailPage() {
         <Badge tone={u.status === 'active' ? 'green' : 'red'}>{u.status}</Badge>
         <Badge tone="gold">{u.role}</Badge>
         {!data.ledgerConsistent && <Badge tone="red">ledger mismatch</Badge>}
+        <Link to={`/reports?status=all&userId=${u.id}`} className="ml-auto text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
       </div>
       {msg && <p className="break-all rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-gold-300" role="status">{msg}</p>}
       {reset && <ResetLinkResult reset={reset} />}

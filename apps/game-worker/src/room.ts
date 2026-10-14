@@ -252,6 +252,8 @@ export class TableRoom extends DurableObject<Env> {
           case 'close':
             await this.beginClose();
             return Response.json({ ok: true, closed: this.room.closed, handInProgress: !!this.hand });
+          case 'report-context':
+            return Response.json(this.reportContext(url.searchParams.get('target') ?? '', url.searchParams.get('reporter') ?? ''));
           default:
             return new Response('not found', { status: 404 });
         }
@@ -760,6 +762,24 @@ export class TableRoom extends DurableObject<Env> {
         /* ignore */
       }
     }
+  }
+
+  /**
+   * Evidence for a player report: the reported player's recent chat and the current
+   * (or last finished) hand. Both players must be here: seated, watching, or in the chat.
+   */
+  private reportContext(target: string, reporter: string) {
+    const connected = this.connectedUsers();
+    const present = (u: string) => this.seatIndexOf(u) !== null || connected.has(u) || this.chat.some((l) => l.userId === u);
+    const live = this.hand && !this.hand.isSettled;
+    return {
+      tableName: this.table?.name ?? '',
+      targetPresent: !!target && present(target),
+      reporterPresent: !!reporter && present(reporter),
+      handId: live ? this.hand!.handId : this.room.settledHandId,
+      handNumber: live || this.room.settledHandId ? this.room.handNumber : null,
+      chat: this.chat.filter((l) => l.userId === target).slice(-10).map((l) => ({ text: l.text, at: l.at })),
+    };
   }
 
   private adminStatus() {

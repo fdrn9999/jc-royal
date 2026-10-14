@@ -1,5 +1,5 @@
 import { sound } from '@jc/audio';
-import type { ActionType, TableView } from '@jc/types';
+import type { ActionType, PublicUserDto, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -7,6 +7,7 @@ import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { HandRankingChart } from '../academy/HandChart';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
+import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal } from '../game/Panels';
 import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
@@ -41,6 +42,8 @@ export function TablePage() {
   const [settings, setSettings] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chart, setChart] = useState(false);
+  const [picked, setPicked] = useState<PublicUserDto | null>(null);
+  const [reporting, setReporting] = useState<ReportSubject | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
@@ -221,6 +224,7 @@ export function TablePage() {
                 mySeat={mySeat}
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
+                onSeatClick={(seat) => seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null })}
                 nextIn={nextIn}
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}
@@ -301,7 +305,13 @@ export function TablePage() {
             </button>
           </div>
           <div className="min-h-0 flex-1">
-            <ChatPanel chat={sock.chat} onSend={(text) => sock.send({ t: 'chat', text })} canChat={canChat} />
+            <ChatPanel
+              chat={sock.chat}
+              onSend={(text) => sock.send({ t: 'chat', text })}
+              canChat={canChat}
+              myId={me?.id}
+              onPick={(m) => setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: s?.seats.find((x) => x.userId === m.userId)?.avatarUrl ?? null })}
+            />
           </div>
           {s && (
             <div className="mt-3 border-t border-white/5 pt-3 text-xs text-ink-400">
@@ -328,6 +338,17 @@ export function TablePage() {
         />
       )}
       <SettingsModal open={settings} onClose={() => setSettings(false)} />
+      {/* The 1:1 chat opens in a new tab so the game connection stays. */}
+      <PlayerCard
+        user={picked}
+        onClose={() => setPicked(null)}
+        newTab
+        onReport={() => {
+          if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
+          setPicked(null);
+        }}
+      />
+      <ReportModal subject={reporting} onClose={() => setReporting(null)} />
       <Modal open={chart} onClose={() => setChart(false)} title={t('table.handChart')}>
         <HandRankingChart compact />
         <Link to="/academy/hands" className="mt-3 inline-block text-sm text-gold-300 hover:underline">

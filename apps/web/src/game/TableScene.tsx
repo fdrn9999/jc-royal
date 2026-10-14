@@ -3,7 +3,7 @@
  * multiplayer table and the offline Academy practice table so both look and
  * animate the same; it only renders the TableView it is given.
  */
-import { handLabelKey, type Card, type TableView } from '@jc/types';
+import { handLabelKey, type Card, type SeatView, type TableView } from '@jc/types';
 import { ChipStack, formatChips, Logo, PlayingCard } from '@jc/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -61,6 +61,7 @@ export function TableScene({
   mySeat,
   canSit,
   onSit,
+  onSeatClick,
   nextIn,
   cues,
   consumeCues,
@@ -71,6 +72,8 @@ export function TableScene({
   mySeat: number | null;
   canSit: boolean;
   onSit: (seatIndex: number) => void;
+  /** Tapping another player's plate (the real table only). */
+  onSeatClick?: (seat: SeatView) => void;
   nextIn: number | null;
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
@@ -146,6 +149,7 @@ export function TableScene({
               newHandKey={hand?.id ?? null}
               canSit={canSit}
               onSit={() => onSit(seat.seatIndex)}
+              onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
               compact={compact}
               style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
             />

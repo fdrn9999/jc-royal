@@ -74,7 +74,7 @@ export function BuyInModal({
   );
 }
 
-export function ChatPanel({ chat, onSend, canChat }: { chat: ChatMessage[]; onSend: (text: string) => void; canChat: boolean }) {
+export function ChatPanel({ chat, onSend, canChat, myId, onPick }: { chat: ChatMessage[]; onSend: (text: string) => void; canChat: boolean; myId?: string; onPick?: (m: ChatMessage) => void }) {
   const { t } = useI18n();
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
@@ -95,7 +95,12 @@ export function ChatPanel({ chat, onSend, canChat }: { chat: ChatMessage[]; onSe
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 text-sm">
         {chat.map((m) => (
           <div key={m.id} className="break-words">
-            <span className="font-semibold text-gold-300">{m.nickname}</span> <span className="text-ink-100">{m.text}</span>
+            {onPick && m.userId !== myId ? (
+              <button type="button" className="font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">{m.nickname}</button>
+            ) : (
+              <span className="font-semibold text-gold-300">{m.nickname}</span>
+            )}{' '}
+            <span className="text-ink-100">{m.text}</span>
           </div>
         ))}
         <div ref={end} />

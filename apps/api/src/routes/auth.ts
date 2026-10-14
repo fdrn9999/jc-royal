@@ -17,7 +17,7 @@ import {
   type MeDto,
   type SignupOptionsDto,
 } from '@jc/types';
-import { and, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv, AuthUser, Env } from '../env';
 import { requireUser } from '../lib/auth';
@@ -325,6 +325,8 @@ export const authRoutes = new Hono<AppEnv>()
         .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
+      // Friends and pending requests go with the account.
+      db.delete(schema.friendships).where(or(eq(schema.friendships.userA, me.id), eq(schema.friendships.userB, me.id))),
     ]);
     await destroySession(c, 'user');
     return c.json({ ok: true });

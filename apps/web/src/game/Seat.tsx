@@ -52,6 +52,8 @@ export interface SeatProps {
   newHandKey: string | null;
   canSit: boolean;
   onSit: () => void;
+  /** Opens this player's card (other occupied seats only). */
+  onPick?: () => void;
   compact: boolean;
   style: CSSProperties;
 }
@@ -146,6 +148,9 @@ export function Seat(p: SeatProps) {
                 <span data-tour={`blind-${p.blind}`} className={cx('rounded-full border px-1.5 text-[9px] font-bold leading-4', p.blind === 'SB' ? 'border-info/50 bg-[#16263b] text-[#a9c8ee]' : 'border-danger/50 bg-[#3a1618] text-[#f0a0a2]')}>{p.blind}</span>
               )}
             </span>
+          )}
+          {p.onPick && (
+            <button type="button" className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400" onClick={p.onPick} aria-label={s.nickname} data-testid={`seat-pick-${s.seatIndex}`} />
           )}
         </div>
         {/* status line */}

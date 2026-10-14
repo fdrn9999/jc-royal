@@ -28,11 +28,23 @@ export function BalancePill({ amount }: { amount: number }) {
   );
 }
 
+/** Small red counter on a nav item. */
+function CountBadge({ n, testId, className = '' }: { n: number; testId?: string; className?: string }) {
+  if (n <= 0) return null;
+  return (
+    <span className={`grid min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-bold leading-4 text-white ${className}`} data-testid={testId}>
+      {n > 99 ? '99+' : n}
+    </span>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const { t } = useI18n();
   const nav = useNavigate();
-  const unread = useUnread();
+  const { unread, dmUnread, friendRequests } = useUnread();
+  const social = dmUnread + friendRequests;
+  const tab = ({ isActive }: { isActive: boolean }) => `relative py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`;
   const link = ({ isActive }: { isActive: boolean }) =>
     `px-3 py-2 text-sm font-semibold tracking-wide transition ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
   return (
@@ -52,6 +64,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink to="/board" className={link}>
               {t('nav.board')}
             </NavLink>
+            <NavLink to="/friends" className={(a) => `${link(a)} inline-flex items-center gap-1`} data-testid="nav-friends">
+              {t('nav.friends')}
+              <CountBadge n={social} testId="friends-badge" />
+            </NavLink>
             <NavLink to="/me" className={link}>
               {t('nav.me')}
             </NavLink>
@@ -61,7 +77,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {me && (
               <Link to="/messages" className="relative rounded-full p-2 text-ink-200 hover:text-ivory" aria-label={`${t('nav.messages')}${unread ? ` (${unread})` : ''}`} data-testid="inbox-link">
                 <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
-                {unread > 0 && <span className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-bold text-white" data-testid="unread-badge">{unread > 99 ? '99+' : unread}</span>}
+                <CountBadge n={unread} testId="unread-badge" className="absolute -right-0.5 -top-0.5" />
               </Link>
             )}
             <span className="hidden md:inline"><LangToggle /></span>
@@ -81,17 +97,21 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 sm:pb-10">{children}</main>
       {/* Mobile bottom navigation */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
-        <NavLink to="/" end className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+        <NavLink to="/" end className={tab}>
           {t('nav.lobby')}
         </NavLink>
-        <NavLink to="/academy" className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`} data-testid="nav-academy">
+        <NavLink to="/academy" className={tab} data-testid="nav-academy">
           {t('nav.academy')}
         </NavLink>
-        <NavLink to="/board" className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
+        <NavLink to="/board" className={tab}>
           {t('nav.board')}
         </NavLink>
-        <NavLink to="/me" className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
+        <NavLink to="/friends" className={tab} data-testid="nav-friends-mobile">
+          {t('nav.friends')}
+          <CountBadge n={social} className="absolute right-[calc(50%-1.6rem)] top-1.5" />
+        </NavLink>
+        <NavLink to="/me" className={tab}>
           {t('nav.me')}
         </NavLink>
       </nav>

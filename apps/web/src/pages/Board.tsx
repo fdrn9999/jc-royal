@@ -1,18 +1,27 @@
-import type { CommentDto, HandSummaryDto, PostDetailDto, PostListItemDto, PostPageDto } from '@jc/types';
+import type { AuthorDto, CommentDto, HandSummaryDto, PostDetailDto, PostListItemDto, PostPageDto, PublicUserDto } from '@jc/types';
 import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PlayingCard, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { HandReview } from '../components/HandReview';
+import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 
-function AuthorName({ a }: { a: PostListItemDto['author'] }) {
+/** The author's name; with `onPick` it opens their player card (never for my own posts). */
+function AuthorName({ a, onPick }: { a: PostListItemDto['author']; onPick?: (a: AuthorDto) => void }) {
   const { t } = useI18n();
+  const { me } = useAuth();
+  const name = onPick && a.id !== me?.id ? (
+    <button type="button" className="font-semibold text-ink-100 hover:text-gold-300 hover:underline" onClick={() => onPick(a)} data-testid="author-name">{a.nickname}</button>
+  ) : (
+    a.nickname
+  );
   return (
     <span className="inline-flex items-center gap-1">
-      {a.nickname}
+      {name}
       {a.isAdmin && <Badge tone="gold">{t('board.admin')}</Badge>}
     </span>
   );
@@ -93,6 +102,8 @@ export function PostPage() {
   const [comment, setComment] = useState('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<PublicUserDto | null>(null);
+  const [reporting, setReporting] = useState<ReportSubject | null>(null);
   const load = useCallback(async () => {
     try {
       setPost(await api<PostDetailDto>(`/api/board/posts/${id}`));
@@ -123,7 +134,7 @@ export function PostPage() {
             {post.title}
           </h1>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-ink-400">
-            <AuthorName a={post.author} />
+            <AuthorName a={post.author} onPick={setPicked} />
             <span>{formatDate(post.createdAt, locale)}{post.updatedAt - post.createdAt > 1000 && ` · ${t('board.edited')}`}</span>
             <span>{t('board.views', { n: post.viewCount })}</span>
             {post.isMine && !post.isNotice && (
@@ -131,6 +142,11 @@ export function PostPage() {
                 <Link to={`/board/${post.id}/edit`} className="text-gold-300 hover:underline">{t('board.edit')}</Link>
                 <button className="text-[#f0a0a2] hover:underline" onClick={() => confirm(t('board.deleteConfirm')) && run(async () => { await api(`/api/board/posts/${post.id}`, { method: 'DELETE' }); nav('/board'); })}>{t('board.delete')}</button>
               </span>
+            )}
+            {!post.isMine && !post.isNotice && (
+              <button className="ml-auto text-ink-400 hover:text-[#f0a0a2]" onClick={() => setReporting({ type: 'post', id: post.id, label: post.title })} data-testid="report-post">
+                {t('report.action')}
+              </button>
             )}
           </div>
         </header>
@@ -143,11 +159,11 @@ export function PostPage() {
         <ul className="divide-y divide-white/5">
           {post.comments.filter((c) => !c.parentId).map((root) => (
             <li key={root.id} className="py-3">
-              <CommentItem c={root} onRun={run} onReply={setReplyTo} replyTo={replyTo} postId={post.id} />
+              <CommentItem c={root} onRun={run} onReply={setReplyTo} replyTo={replyTo} postId={post.id} onPick={setPicked} onReport={setReporting} />
               {post.comments.filter((r) => r.parentId === root.id).length > 0 && (
                 <ul className="mt-2 flex flex-col gap-2 border-l-2 border-gold-500/20 pl-3 sm:ml-4">
                   {post.comments.filter((r) => r.parentId === root.id).map((r) => (
-                    <li key={r.id}><CommentItem c={r} onRun={run} onReply={setReplyTo} replyTo={replyTo} postId={post.id} /></li>
+                    <li key={r.id}><CommentItem c={r} onRun={run} onReply={setReplyTo} replyTo={replyTo} postId={post.id} onPick={setPicked} onReport={setReporting} /></li>
                   ))}
                 </ul>
               )}
@@ -160,12 +176,14 @@ export function PostPage() {
         </form>
         {error && <p className="mt-2 text-sm text-danger" role="alert">{error}</p>}
       </Panel>
+      <PlayerCard user={picked} onClose={() => setPicked(null)} />
+      <ReportModal subject={reporting} onClose={() => setReporting(null)} />
     </div>
   );
 }
 
 /** One comment or reply with author controls and an inline reply form. */
-function CommentItem({ c, onRun, onReply, replyTo, postId }: { c: CommentDto; onRun: (fn: () => Promise<unknown>) => Promise<void>; onReply: (id: string | null) => void; replyTo: string | null; postId: string }) {
+function CommentItem({ c, onRun, onReply, replyTo, postId, onPick, onReport }: { c: CommentDto; onRun: (fn: () => Promise<unknown>) => Promise<void>; onReply: (id: string | null) => void; replyTo: string | null; postId: string; onPick: (a: AuthorDto) => void; onReport: (s: ReportSubject) => void }) {
   const { t, locale } = useI18n();
   const [editing, setEditing] = useState<string | null>(null);
   const [reply, setReply] = useState('');
@@ -174,7 +192,7 @@ function CommentItem({ c, onRun, onReply, replyTo, postId }: { c: CommentDto; on
     <div data-testid={c.parentId ? 'reply' : 'comment'}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-400">
         {c.parentId && <span aria-hidden className="text-gold-500/60">↳</span>}
-        <span className="font-semibold text-ink-100"><AuthorName a={c.author} /></span>
+        <span className="font-semibold text-ink-100"><AuthorName a={c.author} onPick={onPick} /></span>
         <span>{formatDate(c.createdAt, locale)}{c.updatedAt - c.createdAt > 1000 && ` · ${t('board.edited')}`}</span>
         <span className="ml-auto flex gap-2">
           <button className="text-ink-300 hover:text-gold-300" onClick={() => onReply(replyTo === c.id ? null : c.id)}>{t('board.reply')}</button>
@@ -183,6 +201,11 @@ function CommentItem({ c, onRun, onReply, replyTo, postId }: { c: CommentDto; on
               <button className="text-gold-300" onClick={() => setEditing(c.body)}>{t('board.edit')}</button>
               <button className="text-[#f0a0a2]" onClick={() => confirm(t('board.deleteConfirm')) && onRun(() => api(`/api/board/comments/${c.id}`, { method: 'DELETE' }))}>{t('board.delete')}</button>
             </>
+          )}
+          {!c.isMine && (
+            <button className="text-ink-400 hover:text-[#f0a0a2]" onClick={() => onReport({ type: 'comment', id: c.id, label: c.body })} data-testid="report-comment">
+              {t('report.action')}
+            </button>
           )}
         </span>
       </div>

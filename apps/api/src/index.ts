@@ -8,6 +8,8 @@ import { authRoutes } from './routes/auth';
 import { boardRoutes, myCommunityRoutes } from './routes/board';
 import { meRoutes } from './routes/me';
 import { messageRoutes } from './routes/messages';
+import { reportRoutes } from './routes/reports';
+import { dmRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 
 const app = new Hono<AppEnv>();
@@ -25,6 +27,9 @@ app.route('/api/me', meRoutes);
 app.route('/api/me', myCommunityRoutes);
 app.route('/api/board', boardRoutes);
 app.route('/api/messages', messageRoutes);
+app.route('/api/friends', friendRoutes);
+app.route('/api/dm', dmRoutes);
+app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
 app.route('/api/academy', academyRoutes);
 app.route('/api/admin', adminRoutes);
