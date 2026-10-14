@@ -159,6 +159,112 @@ describe('1:1 messages', () => {
   });
 });
 
+describe('1:1 message sync by seq', () => {
+  type Msg = { id: string; seq: number; body: string; at: number; fromMe: boolean; readAt: number | null };
+  type Conv = { messages: Msg[]; hasMore: boolean; peerRead: { seq: number; at: number } | null };
+  const conv = async (x: User, y: User, q = '') => (await x.client.get(`/api/dm/${y.me.id}${q}`)).body as Conv;
+  const seqs = (r: Conv) => r.messages.map((m) => m.seq);
+  const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+
+  it('a burst from both sides while one of them polls: every message once, in seq order, nothing missed', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    await befriend(a, b);
+    // B polls from the last seq it received, as the page does, the whole time both are sending.
+    const seen: Msg[] = [];
+    let cursor = 0;
+    const drain = async () => {
+      for (;;) {
+        const r = await conv(b, a, `?afterSeq=${cursor}`);
+        seen.push(...r.messages);
+        if (r.messages.length) cursor = r.messages.at(-1)!.seq;
+        if (!r.hasMore) return;
+      }
+    };
+    let sending = true;
+    const poller = (async () => {
+      while (sending) await drain();
+    })();
+    const sent = await Promise.all(
+      range(0, 23).map((i) => {
+        const [from, to] = i % 2 ? [b, a] : [a, b];
+        return from.client.post(`/api/dm/${to.me.id}`, { text: `burst ${i}` });
+      }),
+    );
+    sending = false;
+    await poller;
+    await drain();
+    expect(sent.map((r) => r.status)).toEqual(Array(24).fill(201));
+    // Each message got its own seq, 1–24 without gaps, and the poller saw each one exactly once, in order.
+    expect(sent.map((r) => r.body.seq as number).sort((x, y) => x - y)).toEqual(range(1, 24));
+    expect(seen.map((m) => m.seq)).toEqual(range(1, 24));
+    expect(new Set(ids(seen)).size).toBe(24);
+    // Both sides' full conversation matches what was polled.
+    for (const [x, y] of [
+      [a, b],
+      [b, a],
+    ] as const)
+      expect(ids((await conv(x, y)).messages)).toEqual(ids(seen));
+    // Clock times inside a burst can tie or run backwards; the order above holds either way.
+    const prev = (i: number) => seen[i - 1]!.at;
+    const ties = seen.filter((m, i) => i > 0 && m.at === prev(i)).length;
+    const backwards = seen.filter((m, i) => i > 0 && m.at < prev(i)).length;
+    console.info(`dm burst: of 23 neighbouring pairs, ${ties} share a millisecond and ${backwards} run backwards in clock time`);
+  });
+
+  it('afterSeq and beforeSeq page across the 50-message boundary with no gap or repeat', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    await befriend(a, b);
+    // Both take turns so neither hits the per-minute send limit.
+    for (let i = 0; i < 55; i++) {
+      const [from, to] = i % 2 ? [b, a] : [a, b];
+      expect((await from.client.post(`/api/dm/${to.me.id}`, { text: `m${i}` })).body.seq).toBe(i + 1);
+    }
+    // Forward from the start, as a page that was offline catches up.
+    const up1 = await conv(b, a, '?afterSeq=0');
+    expect([seqs(up1), up1.hasMore]).toEqual([range(1, 50), true]);
+    const up2 = await conv(b, a, '?afterSeq=50');
+    expect([seqs(up2), up2.hasMore]).toEqual([range(51, 55), false]);
+    expect(await conv(b, a, '?afterSeq=55')).toMatchObject({ messages: [], hasMore: false });
+    // Back from the latest page.
+    const down1 = await conv(b, a);
+    expect([seqs(down1), down1.hasMore]).toEqual([range(6, 55), true]);
+    const down2 = await conv(b, a, `?beforeSeq=${down1.messages[0]!.seq}`);
+    expect([seqs(down2), down2.hasMore]).toEqual([range(1, 5), false]);
+    expect(down2.messages.map((m) => m.body)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4']);
+    // A cursor that is not a number counts as 0.
+    expect(seqs(await conv(b, a, '?afterSeq=abc'))[0]).toBe(1);
+  });
+
+  it('reading up to a seq leaves a later message unread; the sender sees how far, even in a poll with nothing new', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    await befriend(a, b);
+    await a.client.post(`/api/dm/${b.me.id}`, { text: 'one' });
+    await a.client.post(`/api/dm/${b.me.id}`, { text: 'two' });
+    const shown = (await conv(b, a)).messages;
+    // This one lands after B's page fetched, so B's page marks only what it showed.
+    await a.client.post(`/api/dm/${b.me.id}`, { text: 'three' });
+    expect((await conv(a, b)).peerRead).toBeNull();
+    expect((await b.client.post(`/api/dm/${a.me.id}/read`, { upToSeq: shown.at(-1)!.seq })).status).toBe(200);
+    expect((await counts(b.client)).dmUnread).toBe(1);
+    const mine = await conv(a, b);
+    expect(mine.peerRead).toMatchObject({ seq: 2 });
+    expect(mine.messages.map((m) => m.readAt !== null)).toEqual([true, true, false]);
+    expect(await conv(a, b, '?afterSeq=3')).toMatchObject({ messages: [], peerRead: { seq: 2 } });
+    // A lower mark changes nothing, a bad one is refused, and an empty body (pages from before seq) marks everything.
+    await b.client.post(`/api/dm/${a.me.id}/read`, { upToSeq: 1 });
+    expect((await counts(b.client)).dmUnread).toBe(1);
+    expect((await b.client.post(`/api/dm/${a.me.id}/read`, { upToSeq: -1 })).status).toBe(400);
+    expect((await b.client.req('POST', `/api/dm/${a.me.id}/read`)).status).toBe(200);
+    expect((await counts(b.client)).dmUnread).toBe(0);
+    expect((await conv(a, b)).peerRead).toMatchObject({ seq: 3 });
+    // B has sent nothing, so nothing of B's has been read.
+    expect((await conv(b, a)).peerRead).toBeNull();
+  });
+});
+
 describe('blocking and receive settings', () => {
   it('a block ends the friendship, stops requests and messages both ways, and unblocking restores nothing', async () => {
     const a = await newUser();

@@ -17,11 +17,19 @@ export async function refreshUnread() {
   }
 }
 
+/** Polls while the tab is visible, and at once when it becomes visible again: a hidden tab does not poll. */
 export function useUnread(pollMs = 30_000): UnreadCountsDto {
   useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'visible') void refreshUnread();
+    };
     void refreshUnread();
-    const h = setInterval(refreshUnread, pollMs);
-    return () => clearInterval(h);
+    const h = setInterval(tick, pollMs);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(h);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [pollMs]);
   return useSyncExternalStore(
     (cb) => {

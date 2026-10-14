@@ -1,6 +1,7 @@
 import { schema } from '@jc/db';
 import {
   DirectMessageSchema,
+  DmReadSchema,
   FriendRequestSchema,
   MAX_BLOCKS,
   MAX_FRIENDS,
@@ -18,7 +19,7 @@ import {
   type RelationDto,
   type SocialSettingsDto,
 } from '@jc/types';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, lte, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
@@ -257,63 +258,93 @@ type DmRow = typeof schema.directMessages.$inferSelect;
 
 const toDm =
   (uid: string) =>
-  (m: DmRow): DirectMessageDto => ({ id: m.id, fromMe: m.senderId === uid, body: m.body, kind: m.kind, tableId: m.tableId, at: m.createdAt, readAt: m.readAt });
+  (m: DmRow): DirectMessageDto => ({ id: m.id, seq: m.seq, fromMe: m.senderId === uid, body: m.body, kind: m.kind, tableId: m.tableId, at: m.createdAt, readAt: m.readAt });
 
 /**
  * Writes a 1:1 message only while the two are still friends and neither has blocked the other, checked in the same
  * statement as the insert, so an unfriend or a block that lands meanwhile is never overtaken by this message.
+ * The same statement takes the conversation's next seq: D1 runs statements one at a time, so seq follows the order
+ * messages are saved, and the unique (pair_key, seq) index would refuse a repeat rather than store it.
  */
 async function insertDm(c: Context<AppEnv>, me: string, other: string, m: { body: string; kind: DmKind; tableId: string | null }): Promise<DmRow> {
-  const row: DmRow = { id: crypto.randomUUID(), pairKey: pairKey(me, other), senderId: me, recipientId: other, ...m, readAt: null, createdAt: Date.now() };
+  const row = { id: crypto.randomUUID(), pairKey: pairKey(me, other), senderId: me, recipientId: other, ...m, readAt: null, createdAt: Date.now() };
   const [a, b] = pairOf(me, other);
   const r = await c.env.DB.prepare(
-    `INSERT INTO direct_messages (id, pair_key, sender_id, recipient_id, body, kind, table_id, created_at)
-     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
-      WHERE EXISTS (SELECT 1 FROM friendships WHERE user_a = ?9 AND user_b = ?10 AND status = 'accepted') AND ${notBlocked('?3', '?4')}`,
+    `INSERT INTO direct_messages (id, pair_key, sender_id, recipient_id, body, kind, table_id, created_at, seq)
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(seq), 0) + 1 FROM direct_messages WHERE pair_key = ?2)
+      WHERE EXISTS (SELECT 1 FROM friendships WHERE user_a = ?9 AND user_b = ?10 AND status = 'accepted') AND ${notBlocked('?3', '?4')}
+     RETURNING seq`,
   )
     .bind(row.id, row.pairKey, me, other, row.body, row.kind, row.tableId, row.createdAt, a, b)
-    .run();
-  if (!r.meta.changes) fail(403, 'not_friends', 'you can only message friends');
-  return row;
+    .first<{ seq: number }>();
+  if (!r) fail(403, 'not_friends', 'you can only message friends');
+  return { ...row, seq: r.seq };
 }
 
 /** 1:1 messages. Only friends can send; past messages stay readable after unfriending. */
 export const dmRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
   /**
-   * ?before=<ms>&beforeId=<id> pages back from the oldest message the client has (messages are ordered by time, then id,
-   * so ties in the same millisecond are not skipped); ?after=<ms> polls for new messages (inclusive, the client drops ids it has).
+   * Messages go in seq order. ?afterSeq=<n> polls for newer ones (hasMore: more remain, ask again from the last seq);
+   * ?beforeSeq=<n> pages back (hasMore: older ones remain); with neither, the latest page. A time cursor can pass over a
+   * message whose clock time is earlier than one already fetched but which was saved later; a seq cursor cannot.
+   * ?after=<ms> and ?before=<ms>&beforeId=<id> (by time, then id) still answer pages loaded before seq existed.
    */
   .get('/:userId', async (c) => {
     const me = c.var.user!.id;
     const user = await publicUser(c, { id: c.req.param('userId') });
     if (!user || user.id === me) fail(404, 'user_not_found', 'no such player');
     const key = pairKey(me, user.id);
+    const seqParam = (k: string) => {
+      const v = c.req.query(k);
+      return v === undefined ? undefined : Math.max(0, Math.trunc(Number(v)) || 0);
+    };
+    const afterSeq = seqParam('afterSeq');
+    const beforeSeq = seqParam('beforeSeq');
     const before = Number(c.req.query('before')) || 0;
     const beforeId = c.req.query('beforeId');
     const after = Number(c.req.query('after')) || 0;
     const t = schema.directMessages;
-    let rows;
-    if (after) {
-      rows = await c.var.db.select().from(t).where(and(eq(t.pairKey, key), sql`${t.createdAt} >= ${after}`)).orderBy(t.createdAt, t.id).limit(DM_PAGE + 1);
+    const pair = eq(t.pairKey, key);
+    const newer = afterSeq !== undefined || after > 0;
+    let rows: DmRow[];
+    if (afterSeq !== undefined) {
+      rows = await c.var.db.select().from(t).where(and(pair, gt(t.seq, afterSeq))).orderBy(t.seq).limit(DM_PAGE + 1);
+    } else if (after) {
+      rows = await c.var.db.select().from(t).where(and(pair, sql`${t.createdAt} >= ${after}`)).orderBy(t.createdAt, t.id).limit(DM_PAGE + 1);
+    } else if (before && beforeSeq === undefined) {
+      const older = beforeId ? sql`(${t.createdAt} < ${before} OR (${t.createdAt} = ${before} AND ${t.id} < ${beforeId}))` : sql`${t.createdAt} < ${before}`;
+      rows = await c.var.db.select().from(t).where(and(pair, older)).orderBy(desc(t.createdAt), desc(t.id)).limit(DM_PAGE + 1);
+      rows.reverse();
     } else {
-      const older = !before
-        ? undefined
-        : beforeId
-          ? sql`(${t.createdAt} < ${before} OR (${t.createdAt} = ${before} AND ${t.id} < ${beforeId}))`
-          : sql`${t.createdAt} < ${before}`;
       rows = await c.var.db
         .select()
         .from(t)
-        .where(and(eq(t.pairKey, key), older))
-        .orderBy(sql`${t.createdAt} DESC`, sql`${t.id} DESC`)
+        .where(and(pair, beforeSeq === undefined ? undefined : lt(t.seq, beforeSeq)))
+        .orderBy(desc(t.seq))
         .limit(DM_PAGE + 1);
       rows.reverse();
     }
     const hasMore = rows.length > DM_PAGE;
-    if (hasMore) rows = after ? rows.slice(0, DM_PAGE) : rows.slice(1);
-    const [rel, block] = await Promise.all([relation(c, me, user.id), blockState(c, me, user.id)]);
-    return c.json({ user, isFriend: rel?.status === 'accepted', blocked: block === 'mine', messages: rows.map(toDm(me)), hasMore } satisfies ConversationDto);
+    if (hasMore) rows = newer ? rows.slice(0, DM_PAGE) : rows.slice(1);
+    const [rel, block, read] = await Promise.all([
+      relation(c, me, user.id),
+      blockState(c, me, user.id),
+      // Reading marks everything up to a point, so the newest read message of mine is found walking back from the end.
+      c.env.DB.prepare(
+        `SELECT seq, read_at AS at FROM direct_messages WHERE pair_key = ?1 AND sender_id = ?2 AND read_at IS NOT NULL ORDER BY seq DESC LIMIT 1`,
+      )
+        .bind(key, me)
+        .first<{ seq: number; at: number }>(),
+    ]);
+    return c.json({
+      user,
+      isFriend: rel?.status === 'accepted',
+      blocked: block === 'mine',
+      messages: rows.map(toDm(me)),
+      hasMore,
+      peerRead: read ?? null,
+    } satisfies ConversationDto);
   })
   .post('/:userId', async (c) => {
     const body = await parseBody(c, DirectMessageSchema);
@@ -327,12 +358,20 @@ export const dmRoutes = new Hono<AppEnv>()
     const row = await insertDm(c, me, other, { body: body.text, kind: 'text', tableId: null });
     return c.json(toDm(me)(row), 201);
   })
+  /**
+   * Marks their messages to me as read up to upToSeq, the newest one the page has shown, so one that arrives after the
+   * page last fetched stays unread. Without it (pages from before seq post an empty body), everything is marked.
+   */
   .post('/:userId/read', async (c) => {
     const me = c.var.user!.id;
+    const raw: unknown = await c.req.json().catch(() => ({}));
+    const parsed = DmReadSchema.safeParse(raw ?? {});
+    if (!parsed.success) fail(400, 'bad_request', 'validation failed');
+    const upTo = parsed.data.upToSeq;
     const t = schema.directMessages;
     await c.var.db
       .update(t)
       .set({ readAt: Date.now() })
-      .where(and(eq(t.pairKey, pairKey(me, c.req.param('userId'))), eq(t.recipientId, me), sql`${t.readAt} IS NULL`));
+      .where(and(eq(t.pairKey, pairKey(me, c.req.param('userId'))), eq(t.recipientId, me), isNull(t.readAt), upTo === undefined ? undefined : lte(t.seq, upTo)));
     return c.json({ ok: true });
   });

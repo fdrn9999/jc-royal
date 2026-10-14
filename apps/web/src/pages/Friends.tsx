@@ -32,7 +32,10 @@ function shortTime(ms: number, locale: string) {
     : new Intl.DateTimeFormat(loc, { month: 'short', day: 'numeric' }).format(d);
 }
 
-/** Runs `fn` now, every `ms` while the tab is visible, and again when it becomes visible. */
+/**
+ * Runs `fn` every `ms` while the tab is visible, and at once when it becomes visible again or the connection comes
+ * back. A hidden tab does not poll.
+ */
 function useVisiblePoll(fn: () => void, ms: number) {
   const ref = useRef(fn);
   ref.current = fn;
@@ -42,9 +45,11 @@ function useVisiblePoll(fn: () => void, ms: number) {
     };
     const h = setInterval(tick, ms);
     document.addEventListener('visibilitychange', tick);
+    window.addEventListener('online', tick);
     return () => {
       clearInterval(h);
       document.removeEventListener('visibilitychange', tick);
+      window.removeEventListener('online', tick);
     };
   }, [ms]);
 }
@@ -441,7 +446,7 @@ export function ConversationPage() {
   const { userId = '' } = useParams();
   const { t, err, locale } = useI18n();
   const nav = useNavigate();
-  const [conv, setConv] = useState<Omit<ConversationDto, 'messages'> | null>(null);
+  const [conv, setConv] = useState<Omit<ConversationDto, 'messages' | 'peerRead'> | null>(null);
   const [msgs, setMsgs] = useState<DirectMessageDto[]>([]);
   const [missing, setMissing] = useState(false);
   const [text, setText] = useState('');
@@ -457,25 +462,34 @@ export function ConversationPage() {
   const scroll = useRef<{ kind: 'bottom' } | { kind: 'keep'; height: number } | null>(null);
   const msgsRef = useRef(msgs);
   msgsRef.current = msgs;
-  // Newest message time the server has returned here. Polls continue from it rather than from a message sent
-  // locally, so one the other player sent just before mine is not skipped.
+  // Highest seq the server has returned here. Polls continue from it rather than from a message sent locally, so one
+  // the other player saved just before mine is not skipped.
   const synced = useRef(0);
   const sync = (list: DirectMessageDto[]) => {
-    for (const m of list) synced.current = Math.max(synced.current, m.at);
+    for (const m of list) synced.current = Math.max(synced.current, m.seq);
   };
+  // The conversation on screen: a request still running for one left behind must not touch it.
+  const current = useRef(userId);
+  current.current = userId;
+  const polling = useRef(false);
 
-  const markRead = useCallback(async () => {
-    await api(`/api/dm/${userId}/read`, { body: {} }).catch(() => {});
-    void refreshUnread();
-  }, [userId]);
+  /** Marks their messages read up to the newest one shown, so one that lands meanwhile stays unread. */
+  const markRead = useCallback(
+    async (upToSeq: number) => {
+      await api(`/api/dm/${userId}/read`, { body: { upToSeq } }).catch(() => {});
+      void refreshUnread();
+    },
+    [userId],
+  );
 
-  /** Adds or replaces messages by id, keeping them oldest first (by time, then id, as the server pages them). */
-  const merge = useCallback((incoming: DirectMessageDto[]) => {
-    if (!incoming.length) return;
+  /** Adds or replaces messages by id in seq order, and applies how far the other player has read mine. */
+  const merge = useCallback((incoming: DirectMessageDto[], read?: ConversationDto['peerRead']) => {
+    const nowRead = (m: DirectMessageDto) => !!read && m.fromMe && !m.readAt && m.seq <= read.seq;
     setMsgs((cur) => {
+      if (!incoming.length && !cur.some(nowRead)) return cur;
       const map = new Map(cur.map((m) => [m.id, m]));
       for (const m of incoming) map.set(m.id, m);
-      return [...map.values()].sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      return [...map.values()].map((m) => (nowRead(m) ? { ...m, readAt: read!.at } : m)).sort((a, b) => a.seq - b.seq);
     });
   }, []);
 
@@ -486,13 +500,13 @@ export function ConversationPage() {
     setMissing(false);
     synced.current = 0;
     void api<ConversationDto>(`/api/dm/${userId}`)
-      .then(({ messages, ...rest }) => {
+      .then(({ messages, peerRead: _, ...rest }) => {
         if (!live) return;
         setConv(rest);
         scroll.current = { kind: 'bottom' };
         sync(messages);
         setMsgs(messages);
-        if (messages.some((m) => !m.fromMe && !m.readAt)) void markRead();
+        if (messages.some((m) => !m.fromMe && !m.readAt)) void markRead(synced.current);
       })
       .catch(() => live && setMissing(true));
     return () => {
@@ -501,22 +515,33 @@ export function ConversationPage() {
   }, [userId, markRead]);
 
   const poll = useCallback(async () => {
+    // One at a time: a slow request is not stacked under the next tick.
+    if (polling.current) return;
+    polling.current = true;
+    const id = userId;
     const cur = msgsRef.current;
-    // Re-fetch from my newest message while it is unread, so its read receipt updates.
-    const mine = cur.filter((m) => m.fromMe).at(-1);
-    const since = Math.min(synced.current, mine && !mine.readAt ? mine.at : Infinity);
     try {
-      const r = await api<ConversationDto>(`/api/dm/${userId}${since ? `?after=${since}` : ''}`);
-      sync(r.messages);
+      // A burst, or a while offline, can leave more than a page: keep going from the last one received.
+      const got: DirectMessageDto[] = [];
+      let r: ConversationDto;
+      let pages = 0;
+      do {
+        r = await api<ConversationDto>(`/api/dm/${id}?afterSeq=${synced.current}`);
+        if (current.current !== id) return;
+        sync(r.messages);
+        got.push(...r.messages);
+      } while (r.hasMore && ++pages < 10);
       const el = box.current;
       const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      const fresh = r.messages.filter((m) => !cur.some((x) => x.id === m.id));
+      const fresh = got.filter((m) => !cur.some((x) => x.id === m.id));
       if (fresh.length && nearBottom) scroll.current = { kind: 'bottom' };
-      merge(r.messages);
+      merge(got, r.peerRead);
       setConv((c) => (c ? { ...c, isFriend: r.isFriend, blocked: r.blocked } : c));
-      if (fresh.some((m) => !m.fromMe)) void markRead();
+      if (fresh.some((m) => !m.fromMe && !m.readAt)) void markRead(synced.current);
     } catch {
-      /* offline: try again on the next tick */
+      /* offline: the next tick, or the connection coming back, continues from the same seq */
+    } finally {
+      polling.current = false;
     }
   }, [userId, merge, markRead]);
   useVisiblePoll(() => {
@@ -534,7 +559,7 @@ export function ConversationPage() {
   async function older() {
     const first = msgs[0];
     if (!first) return;
-    const r = await api<ConversationDto>(`/api/dm/${userId}?before=${first.at}&beforeId=${first.id}`);
+    const r = await api<ConversationDto>(`/api/dm/${userId}?beforeSeq=${first.seq}`);
     scroll.current = { kind: 'keep', height: (box.current?.scrollHeight ?? 0) - (box.current?.scrollTop ?? 0) };
     merge(r.messages);
     setConv((c) => (c ? { ...c, hasMore: r.hasMore } : c));

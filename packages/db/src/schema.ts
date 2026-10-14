@@ -387,8 +387,18 @@ export const directMessages = sqliteTable(
     tableId: text('table_id').references(() => tables.id),
     readAt: integer('read_at'),
     createdAt: integer('created_at').notNull().default(now),
+    /**
+     * Position in the conversation (1, 2, 3, …), given out in the statement that saves the message, so it follows the
+     * order messages were saved even where createdAt (the worker's clock) ties or runs backwards. Clients page and
+     * poll by it.
+     */
+    seq: integer('seq').notNull().default(0),
   },
-  (t) => [index('dm_pair_idx').on(t.pairKey, t.createdAt), index('dm_unread_idx').on(t.recipientId, t.readAt)],
+  (t) => [
+    index('dm_pair_idx').on(t.pairKey, t.createdAt),
+    uniqueIndex('dm_pair_seq_uq').on(t.pairKey, t.seq),
+    index('dm_unread_idx').on(t.recipientId, t.readAt),
+  ],
 );
 
 /** Reports of board content, of a player at a table, or of a 1:1 message, reviewed by admins. */

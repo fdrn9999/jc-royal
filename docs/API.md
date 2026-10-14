@@ -86,9 +86,19 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/` | 받은 쪽지(최근 100개) |
-| GET | `/unread-count` | `{unread}` |
+| GET | `/unread-count` | `{unread, dmUnread, friendRequests}`(상단 배지 한 번에) |
 | POST | `/:id/read` · `/read-all` | 읽음 처리 |
 | DELETE | `/:id` | 삭제(본인 것만) |
+
+## 1:1 대화 `/api/dm` (로그인 필요)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/:userId` | ConversationDto `{user, isFriend, blocked, messages, hasMore, peerRead}`. 기본은 최신 50개(오래된 것부터). `?afterSeq=n`은 n보다 새 메시지(새 것 폴링, `hasMore`면 마지막 seq에서 다시 요청), `?beforeSeq=n`은 더 오래된 페이지(`hasMore`면 더 있음). `peerRead {seq, at}`은 상대가 내 메시지를 어디까지 읽었는지(새 메시지가 없는 폴링에도 실림). 예전 화면용 `?after=<ms>`, `?before=<ms>&beforeId=`도 계속 동작 |
+| POST | `/:userId` | `{text(1–500자)}` → 201 DirectMessageDto(`seq` 포함). 친구만, 차단 관계면 403 `not_friends`. 분당 30회 |
+| POST | `/:userId/read` | `{upToSeq?}` — 화면에 보인 마지막 seq까지 읽음 처리(그 뒤에 도착한 메시지는 안 읽음으로 남음). 본문이 없으면 전부 |
+
+메시지 순서는 대화마다 1, 2, 3… 으로 매기는 `seq`입니다. 저장하는 문장 안에서 `MAX(seq)+1`로 정하고 `(pair_key, seq)` 고유 인덱스로 막아, 서버 시계(`at`)가 같은 밀리초이거나 거꾸로 가도 순서와 커서가 흔들리지 않습니다. 기존 메시지는 마이그레이션 0009가 (시간, id) 순으로 번호를 매깁니다. 웹은 탭이 보일 때만 4초마다 폴링하고, 탭이 다시 보이거나 네트워크가 돌아오면 바로 같은 seq부터 이어받습니다.
 
 ## 관리자 `/api/admin` (관리자 출처 + `jc_asid`)
 

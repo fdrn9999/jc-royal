@@ -58,7 +58,7 @@ test('friends: request by nickname, accept, 1:1 chat with read receipt, unfriend
   await b.page.screenshot({ path: 'test-results/dm-conversation.png' });
 
   // A writes while B's page is between polls, then B sends a newer message: A's is still picked up afterwards.
-  const polls = /\/api\/dm\/[^/?]+\?after=/;
+  const polls = /\/api\/dm\/[^/?]+\?afterSeq=/;
   await b.page.route(polls, (r) => r.abort());
   await a.page.getByTestId('dm-input').fill('먼저 보낸 메시지');
   await a.page.getByTestId('dm-input').press('Enter');
@@ -147,4 +147,61 @@ test('reports: a post, a comment and a player at the table; the author card offe
 
   await b.page.getByTestId('leave').click();
   await expect(b.page.locator('[data-testid^=seat-]').filter({ hasText: b.nickname })).toHaveCount(0);
+});
+
+test('1:1 chat sync: no polling while the tab is hidden; coming back or reconnecting catches up at once', async ({ browser }) => {
+  const a = await signUp(browser);
+  const b = await signUp(browser);
+  const idOf = async (p: Page) => (await call<{ id: string }>(p, '/api/auth/me')).id;
+  const [aId, bId] = [await idOf(a.page), await idOf(b.page)];
+  await call(a.page, '/api/friends/requests', { userId: bId });
+  await call(b.page, `/api/friends/${aId}/accept`, {});
+
+  // B's clock moves only when the test moves it, so every request below is one the page chose to make.
+  await b.page.clock.install();
+  await b.page.goto(`/friends/${aId}`);
+  await expect(b.page.getByTestId('dm-title')).toHaveText(a.nickname);
+  await b.page.clock.pauseAt(Date.now() + 1_000);
+  const dmPolls: string[] = [];
+  const badgePolls: string[] = [];
+  b.page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (/^\/api\/dm\/[^/]+$/.test(u.pathname) && u.searchParams.has('afterSeq')) dmPolls.push(u.search);
+    if (u.pathname === '/api/messages/unread-count') badgePolls.push(u.pathname);
+  });
+  const setVisible = (on: boolean) =>
+    b.page.evaluate((v) => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (v ? 'visible' : 'hidden') });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, on);
+
+  // Visible: the conversation polls on its interval.
+  await b.page.clock.runFor(4_500);
+  await expect.poll(() => dmPolls.length).toBeGreaterThan(0);
+
+  // Hidden: two minutes pass without a request, even with a message waiting.
+  await setVisible(false);
+  await b.page.waitForTimeout(300);
+  dmPolls.length = 0;
+  badgePolls.length = 0;
+  await call(a.page, `/api/dm/${bId}`, { text: '숨긴 동안 온 메시지' });
+  await b.page.clock.runFor(120_000);
+  await b.page.waitForTimeout(500);
+  expect(dmPolls).toEqual([]);
+  expect(badgePolls).toEqual([]);
+  await expect(b.page.getByTestId('dm-theirs')).toHaveCount(0);
+
+  // Visible again: one request at once, from where it left off, without waiting for the next tick.
+  await setVisible(true);
+  await expect(b.page.getByTestId('dm-theirs')).toHaveText(/숨긴 동안/);
+  expect(dmPolls).toEqual(['?afterSeq=0']);
+
+  // Offline: a poll fails and the page keeps its place. Back online, it asks again at once and nothing repeats.
+  await b.page.context().setOffline(true);
+  await b.page.clock.runFor(4_500);
+  await call(a.page, `/api/dm/${bId}`, { text: '끊긴 동안 온 메시지' });
+  await b.page.context().setOffline(false);
+  await expect(b.page.getByTestId('dm-theirs').filter({ hasText: '끊긴 동안' })).toBeVisible();
+  await expect(b.page.getByTestId('dm-theirs')).toHaveCount(2);
+  expect(dmPolls.at(-1)).toBe('?afterSeq=1');
 });

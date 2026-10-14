@@ -71,6 +71,8 @@ export const SocialSettingsSchema = z
 // ------------------------------------------------------------------ 1:1 messages
 
 export const DirectMessageSchema = z.object({ text: z.string().trim().min(1).max(500) });
+/** POST /api/dm/:userId/read. upToSeq: the newest message the page has shown; without it, everything. */
+export const DmReadSchema = z.object({ upToSeq: z.number().int().min(0).optional() });
 
 /** 'invite' asks the friend to play at a table; its body is the table's name when it was sent. */
 export type DmKind = 'text' | 'invite';
@@ -80,6 +82,8 @@ export const INVITE_FRESH_MS = 2 * 60 * 60_000;
 
 export interface DirectMessageDto {
   id: string;
+  /** Position in the conversation (1, 2, 3, …), in the order messages were saved. Pages and polls go by it. */
+  seq: number;
   fromMe: boolean;
   body: string;
   kind: DmKind;
@@ -95,9 +99,12 @@ export interface ConversationDto {
   isFriend: boolean;
   /** I blocked this player. */
   blocked: boolean;
-  /** Oldest first. */
+  /** Oldest first (by seq). */
   messages: DirectMessageDto[];
+  /** With ?afterSeq: newer messages remain after this page. Otherwise: older messages remain before it. */
   hasMore: boolean;
+  /** The other player has read my messages up to this seq; `at` is when the newest of them was read. */
+  peerRead: { seq: number; at: number } | null;
 }
 
 /** Header badges: one poll covers the inbox, 1:1 messages and friend requests. */
