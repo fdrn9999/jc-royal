@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { signUp } from './helpers';
+import { signUp, widerThanDevice } from './helpers';
 
 test('mobile: play together from the friends list; the table picker fits and every row is a full-width tap target', async ({ browser }) => {
   const a = await signUp(browser, { mobile: true });
@@ -8,7 +8,7 @@ test('mobile: play together from the friends list; the table picker fits and eve
   const bId = (await call<{ id: string }>(b.page, '/api/auth/me')).id;
   await call(a.page, '/api/friends/requests', { userId: bId });
   await call(b.page, `/api/friends/${aId}/accept`, {});
-  const overflow = () => a.page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  const overflow = () => widerThanDevice(a.page);
 
   await a.page.goto('/friends');
   const item = a.page.getByTestId('friend-item').filter({ hasText: b.nickname });
@@ -54,7 +54,7 @@ test('mobile: report a 1:1 message and block by touch; dialogs fit the screen', 
   await call(a.page, '/api/friends/requests', { userId: bId });
   await call(b.page, `/api/friends/${aId}/accept`, {});
   await call(b.page, `/api/dm/${aId}`, { text: '모바일에서 신고할 메시지' });
-  const overflow = () => a.page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  const overflow = () => widerThanDevice(a.page);
   const inside = async (testId: string) => {
     const box = (await a.page.getByTestId(testId).boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);

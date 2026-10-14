@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `remember` integer DEFAULT true NOT NULL;

@@ -20,18 +20,7 @@ import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
-import { INTERNAL_HEADER } from './tables';
-
-async function roomCall(c: Context<AppEnv>, tableId: string, action: 'status' | 'reload' | 'close'): Promise<Record<string, unknown> | null> {
-  try {
-    const stub = c.env.TABLES.get(c.env.TABLES.idFromName(tableId));
-    const res = await stub.fetch(`https://room/internal/${tableId}/${action}`, { method: 'POST', headers: { [INTERNAL_HEADER]: c.env.INTERNAL_SECRET } });
-    if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
+import { roomCall } from '../lib/room';
 
 const page = (c: Context<AppEnv>) => ({
   limit: Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200),
@@ -235,8 +224,12 @@ const admin = new Hono<AppEnv>()
   })
   // ---------------------------------------------------------------- tables
   .get('/tables', async (c) => {
-    const rows = await c.var.db.select().from(schema.tables).orderBy(desc(schema.tables.createdAt));
-    return c.json(rows.map(({ joinCodeHash, ...t }) => ({ ...t, hasJoinCode: !!joinCodeHash })));
+    const rows = await c.var.db
+      .select({ t: schema.tables, host: schema.users.nickname })
+      .from(schema.tables)
+      .leftJoin(schema.users, eq(schema.users.id, schema.tables.createdBy))
+      .orderBy(desc(schema.tables.createdAt));
+    return c.json(rows.map(({ t: { joinCodeHash, ...t }, host }) => ({ ...t, hasJoinCode: !!joinCodeHash, hostNickname: t.roomType === 'member' ? host : null })));
   })
   .post('/tables', async (c) => {
     const body = await parseBody(c, TableInputSchema);

@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { checkOrCall, signUp } from './helpers';
+import { checkOrCall, signUp, widerThanDevice } from './helpers';
 
 test('mobile: lobby → seat → playable action bar, no horizontal overflow', async ({ browser }) => {
   const a = await signUp(browser, { mobile: true });
   const b = await signUp(browser);
-  const overflow = () => a.page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  const overflow = () => widerThanDevice(a.page);
   expect(await overflow()).toBe(false);
 
   await a.page.getByTestId('lobby-table').filter({ hasText: 'E2E Six' }).getByRole('button', { name: /참여|Join/ }).click();

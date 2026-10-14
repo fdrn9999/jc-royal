@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
 import { JoinCodeModal } from '../components/JoinCode';
+import { CreateRoomModal } from '../components/Rooms';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -26,6 +27,7 @@ export function LobbyPage() {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [codeFor, setCodeFor] = useState<LobbyTableDto | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -87,14 +89,22 @@ export function LobbyPage() {
         </Link>
       )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('lobby.title')}</h1>
-          <p className="mt-1 text-sm text-ink-300">{t('app.virtual')}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('lobby.title')}</h1>
+            <p className="mt-1 text-sm text-ink-300">{t('app.virtual')}</p>
+          </div>
+          <Button size="sm" variant="outline" className="shrink-0 sm:hidden" onClick={() => setCreating(true)} data-testid="room-create-open">
+            ＋ {t('room.create')}
+          </Button>
         </div>
         <div className="flex gap-2">
           <Input placeholder={t('lobby.search')} value={q} onChange={(e) => setQ(e.target.value)} className="sm:w-64" aria-label={t('lobby.search')} />
           <Button variant="subtle" onClick={load} aria-label={t('lobby.refresh')}>
             ↻
+          </Button>
+          <Button variant="outline" className="hidden sm:inline-flex" onClick={() => setCreating(true)} data-testid="room-create-open-wide">
+            ＋ {t('room.create')}
           </Button>
         </div>
       </div>
@@ -135,6 +145,13 @@ export function LobbyPage() {
                       {st === 'playing' && <span className="size-1.5 rounded-full bg-success jc-pulse-gold" />}
                       {t(`lobby.status.${st}` as MsgKey)}
                     </Badge>
+                    {tb.host && (
+                      <span data-testid="member-badge" className="min-w-0 max-w-full">
+                        <Badge className="max-w-full">
+                          <span className="truncate">👤 {t('room.hostedBy', { name: tb.host.nickname })}</span>
+                        </Badge>
+                      </span>
+                    )}
                     {tb.beginner && <span data-testid="beginner-badge"><Badge tone="blue">🔰 {t('lobby.beginner')}</Badge></span>}
                     {tb.isPrivate && <Badge tone="red">🔒 {t('lobby.private')}</Badge>}
                     {!tb.allowSpectators && <Badge>{t('lobby.noSpectate')}</Badge>}
@@ -181,6 +198,7 @@ export function LobbyPage() {
       </div>
 
       <JoinCodeModal table={codeFor} onClose={() => setCodeFor(null)} />
+      <CreateRoomModal open={creating} onClose={() => setCreating(false)} />
     </div>
   );
 }

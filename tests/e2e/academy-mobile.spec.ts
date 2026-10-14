@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { answerAll, CARD_ANSWERS, playScenario } from './academy-helpers';
-import { signUp } from './helpers';
+import { signUp, widerThanDevice } from './helpers';
 
-const noOverflow = async (page: Page) => expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+const noOverflow = async (page: Page) => expect(await widerThanDevice(page)).toBe(false);
 
 test('mobile academy: bottom nav, touch quiz (tap select + tap-to-swap sort), no overflow, no page scroll on card taps', async ({ browser }) => {
   const { page: p } = await signUp(browser, { mobile: true });

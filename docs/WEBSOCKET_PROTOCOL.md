@@ -35,7 +35,7 @@
 
 ### TableView (요약, 정의는 `packages/types/src/table.ts`)
 
-- **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정), `status`(waiting/playing/closing/closed).
+- **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정, 회원 방이면 `roomType:'member'`와 방장 `hostId`), `status`(waiting/playing/closing/closed).
 - **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`.
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).

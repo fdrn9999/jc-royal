@@ -7,6 +7,7 @@ import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { HandRankingChart } from '../academy/HandChart';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
+import { HostRoomModal } from '../components/Rooms';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal } from '../game/Panels';
@@ -41,6 +42,7 @@ export function TablePage() {
   const [buyBusy, setBuyBusy] = useState(false);
   const [buyErr, setBuyErr] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
+  const [hosting, setHosting] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chart, setChart] = useState(false);
   const [picked, setPicked] = useState<PublicUserDto | null>(null);
@@ -166,6 +168,7 @@ export function TablePage() {
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
   const canChat = !!s && (seated || s.table.allowSpectators);
+  const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }}>
@@ -174,33 +177,49 @@ export function TablePage() {
         <Link to="/" aria-label={t('nav.lobby')} className="shrink-0">
           <Logo size={32} />
         </Link>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-bold text-ivory">{s?.table.name ?? '…'}</div>
-          {s && (
-            <div className="truncate font-mono text-[11px] text-ink-300">
-              {formatChips(s.table.smallBlind)}/{formatChips(s.table.bigBlind)}
-              {hand && ` · ${t('table.handNo', { n: hand.number })} · ${t(`stage.${hand.stage}` as MsgKey)}`}
-            </div>
-          )}
-        </div>
-        <div className="ml-auto flex items-center gap-1.5">
+        {(() => {
+          const title = (
+            <>
+              <div className="flex min-w-0 items-center gap-1 text-sm font-bold text-ivory" data-testid="table-title">
+                <span className="truncate">{s?.table.name ?? '…'}</span>
+                {isHost && <span aria-hidden className="shrink-0 text-xs text-gold-300">▾</span>}
+              </div>
+              {s && (
+                <div className="truncate font-mono text-[11px] text-ink-300">
+                  {s.table.roomType === 'member' && <span className="font-sans">{isHost ? `👑 ${t('room.host')}` : t('room.member')} · </span>}
+                  {formatChips(s.table.smallBlind)}/{formatChips(s.table.bigBlind)}
+                  {hand && ` · ${t('table.handNo', { n: hand.number })} · ${t(`stage.${hand.stage}` as MsgKey)}`}
+                </div>
+              )}
+            </>
+          );
+          // The host opens the room's settings from its name, so the header needs no extra button on a phone.
+          return isHost ? (
+            <button type="button" className="jc-tap min-w-0 rounded-lg px-1.5 py-0.5 text-left hover:bg-white/5" onClick={() => setHosting(true)} aria-label={t('room.manage')} data-testid="room-manage">
+              {title}
+            </button>
+          ) : (
+            <div className="min-w-0">{title}</div>
+          );
+        })()}
+        <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
           {seated && (
-            <Button size="sm" variant="subtle" className="whitespace-nowrap px-2.5 sm:px-3" onClick={() => sock.send({ t: s!.you.sittingOut ? 'sitIn' : 'sitOut' })} data-testid="sitout-toggle" aria-label={s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}>
+            <Button size="icon" variant="subtle" onClick={() => sock.send({ t: s!.you.sittingOut ? 'sitIn' : 'sitOut' })} data-testid="sitout-toggle" aria-label={s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}>
               <span aria-hidden className="sm:hidden">{s!.you.sittingOut ? '▶' : '❚❚'}</span>
               <span className="hidden sm:inline">{s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}</span>
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="lg:hidden" onClick={() => setChatOpen((o) => !o)} aria-label={t('table.chat')} aria-expanded={chatOpen}>
+          <Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setChatOpen((o) => !o)} aria-label={t('table.chat')} aria-expanded={chatOpen}>
             💬
           </Button>
-          <Button size="sm" variant="ghost" className="px-2 sm:px-3" onClick={() => setChart(true)} aria-label={t('table.handChart')} data-testid="hand-chart-open">
+          <Button size="icon" variant="ghost" onClick={() => setChart(true)} aria-label={t('table.handChart')} data-testid="hand-chart-open">
             <span aria-hidden className="sm:hidden">♠≡</span>
             <span className="hidden sm:inline">{t('table.handChart')}</span>
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
+          <Button size="icon" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
             ⚙
           </Button>
-          <Button size="sm" variant="outline" className="whitespace-nowrap px-2.5 sm:px-3" onClick={seated ? leave : () => nav('/')} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
+          <Button size="icon" variant="outline" onClick={seated ? leave : () => nav('/')} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
             <span aria-hidden className="sm:hidden">⏏</span>
             <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
           </Button>
@@ -345,6 +364,7 @@ export function TablePage() {
         />
       )}
       <SettingsModal open={settings} onClose={() => setSettings(false)} />
+      {s && isHost && <HostRoomModal open={hosting} onClose={() => setHosting(false)} table={s.table} />}
       {/* The 1:1 chat opens in a new tab so the game connection stays. */}
       <PlayerCard
         user={picked}

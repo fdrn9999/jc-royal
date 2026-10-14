@@ -147,7 +147,8 @@ function useAudioSettings(): AudioSettings {
   );
 }
 
-export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Sound, table look and language; from the header it also offers logout (`onLogout`). */
+export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onClose: () => void; onLogout?: () => void }) {
   const { t, locale } = useI18n();
   const { chooseLocale } = useAuth();
   const prefs = usePrefs();
@@ -209,6 +210,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             </select>
           )}
         </Field>
+        {onLogout && (
+          <>
+            <div className="jc-divider" />
+            <Button variant="outline" className="w-full" onClick={onLogout} data-testid="settings-logout">
+              {t('nav.logout')}
+            </Button>
+          </>
+        )}
       </div>
     </Modal>
   );

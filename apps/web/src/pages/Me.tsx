@@ -8,7 +8,6 @@ import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
 import { ReportModal, type ReportSubject } from '../components/Social';
-import { SettingsModal } from '../game/Panels';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -54,7 +53,6 @@ export function MePage() {
   const [deleting, setDeleting] = useState(false);
   const [delPw, setDelPw] = useState('');
   const [delErr, setDelErr] = useState<string | null>(null);
-  const [settings, setSettings] = useState(false);
 
   if (!me) return null;
 
@@ -147,7 +145,7 @@ export function MePage() {
         {badgeCount > 0 ? <BadgeShelf showLocked={false} /> : <p className="text-sm text-ink-400">{t('me.noBadges')}</p>}
       </Panel>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('me.recent')}>
           {hands.data && hands.data.length === 0 && <Empty>{t('me.none')}</Empty>}
           <ul className="divide-y divide-white/5">
@@ -193,7 +191,7 @@ export function MePage() {
         </Panel>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className="text-xs text-gold-300 hover:underline">{t('board.write')}</Link>}>
           {myPosts.data && myPosts.data.length === 0 && <Empty>{t('me.none')}</Empty>}
           <ul className="divide-y divide-white/5" data-testid="my-posts">
@@ -220,8 +218,8 @@ export function MePage() {
         </Panel>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title={t('me.profile')} actions={<Button size="sm" variant="subtle" onClick={() => setSettings(true)}>{t('settings.title')}</Button>}>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Panel title={t('me.profile')}>
           <form className="flex flex-col gap-4" onSubmit={saveProfile}>
             <Field label={t('auth.nickname')} hint={t('auth.nicknameHint')}>
               {(id) => <Input id={id} value={nickname} maxLength={16} onChange={(e) => setNickname(e.target.value.trim())} />}
@@ -265,9 +263,22 @@ export function MePage() {
             ))}
           </ul>
           <div className="jc-divider my-5" />
-          <Button variant="danger" size="sm" onClick={() => setDeleting(true)}>
-            {t('me.delete')}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await logout();
+                nav('/login', { replace: true });
+              }}
+              data-testid="me-logout"
+            >
+              {t('nav.logout')}
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setDeleting(true)}>
+              {t('me.delete')}
+            </Button>
+          </div>
         </Panel>
       </div>
 
@@ -286,7 +297,6 @@ export function MePage() {
         <Input type="password" value={delPw} onChange={(e) => setDelPw(e.target.value)} autoComplete="current-password" />
         {delErr && <p className="mt-2 text-sm text-danger">{delErr}</p>}
       </Modal>
-      <SettingsModal open={settings} onClose={() => setSettings(false)} />
     </div>
   );
 }
@@ -340,7 +350,7 @@ export function HandDetailPage() {
           </ul>
         </Panel>
       )}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('lobby.players')}>
           <ul className="divide-y divide-white/5">
             {data.players.map((p) => (

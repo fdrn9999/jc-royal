@@ -52,6 +52,8 @@ export const sessions = sqliteTable(
     expiresAt: integer('expires_at').notNull(),
     ip: text('ip'),
     userAgent: text('user_agent'),
+    /** "자동 로그인": a 30-day cookie and session. Off: the cookie ends with the browser, the session after a day idle. */
+    remember: integer('remember', { mode: 'boolean' }).notNull().default(true),
   },
   (t) => [uniqueIndex('sessions_token_uq').on(t.tokenHash), index('sessions_user_idx').on(t.userId)],
 );

@@ -9,6 +9,7 @@ import { boardRoutes, myCommunityRoutes } from './routes/board';
 import { meRoutes } from './routes/me';
 import { messageRoutes } from './routes/messages';
 import { reportRoutes } from './routes/reports';
+import { roomRoutes } from './routes/rooms';
 import { blockRoutes, dmRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 
@@ -32,6 +33,7 @@ app.route('/api/dm', dmRoutes);
 app.route('/api/blocks', blockRoutes);
 app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
+app.route('/api/rooms', roomRoutes);
 app.route('/api/academy', academyRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);

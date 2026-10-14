@@ -9,6 +9,15 @@ export function uid(prefix: string) {
   return `${prefix}${Date.now().toString(36).slice(-5)}${n}`;
 }
 
+/**
+ * Whether the page is wider than the phone. A mobile browser widens its layout to fit wide content (and
+ * window.innerWidth grows with it), so this compares with the device width the context was opened with.
+ */
+export async function widerThanDevice(page: Page) {
+  const width = page.viewportSize()!.width;
+  return page.evaluate((w) => document.documentElement.scrollWidth > w + 1, width);
+}
+
 /** Signs up through the real UI and lands on the lobby. */
 export async function signUp(browser: Browser, opts: { mobile?: boolean } = {}) {
   const ctx = await browser.newContext(opts.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 900 } });

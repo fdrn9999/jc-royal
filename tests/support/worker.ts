@@ -104,6 +104,8 @@ export async function startWorker(port: number, state: string): Promise<RunningW
       '--var', 'PBKDF2_ITERATIONS:1000',
       '--var', 'RATE_LIMIT_IP_SCALE:1000',
       '--var', 'ADMIN_BOOTSTRAP_TOKEN:test-bootstrap-token-0123456789',
+      // Members' rooms with nobody seated close after 8 s here (10 min in production).
+      '--var', 'MEMBER_IDLE_CLOSE_MS:8000',
     ],
     { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
   );

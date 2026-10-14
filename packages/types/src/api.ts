@@ -67,7 +67,7 @@ export interface EmailVerificationSentDto {
   /** Outside production only, so the flow works without a mail provider. */
   devCode?: string;
 }
-export const LoginSchema = z.object({ email: EmailSchema, password: z.string().min(1).max(128) });
+export const LoginSchema = z.object({ email: EmailSchema, password: z.string().min(1).max(128), remember: z.boolean().default(false) });
 export const UpdateProfileSchema = z.object({
   nickname: NicknameSchema.optional(),
   avatarUrl: z

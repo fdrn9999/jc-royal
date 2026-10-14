@@ -1,6 +1,7 @@
 import { formatChips, Logo } from '@jc/ui';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
+import { SettingsModal } from '../game/Panels';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useUnread } from '../lib/unread';
@@ -43,7 +44,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const nav = useNavigate();
   const { unread, dmUnread, friendRequests } = useUnread();
+  const [settings, setSettings] = useState(false);
   const social = dmUnread + friendRequests;
+  async function signOut() {
+    setSettings(false);
+    await logout();
+    nav('/login');
+  }
   const tab = ({ isActive }: { isActive: boolean }) => `relative py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`;
   const link = ({ isActive }: { isActive: boolean }) =>
     `px-3 py-2 text-sm font-semibold tracking-wide transition ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
@@ -81,14 +88,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             )}
             <span className="hidden md:inline"><LangToggle /></span>
+            <button type="button" className="rounded-full p-2 text-ink-200 hover:text-ivory" onClick={() => setSettings(true)} aria-label={t('settings.title')} data-testid="settings-open">
+              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
             {me && (
-              <button
-                className="hidden text-sm text-ink-300 hover:text-ivory sm:inline"
-                onClick={async () => {
-                  await logout();
-                  nav('/login');
-                }}
-              >
+              <button className="hidden text-sm text-ink-300 hover:text-ivory sm:inline" onClick={signOut}>
                 {t('nav.logout')}
               </button>
             )}
@@ -96,6 +103,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 sm:pb-10">{children}</main>
+      <SettingsModal open={settings} onClose={() => setSettings(false)} onLogout={me ? signOut : undefined} />
       {/* Mobile bottom navigation */}
       <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
         <NavLink to="/" end className={tab}>

@@ -57,6 +57,13 @@
       "when": 1791993738939,
       "tag": "0007_social_play",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791995014018,
+      "tag": "0008_session_remember",
+      "breakpoints": true
     }
   ]
 }

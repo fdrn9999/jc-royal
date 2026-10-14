@@ -45,6 +45,8 @@ export interface SeatProps {
   deadline: number | null;
   turnMs: number;
   isDealer: boolean;
+  /** The member who opened this room. */
+  isHost: boolean;
   blind: 'SB' | 'BB' | null;
   winAmount: number | null;
   handLabel: string | null;
@@ -147,6 +149,11 @@ export function Seat(p: SeatProps) {
               {p.blind && (
                 <span data-tour={`blind-${p.blind}`} className={cx('rounded-full border px-1.5 text-[9px] font-bold leading-4', p.blind === 'SB' ? 'border-info/50 bg-[#16263b] text-[#a9c8ee]' : 'border-danger/50 bg-[#3a1618] text-[#f0a0a2]')}>{p.blind}</span>
               )}
+            </span>
+          )}
+          {p.isHost && (
+            <span className="absolute -right-1.5 -top-2 z-10 rounded-full border border-gold-500/50 bg-ink-950 px-1 text-[10px] leading-4" title={t('room.host')} aria-label={t('room.host')} data-testid="host-mark">
+              👑
             </span>
           )}
           {p.onPick && (

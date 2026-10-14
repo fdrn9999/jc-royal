@@ -27,7 +27,7 @@ import { fail, parseBody } from '../lib/http';
 import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { clientIp, rateLimit } from '../lib/rate-limit';
-import { createSession, destroySession } from '../lib/session';
+import { createSession, destroySession, renewUserCookie } from '../lib/session';
 
 export function toMe(u: AuthUser): MeDto {
   return {
@@ -203,7 +203,7 @@ export const authRoutes = new Hono<AppEnv>()
     const ok = await verifyPassword(body.password, u?.passwordHash ?? DUMMY_HASH);
     if (!u || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
     if (u.status === 'suspended') fail(403, 'suspended', u.suspendedReason ?? 'account suspended');
-    await createSession(c, u.id, 'user');
+    await createSession(c, u.id, 'user', body.remember);
     return c.json(toMe(u));
   })
   .post('/logout', async (c) => {
@@ -251,7 +251,10 @@ export const authRoutes = new Hono<AppEnv>()
     return c.json({ ok: true });
   })
   // ----- authenticated -----
-  .get('/me', requireUser, async (c) => c.json(toMe(c.var.user!)))
+  .get('/me', requireUser, async (c) => {
+    renewUserCookie(c);
+    return c.json(toMe(c.var.user!));
+  })
   .patch('/me', requireUser, async (c) => {
     const body = await parseBody(c, UpdateProfileSchema);
     const me = c.var.user!;

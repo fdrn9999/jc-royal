@@ -14,6 +14,8 @@ import { DurableObject } from 'cloudflare:workers';
 import { HandEngine, nextButtonSeat, type PersistedHand } from '@jc/poker-engine';
 import {
   ClientMessageSchema,
+  MEMBER_IDLE_CLOSE_MS,
+  PLAYER_REPORT_WINDOW_MS,
   type ChatMessage,
   type ClientMessage,
   type ErrorCode,
@@ -75,6 +77,12 @@ interface RoomState {
   /** Last hand whose result was applied to seats and recorded (idempotent finalisation). */
   settledHandId: string | null;
   version: number;
+  /** Member rooms: since when nobody has been seated (the room closes itself after MEMBER_IDLE_CLOSE_MS). */
+  emptySince?: number | null;
+  /** When the room closed; its chat is dropped once players can no longer report from it. */
+  closedAt?: number | null;
+  /** Shorter empty-room timeout for local test runs (never in production). */
+  idleCloseMs?: number;
 }
 
 const BETWEEN_HANDS_MS = 4_000;
@@ -241,12 +249,19 @@ export class TableRoom extends DurableObject<Env> {
           case 'status':
             return Response.json(this.adminStatus());
           case 'reload': {
+            // `wrangler dev --var` reaches only the api worker, so local tests pass their timeout along here.
+            const idleMs = Number(request.headers.get('x-jc-idle-close-ms'));
+            if (this.env.ENVIRONMENT !== 'production' && idleMs > 0 && this.room.idleCloseMs !== idleMs) {
+              this.room.idleCloseMs = idleMs;
+              await this.ctx.storage.put('room', this.room);
+            }
             const t = await loadTable(this.env.DB, tableId);
             if (t) {
               this.table = t;
               if (t.status === 'closing' && !this.room.closing) await this.beginClose();
             }
             this.broadcast();
+            await this.schedule();
             return Response.json({ ok: true, appliesFrom: this.hand ? 'next hand' : 'now' });
           }
           case 'close':
@@ -667,9 +682,25 @@ export class TableRoom extends DurableObject<Env> {
     await this.progress([{ kind: 'handStart', handNumber: this.room.handNumber }, { kind: 'deal' }]);
   }
 
+  private idleCloseMs() {
+    return this.room.idleCloseMs ?? MEMBER_IDLE_CLOSE_MS;
+  }
+
+  /** Notes when a member room became empty (or that it no longer is). Returns whether that changed. */
+  private trackEmpty(now: number): boolean {
+    const empty = this.table?.roomType === 'member' && !this.room.closing && !this.room.closed && this.room.seats.every((s) => !s);
+    const since = empty ? (this.room.emptySince ?? now) : null;
+    if (since === (this.room.emptySince ?? null)) return false;
+    this.room.emptySince = since;
+    return true;
+  }
+
   /** Arm the single DO alarm for the earliest pending deadline. */
   private async schedule() {
+    if (this.trackEmpty(Date.now())) await this.ctx.storage.put('room', this.room);
     const times: number[] = [];
+    if (this.room.emptySince) times.push(this.room.emptySince + this.idleCloseMs());
+    if (this.room.closed && this.room.closedAt && this.chat.length) times.push(this.room.closedAt + PLAYER_REPORT_WINDOW_MS);
     if (this.hand && !this.hand.isSettled) {
       const d = this.hand.deadline();
       if (d) times.push(d);
@@ -729,6 +760,15 @@ export class TableRoom extends DurableObject<Env> {
         this.hand = null;
         await this.startHand();
       }
+      // A member room nobody has sat in for a while closes itself.
+      if (this.room.emptySince && this.room.emptySince + this.idleCloseMs() <= now && !this.room.closing && this.room.seats.every((s) => !s)) {
+        await this.beginClose();
+      }
+      // A closed room keeps its chat only while players can still report from it.
+      if (this.room.closed && this.room.closedAt && this.room.closedAt + PLAYER_REPORT_WINDOW_MS <= now && this.chat.length) {
+        this.chat = [];
+        await this.ctx.storage.delete('chat');
+      }
       await this.schedule();
     });
   }
@@ -745,11 +785,13 @@ export class TableRoom extends DurableObject<Env> {
       await this.finishCloseIfIdle();
     }
     this.broadcast();
+    await this.schedule();
   }
 
   private async finishCloseIfIdle() {
     if (this.room.seats.some((s) => s)) return;
     this.room.closed = true;
+    this.room.closedAt = Date.now();
     this.room.nextHandAt = null;
     this.hand = null;
     await this.save();

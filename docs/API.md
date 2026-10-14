@@ -16,9 +16,9 @@
 | POST | `/email-verification/request` | `{email,locale?}` → `{ok, expiresInMinutes:10, resendAfterSeconds:60}`. 6자리 인증번호 메일(요청 `locale`, 기본 ko). 409 `email_taken`, 429 `resend_too_soon`(`details.retryAfterSeconds`)·IP당 20회/시간·이메일당 5회/시간, 502 `mail_failed`, 400 `verification_off`. 개발 환경에서만 `devCode` 반환 |
 | POST | `/email-verification/confirm` | `{email,code}` → `{verificationToken, expiresInMinutes:30}`. 400 `invalid_code`(`details.attemptsLeft`), `too_many_attempts`(5회 오입력 시 새 인증번호 필요), `code_expired` |
 | POST | `/register` | `{email,password,nickname,birthDate(YYYY-MM-DD),locale?,agreements:{age14:true,privacy:true},emailVerificationToken?}` → 201 MeDto + 세션. 비밀번호는 8자 이상 + 영문(대·소문자 무관)·숫자·특수문자. 만 14세 미만 400 `underage`. 이메일 인증이 켜져 있으면 해당 이메일의 유효한 `verificationToken` 필수(없거나 다르면 400 `email_not_verified`, 1회용). 생년월일·인증 시각·동의 버전/시각 저장, 가입 칩 지급(원장), 계정 언어로 환영 쪽지. 409 `email_taken`/`nickname_taken` |
-| POST | `/login` | `{email,password}` → MeDto + 세션. 401 `invalid_credentials`, 403 `suspended`, 429 |
+| POST | `/login` | `{email,password,remember?}` → MeDto + 세션. `remember:true`(자동 로그인)면 30일 쿠키와 30일 슬라이딩 만료, 기본값 `false`면 브라우저 세션 쿠키와 1일 슬라이딩 만료. 401 `invalid_credentials`, 403 `suspended`, 429 |
 | POST | `/logout` | 세션 폐기 |
-| GET | `/me` | 현재 사용자(MeDto) |
+| GET | `/me` | 현재 사용자(MeDto). 세션 만료를 연장하고 쿠키를 다시 발급 |
 | PATCH | `/me` | `{nickname?, avatarUrl?(https), locale?}` |
 | GET | `/nickname-available?nickname=` | `{available}` |
 | POST | `/me/password` | `{currentPassword,newPassword}`(가입과 같은 비밀번호 규칙) → 다른 기기 세션 폐기 |
@@ -46,6 +46,18 @@
 | GET | `/api/tables` | 로비(종료된 테이블 제외, 실시간 착석·진행·대기·관전 수, `beginner` 입문 테이블 여부) |
 | GET | `/api/tables/:id` | 단일 테이블 |
 | GET(upgrade) | `/ws/tables/:id?code=` | WebSocket. 세션 쿠키와 Origin 필수. 비공개 테이블은 참가 코드가 있어야 착석 가능 → `docs/WEBSOCKET_PROTOCOL.md` |
+
+로비 응답의 각 테이블에는 `roomType`(`official`/`member`)과 `host`(회원 방이면 `{id,nickname}`, 공식 테이블이면 `null`)가 있습니다. 공식 테이블이 먼저, 회원 방이 뒤에 나옵니다.
+
+## 회원 방 `/api/rooms` (로그인 필요)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/rooms` | `{name(2–30자), maxSeats(2/6/9), bigBlind(10/20/50/100/200), minBuyIn, maxBuyIn, allowSpectators?, isPrivate?, joinCode?(4–32자)}` → 201 `{id}`. 스몰 블라인드는 BB의 절반, 바이인은 10–200 BB 범위(`minBuyIn ≤ maxBuyIn`), 비공개면 참가 코드 필수(400). 열린 방은 회원당 2개까지(409 `room_limit`, 개수 확인과 생성이 한 문장), 생성은 회원당 시간당 5회(429) |
+| PATCH | `/api/rooms/:id` | 방장만. `{name?, allowSpectators?, isPrivate?, joinCode?}` — 블라인드·바이인 필드는 무시됩니다. 빈 `joinCode`는 코드 삭제(비공개면 400). 다른 회원 403, 공식·종료·없는 방 404 |
+| POST | `/api/rooms/:id/close` | 방장만. 관리자 종료와 같은 절차: 새 핸드 금지 → 진행 중 핸드 종료 → 착석자 전원 원장 `cash_out` → 종료. `{ok, closed}`(`closed:false`면 핸드가 끝난 뒤 닫힘) |
+
+방장 권한은 이름·관전 허용·참가 코드 변경, 초대 링크 공유, 방 종료뿐입니다. 칩 지급, 카드·결과 조작, 다른 사람의 카드 보기는 없습니다. 방장이 나가도 방은 유지되고(방장 위임 없음), 아무도 앉아 있지 않은 채 10분이 지나면 저절로 닫힙니다(`MEMBER_IDLE_CLOSE_MS`). 공식 테이블은 지금처럼 관리자만 만듭니다. 관리자 테이블 목록에는 방 유형과 방장 닉네임(`hostNickname`)이 함께 나옵니다.
 
 ## 아카데미 `/api/academy`
 

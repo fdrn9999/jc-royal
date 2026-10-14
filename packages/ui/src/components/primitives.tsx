@@ -19,7 +19,7 @@ export function Logo({ size = 40, withWordmark = false, className }: { size?: nu
 }
 
 type Variant = 'gold' | 'ghost' | 'outline' | 'danger' | 'subtle';
-type Size = 'sm' | 'md' | 'lg';
+type Size = 'icon' | 'sm' | 'md' | 'lg';
 
 const variants: Record<Variant, string> = {
   gold: 'bg-gradient-to-b from-gold-400 to-gold-600 text-ink-950 shadow-[0_6px_18px_-8px_rgba(212,175,55,0.8)] hover:from-gold-300 hover:to-gold-500',
@@ -28,7 +28,10 @@ const variants: Record<Variant, string> = {
   subtle: 'bg-ink-700 text-ink-100 hover:bg-ink-600 border border-white/5',
   danger: 'bg-danger/90 text-white hover:bg-danger',
 };
+// Padding is set here, not by className: cx() only joins classes, so a px-* passed in loses to the size's own.
 const sizes: Record<Size, string> = {
+  /** sm on wide screens; a tight 32px square on phones, for icon-only buttons in a crowded bar. */
+  icon: 'h-8 min-w-8 px-1.5 text-sm sm:px-3',
   sm: 'h-8 px-3 text-sm',
   md: 'h-10 px-4 text-sm',
   lg: 'h-12 px-6 text-base',
