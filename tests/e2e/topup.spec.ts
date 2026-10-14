@@ -59,6 +59,28 @@ test('top-up: between hands it applies at once; during a hand it waits, can be c
   await expect(me.getByTestId('ledger').getByText(/^(스택 충전|Table top-up)$/)).toHaveCount(2);
 });
 
+test('top-up: the dialog opens with its suggested amount already in place, so an amount picked at once is the one sent', async ({ browser }) => {
+  const a = await signUp(browser);
+  await sitWith(a.page, 'e2e-topup-open', 100);
+  const open = a.page.getByTestId('topup-open');
+  for (const pick of [250, 250]) {
+    await expect(open).toBeVisible();
+    // Open the dialog and move the slider in the same task as the first paint, before any later effect could run.
+    const shown = await a.page.evaluate(async (v) => {
+      (document.querySelector('[data-testid="topup-open"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+      const range = document.querySelector('[data-testid="topup-range"]') as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(range, String(v));
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      return document.querySelector('[data-testid="topup-amount"]')!.textContent;
+    }, pick);
+    expect(shown).toBe(`+${pick}`);
+    await a.page.keyboard.press('Escape');
+    await expect(a.page.getByTestId('topup-modal')).toHaveCount(0);
+  }
+});
+
 test('auto rebuy: off by default, needs explicit consent with an amount and a limit, and can be turned off', async ({ browser }) => {
   const a = await signUp(browser);
   await sitWith(a.page, 'e2e-rebuy', 100);
