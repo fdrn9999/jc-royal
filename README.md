@@ -45,6 +45,7 @@ docs/               문서
 
 | 문서 | 내용 |
 |---|---|
+| [docs/HANDOFF.md](docs/HANDOFF.md) | **인수인계 · 남은 일 (새 세션은 여기부터)** |
 | [docs/DIRECTIVE.md](docs/DIRECTIVE.md) | 개발 지시서(기준) |
 | [docs/INTEGRATION_ANALYSIS.md](docs/INTEGRATION_ANALYSIS.md) | 원본 저장소 3개 분석 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 아키텍처 · 상태 · 칩 경제 · DB 모델 |
