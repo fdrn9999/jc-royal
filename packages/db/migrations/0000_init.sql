@@ -10,16 +10,6 @@ CREATE TABLE `admin_audit_log` (
 );
 --> statement-breakpoint
 CREATE INDEX `audit_created_idx` ON `admin_audit_log` (`created_at`);--> statement-breakpoint
-CREATE TABLE `admin_recovery_codes` (
-	`id` text PRIMARY KEY NOT NULL,
-	`user_id` text NOT NULL,
-	`code_hash` text NOT NULL,
-	`used_at` integer,
-	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
-CREATE INDEX `recovery_user_idx` ON `admin_recovery_codes` (`user_id`);--> statement-breakpoint
 CREATE TABLE `chip_ledger` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -103,7 +93,6 @@ CREATE TABLE `sessions` (
 	`user_id` text NOT NULL,
 	`token_hash` text NOT NULL,
 	`kind` text NOT NULL,
-	`mfa_verified_at` integer,
 	`reauth_at` integer,
 	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	`last_seen_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
@@ -175,25 +164,4 @@ CREATE TABLE `users` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `users_email_uq` ON `users` (`email`);--> statement-breakpoint
-CREATE UNIQUE INDEX `users_nickname_uq` ON `users` (lower("nickname"));--> statement-breakpoint
-CREATE TABLE `webauthn_challenges` (
-	`id` text PRIMARY KEY NOT NULL,
-	`session_id` text NOT NULL,
-	`purpose` text NOT NULL,
-	`challenge` text NOT NULL,
-	`expires_at` integer NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE `webauthn_credentials` (
-	`id` text PRIMARY KEY NOT NULL,
-	`user_id` text NOT NULL,
-	`public_key` text NOT NULL,
-	`counter` integer DEFAULT 0 NOT NULL,
-	`transports` text,
-	`nickname` text NOT NULL,
-	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
-	`last_used_at` integer,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
-CREATE INDEX `webauthn_user_idx` ON `webauthn_credentials` (`user_id`);
+CREATE UNIQUE INDEX `users_nickname_uq` ON `users` (lower("nickname"));

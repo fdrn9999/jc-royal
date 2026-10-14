@@ -13,7 +13,7 @@ export const USER_SESSION_TTL = 30 * DAY;
 /** Admin sessions: short idle timeout and hard absolute cap. */
 export const ADMIN_IDLE_TTL = 30 * 60 * 1000;
 export const ADMIN_ABSOLUTE_TTL = 8 * 60 * 60 * 1000;
-/** Window during which a fresh WebAuthn assertion authorises sensitive admin actions. */
+/** Window during which a password re-confirmation authorises sensitive admin actions. */
 export const ADMIN_REAUTH_WINDOW = 5 * 60 * 1000;
 
 function cookieName(kind: 'user' | 'admin') {
@@ -84,7 +84,7 @@ export async function resolveSession(c: Context<AppEnv>, kind: 'user' | 'admin')
     );
   }
   return {
-    session: { id: row.s.id, kind: row.s.kind, mfaVerifiedAt: row.s.mfaVerifiedAt, reauthAt: row.s.reauthAt, createdAt: row.s.createdAt },
+    session: { id: row.s.id, kind: row.s.kind, reauthAt: row.s.reauthAt, createdAt: row.s.createdAt },
     user: {
       id: row.u.id,
       email: row.u.email,

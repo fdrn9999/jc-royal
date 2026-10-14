@@ -19,3 +19,4 @@ playwright-report/
 Thumbs.db
 tests/.state/
 tests/visual/out/
+tests/visual/out-admin/

@@ -22,6 +22,8 @@ export interface TestTable {
 
 /** Tables seeded for integration tests (admin API arrives in Phase 7). */
 export const TABLES: TestTable[] = [
+  { id: 'it-admin-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-admin-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
   ...Array.from({ length: 12 }, (_, i) => ({ id: `it-hu-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000 })),
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-six-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 2000 })),
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-fast-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 2 })),
@@ -86,6 +88,7 @@ export async function startWorker(port: number, state: string): Promise<RunningW
       '--inspector-port', String(port + 1000),
       '--var', 'PBKDF2_ITERATIONS:1000',
       '--var', 'RATE_LIMIT_IP_SCALE:1000',
+      '--var', 'ADMIN_BOOTSTRAP_TOKEN:test-bootstrap-token-0123456789',
     ],
     { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
   );

@@ -9,10 +9,8 @@ export interface Env {
   ENVIRONMENT: 'development' | 'test' | 'production';
   /** Comma separated list of browser origins allowed to send state-changing requests. */
   ALLOWED_ORIGINS: string;
-  /** Origin of the admin console (WebAuthn expected origin). */
+  /** Origin of the admin console; admin API requests must come from it. */
   ADMIN_ORIGIN: string;
-  /** WebAuthn relying party id (admin host name). */
-  WEBAUTHN_RP_ID: string;
   PBKDF2_ITERATIONS: string;
   SIGNUP_GRANT: string;
   /** Shared secret between api and game worker for internal calls. */
@@ -38,7 +36,6 @@ export interface AuthUser {
 export interface AuthSession {
   id: string;
   kind: 'user' | 'admin';
-  mfaVerifiedAt: number | null;
   reauthAt: number | null;
   createdAt: number;
 }

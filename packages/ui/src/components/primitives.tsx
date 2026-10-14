@@ -47,7 +47,7 @@ export function Button({
       {...rest}
       disabled={rest.disabled || loading}
       className={cx(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-semibold tracking-wide transition-all duration-150',
+        'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition-all duration-150',
         'disabled:opacity-45 disabled:cursor-not-allowed active:translate-y-px',
         variants[variant],
         sizes[size],
@@ -153,7 +153,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: { open: 
 export function Stat({ label, value, sub }: { label: ReactNode; value: ReactNode; sub?: ReactNode }) {
   return (
     <div className="rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{label}</div>
+      <div className="text-[11px] font-semibold tracking-[0.04em] text-ink-400">{label}</div>
       <div className="mt-1 font-mono text-xl font-semibold text-ivory tabular-nums">{value}</div>
       {sub && <div className="mt-0.5 text-xs text-ink-400">{sub}</div>}
     </div>

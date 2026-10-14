@@ -2,6 +2,7 @@ import { createDb } from '@jc/db';
 import { Hono } from 'hono';
 import type { AppEnv } from './env';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
+import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { meRoutes } from './routes/me';
 import { tableRoutes, tableSocket } from './routes/tables';
@@ -19,6 +20,7 @@ app.get('/api/health', (c) => c.json({ ok: true, env: c.env.ENVIRONMENT, at: Dat
 app.route('/api/auth', authRoutes);
 app.route('/api/me', meRoutes);
 app.route('/api/tables', tableRoutes);
+app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
 
 app.notFound(async (c) => {

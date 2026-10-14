@@ -34,9 +34,7 @@ export const sessions = sqliteTable(
     /** SHA-256 of the cookie token; the raw token is never stored. */
     tokenHash: text('token_hash').notNull(),
     kind: text('kind', { enum: ['user', 'admin'] }).notNull(),
-    /** Admin sessions: when the WebAuthn second factor was verified. */
-    mfaVerifiedAt: integer('mfa_verified_at'),
-    /** Admin sessions: last fresh WebAuthn re-authentication for sensitive actions. */
+    /** Admin sessions: last password re-confirmation, required for sensitive actions. */
     reauthAt: integer('reauth_at'),
     createdAt: integer('created_at').notNull().default(now),
     lastSeenAt: integer('last_seen_at').notNull().default(now),
@@ -163,42 +161,6 @@ export const handPlayers = sqliteTable(
   (t) => [primaryKey({ columns: [t.handId, t.userId] }), index('hp_user_idx').on(t.userId, t.endedAt)],
 );
 
-export const webauthnCredentials = sqliteTable(
-  'webauthn_credentials',
-  {
-    id: text('id').primaryKey(),
-    userId: text('user_id').notNull().references(() => users.id),
-    publicKey: text('public_key').notNull(),
-    counter: integer('counter').notNull().default(0),
-    transports: text('transports'),
-    nickname: text('nickname').notNull(),
-    createdAt: integer('created_at').notNull().default(now),
-    lastUsedAt: integer('last_used_at'),
-  },
-  (t) => [index('webauthn_user_idx').on(t.userId)],
-);
-
-/** Short-lived WebAuthn challenges (registration / authentication). */
-export const webauthnChallenges = sqliteTable('webauthn_challenges', {
-  id: text('id').primaryKey(),
-  sessionId: text('session_id').notNull(),
-  purpose: text('purpose', { enum: ['register', 'login', 'reauth'] }).notNull(),
-  challenge: text('challenge').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-});
-
-export const adminRecoveryCodes = sqliteTable(
-  'admin_recovery_codes',
-  {
-    id: text('id').primaryKey(),
-    userId: text('user_id').notNull().references(() => users.id),
-    codeHash: text('code_hash').notNull(),
-    usedAt: integer('used_at'),
-    createdAt: integer('created_at').notNull().default(now),
-  },
-  (t) => [index('recovery_user_idx').on(t.userId)],
-);
-
 export const adminAuditLog = sqliteTable(
   'admin_audit_log',
   {
@@ -232,3 +194,4 @@ export const rateLimits = sqliteTable('rate_limits', {
   windowStart: integer('window_start').notNull(),
   count: integer('count').notNull(),
 });
+
