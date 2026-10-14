@@ -24,12 +24,17 @@ export const messageRoutes = new Hono<AppEnv>()
     const out: MessageDto[] = rows.map(({ m, from }) => ({ id: m.id, category: m.category, title: m.title, body: m.body, fromAdmin: m.senderId ? (from ?? 'admin') : null, readAt: m.readAt, createdAt: m.createdAt }));
     return c.json(out);
   })
-  /** Header badges: inbox, 1:1 messages and received friend requests in one poll. */
+  /**
+   * Header badges: inbox, 1:1 messages and received friend requests in one poll. 1:1 messages count only while the
+   * member keeps their notifications on, and never from players they blocked.
+   */
   .get('/unread-count', async (c) => {
     const r = await c.env.DB.prepare(
       `SELECT (SELECT COUNT(*) FROM messages WHERE user_id = ?1 AND read_at IS NULL AND deleted_at IS NULL) AS unread,
               (SELECT COUNT(*) FROM direct_messages d JOIN users u ON u.id = d.sender_id
-                WHERE d.recipient_id = ?1 AND d.read_at IS NULL AND u.status != 'deleted') AS dmUnread,
+                WHERE d.recipient_id = ?1 AND d.read_at IS NULL AND u.status != 'deleted'
+                  AND (SELECT dm_notifications FROM users WHERE id = ?1)
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.blocker_id = ?1 AND b.blocked_id = d.sender_id)) AS dmUnread,
               (SELECT COUNT(*) FROM friendships f JOIN users u ON u.id = f.requester_id
                 WHERE (f.user_a = ?1 OR f.user_b = ?1) AND f.status = 'pending' AND f.requester_id != ?1 AND u.status != 'deleted') AS friendRequests`,
     )

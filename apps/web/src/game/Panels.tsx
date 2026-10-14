@@ -74,15 +74,31 @@ export function BuyInModal({
   );
 }
 
-export function ChatPanel({ chat, onSend, canChat, myId, onPick }: { chat: ChatMessage[]; onSend: (text: string) => void; canChat: boolean; myId?: string; onPick?: (m: ChatMessage) => void }) {
+export function ChatPanel({
+  chat,
+  onSend,
+  canChat,
+  myId,
+  onPick,
+  hidden,
+}: {
+  chat: ChatMessage[];
+  onSend: (text: string) => void;
+  canChat: boolean;
+  myId?: string;
+  onPick?: (m: ChatMessage) => void;
+  /** Players whose lines are left out (muted or blocked by me). */
+  hidden?: ReadonlySet<string>;
+}) {
   const { t } = useI18n();
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
+  const shown = hidden?.size ? chat.filter((m) => !hidden.has(m.userId)) : chat;
   useEffect(() => {
     // Block body on purpose: newer Chrome returns a Promise from scrollIntoView,
     // and React would call a returned value as the effect cleanup.
     end.current?.scrollIntoView({ block: 'end' });
-  }, [chat.length]);
+  }, [shown.length]);
   function submit(e: FormEvent) {
     e.preventDefault();
     const v = text.trim();
@@ -93,8 +109,8 @@ export function ChatPanel({ chat, onSend, canChat, myId, onPick }: { chat: ChatM
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 text-sm">
-        {chat.map((m) => (
-          <div key={m.id} className="break-words">
+        {shown.map((m) => (
+          <div key={m.id} className="break-words" data-testid="chat-line">
             {onPick && m.userId !== myId ? (
               <button type="button" className="font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">{m.nickname}</button>
             ) : (

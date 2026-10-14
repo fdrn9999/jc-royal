@@ -1,7 +1,7 @@
 import { schema } from '@jc/db';
 import type { LobbyTableDto } from '@jc/types';
-import { and, asc, eq, ne } from 'drizzle-orm';
-import { Hono, type Handler } from 'hono';
+import { and, asc, desc, eq, ne } from 'drizzle-orm';
+import { Hono, type Context, type Handler } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { sha256 } from '../lib/crypto';
@@ -11,10 +11,12 @@ import { resolveSession } from '../lib/session';
 
 type TableRow = typeof schema.tables.$inferSelect;
 
-export function toLobbyDto(t: TableRow): LobbyTableDto {
+export function toLobbyDto(t: TableRow, hostNickname: string | null = null): LobbyTableDto {
   return {
     id: t.id,
     name: t.name,
+    roomType: t.roomType,
+    host: t.roomType === 'member' && t.createdBy ? { id: t.createdBy, nickname: hostNickname ?? '' } : null,
     maxSeats: t.maxSeats,
     smallBlind: t.smallBlind,
     bigBlind: t.bigBlind,
@@ -45,16 +47,23 @@ export interface RoomIdentity {
   codeOk: boolean;
 }
 
+/** Tables with the nickname of the member who opened them. */
+const withHost = (c: Context<AppEnv>) =>
+  c.var.db.select({ t: schema.tables, host: schema.users.nickname }).from(schema.tables).leftJoin(schema.users, eq(schema.users.id, schema.tables.createdBy));
+
 export const tableRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
   .get('/', async (c) => {
-    const rows = await c.var.db.select().from(schema.tables).where(ne(schema.tables.status, 'closed')).orderBy(asc(schema.tables.bigBlind), asc(schema.tables.name));
-    return c.json(rows.map(toLobbyDto));
+    const rows = await withHost(c)
+      .where(ne(schema.tables.status, 'closed'))
+      // Official tables first, then members' rooms.
+      .orderBy(desc(schema.tables.roomType), asc(schema.tables.bigBlind), asc(schema.tables.name));
+    return c.json(rows.map((r) => toLobbyDto(r.t, r.host)));
   })
   .get('/:id', async (c) => {
-    const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, c.req.param('id')) });
-    if (!t) fail(404, 'not_found', 'table not found');
-    return c.json(toLobbyDto(t));
+    const [r] = await withHost(c).where(eq(schema.tables.id, c.req.param('id')));
+    if (!r) fail(404, 'not_found', 'table not found');
+    return c.json(toLobbyDto(r.t, r.host));
   });
 
 /**

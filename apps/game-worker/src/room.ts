@@ -854,6 +854,8 @@ export class TableRoom extends DurableObject<Env> {
         turnSeconds: t.turnSeconds,
         allowSpectators: t.allowSpectators,
         isPrivate: t.isPrivate,
+        roomType: t.roomType,
+        hostId: t.roomType === 'member' ? t.createdBy : null,
       },
       status: this.room.closed ? 'closed' : this.room.closing ? 'closing' : h && !h.isSettled ? 'playing' : 'waiting',
       seats,

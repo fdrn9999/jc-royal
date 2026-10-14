@@ -104,6 +104,41 @@ export const TableInputSchema = z
   .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private tables need a join code', path: ['joinCode'] });
 export type TableInput = z.infer<typeof TableInputSchema>;
 
+/** Blinds a member can choose for their own room (small blind is half the big blind). */
+export const ROOM_BIG_BLINDS = [10, 20, 50, 100, 200] as const;
+/** Rooms a member can have open at once. */
+export const MAX_ACTIVE_ROOMS = 2;
+/** A member room with nobody seated for this long closes itself. */
+export const MEMBER_IDLE_CLOSE_MS = 10 * 60_000;
+
+const RoomCodeSchema = z.string().trim().min(4).max(32);
+
+/** A member's own room. Buy-in limits are in big blinds' worth of chips, within 10–200 BB. */
+export const RoomCreateSchema = z
+  .object({
+    name: z.string().trim().min(2).max(30),
+    maxSeats: z.union(SUPPORTED_MAX_SEATS.map((n) => z.literal(n)) as [z.ZodLiteral<2>, z.ZodLiteral<6>, z.ZodLiteral<9>]),
+    bigBlind: z.union(ROOM_BIG_BLINDS.map((n) => z.literal(n)) as unknown as [z.ZodLiteral<10>, z.ZodLiteral<20>, ...z.ZodLiteral<number>[]]),
+    minBuyIn: z.number().int().positive(),
+    maxBuyIn: z.number().int().positive(),
+    allowSpectators: z.boolean().default(true),
+    isPrivate: z.boolean().default(false),
+    joinCode: RoomCodeSchema.optional(),
+  })
+  .refine((t) => t.minBuyIn >= t.bigBlind * 10, { message: 'minBuyIn must be >= 10 BB', path: ['minBuyIn'] })
+  .refine((t) => t.maxBuyIn <= t.bigBlind * 200, { message: 'maxBuyIn must be <= 200 BB', path: ['maxBuyIn'] })
+  .refine((t) => t.maxBuyIn >= t.minBuyIn, { message: 'maxBuyIn must be >= minBuyIn', path: ['maxBuyIn'] })
+  .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private rooms need a join code', path: ['joinCode'] });
+export type RoomCreate = z.infer<typeof RoomCreateSchema>;
+
+/** What the host can change. Stakes, seats, chips, cards and results are not theirs to change. */
+export const RoomPatchSchema = z.object({
+  name: z.string().trim().min(2).max(30).optional(),
+  allowSpectators: z.boolean().optional(),
+  isPrivate: z.boolean().optional(),
+  joinCode: RoomCodeSchema.nullable().optional(),
+});
+
 export const TablePatchSchema = z.object({
   name: z.string().trim().min(2).max(40).optional(),
   smallBlind: z.number().int().min(1).optional(),
@@ -137,9 +172,14 @@ export interface MeDto {
   createdAt: number;
 }
 
+export type RoomType = 'official' | 'member';
+
 export interface LobbyTableDto {
   id: string;
   name: string;
+  roomType: RoomType;
+  /** The member who opened a member room. */
+  host: { id: string; nickname: string } | null;
   maxSeats: number;
   smallBlind: number;
   bigBlind: number;

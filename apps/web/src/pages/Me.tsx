@@ -7,6 +7,7 @@ import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
+import { ReportModal, type ReportSubject } from '../components/Social';
 import { SettingsModal } from '../game/Panels';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -292,12 +293,13 @@ export function MePage() {
 
 interface HandDetail {
   id: string;
+  tableId: string;
   handNumber: number;
   board: string[];
   potTotal: number;
   endedAt: number;
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
-  players: { seatIndex: number; nickname: string; isYou: boolean; holeCards: string[] | null; stackStart: number; net: number; won: number; rankClass: string | null }[];
+  players: { userId: string; seatIndex: number; nickname: string; isYou: boolean; holeCards: string[] | null; stackStart: number; net: number; won: number; rankClass: string | null }[];
 }
 
 export function HandDetailPage() {
@@ -305,6 +307,7 @@ export function HandDetailPage() {
   const { t, locale } = useI18n();
   const { data, error } = useLoad<HandDetail>(`/api/me/hands/${encodeURIComponent(id)}`);
   const tr = useTr();
+  const [reporting, setReporting] = useState<ReportSubject | null>(null);
   if (error) return <Empty>{t('notFound')}</Empty>;
   if (!data) return <Empty>{t('common.loading')}</Empty>;
   const name = (seat: number) => data.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
@@ -347,9 +350,20 @@ export function HandDetailPage() {
                 <span className={`min-w-0 flex-1 truncate text-sm ${p.isYou ? 'font-semibold text-gold-300' : ''}`}>{p.nickname}</span>
                 {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
                 <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{signed(p.net)}</span>
+                {!p.isYou && (
+                  <button
+                    type="button"
+                    className="jc-tap -my-1 min-h-9 rounded-md px-2 text-xs font-semibold text-[#f0a0a2] hover:bg-danger/10"
+                    onClick={() => setReporting({ type: 'player', id: p.userId, tableId: data.tableId, label: p.nickname })}
+                    data-testid="hand-report"
+                  >
+                    {t('report.action')}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+          <p className="mt-2 text-xs text-ink-400">{t('report.afterHint')}</p>
         </Panel>
         <Panel title={t('replay.actions')}>
           <ol className="flex flex-col gap-1 text-sm">
@@ -364,6 +378,7 @@ export function HandDetailPage() {
           </ol>
         </Panel>
       </div>
+      <ReportModal subject={reporting} onClose={() => setReporting(null)} />
     </div>
   );
 }

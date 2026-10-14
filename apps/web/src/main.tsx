@@ -10,7 +10,7 @@ import { I18nProvider, useI18n } from './lib/i18n';
 import { applyInitialTheme } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { BoardPage, PostEditorPage, PostPage } from './pages/Board';
-import { ConversationPage, FriendsPage } from './pages/Friends';
+import { ConversationPage, FriendSettingsPage, FriendsPage } from './pages/Friends';
 import { LobbyPage } from './pages/Lobby';
 import { MessagesPage } from './pages/Messages';
 import { HandDetailPage, MePage } from './pages/Me';
@@ -96,6 +96,7 @@ const router = createBrowserRouter([
       { path: '/board/:id/edit', element: <PostEditorPage /> },
       { path: '/messages', element: <MessagesPage /> },
       { path: '/friends', element: <FriendsPage /> },
+      { path: '/friends/settings', element: <FriendSettingsPage /> },
       { path: '/friends/:userId', element: <ConversationPage /> },
       { path: '/academy', element: <Academy page="AcademyPage" /> },
       { path: '/academy/cards', element: <Academy page="CardsLesson" /> },

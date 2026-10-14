@@ -325,8 +325,9 @@ export const authRoutes = new Hono<AppEnv>()
         .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
-      // Friends and pending requests go with the account.
+      // Friends, pending requests and blocks (made by or against the account) go with it.
       db.delete(schema.friendships).where(or(eq(schema.friendships.userA, me.id), eq(schema.friendships.userB, me.id))),
+      db.delete(schema.userBlocks).where(or(eq(schema.userBlocks.blockerId, me.id), eq(schema.userBlocks.blockedId, me.id))),
     ]);
     await destroySession(c, 'user');
     return c.json({ ok: true });

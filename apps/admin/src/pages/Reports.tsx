@@ -8,7 +8,7 @@ import { ApiError, useAdmin, useData } from '../lib';
 const errMsg = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
 
 const REASON: Record<ReportReason, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
-const TARGET: Record<ReportTarget, Key> = { post: 'targetPost', comment: 'targetComment', player: 'targetPlayer' };
+const TARGET: Record<ReportTarget, Key> = { post: 'targetPost', comment: 'targetComment', player: 'targetPlayer', dm: 'targetDm' };
 const STATUS: Record<ReportStatus, Key> = { open: 'statusOpen', resolved: 'statusResolved', dismissed: 'statusDismissed' };
 
 /** What the server captured when the report was filed. */
@@ -16,6 +16,34 @@ function Evidence({ r }: { r: ReportDto }) {
   const { t, locale } = useT();
   const ctx = r.context;
   if (!ctx) return <p className="text-xs text-ink-400">{t('none')}</p>;
+  if (ctx.kind === 'dm') {
+    return (
+      <div className="flex flex-col gap-2 text-sm" data-testid="report-dm">
+        <div className="text-xs text-ink-400">
+          {t('dmParties')}:{' '}
+          <Link to={`/users/${ctx.senderId}`} className="text-gold-300 hover:underline">{r.target.nickname}</Link> →{' '}
+          <Link to={`/users/${ctx.recipientId}`} className="text-ink-100 hover:underline">{ctx.recipientId === r.reporter.id ? r.reporter.nickname : ctx.recipientId}</Link>
+        </div>
+        <div>
+          <div className="mb-1 text-xs text-ink-400">{t('dmMessage')} · {formatDate(ctx.at, locale)}</div>
+          <p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded bg-ink-950/60 p-2 text-ink-100" data-testid="report-content">{ctx.body}</p>
+        </div>
+        {ctx.earlier.length > 0 && (
+          <div>
+            <div className="mb-1 text-xs text-ink-400">{t('dmEarlier')}</div>
+            <ul className="flex flex-col gap-0.5 rounded bg-ink-950/60 p-2 text-xs">
+              {ctx.earlier.map((m) => (
+                <li key={m.id} className="break-words">
+                  <span className="mr-2 font-mono text-ink-400">{formatDate(m.at, locale)}</span>
+                  {m.body}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
   if (ctx.kind === 'player') {
     return (
       <div className="flex flex-col gap-2 text-sm">
@@ -24,7 +52,21 @@ function Evidence({ r }: { r: ReportDto }) {
           {ctx.handId && ctx.handNumber !== null && (
             <Link to={`/hands/${ctx.handId}`} className="text-gold-300 hover:underline" data-testid="report-hand">{t('handN', { n: ctx.handNumber })}</Link>
           )}
+          {ctx.basis && <Badge tone={ctx.basis === 'present' ? 'green' : 'blue'}>{t(ctx.basis === 'present' ? 'basisPresent' : 'basisHistory')}</Badge>}
         </div>
+        {ctx.overlap && (
+          <div className="text-xs text-ink-300" data-testid="report-overlap">
+            {t('overlap')}: {formatDate(ctx.overlap.from, locale)} – {formatDate(ctx.overlap.to, locale)}
+          </div>
+        )}
+        {ctx.sharedHands && ctx.sharedHands.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span className="text-ink-400">{t('sharedHands')}:</span>
+            {ctx.sharedHands.map((h) => (
+              <Link key={h.id} to={`/hands/${h.id}`} className="text-gold-300 hover:underline">#{h.number}</Link>
+            ))}
+          </div>
+        )}
         <div>
           <div className="mb-1 text-xs text-ink-400">{t('recentChat')}</div>
           {ctx.chat.length === 0 ? (
@@ -80,7 +122,7 @@ function ReportItem({ r, onDone }: { r: ReportDto; onDone: (msg: string) => void
         <Badge tone="blue">{t(TARGET[r.targetType])}</Badge>
         <Badge tone="gold">{t(REASON[r.reason])}</Badge>
         <Badge tone={r.status === 'open' ? 'red' : r.status === 'resolved' ? 'green' : 'neutral'}>{t(STATUS[r.status])}</Badge>
-        <span className="ml-auto text-xs text-ink-400">{formatDate(r.createdAt, locale)}</span>
+        <span className="ml-auto text-xs text-ink-400">{t('receivedAt')} {formatDate(r.createdAt, locale)}</span>
       </div>
       <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
         <div className="flex gap-2">
@@ -95,6 +137,11 @@ function ReportItem({ r, onDone }: { r: ReportDto; onDone: (msg: string) => void
           <dd><Link to={`/users/${r.reporter.id}`} className="text-ink-100 hover:underline">{r.reporter.nickname}</Link></dd>
         </div>
       </dl>
+      {r.priorReports.total > 0 && (
+        <Link to={`/reports?status=all&userId=${r.target.id}`} className="self-start text-xs text-[#f0a0a2] hover:underline" data-testid="report-prior">
+          {t('priorReports', { total: r.priorReports.total, resolved: r.priorReports.resolved })}
+        </Link>
+      )}
       {r.detail && <p className="whitespace-pre-wrap break-words border-l-2 border-gold-500/40 pl-3 text-sm text-ink-100">{r.detail}</p>}
       <div>
         <div className="mb-1 text-xs font-semibold text-ink-300">{t('evidence')}</div>

@@ -31,6 +31,10 @@ export const TABLES: TestTable[] = [
   { id: 'it-private', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'royal-777' },
   { id: 'it-nospec', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, allowSpectators: false },
   { id: 'it-report-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-report-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-invite-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-invite-1', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-invite-priv', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'invite-42' },
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-restart-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
 ];
 

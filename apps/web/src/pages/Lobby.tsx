@@ -1,8 +1,9 @@
 import type { LobbyTableDto } from '@jc/types';
-import { Badge, Button, Empty, Field, formatChips, Input, Modal, Spinner } from '@jc/ui';
+import { Badge, Button, Empty, formatChips, Input, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
+import { JoinCodeModal } from '../components/JoinCode';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -24,8 +25,7 @@ export function LobbyPage() {
   const [error, setError] = useState(false);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [codeFor, setCodeFor] = useState<{ table: LobbyTableDto; sit: boolean } | null>(null);
-  const [code, setCode] = useState('');
+  const [codeFor, setCodeFor] = useState<LobbyTableDto | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -68,8 +68,7 @@ export function LobbyPage() {
 
   function open(tb: LobbyTableDto, sit: boolean) {
     if (tb.isPrivate && sit) {
-      setCode('');
-      setCodeFor({ table: tb, sit });
+      setCodeFor(tb);
       return;
     }
     nav(`/table/${tb.id}${sit ? '?sit=1' : ''}`);
@@ -181,25 +180,7 @@ export function LobbyPage() {
         })}
       </div>
 
-      <Modal
-        open={!!codeFor}
-        onClose={() => setCodeFor(null)}
-        title={codeFor?.table.name ?? ''}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setCodeFor(null)}>
-              {t('common.cancel')}
-            </Button>
-            <Button disabled={code.trim().length < 4} onClick={() => codeFor && nav(`/table/${codeFor.table.id}?sit=1&code=${encodeURIComponent(code.trim())}`)}>
-              {t('lobby.join')}
-            </Button>
-          </>
-        }
-      >
-        <Field label={t('lobby.code')} hint={t('lobby.codeHint')}>
-          {(id) => <Input id={id} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" />}
-        </Field>
-      </Modal>
+      <JoinCodeModal table={codeFor} onClose={() => setCodeFor(null)} />
     </div>
   );
 }

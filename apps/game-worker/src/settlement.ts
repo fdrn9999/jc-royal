@@ -21,6 +21,9 @@ export interface TableRow {
   allowSpectators: boolean;
   entryBlocked: boolean;
   status: 'open' | 'closing' | 'closed';
+  roomType: 'official' | 'member';
+  /** The member who opened a member room (or the admin who opened an official table). */
+  createdBy: string | null;
 }
 
 export async function loadTable(d1: D1Database, tableId: string): Promise<TableRow | null> {
@@ -28,7 +31,8 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
     .prepare(
       `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
               min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
-              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, status
+              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, status,
+              room_type AS roomType, created_by AS createdBy
        FROM tables WHERE id = ?1`,
     )
     .bind(tableId)
@@ -47,6 +51,8 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
     allowSpectators: !!r.allowSpectators,
     entryBlocked: !!r.entryBlocked,
     status: r.status as TableRow['status'],
+    roomType: r.roomType === 'member' ? 'member' : 'official',
+    createdBy: r.createdBy == null ? null : String(r.createdBy),
   };
 }
 

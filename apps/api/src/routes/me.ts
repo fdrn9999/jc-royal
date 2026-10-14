@@ -112,12 +112,14 @@ export const meRoutes = new Hono<AppEnv>()
     const log = JSON.parse(hand.eventLog) as { actions: unknown[] };
     return c.json({
       id: hand.id,
+      tableId: hand.tableId,
       handNumber: hand.handNumber,
       board: JSON.parse(hand.board) as string[],
       potTotal: hand.potTotal,
       endedAt: hand.endedAt,
       actions: log.actions,
       players: players.map(({ hp, nickname }) => ({
+        userId: hp.userId,
         seatIndex: hp.seatIndex,
         nickname,
         isYou: hp.userId === uid,

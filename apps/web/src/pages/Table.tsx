@@ -13,6 +13,7 @@ import { BuyInModal, ChatPanel, SettingsModal } from '../game/Panels';
 import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { useAuth } from '../lib/auth';
+import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
 
@@ -44,6 +45,8 @@ export function TablePage() {
   const [chart, setChart] = useState(false);
   const [picked, setPicked] = useState<PublicUserDto | null>(null);
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
+  // Table chat from players I muted on this device or blocked; it hides their lines for me only.
+  const hiddenChat = useHiddenChat(me?.id);
   const [toast, setToast] = useState<string | null>(null);
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
@@ -75,10 +78,13 @@ export function TablePage() {
     if (s.you.seatIndex === null && s.you.canSit) {
       const free = s.seats.find((x) => x.state === 'empty');
       if (free) setBuySeat(free.seatIndex);
+    } else if (s.you.seatIndex === null && s.seats.every((x) => x.state !== 'empty')) {
+      setToast(t('invite.fullNow'));
+      setTimeout(() => setToast(null), 5_000);
     }
     params.delete('sit');
     setParams(params, { replace: true });
-  }, [s, params, setParams]);
+  }, [s, params, setParams, t]);
 
   const anchor = s?.you.seatIndex ?? 0;
   const layout = useTableLayout(area, s?.table.maxSeats, anchor);
@@ -310,6 +316,7 @@ export function TablePage() {
               onSend={(text) => sock.send({ t: 'chat', text })}
               canChat={canChat}
               myId={me?.id}
+              hidden={hiddenChat}
               onPick={(m) => setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: s?.seats.find((x) => x.userId === m.userId)?.avatarUrl ?? null })}
             />
           </div>
@@ -343,6 +350,7 @@ export function TablePage() {
         user={picked}
         onClose={() => setPicked(null)}
         newTab
+        chatMute
         onReport={() => {
           if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
           setPicked(null);

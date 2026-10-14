@@ -77,6 +77,9 @@ export interface TableConfigView {
   turnSeconds: number;
   allowSpectators: boolean;
   isPrivate: boolean;
+  roomType: 'official' | 'member';
+  /** The member who opened a member room; null for official tables. */
+  hostId: string | null;
 }
 
 export interface TableView {
