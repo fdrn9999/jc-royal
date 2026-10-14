@@ -66,6 +66,9 @@ test('free practice: rule-based bots, any legal action, several hands, still off
         const fold = bar.getByRole('button', { name: /^(폴드|Fold)$/ });
         const pass = bar.getByRole('button', { name: /^(체크|Check|콜|Call)/ });
         await ((await pass.count()) ? pass.first() : fold).click();
+        // A big call asks for a second tap (risky-action guard); confirm it before the arm expires.
+        const again = bar.getByRole('button', { name: /^(한 번 더|Tap again)/ });
+        if (await again.first().isVisible().catch(() => false)) await again.first().click();
       }
       await expect(p.getByTestId('free-result')).toBeVisible({ timeout: 1500 });
     }).toPass({ timeout: 60_000 });
