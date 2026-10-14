@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { balanceOf, signUp } from './helpers';
+import { expect } from '@playwright/test';
+import { balanceOf, signUp, test } from './helpers';
 
 const CLOSED = /테이블이 종료되었습니다|The table has been closed/;
 

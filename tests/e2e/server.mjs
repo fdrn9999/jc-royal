@@ -24,7 +24,7 @@ writeFileSync(
   `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds) VALUES
    ('e2e-hu', 'E2E Heads-up', 2, 5, 10, 100, 1000, 30), ('e2e-six', 'E2E Six', 6, 5, 10, 100, 1000, 30), ('e2e-touch', 'E2E Touch', 2, 5, 10, 100, 1000, 30), ('e2e-academy', 'E2E Academy', 2, 5, 10, 100, 1000, 30), ('e2e-coach', 'E2E Coach', 2, 5, 10, 100, 1000, 30), ('e2e-social', 'E2E Social', 6, 5, 10, 100, 1000, 30);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, beginner) VALUES ('e2e-rookie', 'E2E Rookie', 6, 1, 2, 20, 200, 30, 1);
-   INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds) VALUES ('e2e-together', 'E2E Together', 2, 5, 10, 100, 1000, 30);
+   INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds) VALUES ('e2e-together', 'E2E Together', 2, 5, 10, 100, 1000, 30), ('e2e-reconnect', 'E2E Reconnect', 2, 5, 10, 100, 1000, 30);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash) VALUES
    ('e2e-secret', 'E2E Secret', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-secret:secret-77').digest('base64url')}');`,
 );

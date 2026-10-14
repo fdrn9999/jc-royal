@@ -111,6 +111,41 @@
 
 메시지 순서는 대화마다 1, 2, 3… 으로 매기는 `seq`입니다. 저장하는 문장 안에서 `MAX(seq)+1`로 정하고 `(pair_key, seq)` 고유 인덱스로 막아, 서버 시계(`at`)가 같은 밀리초이거나 거꾸로 가도 순서와 커서가 흔들리지 않습니다. 기존 메시지는 마이그레이션 0009가 (시간, id) 순으로 번호를 매깁니다. 웹은 탭이 보일 때만 4초마다 폴링하고, 탭이 다시 보이거나 네트워크가 돌아오면 바로 같은 seq부터 이어받습니다.
 
+## 친구 `/api/friends` (로그인 필요)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/` | `{friends, incoming, outgoing}`. 친구마다 안 읽은 1:1 수와 마지막 메시지(최근 대화 순). 탈퇴한 회원은 빠짐 |
+| POST | `/requests` | `{nickname}` 또는 `{userId}` 중 하나 → 201 `{status:'pending', user}`. 상대가 이미 요청했으면 200 `{status:'accepted'}`로 바로 친구. 400 `friend_self`, 404 `user_not_found`, 409 `already_friends`·`already_requested`·`blocked_user`(내가 차단함)·`friend_limit`(200명), 403 `request_unavailable`(상대가 차단했거나 요청을 받지 않음: 둘을 구분하지 않음). 시간당 30회 |
+| GET / PATCH | `/settings` | `{friendRequests:'everyone'\|'nobody', dmNotifications:boolean}` |
+| GET | `/:userId/relation` | `{relation:'none'\|'friend'\|'incoming'\|'outgoing'\|'blocked'}` — 내 쪽에서 본 관계(나를 차단한 상대는 `none`) |
+| POST | `/:userId/accept` | 받은 요청 수락. 없으면 404 |
+| POST | `/:userId/invite` | `{tableId}` → 201 DirectMessageDto(`kind:'invite'`). 친구에게 열린 테이블 초대 카드를 1:1로 보냄. 참가 코드는 담지 않고 아무 권한도 주지 않음(좌석·코드·관전은 테이블이 똑같이 검사). 403 `not_friends`, 409 `table_unavailable`(닫힘·입장 차단). 10분당 20회 |
+| DELETE | `/:userId` | 받은 요청 거절, 보낸 요청 취소, 친구 삭제 |
+
+친구 요청은 두 사람 사이에 차단이 없을 때만 저장하는 한 문장으로 기록합니다. 그래서 요청과 차단이 동시에 와도 차단이 이깁니다(차단이 먼저 쓴 요청도 지움).
+
+## 차단 `/api/blocks` (로그인 필요)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/` | 내가 차단한 회원 목록 |
+| PUT | `/:userId` | 차단. 같은 트랜잭션에서 두 사람의 친구 관계·대기 중인 요청을 지움. 이후 양쪽 모두 친구 요청과 1:1 메시지를 보낼 수 없음. 400 `block_self`, 404 `user_not_found`, 409 `block_limit`(500명). 시간당 60회 |
+| DELETE | `/:userId` | 차단 해제(친구 관계는 되살리지 않음) |
+
+차단은 개인 설정이라 같은 테이블 착석을 막지 않습니다(제재는 관리자 정지). 테이블 채팅 뮤트는 서버가 아니라 기기에 저장합니다.
+
+## 신고 `/api/reports` (로그인 필요)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/` | `{targetType:'post'\|'comment'\|'dm'\|'player', targetId, tableId?(player만, 필수), reason:'spam'\|'abuse'\|'inappropriate'\|'cheating'\|'other', detail?(≤500)}` → 201 `{id}`. 시간당 20회 |
+
+- **증거는 서버가 복사한다**: 글·댓글은 신고 시점 본문, 1:1 메시지는 서버에 저장된 그 메시지와 같은 보낸 사람의 직전 5개, 플레이어는 테이블 이름·핸드 번호·채팅. 신고자가 보낸 본문은 쓰지 않습니다. 숨긴 카드는 담지 않습니다.
+- **대상이 없으면 404**: 공개 상태가 아닌(삭제·숨김) 글·댓글, 대화 당사자가 아닌 사람의 1:1 메시지, 탈퇴한 회원의 메시지·회원. 이미 낸 신고는 원래 증거와 함께 남고, 관리자 화면에 지금 콘텐츠 상태(`contentStatus`)가 함께 나옵니다.
+- **플레이어 신고는 같은 테이블에 있었던 사람만**: 둘 다 지금 그 테이블에 있으면(앉아 있거나, 관전 중으로 접속해 있거나, 남아 있는 채팅에 글이 있으면) 바로 접수합니다. 한쪽이 떠났으면 착석 기록(`table_sessions`)에서 최근 24시간 안에 두 사람이 동시에 앉아 있던 구간을 찾고, 없으면 409 `not_at_table`. 그 구간의 공동 핸드와 그때 채팅만 증거로 남깁니다.
+- 400 `report_self`, 409 `already_reported`(같은 대상에 대한 내 신고가 아직 처리 중).
+
 ## 관리자 `/api/admin` (관리자 출처 + `jc_asid`)
 
 인증:
@@ -143,5 +178,7 @@
 | GET / POST | `/board/posts` · `/board/posts/:id` · `/board/notices` · PATCH `/board/notices/:id` | 게시판 관리와 공지 |
 | POST | `/board/posts/:id/status` · `/board/comments/:id/status` | `visible`/`hidden`/`deleted` |
 | POST / GET | `/messages` | `{userIds(1-500), category, title, body}` 발송과 발송 이력 |
+| GET | `/reports?status&userId` | `{items, openCount}`. `status`는 `open`(기본)·`resolved`·`dismissed`·`all`, `userId`는 신고당한 회원. 항목마다 신고 시점 증거, 지금 콘텐츠 상태, 같은 회원의 다른 신고 수(전체·인정). 조회마다 감사 로그 `report.view`(1:1 메시지 신고 ID 포함). 최근 200건 |
+| POST | `/reports/:id` | `{status:'resolved'\|'dismissed', note?, hideContent?}` → `{ok, closed}`. 같은 대상의 열린 신고를 함께 닫고, `hideContent`면 글·댓글을 숨김(그 밖의 대상은 400). 감사 행 기록·숨김·상태 변경을 한 batch로 처리해, 두 관리자가 동시에 처리해도 결정·숨김·감사 행은 하나뿐이고 늦은 쪽은 409 `report_closed` |
 
 아카데미 지표(관리자): `GET /api/admin/academy/stats` → `[{kind, itemId, starts, completes, correct, wrong}]`(익명 집계). 테이블 생성·수정 본문에 `beginner`(입문 테이블) 추가.

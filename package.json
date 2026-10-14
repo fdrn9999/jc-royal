@@ -11,6 +11,7 @@
     "test": "pnpm --filter @jc/poker-engine --filter @jc/web --filter @jc/api test",
     "test:integration": "vitest run --config tests/vitest.config.ts",
     "test:e2e": "playwright test -c tests/playwright.config.ts",
+    "test:load": "vitest run --config tests/load/vitest.config.ts",
     "check:bundle": "node tests/bundle-check.mjs",
     "build": "pnpm --filter @jc/web build && pnpm --filter @jc/admin build",
     "db:generate": "pnpm --filter @jc/db run generate",

@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { checkOrCall, signUp } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { checkOrCall, signUp, test } from './helpers';
 
 /** Same-origin JSON call with the page's session. */
 async function call<T = any>(page: Page, path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {

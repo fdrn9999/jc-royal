@@ -1,6 +1,3 @@
-
-> jc-royal@ check:bundle C:\Users\ckato\OneDrive\문서\jc-royal
-> node tests/bundle-check.mjs
-
-entry index-LfGqyXRI.js: 547 KB; engine in: routes-BxkLaA8W.js
+> pnpm check:bundle   (node tests/bundle-check.mjs, 2026-10-15)
+entry index-DRKJLrJs.js: 633 KB; engine in: routes-BR1vi0S3.js
 ✓ bundle guard passed

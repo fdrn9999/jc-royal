@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { PASSWORD, signUp } from './helpers';
+import { expect } from '@playwright/test';
+import { PASSWORD, signUp, test } from './helpers';
 
 test('privacy policy and terms are public drafts in Korean and English, linked from the footers and sign-up', async ({ page }) => {
   // Signed out: the sign-in page footer links to both pages.

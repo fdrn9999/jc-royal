@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { PASSWORD, signUp } from './helpers';
+import { PASSWORD, signUp, test } from './helpers';
 
 const ADMIN = 'http://localhost:5174';
 

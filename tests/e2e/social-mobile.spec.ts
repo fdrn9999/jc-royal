@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { signUp, widerThanDevice } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { signUp, test, widerThanDevice } from './helpers';
 
 test('mobile: play together from the friends list; the table picker fits and every row is a full-width tap target', async ({ browser }) => {
   const a = await signUp(browser, { mobile: true });

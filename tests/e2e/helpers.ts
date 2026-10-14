@@ -1,4 +1,19 @@
-import { expect, type Browser, type Page } from '@playwright/test';
+import { test as base, expect, type Browser, type Page } from '@playwright/test';
+
+/**
+ * Closes the contexts a test opened with browser.newContext() (signUp, admin) when it ends. The worker keeps one
+ * browser for the whole run, so contexts left open kept polling and holding sockets, and about twenty tests in
+ * Chrome failed page loads with net::ERR_INSUFFICIENT_RESOURCES.
+ */
+export const test = base.extend<{ closeContexts: void }>({
+  closeContexts: [
+    async ({ browser }, use) => {
+      const before = new Set(browser.contexts());      await use();
+      await Promise.all(browser.contexts().filter((c) => !before.has(c)).map((c) => c.close()));
+    },
+    { auto: true },
+  ],
+});
 
 /** Meets the password policy (letter, digit, symbol, 8+). */
 export const PASSWORD = 'Password123!';

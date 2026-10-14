@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { PASSWORD, signUp, widerThanDevice } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { PASSWORD, signUp, test, widerThanDevice } from './helpers';
 
 const sessionCookie = async (page: Page) => (await page.context().cookies()).find((c) => c.name === 'jc_sid');
 

@@ -1,0 +1,8 @@
+> pnpm --filter @jc/api test   (실행: pnpm test, 2026-10-15)
+
+RUN  v4.1.11 <repo>/apps/api
+ Test Files  3 passed (3)
+      Tests  13 passed (13)
+   Start at  03:49:05
+   Duration  587ms (transform 177ms, setup 0ms, import 386ms, tests 50ms, environment 0ms)
+Done

@@ -486,6 +486,12 @@ describe('reports', () => {
     expect((await admin.post(`/api/admin/reports/${cmReport.id}`, { status: 'dismissed' })).status).toBe(200);
     expect((await r1.client.post('/api/reports', { targetType: 'comment', targetId: cm.id, reason: 'abuse' })).status).toBe(201);
 
+    // Deleted by its author: the open report keeps its snapshot, and nobody can file a new one.
+    expect((await author.client.req('DELETE', `/api/board/comments/${cm.id}`)).status).toBe(200);
+    expect((await r2.client.post('/api/reports', { targetType: 'comment', targetId: cm.id, reason: 'abuse' })).status).toBe(404);
+    const pending = (await admin.get(`/api/admin/reports?userId=${author.me.id}`)).body.items.find((r: { targetType: string }) => r.targetType === 'comment');
+    expect(pending).toMatchObject({ status: 'open', context: { kind: 'comment', body: 'rude words' }, contentStatus: 'deleted' });
+
     // Handling is audited.
     const auditLog = (await admin.get('/api/admin/audit?limit=50')).body;
     expect(JSON.stringify(auditLog)).toContain('report.resolved');

@@ -1,6 +1,6 @@
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, type Browser } from '@playwright/test';
 import { answerAll, CARD_ANSWERS } from './academy-helpers';
-import { balanceOf, checkOrCall, PASSWORD, signUp } from './helpers';
+import { balanceOf, checkOrCall, PASSWORD, signUp, test } from './helpers';
 
 async function loginOnNewDevice(browser: Browser, email: string) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });

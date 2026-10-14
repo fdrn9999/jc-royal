@@ -43,12 +43,12 @@ async function sha256b64url(s: string) {
   return Buffer.from(d).toString('base64url');
 }
 
-export async function prepareState(state: string) {
+export async function prepareState(state: string, tables: TestTable[] = TABLES) {
   rmSync(state, { recursive: true, force: true });
   const mig = spawnSync(process.execPath, [wrangler, 'd1', 'migrations', 'apply', 'jc-royal-db', '--local', '--persist-to', state, '-c', 'apps/api/wrangler.jsonc'], { cwd: root, encoding: 'utf8' });
   if (mig.status !== 0) throw new Error(`migration failed: ${mig.stderr || mig.stdout}`);
   const rows: string[] = [];
-  for (const t of TABLES) {
+  for (const t of tables) {
     const code = t.joinCode ? `'${await sha256b64url(`${t.id}:${t.joinCode}`)}'` : 'NULL';
     rows.push(
       `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators) VALUES ('${t.id}', '${t.id}', ${t.maxSeats}, ${t.sb}, ${t.bb}, ${t.min}, ${t.max}, ${t.turnSeconds ?? 20}, ${t.isPrivate ? 1 : 0}, ${code}, ${t.allowSpectators === false ? 0 : 1});`,

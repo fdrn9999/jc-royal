@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { checkOrCall, signUp, widerThanDevice } from './helpers';
+import { expect } from '@playwright/test';
+import { checkOrCall, signUp, test, widerThanDevice } from './helpers';
 
 test('mobile: lobby → seat → playable action bar, no horizontal overflow', async ({ browser }) => {
   const a = await signUp(browser, { mobile: true });

@@ -1,13 +1,8 @@
+> pnpm --filter @jc/web test   (실행: pnpm test, 2026-10-15)
 
-> @jc/web@0.0.0 test C:\Users\ckato\OneDrive\문서\jc-royal\apps\web
-> vitest run
-
-
- RUN  v4.1.11 C:/Users/ckato/OneDrive/문서/jc-royal/apps/web
-
-
- Test Files  2 passed (2)
-      Tests  43 passed (43)
-   Start at  17:50:54
-   Duration  786ms (transform 417ms, setup 0ms, import 719ms, tests 319ms, environment 0ms)
-
+RUN  v4.1.11 <repo>/apps/web
+ Test Files  3 passed (3)
+      Tests  54 passed (54)
+   Start at  03:49:12
+   Duration  1.08s (transform 585ms, setup 0ms, import 1.17s, tests 475ms, environment 0ms)
+Done

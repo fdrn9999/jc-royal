@@ -1,6 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { answerAll, CARD_ANSWERS, playScenario } from './academy-helpers';
-import { signUp, widerThanDevice } from './helpers';
+import { signUp, test, widerThanDevice } from './helpers';
 
 const noOverflow = async (page: Page) => expect(await widerThanDevice(page)).toBe(false);
 

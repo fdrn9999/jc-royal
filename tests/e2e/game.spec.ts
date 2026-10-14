@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { balanceOf, checkOrCall, signUp } from './helpers';
+import { expect } from '@playwright/test';
+import { balanceOf, checkOrCall, signUp, test } from './helpers';
 
 test('two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund', async ({ browser }) => {
   const a = await signUp(browser);

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { balanceOf, signUp, widerThanDevice } from './helpers';
+import { expect } from '@playwright/test';
+import { balanceOf, signUp, test, widerThanDevice } from './helpers';
 
 test('mobile: open a room by touch; the create dialog, the table header with the host button and the host dialog fit a 360px phone', async ({ browser }) => {
   const { page, nickname } = await signUp(browser, { mobile: true });
