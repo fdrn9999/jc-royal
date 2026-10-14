@@ -1,0 +1,301 @@
+/*
+ * JC ROYAL design system.
+ * Import after `@import "tailwindcss";` in each app.
+ *
+ * Table themes, card faces, chip stacks and reveal animations are adapted from
+ * Elite-Poker (MIT, © 2026 OpaDips) and restyled for the JC ROYAL brand: black &
+ * charcoal UI, gold accents, no neon.
+ */
+
+@theme {
+  --font-sans: 'Pretendard Variable', Pretendard, 'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Cinzel', 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  --color-ink-950: #050506;
+  --color-ink-900: #0a0b0d;
+  --color-ink-850: #0f1013;
+  --color-ink-800: #14161a;
+  --color-ink-700: #1c1f25;
+  --color-ink-600: #272b33;
+  --color-ink-500: #3a3f49;
+  --color-ink-400: #5d6370;
+  --color-ink-300: #8d929c;
+  --color-ink-200: #b9bcc3;
+  --color-ink-100: #e4e1d8;
+  --color-ivory: #f4efe3;
+
+  --color-gold-300: #f3dd9b;
+  --color-gold-400: #e6c56b;
+  --color-gold-500: #d4af37;
+  --color-gold-600: #b48e22;
+  --color-gold-700: #8a6b17;
+
+  --color-success: #3fa36b;
+  --color-danger: #c4474a;
+  --color-warning: #d99a2b;
+  --color-info: #4f86c6;
+
+  --radius-card: 0.875rem;
+  --radius-pill: 999px;
+
+  --shadow-panel: 0 18px 50px -18px rgba(0, 0, 0, 0.75), 0 2px 0 rgba(255, 255, 255, 0.02) inset;
+  --shadow-gold: 0 0 0 1px rgba(212, 175, 55, 0.35), 0 10px 30px -12px rgba(212, 175, 55, 0.35);
+
+  --animate-fade-in: fade-in 0.25s ease-out both;
+  --animate-rise: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ------------------------------------------------------------------ themes */
+
+:root,
+[data-theme='royal'] {
+  /* Royal Black & Gold (default) */
+  --t-accent: #d4af37;
+  --t-accent-soft: rgba(212, 175, 55, 0.14);
+  --t-felt: radial-gradient(ellipse at 50% 42%, #145a43 0%, #0c3d2e 48%, #072419 100%);
+  --t-felt-line: rgba(243, 221, 155, 0.14);
+  --t-rail: linear-gradient(160deg, #1a1712 0%, #3a2f17 22%, #c9a227 48%, #6f5615 70%, #15120c 100%);
+  --t-rail-inner: #0b0c0e;
+  --t-bg: radial-gradient(ellipse at 50% -20%, #1d1a12 0%, #0b0b0d 45%, #050506 100%);
+  --t-seat: rgba(10, 11, 13, 0.9);
+  --t-seat-border: rgba(212, 175, 55, 0.3);
+  --t-winner: #f3dd9b;
+  --t-watermark-opacity: 0.08;
+}
+
+[data-theme='emerald'] {
+  /* Emerald Classic */
+  --t-accent: #c9a45c;
+  --t-accent-soft: rgba(201, 164, 92, 0.15);
+  --t-felt: radial-gradient(ellipse at 50% 42%, #1f7a4f 0%, #145c3a 50%, #0b3a24 100%);
+  --t-felt-line: rgba(255, 255, 255, 0.12);
+  --t-rail: linear-gradient(160deg, #2a1a0e 0%, #5a3a1c 30%, #8b5e34 50%, #4a2f16 72%, #1f140a 100%);
+  --t-rail-inner: #120c07;
+  --t-bg: radial-gradient(ellipse at 50% -20%, #12261c 0%, #08100c 50%, #040706 100%);
+  --t-seat: rgba(8, 14, 11, 0.9);
+  --t-seat-border: rgba(201, 164, 92, 0.32);
+  --t-winner: #f1d58f;
+  --t-watermark-opacity: 0.07;
+}
+
+[data-theme='crimson'] {
+  /* Royal Crimson */
+  --t-accent: #d8b46a;
+  --t-accent-soft: rgba(216, 180, 106, 0.14);
+  --t-felt: radial-gradient(ellipse at 50% 42%, #6e1a24 0%, #4d1118 50%, #2a080d 100%);
+  --t-felt-line: rgba(255, 220, 190, 0.12);
+  --t-rail: linear-gradient(160deg, #160b0c 0%, #3a1d17 26%, #caa04a 50%, #5c3a16 72%, #120909 100%);
+  --t-rail-inner: #0d0607;
+  --t-bg: radial-gradient(ellipse at 50% -20%, #22100f 0%, #0d0707 50%, #050303 100%);
+  --t-seat: rgba(14, 8, 9, 0.9);
+  --t-seat-border: rgba(216, 180, 106, 0.3);
+  --t-winner: #f4d9a0;
+  --t-watermark-opacity: 0.07;
+}
+
+[data-theme='sapphire'] {
+  /* Sapphire Noir */
+  --t-accent: #b9c6d8;
+  --t-accent-soft: rgba(185, 198, 216, 0.14);
+  --t-felt: radial-gradient(ellipse at 50% 42%, #173a66 0%, #0f2747 52%, #08162a 100%);
+  --t-felt-line: rgba(200, 220, 255, 0.12);
+  --t-rail: linear-gradient(160deg, #0b0e14 0%, #222a38 28%, #9aa7ba 50%, #2a3446 72%, #090b10 100%);
+  --t-rail-inner: #070a10;
+  --t-bg: radial-gradient(ellipse at 50% -20%, #111a2a 0%, #080b12 50%, #040509 100%);
+  --t-seat: rgba(8, 11, 17, 0.9);
+  --t-seat-border: rgba(185, 198, 216, 0.3);
+  --t-winner: #dbe6f5;
+  --t-watermark-opacity: 0.07;
+}
+
+/* ------------------------------------------------------------------ base */
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-ink-900 text-ivory font-sans antialiased;
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-gold-400);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: rgba(212, 175, 55, 0.35);
+  }
+  input[type='range'] {
+    accent-color: var(--color-gold-500);
+  }
+}
+
+@layer components {
+  .jc-panel {
+    background: linear-gradient(180deg, rgba(28, 31, 37, 0.92), rgba(15, 16, 19, 0.96));
+    border: 1px solid rgba(212, 175, 55, 0.16);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-panel);
+  }
+  .jc-gold-text {
+    background: linear-gradient(180deg, #f6e3a6 0%, #d4af37 55%, #a07c1c 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .jc-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.35), transparent);
+  }
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.jc-card {
+  --card-w: var(--card-size, 3.25rem);
+  width: var(--card-w);
+  height: calc(var(--card-w) * 1.4);
+  border-radius: calc(var(--card-w) * 0.12);
+  position: relative;
+  flex: none;
+  user-select: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+.jc-card-face {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(165deg, #fffdf7 0%, #f3ecdc 100%);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.jc-card-face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.4) 0%, transparent 38%);
+  pointer-events: none;
+}
+.jc-card .rank {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1;
+  font-size: calc(var(--card-w) * 0.34);
+}
+.jc-card .suit-red { color: #b3212b; }
+.jc-card .suit-black { color: #15171c; }
+.jc-card-back {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.12) 0 30%, transparent 31%),
+    repeating-linear-gradient(45deg, rgba(212, 175, 55, 0.12) 0 2px, transparent 2px 7px),
+    repeating-linear-gradient(-45deg, rgba(212, 175, 55, 0.12) 0 2px, transparent 2px 7px),
+    linear-gradient(160deg, #15161a, #070708);
+  border: 1px solid rgba(212, 175, 55, 0.55);
+  box-shadow: inset 0 0 0 3px #0a0a0b, inset 0 0 0 4px rgba(212, 175, 55, 0.45);
+  display: grid;
+  place-items: center;
+}
+.jc-card-back img {
+  width: 58%;
+  height: auto;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+.jc-card.highlight {
+  box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 18px rgba(230, 197, 107, 0.55);
+  transform: translateY(-4px);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.jc-card.dim {
+  filter: brightness(0.55) saturate(0.6);
+}
+
+/* 3D flip used when a card is revealed (deal, board, showdown). */
+@keyframes jc-flip-in {
+  0% { transform: perspective(600px) rotateY(180deg) scale(0.6); opacity: 0; }
+  60% { transform: perspective(600px) rotateY(-10deg) scale(1.06); opacity: 1; }
+  100% { transform: perspective(600px) rotateY(0) scale(1); opacity: 1; }
+}
+.jc-flip-in {
+  animation: jc-flip-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  backface-visibility: hidden;
+}
+@keyframes jc-deal-in {
+  0% { transform: translate(var(--deal-dx, 0), var(--deal-dy, -120px)) rotate(-25deg) scale(0.4); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+.jc-deal-in {
+  animation: jc-deal-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* ------------------------------------------------------------------ chips */
+
+.jc-chip {
+  --chip-size: 1.5rem;
+  width: var(--chip-size);
+  height: var(--chip-size);
+  border-radius: 50%;
+  background: repeating-conic-gradient(#f4efe3 0deg 14deg, var(--chip-base, #2b2b33) 14deg 60deg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  position: relative;
+  flex: none;
+}
+.jc-chip::after {
+  content: '';
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: var(--chip-face, #43434e);
+  border: 1px dashed rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+.jc-chip-pile {
+  position: relative;
+  width: var(--chip-size, 1.5rem);
+  height: calc(var(--chip-size, 1.5rem) + 6px);
+}
+.jc-chip-pile .jc-chip {
+  position: absolute;
+  left: 0;
+}
+
+@keyframes jc-pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 197, 107, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(230, 197, 107, 0); }
+}
+.jc-pulse-gold {
+  animation: jc-pulse-gold 1.6s ease-in-out infinite;
+}
+@keyframes jc-winner-glow {
+  0%, 100% { box-shadow: 0 0 0 2px var(--t-winner), 0 0 22px rgba(243, 221, 155, 0.45); }
+  50% { box-shadow: 0 0 0 2px var(--t-winner), 0 0 36px rgba(243, 221, 155, 0.75); }
+}
+.jc-winner {
+  animation: jc-winner-glow 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jc-flip-in,
+  .jc-deal-in,
+  .jc-pulse-gold,
+  .jc-winner {
+    animation: none !important;
+  }
+}
+
+/* Four-colour deck preference (diamonds blue, clubs green). */
+[data-four-color='1'] .jc-card[data-card$='d'] .jc-card-face { color: #1f5fbf; }
+[data-four-color='1'] .jc-card[data-card$='c'] .jc-card-face { color: #1d7a3e; }
