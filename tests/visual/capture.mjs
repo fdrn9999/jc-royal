@@ -16,7 +16,7 @@ async function newUser(name, viewport, opts = {}) {
   page.on('console', (m) => m.type() === 'error' && errors.push(`${name}: ${m.text()}`));
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   await page.goto(`${base}/register`);
-  await page.getByLabel(/이메일|Email/).fill(`${name}-${stamp}@visual.dev`);
+  await page.getByLabel(/이메일 아이디|Email name/).fill(`${name}-${stamp}@visual.dev`); // full address is split automatically
   await page.getByLabel(/닉네임|Nickname/).fill(`${name}${stamp.slice(-4)}`);
   await page.getByLabel(/비밀번호|Password/).fill('password123');
   await page.getByRole('button', { name: /회원가입|Create account/ }).click();

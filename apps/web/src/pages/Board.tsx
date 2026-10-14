@@ -1,4 +1,4 @@
-import type { HandSummaryDto, PostDetailDto, PostListItemDto, PostPageDto } from '@jc/types';
+import type { CommentDto, HandSummaryDto, PostDetailDto, PostListItemDto, PostPageDto } from '@jc/types';
 import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PlayingCard, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -91,7 +91,7 @@ export function PostPage() {
   const [post, setPost] = useState<PostDetailDto | null>(null);
   const [missing, setMissing] = useState(false);
   const [comment, setComment] = useState('');
-  const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
+  const [replyTo, setReplyTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
@@ -139,28 +139,17 @@ export function PostPage() {
         {post.hands.length > 0 && <div className="mt-5 flex flex-col gap-3">{post.hands.map((h) => <HandReview key={h.id} hand={h} />)}</div>}
       </article>
 
-      <Panel title={t('board.comments', { n: post.comments.length })}>
+      <Panel title={t('board.comments', { n: post.comments.filter((c) => !c.deleted).length })}>
         <ul className="divide-y divide-white/5">
-          {post.comments.map((c) => (
-            <li key={c.id} className="py-3" data-testid="comment">
-              <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-400">
-                <span className="font-semibold text-ink-100"><AuthorName a={c.author} /></span>
-                <span>{formatDate(c.createdAt, locale)}{c.updatedAt - c.createdAt > 1000 && ` · ${t('board.edited')}`}</span>
-                {c.isMine && (
-                  <span className="ml-auto flex gap-2">
-                    <button className="text-gold-300" onClick={() => setEditing({ id: c.id, body: c.body })}>{t('board.edit')}</button>
-                    <button className="text-[#f0a0a2]" onClick={() => confirm(t('board.deleteConfirm')) && run(() => api(`/api/board/comments/${c.id}`, { method: 'DELETE' }))}>{t('board.delete')}</button>
-                  </span>
-                )}
-              </div>
-              {editing?.id === c.id ? (
-                <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void run(async () => { await api(`/api/board/comments/${c.id}`, { method: 'PATCH', body: { body: editing.body } }); setEditing(null); }); }}>
-                  <Input value={editing.body} maxLength={1000} onChange={(e) => setEditing({ id: c.id, body: e.target.value })} />
-                  <Button type="submit" size="sm">{t('common.save')}</Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button>
-                </form>
-              ) : (
-                <p className="whitespace-pre-wrap break-words text-sm text-ink-100">{c.body}</p>
+          {post.comments.filter((c) => !c.parentId).map((root) => (
+            <li key={root.id} className="py-3">
+              <CommentItem c={root} onRun={run} onReply={setReplyTo} replyTo={replyTo} postId={post.id} />
+              {post.comments.filter((r) => r.parentId === root.id).length > 0 && (
+                <ul className="mt-2 flex flex-col gap-2 border-l-2 border-gold-500/20 pl-3 sm:ml-4">
+                  {post.comments.filter((r) => r.parentId === root.id).map((r) => (
+                    <li key={r.id}><CommentItem c={r} onRun={run} onReply={setReplyTo} replyTo={replyTo} postId={post.id} /></li>
+                  ))}
+                </ul>
               )}
             </li>
           ))}
@@ -171,6 +160,50 @@ export function PostPage() {
         </form>
         {error && <p className="mt-2 text-sm text-danger" role="alert">{error}</p>}
       </Panel>
+    </div>
+  );
+}
+
+/** One comment or reply with author controls and an inline reply form. */
+function CommentItem({ c, onRun, onReply, replyTo, postId }: { c: CommentDto; onRun: (fn: () => Promise<unknown>) => Promise<void>; onReply: (id: string | null) => void; replyTo: string | null; postId: string }) {
+  const { t, locale } = useI18n();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [reply, setReply] = useState('');
+  if (c.deleted) return <p className="text-sm italic text-ink-400" data-testid="comment">{t('board.deletedComment')}</p>;
+  return (
+    <div data-testid={c.parentId ? 'reply' : 'comment'}>
+      <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-400">
+        {c.parentId && <span aria-hidden className="text-gold-500/60">↳</span>}
+        <span className="font-semibold text-ink-100"><AuthorName a={c.author} /></span>
+        <span>{formatDate(c.createdAt, locale)}{c.updatedAt - c.createdAt > 1000 && ` · ${t('board.edited')}`}</span>
+        <span className="ml-auto flex gap-2">
+          <button className="text-ink-300 hover:text-gold-300" onClick={() => onReply(replyTo === c.id ? null : c.id)}>{t('board.reply')}</button>
+          {c.isMine && (
+            <>
+              <button className="text-gold-300" onClick={() => setEditing(c.body)}>{t('board.edit')}</button>
+              <button className="text-[#f0a0a2]" onClick={() => confirm(t('board.deleteConfirm')) && onRun(() => api(`/api/board/comments/${c.id}`, { method: 'DELETE' }))}>{t('board.delete')}</button>
+            </>
+          )}
+        </span>
+      </div>
+      {editing !== null ? (
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void onRun(async () => { await api(`/api/board/comments/${c.id}`, { method: 'PATCH', body: { body: editing } }); setEditing(null); }); }}>
+          <Input value={editing} maxLength={1000} onChange={(e) => setEditing(e.target.value)} />
+          <Button type="submit" size="sm">{t('common.save')}</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button>
+        </form>
+      ) : (
+        <p className="whitespace-pre-wrap break-words text-sm text-ink-100">
+          {c.replyTo && <span className="mr-1 font-semibold text-gold-300">@{c.replyTo}</span>}
+          {c.body}
+        </p>
+      )}
+      {replyTo === c.id && (
+        <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!reply.trim()) return; void onRun(async () => { await api(`/api/board/posts/${postId}/comments`, { body: { body: reply, parentId: c.id } }); setReply(''); onReply(null); }); }}>
+          <Input autoFocus value={reply} maxLength={1000} onChange={(e) => setReply(e.target.value)} placeholder={t('board.replyPlaceholder', { name: c.author.nickname })} aria-label={t('board.reply')} />
+          <Button type="submit" size="sm" disabled={!reply.trim()} data-testid="reply-submit">{t('board.reply')}</Button>
+        </form>
+      )}
     </div>
   );
 }
@@ -186,6 +219,8 @@ export function PostEditorPage() {
   const [myHands, setMyHands] = useState<HandSummaryDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // In edit mode the form is shown only after the post is loaded, so typing can never be overwritten.
+  const [loaded, setLoaded] = useState(!id);
 
   useEffect(() => {
     if (!id) return;
@@ -193,6 +228,7 @@ export function PostEditorPage() {
       setTitle(p.title);
       setBody(p.body);
       setHandIds(p.hands.map((h) => h.id));
+      setLoaded(true);
     });
   }, [id]);
   useEffect(() => {
@@ -217,6 +253,7 @@ export function PostEditorPage() {
       setBusy(false);
     }
   }
+  if (!loaded) return <div className="flex justify-center py-12 text-gold-400"><Spinner /></div>;
   const toggle = (hid: string) => setHandIds((cur) => (cur.includes(hid) ? cur.filter((x) => x !== hid) : cur.length >= 3 ? cur : [...cur, hid]));
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">

@@ -92,6 +92,39 @@ describe('board', () => {
     expect((await a.client.post('/api/board/posts', { title: 'x', body: '' })).status).toBe(400);
   });
 
+  it('replies form two-level threads; deleted parents with replies remain as placeholders', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    const c3 = await newUser();
+    const post = (await a.client.post('/api/board/posts', { title: '답글 테스트', body: '본문' })).body.id;
+    const root = (await b.client.post(`/api/board/posts/${post}/comments`, { body: '루트 댓글' })).body.id;
+    const r1 = (await a.client.post(`/api/board/posts/${post}/comments`, { body: '첫 답글', parentId: root })).body.id;
+    // replying to a reply stays in the same thread and mentions the reply's author
+    const r2 = await c3.client.post(`/api/board/posts/${post}/comments`, { body: '답글의 답글', parentId: r1 });
+    expect(r2.status).toBe(201);
+    let d = (await a.client.get(`/api/board/posts/${post}`)).body;
+    const byId = Object.fromEntries(d.comments.map((x: { id: string }) => [x.id, x]));
+    expect(byId[r1]).toMatchObject({ parentId: root, replyTo: null });
+    expect(byId[r2.body.id]).toMatchObject({ parentId: root, replyTo: a.me.nickname });
+    expect(d.commentCount).toBe(3);
+    // reply to a comment of another post is rejected
+    const other = (await a.client.post('/api/board/posts', { title: '다른 글', body: '본문' })).body.id;
+    expect((await a.client.post(`/api/board/posts/${other}/comments`, { body: 'x', parentId: root })).status).toBe(404);
+    // deleting the root keeps a placeholder while replies exist
+    expect((await b.client.req('DELETE', `/api/board/comments/${root}`)).status).toBe(200);
+    d = (await c3.client.get(`/api/board/posts/${post}`)).body;
+    const placeholder = d.comments.find((x: { id: string }) => x.id === root);
+    expect(placeholder).toMatchObject({ deleted: true, body: '', isMine: false });
+    expect(d.comments.filter((x: { deleted: boolean }) => !x.deleted)).toHaveLength(2);
+    expect(d.commentCount).toBe(2);
+    // no new replies to a deleted comment
+    expect((await c3.client.post(`/api/board/posts/${post}/comments`, { body: 'late', parentId: root })).status).toBe(404);
+    // when the last replies go, the placeholder disappears
+    await a.client.req('DELETE', `/api/board/comments/${r1}`);
+    await c3.client.req('DELETE', `/api/board/comments/${r2.body.id}`);
+    expect((await a.client.get(`/api/board/posts/${post}`)).body.comments).toEqual([]);
+  });
+
   it('notices are admin-only and pinned above posts; members cannot edit them', async () => {
     const n = await admin.post('/api/admin/board/notices', { title: '[공지] 서비스 점검 안내', body: '10월 20일 02:00~04:00 점검' });
     expect(n.status).toBe(201);

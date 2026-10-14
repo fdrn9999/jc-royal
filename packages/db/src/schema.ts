@@ -233,6 +233,10 @@ export const comments = sqliteTable(
     id: text('id').primaryKey(),
     postId: text('post_id').notNull().references(() => posts.id),
     authorId: text('author_id').notNull().references(() => users.id),
+    /** Replies point at a top-level comment (two-level threads). */
+    parentId: text('parent_id'),
+    /** For replies to a reply: whom it answers (shown as @nickname). */
+    replyToUserId: text('reply_to_user_id'),
     body: text('body').notNull(),
     status: text('status', { enum: ['visible', 'hidden', 'deleted'] }).notNull().default('visible'),
     createdAt: integer('created_at').notNull().default(now),

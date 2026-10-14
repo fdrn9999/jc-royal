@@ -9,6 +9,7 @@ export const PostInputSchema = z.object({
 export type PostInput = z.infer<typeof PostInputSchema>;
 
 export const CommentInputSchema = z.object({ body: z.string().trim().min(1).max(1_000) });
+export const CommentCreateSchema = CommentInputSchema.extend({ parentId: z.string().min(1).max(64).optional() });
 
 export const MESSAGE_CATEGORIES = ['system', 'event', 'sanction', 'notice', 'admin'] as const;
 export type MessageCategory = (typeof MESSAGE_CATEGORIES)[number];
@@ -64,6 +65,12 @@ export interface HandReviewDto {
 
 export interface CommentDto {
   id: string;
+  /** null for top-level comments; replies reference their top-level comment. */
+  parentId: string | null;
+  /** Nickname this reply answers (when replying to a reply). */
+  replyTo: string | null;
+  /** Removed comment kept as a placeholder because it has visible replies. */
+  deleted: boolean;
   body: string;
   author: AuthorDto;
   isMine: boolean;

@@ -3,6 +3,7 @@ import { Button, Field, Input } from '@jc/ui';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AuthLayout } from '../components/AppShell';
+import { EmailInput } from '../components/EmailInput';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
@@ -98,7 +99,7 @@ export function RegisterPage() {
   return (
     <AuthLayout title={t('auth.register')}>
       <form className="flex flex-col gap-4" onSubmit={submit}>
-        <Field label={t('auth.email')}>{(id) => <Input id={id} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />}</Field>
+        <Field label={t('auth.email')}>{(id) => <EmailInput id={id} onChange={setEmail} />}</Field>
         <Field
           label={t('auth.nickname')}
           error={nickState === 'taken' ? t('auth.nicknameTaken') : null}
@@ -111,7 +112,7 @@ export function RegisterPage() {
         </Field>
         <p className="text-xs text-gold-300/80">{t('auth.welcomeGrant', { amount: '10,000' })}</p>
         {error && <p role="alert" className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-[#f3b0b2]">{error}</p>}
-        <Button type="submit" size="lg" loading={busy} disabled={!nickValid || nickState === 'taken' || password.length < 8}>
+        <Button type="submit" size="lg" loading={busy} disabled={!email || !nickValid || nickState === 'taken' || password.length < 8}>
           {t('auth.register')}
         </Button>
         <p className="text-center text-sm text-ink-300">

@@ -1,6 +1,7 @@
 import { schema } from '@jc/db';
-import { CommentInputSchema, PostInputSchema, type AuthorDto, type CommentDto, type MyCommentDto, type PostDetailDto, type PostListItemDto, type PostPageDto } from '@jc/types';
+import { CommentCreateSchema, CommentInputSchema, PostInputSchema, type AuthorDto, type CommentDto, type MyCommentDto, type PostDetailDto, type PostListItemDto, type PostPageDto } from '@jc/types';
 import { and, count, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
@@ -9,6 +10,7 @@ import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
 
 const PAGE_SIZE = 20;
+const replyTarget = alias(schema.users, 'reply_target');
 const author = {
   id: schema.users.id,
   nickname: schema.users.nickname,
@@ -72,12 +74,17 @@ export async function postDetail(c: Context<AppEnv>, id: string, viewerId: strin
   const attached = await c.var.db.select().from(schema.postHands).where(eq(schema.postHands.postId, id)).orderBy(schema.postHands.sort);
   // Hand reviews are rendered from the AUTHOR's perspective, whoever is reading.
   const hands = await handReviews(c.var.db, attached.map((h) => h.handId), r.p.authorId);
-  const cm = await c.var.db
-    .select({ c: schema.comments, a: author })
+  const all = await c.var.db
+    .select({ c: schema.comments, a: author, replyTo: replyTarget.nickname })
     .from(schema.comments)
     .innerJoin(schema.users, eq(schema.users.id, schema.comments.authorId))
-    .where(and(eq(schema.comments.postId, id), includeHidden ? sql`${schema.comments.status} != 'deleted'` : eq(schema.comments.status, 'visible')))
+    .leftJoin(replyTarget, eq(replyTarget.id, schema.comments.replyToUserId))
+    .where(eq(schema.comments.postId, id))
     .orderBy(schema.comments.createdAt);
+  const shown = (s: string) => s === 'visible' || (includeHidden && s === 'hidden');
+  // A removed top-level comment stays as a placeholder while it still has visible replies.
+  const liveReplies = new Set(all.filter((x) => x.c.parentId && shown(x.c.status)).map((x) => x.c.parentId!));
+  const cm = all.filter((x) => shown(x.c.status) || (!x.c.parentId && liveReplies.has(x.c.id)));
   return {
     id: r.p.id,
     title: r.p.title,
@@ -91,7 +98,20 @@ export async function postDetail(c: Context<AppEnv>, id: string, viewerId: strin
     createdAt: r.p.createdAt,
     updatedAt: r.p.updatedAt,
     hands,
-    comments: cm.map(({ c: x, a }): CommentDto => ({ id: x.id, body: x.body, author: toAuthor(a), isMine: x.authorId === viewerId, createdAt: x.createdAt, updatedAt: x.updatedAt })),
+    comments: cm.map(({ c: x, a, replyTo }): CommentDto => {
+      const deleted = !shown(x.status);
+      return {
+        id: x.id,
+        parentId: x.parentId,
+        replyTo: replyTo ?? null,
+        deleted,
+        body: deleted ? '' : x.body,
+        author: deleted ? { id: '', nickname: '', avatarUrl: null, isAdmin: false } : toAuthor(a),
+        isMine: !deleted && x.authorId === viewerId,
+        createdAt: x.createdAt,
+        updatedAt: x.updatedAt,
+      };
+    }),
   };
 }
 
@@ -154,11 +174,20 @@ export const boardRoutes = new Hono<AppEnv>()
     const me = c.var.user!;
     await rateLimit(c, `comment:${me.id}`, 30, 10 * 60 * 1000);
     const id = c.req.param('id');
-    const body = await parseBody(c, CommentInputSchema);
+    const body = await parseBody(c, CommentCreateSchema);
     const post = await c.var.db.query.posts.findFirst({ where: and(eq(schema.posts.id, id), eq(schema.posts.status, 'visible')) });
     if (!post) fail(404, 'not_found', 'post not found');
+    let parentId: string | null = null;
+    let replyToUserId: string | null = null;
+    if (body.parentId) {
+      const parent = await c.var.db.query.comments.findFirst({ where: and(eq(schema.comments.id, body.parentId), eq(schema.comments.postId, id)) });
+      if (!parent || parent.status !== 'visible') fail(404, 'not_found', 'comment to reply to not found');
+      // Threads are two levels deep: a reply to a reply joins the same thread and mentions its author.
+      parentId = parent.parentId ?? parent.id;
+      replyToUserId = parent.parentId ? parent.authorId : null;
+    }
     const cid = crypto.randomUUID();
-    await c.var.db.insert(schema.comments).values({ id: cid, postId: id, authorId: me.id, body: body.body });
+    await c.var.db.insert(schema.comments).values({ id: cid, postId: id, authorId: me.id, parentId, replyToUserId, body: body.body });
     await recountComments(c, id);
     return c.json({ id: cid }, 201);
   })
