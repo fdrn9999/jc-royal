@@ -8,8 +8,9 @@
   "services": [{ "binding": "API", "service": "jc-royal-api" }],
   "env": {
     "production": {
-      "name": "jc-royal-admin-prod",
-      "services": [{ "binding": "API", "service": "jc-royal-api-prod" }]
+      // Served at https://admin.jcroyal.workers.dev
+      "name": "admin",
+      "services": [{ "binding": "API", "service": "play" }]
     }
   }
 }

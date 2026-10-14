@@ -1,13 +1,13 @@
 import { expect, test, type Browser } from '@playwright/test';
 import { answerAll, CARD_ANSWERS } from './academy-helpers';
-import { balanceOf, checkOrCall, signUp } from './helpers';
+import { balanceOf, checkOrCall, PASSWORD, signUp } from './helpers';
 
 async function loginOnNewDevice(browser: Browser, email: string) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
   const page = await ctx.newPage();
   await page.goto('/login');
   await page.getByLabel(/^(이메일|Email)$/).fill(email);
-  await page.getByLabel(/^(비밀번호|Password)$/).fill('password123');
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /^(로그인|Log in)$/ }).click();
   await expect(page).toHaveURL(/\/$/);
   return page;

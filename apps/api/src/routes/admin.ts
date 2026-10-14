@@ -12,10 +12,13 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { requireAdmin, requireRecentReauth, requireSuperAdmin } from '../lib/auth';
 import { randomToken, sha256 } from '../lib/crypto';
+import { toCsv } from '../lib/csv';
 import { fail, parseBody } from '../lib/http';
 import { adminAuthRoutes, audit, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { sendMessages } from '../lib/community';
+import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
+import { notices } from '../lib/notices';
 import { INTERNAL_HEADER } from './tables';
 
 async function roomCall(c: Context<AppEnv>, tableId: string, action: 'status' | 'reload' | 'close'): Promise<Record<string, unknown> | null> {
@@ -69,18 +72,65 @@ const admin = new Hono<AppEnv>()
     const { limit, offset } = page(c);
     const q = (c.req.query('q') ?? '').trim();
     const status = c.req.query('status');
+    const locale = c.req.query('locale');
     const where = and(
       q ? or(like(schema.users.email, `%${q}%`), like(schema.users.nickname, `%${q}%`), eq(schema.users.id, q)) : undefined,
       status === 'active' || status === 'suspended' || status === 'deleted' ? eq(schema.users.status, status) : undefined,
+      locale === 'ko' || locale === 'en' ? eq(schema.users.locale, locale) : undefined,
     );
     const rows = await c.var.db
-      .select({ id: schema.users.id, email: schema.users.email, nickname: schema.users.nickname, role: schema.users.role, status: schema.users.status, balance: schema.users.balance, createdAt: schema.users.createdAt })
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        nickname: schema.users.nickname,
+        locale: schema.users.locale,
+        role: schema.users.role,
+        status: schema.users.status,
+        balance: schema.users.balance,
+        createdAt: schema.users.createdAt,
+      })
       .from(schema.users)
       .where(where)
       .orderBy(desc(schema.users.createdAt))
       .limit(limit)
       .offset(offset);
     return c.json(rows);
+  })
+  /** Member data export for the selected members. The notice members accept at signup covers this use. */
+  .post('/users/export', requireRecentReauth, async (c) => {
+    const body = await parseBody(c, z.object({ userIds: z.array(z.string().min(1).max(64)).min(1).max(1000) }));
+    const ids = [...new Set(body.userIds)];
+    const u = schema.users;
+    const cols = {
+      id: u.id,
+      email: u.email,
+      nickname: u.nickname,
+      locale: u.locale,
+      role: u.role,
+      status: u.status,
+      balance: u.balance,
+      createdAt: u.createdAt,
+      birthDate: u.birthDate,
+      emailVerifiedAt: u.emailVerifiedAt,
+      privacyConsentVersion: u.privacyConsentVersion,
+      privacyConsentAt: u.privacyConsentAt,
+      suspendedReason: u.suspendedReason,
+    };
+    const rows: Awaited<ReturnType<typeof selectChunk>> = [];
+    // D1 caps bound parameters per statement.
+    function selectChunk(chunk: string[]) {
+      return c.var.db.select(cols).from(u).where(inArray(u.id, chunk));
+    }
+    for (let i = 0; i < ids.length; i += 90) rows.push(...(await selectChunk(ids.slice(i, i + 90))));
+    rows.sort((a, b) => b.createdAt - a.createdAt);
+    const iso = (ms: number | null) => (ms ? new Date(ms).toISOString() : '');
+    const csv = toCsv([
+      ['id', 'email', 'nickname', 'language', 'role', 'status', 'balance', 'joined_at_utc', 'birth_date', 'email_verified_at_utc', 'privacy_notice_version', 'privacy_agreed_at_utc', 'suspended_reason'],
+      ...rows.map((r) => [r.id, r.email, r.nickname, r.locale, r.role, r.status, r.balance, iso(r.createdAt), r.birthDate, iso(r.emailVerifiedAt), r.privacyConsentVersion, iso(r.privacyConsentAt), r.suspendedReason]),
+    ]);
+    await audit(c, 'user.export', undefined, { count: rows.length, userIds: rows.map((r) => r.id) });
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+    return c.json({ filename: `jc-royal-members-${stamp}.csv`, count: rows.length, csv });
   })
   .get('/users/:id', async (c) => {
     const id = c.req.param('id');
@@ -106,19 +156,21 @@ const admin = new Hono<AppEnv>()
       c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: body.reason, updatedAt: Date.now() }).where(eq(schema.users.id, id)),
       c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
     ]);
-    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', title: '계정 이용 제한 안내', body: `운영 정책에 따라 계정 이용이 제한되었습니다.
-사유: ${body.reason}`, senderId: c.var.user!.id });
+    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).suspended(body.reason), senderId: c.var.user!.id });
     await audit(c, 'user.suspend', { type: 'user', id }, body);
     return c.json({ ok: true });
   })
   .post('/users/:id/unsuspend', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true } });
+    if (!target) fail(404, 'not_found', 'user not found');
+    if (target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can unsuspend administrators');
     const lifted = await c.var.db
       .update(schema.users)
       .set({ status: 'active', suspendedReason: null, updatedAt: Date.now() })
       .where(and(eq(schema.users.id, id), eq(schema.users.status, 'suspended')))
       .returning({ id: schema.users.id });
-    if (lifted[0]) await sendMessages(c.var.db, { userIds: [id], category: 'sanction', title: '계정 이용 제한 해제 안내', body: '계정 이용 제한이 해제되었습니다. 다시 JC ROYAL을 이용하실 수 있습니다.', senderId: c.var.user!.id });
+    if (lifted[0]) await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).unsuspended(), senderId: c.var.user!.id });
     await audit(c, 'user.unsuspend', { type: 'user', id });
     return c.json({ ok: true });
   })
@@ -137,6 +189,8 @@ const admin = new Hono<AppEnv>()
   .post('/users/:id/chips', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
     const body = await parseBody(c, ChipAdjustSchema);
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true } });
+    if (target && target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can adjust chips of administrators');
     const r = await applyLedger(c.env.DB, {
       userId: id,
       type: 'admin_adjust',
@@ -150,25 +204,33 @@ const admin = new Hono<AppEnv>()
       await sendMessages(c.var.db, {
         userIds: [id],
         category: body.amount > 0 ? 'event' : 'admin',
-        title: body.amount > 0 ? '가상 칩 지급 안내' : '가상 칩 조정 안내',
-        body: `${body.amount > 0 ? '+' : ''}${body.amount.toLocaleString('en-US')} 가상 칩이 ${body.amount > 0 ? '지급' : '차감'}되었습니다.
-사유: ${body.memo}
-현재 잔액: ${r.balanceAfter.toLocaleString('en-US')}`,
+        ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
       });
       await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
     }
     return c.json({ ok: true, duplicate: r.status === 'duplicate', balanceAfter: r.balanceAfter });
   })
-  /** Issues a one-time password reset link (no mail provider is configured). */
+  /**
+   * Issues a one-time password reset link. With mail configured it is also mailed to the
+   * member; either way the response carries the link and a copy-ready message in the member's language.
+   */
   .post('/users/:id/reset-link', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
+    if (id === c.var.user!.id) fail(400, 'bad_request', 'use the change-password flow for your own account');
     const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.id, id), eq(schema.users.status, 'active')) });
     if (!u) fail(404, 'not_found', 'user not found');
+    // A reset link is an account takeover token: plain admins may only issue them for members.
+    if (u.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can issue reset links for administrators');
     const token = randomToken();
     await c.var.db.insert(schema.passwordResets).values({ tokenHash: await sha256(token), userId: id, expiresAt: Date.now() + 30 * 60 * 1000 });
-    await audit(c, 'user.reset_link', { type: 'user', id });
-    return c.json({ path: `/reset?token=${encodeURIComponent(token)}`, expiresInMinutes: 30 });
+    const path = `/reset?token=${encodeURIComponent(token)}`;
+    const origin = c.env.APP_ORIGIN ?? '';
+    const message = passwordResetMail({ locale: u.locale, nickname: u.nickname, link: `${origin}${path}`, origin, minutes: 30 });
+    const mailed = mailEnabled(c.env);
+    if (mailed) c.executionCtx.waitUntil(sendMail(c.env, { to: u.email, ...message }).catch((e) => console.error('admin reset mail failed', e)));
+    await audit(c, 'user.reset_link', { type: 'user', id }, { mailed });
+    return c.json({ path, url: `${origin}${path}`, expiresInMinutes: 30, locale: u.locale, mailed, message: { subject: message.subject, text: message.text } });
   })
   // ---------------------------------------------------------------- tables
   .get('/tables', async (c) => {

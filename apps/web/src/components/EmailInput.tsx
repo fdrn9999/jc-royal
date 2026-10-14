@@ -9,7 +9,7 @@ const CUSTOM = '__custom__';
  * Email entry split into a local part and a domain picker (common domains +
  * "direct input"). Reports the combined address, or '' while incomplete.
  */
-export function EmailInput({ id, onChange }: { id: string; onChange: (email: string) => void }) {
+export function EmailInput({ id, onChange, disabled }: { id: string; onChange: (email: string) => void; disabled?: boolean }) {
   const { t } = useI18n();
   const [local, setLocal] = useState('');
   const [domain, setDomain] = useState<string>(EMAIL_DOMAINS[0]);
@@ -43,6 +43,7 @@ export function EmailInput({ id, onChange }: { id: string; onChange: (email: str
           autoComplete="username"
           inputMode="email"
           required
+          disabled={disabled}
           aria-label={t('auth.emailLocal')}
           className="min-w-0 flex-1"
         />
@@ -52,8 +53,9 @@ export function EmailInput({ id, onChange }: { id: string; onChange: (email: str
         <select
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
+          disabled={disabled}
           aria-label={t('auth.emailDomain')}
-          className="h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-2 text-ivory focus:border-gold-500/70 focus:outline-none"
+          className="h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-2 text-ivory focus:border-gold-500/70 focus:outline-none disabled:opacity-60"
         >
           {EMAIL_DOMAINS.map((d) => (
             <option key={d} value={d}>
@@ -64,7 +66,7 @@ export function EmailInput({ id, onChange }: { id: string; onChange: (email: str
         </select>
       </div>
       {domain === CUSTOM && (
-        <Input value={custom} onChange={(e) => setCustom(e.target.value.trim().toLowerCase())} placeholder="example.com" aria-label={t('auth.emailCustomDomain')} required autoComplete="off" />
+        <Input value={custom} onChange={(e) => setCustom(e.target.value.trim().toLowerCase())} placeholder="example.com" aria-label={t('auth.emailCustomDomain')} required autoComplete="off" disabled={disabled} />
       )}
     </div>
   );

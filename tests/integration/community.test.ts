@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Client, newUser, sharedAdmin, uniq } from '../support/client';
+import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
 import { isMyTurn, TableSocket } from '../support/ws';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
@@ -10,8 +10,11 @@ beforeAll(async () => {
   expect((await admin.get('/api/admin/auth/me')).status).toBe(200);
 });
 
+/** Re-confirms the password unless the 5-minute window is still open (re-confirmation is rate limited per account). */
 async function reauth() {
-  expect((await admin.post('/api/admin/auth/reauth', { password: 'password123' })).status).toBe(200);
+  const until = (await admin.get('/api/admin/auth/me')).body?.reauthValidUntil;
+  if (until && until - Date.now() > 60_000) return;
+  expect((await admin.post('/api/admin/auth/reauth', { password: PASSWORD })).status).toBe(200);
 }
 
 describe('messages (one-way, admin → user)', () => {
@@ -50,7 +53,7 @@ describe('messages (one-way, admin → user)', () => {
     await admin.post(`/api/admin/users/${b.me.id}/suspend`, { reason: '욕설' });
     await admin.post(`/api/admin/users/${b.me.id}/unsuspend`, {});
     const relog = new Client();
-    expect((await relog.post('/api/auth/login', { email: b.email, password: 'password123' })).status).toBe(200);
+    expect((await relog.post('/api/auth/login', { email: b.email, password: PASSWORD })).status).toBe(200);
     const inbox = (await relog.get('/api/messages')).body as { category: string; title: string; body: string }[];
     expect(inbox.filter((m) => m.category === 'sanction').map((m) => m.title)).toEqual(['계정 이용 제한 해제 안내', '계정 이용 제한 안내']);
     expect(inbox.find((m) => m.title === '계정 이용 제한 안내')!.body).toContain('욕설');

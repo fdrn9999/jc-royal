@@ -7,6 +7,7 @@ const base = process.argv[2] ?? 'http://localhost:8787';
 const out = process.argv[3] ?? 'tests/visual/out';
 mkdirSync(out, { recursive: true });
 const stamp = Date.now().toString(36);
+const PASSWORD = 'Password123!';
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });
 const errors = [];
 
@@ -17,8 +18,16 @@ async function newUser(name, viewport, opts = {}) {
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   await page.goto(`${base}/register`);
   await page.getByLabel(/이메일 아이디|Email name/).fill(`${name}-${stamp}@visual.dev`); // full address is split automatically
+  await page.getByRole('button', { name: /^(인증번호 받기|Send code)$/ }).click();
+  const code = ((await page.getByTestId('dev-code').textContent()) ?? '').match(/\d{6}/)[0];
+  await page.getByLabel(/^(인증번호|Verification code)$/).fill(code);
+  await page.getByRole('button', { name: /^(확인|Verify)$/ }).click();
+  await page.getByText(/^(인증 완료|Verified)$/).waitFor();
   await page.getByLabel(/닉네임|Nickname/).fill(`${name}${stamp.slice(-4)}`);
-  await page.getByLabel(/비밀번호|Password/).fill('password123');
+  await page.getByLabel(/^(생년월일|Date of birth)$/).fill('1990-01-01');
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호 확인|Confirm password)$/).fill(PASSWORD);
+  await page.getByLabel(/전체 동의|Agree to all/).check();
   await page.getByRole('button', { name: /회원가입|Create account/ }).click();
   await page.waitForURL(`${base}/`);
   return page;

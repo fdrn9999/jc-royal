@@ -83,7 +83,7 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
       {...rest}
       className={cx(
         'h-11 w-full rounded-lg border border-white/10 bg-ink-850 px-3 text-ivory placeholder:text-ink-400',
-        'focus:border-gold-500/70 focus:outline-none focus:ring-2 focus:ring-gold-500/20 transition',
+        'focus:border-gold-500/70 focus:outline-none focus:ring-2 focus:ring-gold-500/20 transition disabled:cursor-not-allowed disabled:opacity-60',
         className,
       )}
     />

@@ -1,4 +1,4 @@
-import { handLabelKey, NICKNAME_RE, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
+import { handLabelKey, NICKNAME_RE, passwordOk, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -6,6 +6,7 @@ import { BadgeShelf } from '../academy/Badges';
 import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
+import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
 import { SettingsModal } from '../game/Panels';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -47,7 +48,7 @@ export function MePage() {
   const [nickname, setNickname] = useState(me?.nickname ?? '');
   const [avatarUrl, setAvatarUrl] = useState(me?.avatarUrl ?? '');
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
-  const [pw, setPw] = useState({ current: '', next: '' });
+  const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [delPw, setDelPw] = useState('');
@@ -75,7 +76,7 @@ export function MePage() {
     setPwMsg(null);
     try {
       await api('/api/auth/me/password', { body: { currentPassword: pw.current, newPassword: pw.next } });
-      setPw({ current: '', next: '' });
+      setPw({ current: '', next: '', confirm: '' });
       setPwMsg(t('me.saved'));
       void sessions.reload();
     } catch (x) {
@@ -235,10 +236,13 @@ export function MePage() {
         <Panel title={t('me.account')}>
           <form className="flex flex-col gap-3" onSubmit={changePassword}>
             <h3 className="text-sm font-semibold">{t('me.changePassword')}</h3>
-            <Input type="password" placeholder={t('me.currentPassword')} autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
-            <Input type="password" placeholder={t('auth.newPassword')} autoComplete="new-password" minLength={8} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
+            <PasswordInput placeholder={t('me.currentPassword')} aria-label={t('me.currentPassword')} autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+            <PasswordInput id="me-new-password" placeholder={t('auth.newPassword')} aria-label={t('auth.newPassword')} autoComplete="new-password" maxLength={128} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} aria-describedby="me-new-password-rules" />
+            <PasswordRules id="me-new-password-rules" value={pw.next} />
+            <PasswordInput id="me-confirm-password" placeholder={t('auth.passwordConfirm')} aria-label={t('auth.passwordConfirm')} autoComplete="new-password" maxLength={128} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} aria-describedby="me-confirm-password-match" />
+            <PasswordMatch id="me-confirm-password-match" password={pw.next} confirm={pw.confirm} />
             {pwMsg && <p className="text-sm text-gold-300">{pwMsg}</p>}
-            <Button type="submit" variant="outline" disabled={!pw.current || pw.next.length < 8}>
+            <Button type="submit" variant="outline" disabled={!pw.current || !passwordOk(pw.next) || pw.confirm !== pw.next}>
               {t('me.changePassword')}
             </Button>
           </form>

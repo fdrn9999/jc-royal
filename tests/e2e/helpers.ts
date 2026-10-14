@@ -1,5 +1,8 @@
 import { expect, type Browser, type Page } from '@playwright/test';
 
+/** Meets the password policy (upper, lower, digit, symbol, 8+). */
+export const PASSWORD = 'Password123!';
+
 let n = 0;
 export function uid(prefix: string) {
   n += 1;
@@ -17,8 +20,18 @@ export async function signUp(browser: Browser, opts: { mobile?: boolean } = {}) 
   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
   await page.getByLabel(/도메인 직접 입력|^Domain$/).fill('e2e.dev');
+  // Email code step: outside production the API returns the code and the page shows it.
+  await page.getByRole('button', { name: /^(인증번호 받기|Send code)$/ }).click();
+  const code = ((await page.getByTestId('dev-code').textContent()) ?? '').match(/\d{6}/)?.[0];
+  expect(code).toBeTruthy();
+  await page.getByLabel(/^(인증번호|Verification code)$/).fill(code!);
+  await page.getByRole('button', { name: /^(확인|Verify)$/ }).click();
+  await expect(page.getByText(/^(인증 완료|Verified)$/)).toBeVisible();
   await page.getByLabel(/닉네임|Nickname/).fill(nickname);
-  await page.getByLabel(/비밀번호|Password/).fill('password123');
+  await page.getByLabel(/^(생년월일|Date of birth)$/).fill('1990-01-01');
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호 확인|Confirm password)$/).fill(PASSWORD);
+  await page.getByLabel(/전체 동의|Agree to all/).check();
   await expect(page.getByText(/사용 가능한 닉네임|Nickname available/)).toBeVisible();
   await page.getByRole('button', { name: /회원가입|Create account/ }).click();
   await expect(page).toHaveURL(/\/$/);

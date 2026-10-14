@@ -1,9 +1,11 @@
-import { NICKNAME_RE, type MeDto } from '@jc/types';
+import { ageOn, isoDate, MIN_SIGNUP_AGE, NICKNAME_RE, passwordOk, type MeDto, type SignupOptionsDto } from '@jc/types';
 import { Button, Field, Input } from '@jc/ui';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AuthLayout } from '../components/AppShell';
-import { EmailInput } from '../components/EmailInput';
+import { EmailVerify } from '../components/EmailVerify';
+import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
+import { SignupConsent, type Agreements } from '../components/SignupConsent';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
@@ -61,14 +63,25 @@ export function LoginPage() {
 }
 
 export function RegisterPage() {
-  const { t, err } = useI18n();
+  const { t, err, locale } = useI18n();
   const done = useAfterLogin();
+  const [options, setOptions] = useState<SignupOptionsDto | null>(null);
   const [email, setEmail] = useState('');
+  const [verificationToken, setVerificationToken] = useState<string | null>(null);
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [nickname, setNickname] = useState('');
   const [nickState, setNickState] = useState<'idle' | 'ok' | 'taken'>('idle');
+  const [birthDate, setBirthDate] = useState('');
+  const [agreements, setAgreements] = useState<Agreements>({ age14: false, privacy: false });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<SignupOptionsDto>('/api/auth/signup-options')
+      .then(setOptions)
+      .catch(() => setOptions({ emailVerification: false, privacyNoticeVersion: '' }));
+  }, []);
 
   useEffect(() => {
     if (!NICKNAME_RE.test(nickname)) return setNickState('idle');
@@ -83,23 +96,39 @@ export function RegisterPage() {
     return () => clearTimeout(h);
   }, [nickname]);
 
+  const onEmail = useCallback((v: { email: string; token: string | null }) => {
+    setEmail(v.email);
+    setVerificationToken(v.token);
+  }, []);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      done(await api<MeDto>('/api/auth/register', { body: { email, password, nickname } }));
+      done(
+        await api<MeDto>('/api/auth/register', {
+          body: { email, password, nickname, birthDate, locale, agreements: { age14: true, privacy: true }, emailVerificationToken: verificationToken ?? undefined },
+        }),
+      );
     } catch (x) {
       setError(err(x instanceof ApiError ? x.code : null));
     } finally {
       setBusy(false);
     }
   }
+  const today = isoDate();
   const nickValid = NICKNAME_RE.test(nickname);
+  const birthValid = /^\d{4}-\d{2}-\d{2}$/.test(birthDate) && birthDate >= '1900-01-01' && birthDate <= today;
+  const underage = birthValid && ageOn(birthDate, today) < MIN_SIGNUP_AGE;
+  const needVerify = options?.emailVerification ?? true;
+  const verified = !needVerify || verificationToken !== null;
+  const canSubmit =
+    options !== null && !!email && verified && nickValid && nickState !== 'taken' && birthValid && !underage && passwordOk(password) && confirm === password && agreements.age14 && agreements.privacy;
   return (
     <AuthLayout title={t('auth.register')}>
       <form className="flex flex-col gap-4" onSubmit={submit}>
-        <Field label={t('auth.email')}>{(id) => <EmailInput id={id} onChange={setEmail} />}</Field>
+        <Field label={t('auth.email')}>{(id) => (options ? <EmailVerify id={id} required={options.emailVerification} onChange={onEmail} /> : <Input id={id} disabled />)}</Field>
         <Field
           label={t('auth.nickname')}
           error={nickState === 'taken' ? t('auth.nicknameTaken') : null}
@@ -107,12 +136,32 @@ export function RegisterPage() {
         >
           {(id) => <Input id={id} required maxLength={16} value={nickname} onChange={(e) => setNickname(e.target.value.trim())} aria-invalid={nickname !== '' && !nickValid} />}
         </Field>
-        <Field label={t('auth.password')} hint={t('auth.passwordHint')}>
-          {(id) => <Input id={id} type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(e) => setPassword(e.target.value)} />}
+        <Field label={t('auth.birthDate')} error={underage ? t('auth.underage') : null} hint={t('auth.birthDateHint')}>
+          {(id) => (
+            <Input id={id} type="date" required min="1900-01-01" max={today} autoComplete="bday" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} aria-invalid={underage} />
+          )}
         </Field>
+        <Field label={t('auth.password')}>
+          {(id) => (
+            <div className="flex flex-col gap-2">
+              <PasswordInput id={id} autoComplete="new-password" required maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby={`${id}-rules`} />
+              <PasswordRules id={`${id}-rules`} value={password} />
+            </div>
+          )}
+        </Field>
+        <Field label={t('auth.passwordConfirm')}>
+          {(id) => (
+            <div className="flex flex-col gap-2">
+              <PasswordInput id={id} autoComplete="new-password" required maxLength={128} value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-describedby={`${id}-match`} />
+              <PasswordMatch id={`${id}-match`} password={password} confirm={confirm} />
+            </div>
+          )}
+        </Field>
+        <SignupConsent value={agreements} onChange={setAgreements} />
         <p className="text-xs text-gold-300/80">{t('auth.welcomeGrant', { amount: '10,000' })}</p>
         {error && <p role="alert" className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-[#f3b0b2]">{error}</p>}
-        <Button type="submit" size="lg" loading={busy} disabled={!email || !nickValid || nickState === 'taken' || password.length < 8}>
+        {email && !verified && <p className="text-center text-xs text-ink-400">{t('auth.verifyNeeded')}</p>}
+        <Button type="submit" size="lg" loading={busy} disabled={!canSubmit}>
           {t('auth.register')}
         </Button>
         <p className="text-center text-sm text-ink-300">
@@ -133,6 +182,7 @@ export function ResetPage() {
   const nav = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [devToken, setDevToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -169,11 +219,24 @@ export function ResetPage() {
     <AuthLayout title={t('auth.reset')}>
       {token ? (
         <form className="flex flex-col gap-4" onSubmit={confirm}>
-          <Field label={t('auth.newPassword')} hint={t('auth.passwordHint')}>
-            {(id) => <Input id={id} type="password" minLength={8} required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />}
+          <Field label={t('auth.newPassword')}>
+            {(id) => (
+              <div className="flex flex-col gap-2">
+                <PasswordInput id={id} required maxLength={128} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby={`${id}-rules`} />
+                <PasswordRules id={`${id}-rules`} value={password} />
+              </div>
+            )}
+          </Field>
+          <Field label={t('auth.passwordConfirm')}>
+            {(id) => (
+              <div className="flex flex-col gap-2">
+                <PasswordInput id={id} required maxLength={128} autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} aria-describedby={`${id}-match`} />
+                <PasswordMatch id={`${id}-match`} password={password} confirm={confirmPw} />
+              </div>
+            )}
           </Field>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-          <Button type="submit" size="lg" loading={busy}>
+          <Button type="submit" size="lg" loading={busy} disabled={!passwordOk(password) || confirmPw !== password}>
             {t('common.save')}
           </Button>
         </form>

@@ -23,15 +23,20 @@ async function call(j, origin, method, path, body) {
   const text = await res.text();
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
+const PASSWORD = 'Password123!';
 async function player(name) {
   const j = jar();
-  const r = await call(j, 'http://localhost:5173', 'POST', '/api/auth/register', { email: `${name}-${stamp}@visual.dev`, password: 'password123', nickname: `${name}${stamp.slice(-4)}` });
+  const web = 'http://localhost:5173';
+  const email = `${name}-${stamp}@visual.dev`;
+  const sent = await call(j, web, 'POST', '/api/auth/email-verification/request', { email });
+  const proof = await call(j, web, 'POST', '/api/auth/email-verification/confirm', { email, code: sent.body.devCode });
+  const r = await call(j, web, 'POST', '/api/auth/register', { email, password: PASSWORD, nickname: `${name}${stamp.slice(-4)}`, birthDate: '1990-01-01', agreements: { age14: true, privacy: true }, emailVerificationToken: proof.body.verificationToken });
   return { j, me: r.body };
 }
 
 // 1. Admin: notice + broadcast message
 const admin = jar();
-console.log('admin login', (await call(admin, ADMIN_ORIGIN, 'POST', '/api/admin/auth/login', { email: 'owner@visual.dev', password: 'password123' })).status);
+console.log('admin login', (await call(admin, ADMIN_ORIGIN, 'POST', '/api/admin/auth/login', { email: 'owner@visual.dev', password: PASSWORD })).status);
 await call(admin, ADMIN_ORIGIN, 'POST', '/api/admin/board/notices', { title: '[공지] JC ROYAL 그랜드 오픈 이벤트', body: '오픈 기념으로 매일 출석 시 가상 칩 1,000개를 드립니다.\n모든 칩은 현금 가치가 없는 플레이 전용 칩입니다.' });
 
 // 2. Two players play one hand to showdown over WebSocket

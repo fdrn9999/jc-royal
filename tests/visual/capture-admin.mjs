@@ -12,9 +12,19 @@ const stamp = Date.now().toString(36);
 // Fixed owner account: bootstrap only succeeds once per database.
 const email = 'owner@visual.dev';
 
-// player account to promote
-let r = await fetch(`${api}/api/auth/register`, { method: 'POST', headers: { Origin: 'http://localhost:5173', 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'password123', nickname: 'owner' }) });
-console.log('register', r.status);
+const PASSWORD = 'Password123!';
+const web = { Origin: 'http://localhost:5173', 'Content-Type': 'application/json' };
+const post = (path, body) => fetch(`${api}${path}`, { method: 'POST', headers: web, body: JSON.stringify(body) }).then(async (res) => ({ status: res.status, body: await res.json().catch(() => null) }));
+
+// player account to promote (email code is returned as devCode outside production)
+const sent = await post('/api/auth/email-verification/request', { email });
+let r;
+if (sent.status === 200) {
+  const proof = await post('/api/auth/email-verification/confirm', { email, code: sent.body.devCode });
+  r = await post('/api/auth/register', { email, password: PASSWORD, nickname: 'owner', birthDate: '1990-01-01', agreements: { age14: true, privacy: true }, emailVerificationToken: proof.body?.verificationToken });
+  console.log('register', r.status);
+} else console.log('register skipped', sent.status, sent.body?.error?.code);
+r = await fetch(`${api}/api/admin/auth/bootstrap`, { method: 'POST', headers: { Origin: adminBase, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, email }) });
 r = await fetch(`${api}/api/admin/auth/bootstrap`, { method: 'POST', headers: { Origin: adminBase, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, email }) });
 console.log('bootstrap', r.status, await r.text());
 
@@ -27,7 +37,7 @@ await page.goto(adminBase);
 await page.waitForTimeout(500);
 await page.screenshot({ path: `${out}/01-login.png` });
 await page.getByLabel(/이메일|Email/).fill(email);
-await page.getByLabel(/비밀번호|Password/).fill('password123');
+await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
 await page.getByRole('button', { name: /로그인|Log in/ }).click();
 await page.getByTestId('dashboard').waitFor();
 await page.screenshot({ path: `${out}/02-dashboard.png` });
@@ -50,7 +60,7 @@ await page.getByRole('button', { name: /^확인$|^Confirm$/ }).first().click();
 await page.getByTestId('reauth-confirm').waitFor();
 await page.waitForTimeout(500);
 await page.screenshot({ path: `${out}/05-reauth.png` });
-await page.getByLabel(/비밀번호|Password/).fill('password123');
+await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
 await page.getByTestId('reauth-confirm').click();
 await page.waitForTimeout(800);
 await page.screenshot({ path: `${out}/06-user-detail.png` });

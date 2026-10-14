@@ -1,3 +1,14 @@
 @import 'tailwindcss';
 @import '@jc/ui/styles.css';
 @source '../../../packages/ui/src';
+
+/* Edge/IE draw their own reveal and clear buttons in password fields; PasswordInput has its own eye button. */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
+/* Native date picker icon and popup follow the dark theme. */
+input[type='date'] {
+  color-scheme: dark;
+}

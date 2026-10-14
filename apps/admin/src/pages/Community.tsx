@@ -2,6 +2,7 @@ import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel } from '@j
 import { useState, type FormEvent } from 'react';
 import { useT } from '../i18n';
 import { ApiError, useAdmin, useData } from '../lib';
+import { LangBadge } from './Console';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
 
@@ -109,7 +110,7 @@ export function BoardAdminPage() {
   );
 }
 
-interface UserRow { id: string; nickname: string; email: string; status: string }
+interface UserRow { id: string; nickname: string; email: string; status: string; locale: 'ko' | 'en' }
 interface Batch { batchId: string; title: string; category: string; createdAt: number; recipients: number; readCount: number; sender: string | null }
 
 export function MessagesAdminPage() {
@@ -155,6 +156,7 @@ export function MessagesAdminPage() {
           <ul className="max-h-64 divide-y divide-white/5 overflow-y-auto text-sm">
             {results.map((u) => (
               <li key={u.id} className="flex items-center gap-2 py-1.5">
+                <LangBadge locale={u.locale} />
                 <span className="min-w-0 flex-1 truncate">{u.nickname} <span className="text-xs text-ink-400">{u.email}</span></span>
                 <Button size="sm" variant="outline" onClick={() => add(u)} disabled={picked.some((x) => x.id === u.id)}>+</Button>
               </li>
@@ -166,9 +168,14 @@ export function MessagesAdminPage() {
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap gap-1.5" data-testid="picked">
               {picked.length === 0 ? <span className="text-xs text-ink-400">{t('noRecipients')}</span> : picked.map((u) => (
-                <button key={u.id} onClick={() => setPicked((p) => p.filter((x) => x.id !== u.id))} className="rounded-full border border-gold-500/40 bg-gold-500/10 px-2 py-0.5 text-xs text-gold-300">{u.nickname} ✕</button>
+                <button key={u.id} onClick={() => setPicked((p) => p.filter((x) => x.id !== u.id))} className="rounded-full border border-gold-500/40 bg-gold-500/10 px-2 py-0.5 text-xs text-gold-300">{u.nickname} <span className="font-mono text-[10px] text-ink-300">{u.locale.toUpperCase()}</span> ✕</button>
               ))}
             </div>
+            {picked.length > 0 && (
+              <p className="text-xs text-ink-300" data-testid="recipient-languages">
+                {t('recipientLanguages')}: {t('langKo')} {picked.filter((u) => u.locale !== 'en').length} · {t('langEn')} {picked.filter((u) => u.locale === 'en').length}
+              </p>
+            )}
             <Field label={t('category')}>{(id) => (
               <select id={id} value={category} onChange={(e) => setCategory(e.target.value as typeof category)} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3">
                 <option value="notice">notice</option>

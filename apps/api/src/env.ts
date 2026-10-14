@@ -17,6 +17,12 @@ export interface Env {
   INTERNAL_SECRET: string;
   /** Optional: one-time bootstrap token to promote the first super admin. */
   ADMIN_BOOTSTRAP_TOKEN?: string;
+  /** Public origin of the player site, used for links and images in emails. */
+  APP_ORIGIN?: string;
+  /** Optional: Resend API key (secret). Mail is sent only together with MAIL_FROM. */
+  RESEND_API_KEY?: string;
+  /** Optional: sender, e.g. `JC ROYAL <no-reply@example.com>` on a domain verified in Resend. */
+  MAIL_FROM?: string;
   /** Multiplier for IP-keyed rate limits (tests only; defaults to 1). */
   RATE_LIMIT_IP_SCALE?: string;
 }

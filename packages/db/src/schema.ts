@@ -16,7 +16,14 @@ export const users = sqliteTable(
     balance: integer('balance').notNull().default(0),
     avatarUrl: text('avatar_url'),
     locale: text('locale', { enum: ['ko', 'en'] }).notNull().default('ko'),
+    /** YYYY-MM-DD given at signup. Null for accounts created before it was collected. */
+    birthDate: text('birth_date'),
+    /** When the signup email code was confirmed. Null when verification was off or for older accounts. */
+    emailVerifiedAt: integer('email_verified_at'),
     suspendedReason: text('suspended_reason'),
+    /** Privacy notice version accepted at signup and when. Null for accounts created before consent was recorded. */
+    privacyConsentVersion: text('privacy_consent_version'),
+    privacyConsentAt: integer('privacy_consent_at'),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -50,6 +57,22 @@ export const passwordResets = sqliteTable('password_resets', {
   userId: text('user_id').notNull().references(() => users.id),
   expiresAt: integer('expires_at').notNull(),
   usedAt: integer('used_at'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * Sign-up email codes, one row per address (a new request replaces the old one).
+ * Rows are deleted on sign-up and swept a day after they expire.
+ */
+export const emailVerifications = sqliteTable('email_verifications', {
+  email: text('email').primaryKey(),
+  /** SHA-256 of `${email}:${code}`. */
+  codeHash: text('code_hash').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  expiresAt: integer('expires_at').notNull(),
+  /** Set once the code is confirmed: SHA-256 of the one-time proof that /register consumes. */
+  proofHash: text('proof_hash'),
+  verifiedAt: integer('verified_at'),
   createdAt: integer('created_at').notNull().default(now),
 });
 

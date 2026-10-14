@@ -1,25 +1,37 @@
 name: Deploy
 
-# Manual, gated deployment. Requires repository secrets CLOUDFLARE_API_TOKEN and
-# CLOUDFLARE_ACCOUNT_ID, and real D1 database ids in the wrangler.jsonc files.
+# Production deployment to Cloudflare.
+# - Automatic: ci.yml calls this after every green push to main.
+# - Manual: Actions → Deploy → Run workflow (re-runs typecheck and unit tests first).
+# Requires repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+# Worker secrets (INTERNAL_SECRET, RESEND_API_KEY, ...) live in Cloudflare and survive deploys.
 on:
+  workflow_call:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Target environment
-        type: choice
-        options: [production]
-        default: production
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment:
+      name: production
+      url: https://play.jcroyal.workers.dev
+    # One deploy at a time; a newer push waits instead of cancelling a half-finished deploy.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PLAY_URL: https://play.jcroyal.workers.dev
+      ADMIN_URL: https://admin.jcroyal.workers.dev
     steps:
+      - name: Check Cloudflare credentials
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Set repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (docs/DEPLOYMENT.md)."
+            exit 1
+          fi
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -27,8 +39,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm test
-      - run: pnpm --filter @jc/web build && pnpm --filter @jc/admin build
+      # CI already ran the full suite before calling this workflow; manual runs get a quick check.
+      - name: Typecheck and unit tests (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm typecheck && pnpm test
+      - run: pnpm build
       - name: Apply D1 migrations
         run: pnpm exec wrangler d1 migrations apply jc-royal-db-prod --remote --env production -c apps/api/wrangler.jsonc
       # Order matters: the Durable Object class must exist before the API binds to it,
@@ -39,3 +54,12 @@ jobs:
         run: pnpm exec wrangler deploy --env production -c apps/api/wrangler.jsonc
       - name: Deploy admin console
         run: pnpm exec wrangler deploy --env production -c apps/admin/wrangler.jsonc
+      - name: Smoke check
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "$PLAY_URL/api/health" | grep -q '"ok":true'; then break; fi
+            [ "$i" = 6 ] && { echo "::error::$PLAY_URL/api/health did not return ok"; exit 1; }
+            sleep 5
+          done
+          curl -fsS -o /dev/null -w 'play %{http_code}\n' "$PLAY_URL/"
+          curl -fsS -o /dev/null -w 'admin %{http_code}\n' "$ADMIN_URL/"

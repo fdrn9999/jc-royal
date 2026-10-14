@@ -26,18 +26,20 @@
     "ENVIRONMENT": "development",
     "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:5174,http://localhost:8787,http://127.0.0.1:8787",
     "ADMIN_ORIGIN": "http://localhost:5174",
+    "APP_ORIGIN": "http://localhost:5173",
     "PBKDF2_ITERATIONS": "100000",
     "SIGNUP_GRANT": "10000"
   },
   "observability": { "enabled": true },
   "env": {
     "production": {
-      "name": "jc-royal-api-prod",
+      // Served at https://play.jcroyal.workers.dev (account workers.dev subdomain: jcroyal).
+      "name": "play",
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "jc-royal-db-prod",
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "ea0b162f-0186-4312-a4ea-10f579e298f0",
           "migrations_dir": "../../packages/db/migrations"
         }
       ],
@@ -46,8 +48,11 @@
       },
       "vars": {
         "ENVIRONMENT": "production",
-        "ALLOWED_ORIGINS": "https://jcroyal.example,https://admin.jcroyal.example",
-        "ADMIN_ORIGIN": "https://admin.jcroyal.example",
+        "ALLOWED_ORIGINS": "https://play.jcroyal.workers.dev,https://admin.jcroyal.workers.dev",
+        "ADMIN_ORIGIN": "https://admin.jcroyal.workers.dev",
+        "APP_ORIGIN": "https://play.jcroyal.workers.dev",
+        // Password reset mail turns on once MAIL_FROM is set to an address on a
+        // domain verified in Resend (and the RESEND_API_KEY secret exists).
         "PBKDF2_ITERATIONS": "100000",
         "SIGNUP_GRANT": "10000"
       }

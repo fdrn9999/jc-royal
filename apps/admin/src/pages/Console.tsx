@@ -1,4 +1,5 @@
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat } from '@jc/ui';
+import { ageOn, isoDate } from '@jc/types';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useT } from '../i18n';
@@ -7,6 +8,49 @@ import { ApiError, useAdmin, useData } from '../lib';
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 const errMsg = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e));
 const newKey = () => crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+
+type Locale = 'ko' | 'en';
+/** Account language: mail, reset links and system messages to this member use it. */
+export function LangBadge({ locale }: { locale: Locale }) {
+  const { t } = useT();
+  return (
+    <Badge tone={locale === 'en' ? 'blue' : 'neutral'} className="font-mono">
+      <span aria-hidden>{locale.toUpperCase()}</span>
+      <span className="sr-only">{locale === 'en' ? t('langEn') : t('langKo')}</span>
+    </Badge>
+  );
+}
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const { t } = useT();
+  const [done, setDone] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="subtle"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        });
+      }}
+    >
+      {done ? t('copied') : label}
+    </Button>
+  );
+}
+
+function downloadCsv(filename: string, csv: string) {
+  // The BOM makes Excel read the file as UTF-8 (Korean nicknames).
+  const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
   return (
@@ -65,27 +109,102 @@ export function DashboardPage() {
 }
 
 // ------------------------------------------------------------------ users
-interface UserRow { id: string; email: string; nickname: string; role: string; status: string; balance: number; createdAt: number }
+interface UserRow { id: string; email: string; nickname: string; locale: Locale; role: string; status: string; balance: number; createdAt: number }
+
+const EXPORT_MAX = 1000;
+const checkbox = 'size-4 cursor-pointer accent-gold-500';
 
 export function UsersPage() {
   const { t, locale } = useT();
+  const { api } = useAdmin();
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
-  const { data, error } = useData<UserRow[]>(`/api/admin/users?q=${encodeURIComponent(query)}`);
+  const [lang, setLang] = useState<'' | Locale>('');
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { data, error } = useData<UserRow[]>(`/api/admin/users?q=${encodeURIComponent(query)}${lang ? `&locale=${lang}` : ''}&limit=200`);
+  const shown = data ?? [];
+  const shownSelected = shown.filter((u) => selected.has(u.id)).length;
+  const allShown = shown.length > 0 && shownSelected === shown.length;
+  const toggle = (id: string, on: boolean) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (on) n.add(id);
+      else n.delete(id);
+      return n;
+    });
+  const toggleShown = (on: boolean) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      for (const u of shown) {
+        if (on) n.add(u.id);
+        else n.delete(u.id);
+      }
+      return n;
+    });
+  async function exportCsv() {
+    setExporting(true);
+    setMsg(null);
+    try {
+      const r = await api<{ filename: string; count: number; csv: string }>('/api/admin/users/export', { body: { userIds: [...selected] } });
+      downloadCsv(r.filename, r.csv);
+      setMsg(t('exported', { n: r.count }));
+    } catch (e) {
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errMsg(e));
+    } finally {
+      setExporting(false);
+    }
+  }
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-extrabold">{t('users')}</h1>
-      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); setQuery(q); }}>
-        <Input placeholder={t('search')} value={q} onChange={(e) => setQ(e.target.value)} />
+      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setQuery(q); }}>
+        <Input className="min-w-0 flex-1 basis-56" placeholder={t('search')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <select aria-label={t('language')} value={lang} onChange={(e) => setLang(e.target.value as '' | Locale)} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm" data-testid="lang-filter">
+          <option value="">{t('allLanguages')}</option>
+          <option value="ko">{t('langKo')}</option>
+          <option value="en">{t('langEn')}</option>
+        </select>
         <Button type="submit" variant="subtle">⌕</Button>
       </form>
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-ink-900/60 px-3 py-2" data-testid="export-bar">
+        <span className="text-sm font-semibold" aria-live="polite">{t('selectedN', { n: selected.size })}</span>
+        {selected.size > 0 && <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>{t('clearSelection')}</Button>}
+        <Button size="sm" className="ml-auto" onClick={exportCsv} loading={exporting} disabled={selected.size === 0 || selected.size > EXPORT_MAX} data-testid="export-csv">
+          {t('exportCsv')}
+        </Button>
+        <p className="w-full text-xs text-ink-400">{t('exportHint')}</p>
+      </div>
+      {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
       {error && <Empty>{error}</Empty>}
       <Panel>
-        <Table head={['nickname', t('email'), t('role'), t('status'), t('balance'), t('createdAt'), '']}>
+        <Table
+          head={[
+            <input
+              key="all"
+              type="checkbox"
+              className={checkbox}
+              aria-label={t('selectAllShown')}
+              checked={allShown}
+              ref={(el) => {
+                if (el) el.indeterminate = shownSelected > 0 && !allShown;
+              }}
+              onChange={(e) => toggleShown(e.target.checked)}
+              disabled={shown.length === 0}
+              data-testid="select-all"
+            />,
+            'nickname', t('email'), t('language'), t('role'), t('status'), t('balance'), t('createdAt'), '',
+          ]}
+        >
           {data?.map((u) => (
-            <tr key={u.id}>
+            <tr key={u.id} className={selected.has(u.id) ? 'bg-gold-500/5' : undefined}>
+              <td className="w-8 px-2 py-2">
+                <input type="checkbox" className={checkbox} aria-label={t('selectUser', { name: u.nickname })} checked={selected.has(u.id)} onChange={(e) => toggle(u.id, e.target.checked)} />
+              </td>
               <td className="px-2 py-2 font-semibold">{u.nickname}</td>
               <td className="px-2 py-2 text-ink-300">{u.email}</td>
+              <td className="px-2 py-2"><LangBadge locale={u.locale} /></td>
               <td className="px-2 py-2"><Badge tone={u.role === 'user' ? 'neutral' : 'gold'}>{u.role}</Badge></td>
               <td className="px-2 py-2"><Badge tone={u.status === 'active' ? 'green' : 'red'}>{u.status}</Badge></td>
               <td className="px-2 py-2 font-mono">{formatChips(u.balance)}</td>
@@ -100,11 +219,28 @@ export function UsersPage() {
 }
 
 interface UserDetail {
-  user: UserRow & { suspendedReason: string | null; avatarUrl: string | null };
+  user: UserRow & {
+    suspendedReason: string | null;
+    avatarUrl: string | null;
+    birthDate: string | null;
+    emailVerifiedAt: number | null;
+    privacyConsentVersion: string | null;
+    privacyConsentAt: number | null;
+  };
   ledger: { id: string; type: string; amount: number; balanceAfter: number; memo: string | null; createdAt: number; actorId: string | null }[];
   openSeats: { id: string; tableId: string; seatIndex: number; buyIn: number }[];
   hands: { n: number; net: number };
   ledgerConsistent: boolean;
+}
+
+interface ResetLink {
+  path: string;
+  /** Absolute link on the player site (relative when the API has no APP_ORIGIN). */
+  url: string;
+  expiresInMinutes: number;
+  locale: Locale;
+  mailed: boolean;
+  message: { subject: string; text: string };
 }
 
 export function UserDetailPage() {
@@ -116,15 +252,25 @@ export function UserDetailPage() {
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [reason, setReason] = useState('');
+  const [reset, setReset] = useState<ResetLink | null>(null);
   const run = async (fn: () => Promise<unknown>) => {
     setMsg(null);
+    setReset(null);
     try {
-      const r = await fn();
-      // Reset links are paths on the player site (shown once; no mail provider is configured).
-      setMsg(r && typeof r === 'object' && 'path' in r ? `${import.meta.env.VITE_USER_ORIGIN ?? ''}${(r as { path: string }).path}` : t('saved'));
+      await fn();
+      setMsg(t('saved'));
       await reload();
     } catch (e) {
       setMsg(errMsg(e));
+    }
+  };
+  const issueReset = async () => {
+    setMsg(null);
+    setReset(null);
+    try {
+      setReset(await api<ResetLink>(`/api/admin/users/${id}/reset-link`, { body: {} }));
+    } catch (e) {
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errMsg(e));
     }
   };
   if (error) return <Empty>{error}</Empty>;
@@ -139,12 +285,33 @@ export function UserDetailPage() {
         {!data.ledgerConsistent && <Badge tone="red">ledger mismatch</Badge>}
       </div>
       {msg && <p className="break-all rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-gold-300" role="status">{msg}</p>}
+      {reset && <ResetLinkResult reset={reset} />}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label={t('balance')} value={formatChips(u.balance)} />
         <Stat label="hands" value={formatChips(data.hands.n)} sub={`net ${formatChips(data.hands.net)}`} />
         <Stat label={t('openSeats')} value={data.openSeats.length} />
         <Stat label={t('createdAt')} value={<span className="text-sm">{formatDate(u.createdAt, locale)}</span>} sub={u.email} />
       </div>
+      <Panel title={t('memberInfo')}>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4" data-testid="member-info">
+          <div>
+            <dt className="text-xs text-ink-400">{t('language')}</dt>
+            <dd className="mt-1 flex items-center gap-2"><LangBadge locale={u.locale} /> {u.locale === 'en' ? t('langEn') : t('langKo')}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-ink-400">{t('birthDate')}</dt>
+            <dd className="mt-1 font-mono">{u.birthDate ? <>{u.birthDate} <span className="font-sans text-xs text-ink-400">({t('ageYears', { n: ageOn(u.birthDate, isoDate()) })})</span></> : <span className="text-ink-400">{t('none')}</span>}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-ink-400">{t('emailVerified')}</dt>
+            <dd className="mt-1">{u.emailVerifiedAt ? <span className="text-success">{formatDate(u.emailVerifiedAt, locale)}</span> : <span className="text-ink-400">{t('notVerified')}</span>}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-ink-400">{t('privacyConsent')}</dt>
+            <dd className="mt-1">{u.privacyConsentAt ? <>{formatDate(u.privacyConsentAt, locale)} <span className="font-mono text-xs text-ink-400">v{u.privacyConsentVersion}</span></> : <span className="text-ink-400">{t('none')}</span>}</dd>
+          </div>
+        </dl>
+      </Panel>
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('adjustChips')}>
           <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void run(() => api(`/api/admin/users/${id}/chips`, { body: { amount: Number(amount), memo, idempotencyKey: newKey() } })); }}>
@@ -163,7 +330,7 @@ export function UserDetailPage() {
             ) : u.status === 'suspended' ? (
               <Button variant="outline" onClick={() => run(() => api(`/api/admin/users/${id}/unsuspend`, { body: {} }))}>{t('unsuspend')} ({u.suspendedReason})</Button>
             ) : null}
-            <Button variant="subtle" onClick={() => run(() => api(`/api/admin/users/${id}/reset-link`, { body: {} }))}>{t('resetLink')}</Button>
+            <Button variant="subtle" onClick={issueReset} data-testid="reset-link">{t('resetLink')}</Button>
             {me?.user.role === 'super_admin' && me.user.id !== u.id && (
               <div className="flex flex-wrap gap-2">
                 <span className="self-center text-sm text-ink-300">{t('setRole')}:</span>
@@ -189,6 +356,32 @@ export function UserDetailPage() {
         </Table>
       </Panel>
     </div>
+  );
+}
+
+function ResetLinkResult({ reset }: { reset: ResetLink }) {
+  const { t } = useT();
+  const link = reset.url;
+  const lang = reset.locale === 'en' ? t('langEn') : t('langKo');
+  const message = `${reset.message.subject}\n\n${reset.message.text}`;
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border border-gold-500/30 bg-gold-500/5 p-4" data-testid="reset-result" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-bold text-gold-300">{t('resetLinkTitle', { m: reset.expiresInMinutes })}</h2>
+        <LangBadge locale={reset.locale} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <code className="min-w-0 flex-1 break-all rounded bg-ink-950/70 px-2 py-1.5 text-xs text-ink-100">{link}</code>
+        <CopyButton text={link} label={t('copyLink')} />
+      </div>
+      <p className={reset.mailed ? 'text-sm text-success' : 'text-sm text-ink-200'}>{reset.mailed ? t('resetMailed', { lang }) : t('resetNotMailed', { lang })}</p>
+      {!reset.mailed && (
+        <div className="flex flex-col gap-2">
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-ink-950/70 p-3 font-sans text-xs leading-relaxed text-ink-200" data-testid="reset-message">{message}</pre>
+          <div><CopyButton text={message} label={t('copyMessage')} /></div>
+        </div>
+      )}
+    </section>
   );
 }
 

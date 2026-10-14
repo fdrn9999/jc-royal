@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { signUp } from './helpers';
+import { readFileSync } from 'node:fs';
+import { PASSWORD, signUp } from './helpers';
 
 const ADMIN = 'http://localhost:5174';
 
@@ -14,7 +15,7 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   const page = await ctx.newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(owner.email);
-  await page.getByLabel(/비밀번호|Password/).fill('password123');
+  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
 
@@ -36,7 +37,7 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await page.getByLabel(/메모|Memo/).fill('E2E 이벤트');
   await page.getByRole('button', { name: /^확인$|^Confirm$/ }).first().click();
   await expect(page.getByTestId('reauth-confirm')).toBeVisible();
-  await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill('password123');
+  await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByTestId('reauth-confirm').click();
   await expect(page.getByText('+777')).toBeVisible();
 
@@ -44,4 +45,34 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await member.page.goto('/messages');
   await expect(member.page.getByText('가상 칩 지급 안내')).toBeVisible();
   await expect(member.page.getByTestId('balance')).toContainText('10,777');
+
+  // Member detail shows the sign-up fields; a reset link comes with a ready-to-send message.
+  await expect(page.getByTestId('member-info')).toContainText('1990-01-01');
+  await expect(page.getByTestId('member-info')).toContainText(/한국어|Korean/);
+  await page.getByTestId('reset-link').click();
+  await expect(page.getByTestId('reset-result')).toContainText(/https?:\/\/[^/]+\/reset\?token=/);
+  await expect(page.getByTestId('reset-message')).toContainText(/비밀번호 재설정|Reset your password/);
+  await page.screenshot({ path: 'test-results/admin-member-detail.png', fullPage: true });
+
+  // Members list: select (all shown / one by one) and export the selection as CSV.
+  await page.getByRole('link', { name: /^회원$|^Users$/ }).click();
+  await page.getByTestId('lang-filter').selectOption('ko');
+  const all = page.getByTestId('select-all');
+  await all.check();
+  const rows = page.locator('tbody').getByRole('checkbox');
+  const n = await rows.count();
+  expect(n).toBeGreaterThan(1);
+  await expect(page.getByTestId('export-bar')).toContainText(new RegExp(`${n}명 선택됨|${n} selected`));
+  await rows.first().uncheck();
+  await expect(all).toHaveJSProperty('indeterminate', true);
+  await rows.first().check();
+  await page.screenshot({ path: 'test-results/admin-users-selected.png', fullPage: true });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-csv').click()]);
+  expect(download.suggestedFilename()).toMatch(/^jc-royal-members-\d{8}-\d{4}\.csv$/);
+  const csv = readFileSync((await download.path())!, 'utf8');
+  expect(csv.charCodeAt(0)).toBe(0xfeff);
+  expect(csv).toContain('id,email,nickname,language,role,status,balance,joined_at_utc,birth_date');
+  expect(csv).toContain(member.email);
+  expect(csv.trimEnd().split('\r\n')).toHaveLength(n + 1);
+  await expect(page.getByRole('status').filter({ hasText: new RegExp(`${n}명의 정보를 내보냈습니다|Exported ${n} members`) })).toBeVisible();
 });

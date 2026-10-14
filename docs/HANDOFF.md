@@ -1,14 +1,20 @@
 # 인수인계 (다음 세션용)
 
-> 새 기기 또는 새 Claude 세션은 이 파일부터 읽는다. 마지막 갱신: 2026-10-14 (commit 7791e59 이후)
+> 새 기기 또는 새 Claude 세션은 이 파일부터 읽는다. 마지막 갱신: 2026-10-14 (첫 운영 배포)
 
 ## 현재 상태
 
-- `docs/DIRECTIVE.md` Phase 1~9를 구현했고 `main`에 push했다.
-- 검증 결과:
-  - 엔진 테스트 27, 통합 테스트 42, E2E 5 모두 통과(`docs/TEST_REPORT.md`)
-  - 운영 번들 dry-run 성공
-- 실제 Cloudflare 배포는 **하지 않았다**.
+- `docs/DIRECTIVE.md` Phase 1~9와 포커 아카데미를 구현했다.
+- 검증 결과는 `docs/TEST_REPORT.md`와 `docs/STATUS.md`에 있다.
+- **운영 배포 완료**(2026-10-14, 로컬 wrangler, Workers Paid):
+  - 사용자 사이트: https://play.jcroyal.workers.dev
+  - 관리자 콘솔: https://admin.jcroyal.workers.dev
+  - Worker: `jc-royal-game-prod` → `play` → `admin`
+  - D1: `jc-royal-db-prod`(APAC), 마이그레이션 `0000`~`0003` 적용
+  - 시크릿: 두 Worker에 `INTERNAL_SECRET`, `play`에 `RESEND_API_KEY`
+- 최초 슈퍼관리자: ckato9173@gmail.com. 부트스트랩 후 `ADMIN_BOOTSTRAP_TOKEN`은 삭제한다.
+- **배포 자동화**: `main`에 push하고 CI가 통과하면 GitHub Actions가 운영에 배포한다(`docs/DEPLOYMENT.md` 3절). 저장소 시크릿 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 있어야 동작한다.
+- **가입·회원 정보 개편**(브랜치 `chore/production-deploy-prep`): 이메일 인증번호, 생년월일(만 14세), 필수 동의, 비밀번호 규칙, 계정 언어, 관리자 CSV 내보내기. 운영에 반영하려면 마이그레이션 `0004_signup_profile`이 필요하다(Actions 배포는 자동 적용).
 
 ## 꼭 알아야 할 결정 사항
 
@@ -20,10 +26,10 @@
 
 ## 남은 일 (오너가 새 세션에서 진행 예정)
 
-1. **Resend 메일 연동**(비밀번호 재설정)
-   - 필요한 것: 오너의 Resend API 키, Resend에서 인증한 발신 도메인
-   - 계획: `RESEND_API_KEY` 시크릿이 있으면 메일을 발송하고, 없으면 지금처럼 관리자가 재설정 링크를 발급한다.
-   - 관련 코드: `apps/api/src/routes/auth.ts`의 `/password-reset/request`
+1. **메일 켜기(가입 이메일 인증 + 재설정 메일)**: 코드, 한/영 템플릿, `RESEND_API_KEY`는 준비되어 있다.
+   - 남은 일: Resend에서 발신 도메인을 인증하고, `MAIL_FROM`을 넣은 뒤 다시 배포한다(`docs/DEPLOYMENT.md` 2절). 넣는 순간 가입에 이메일 인증이 필수가 된다.
+   - 그 전까지 운영 가입은 이메일 인증 없이 진행되고, 비밀번호 재설정은 관리자가 링크를 발급한다.
+   - 관련 코드: `apps/api/src/lib/mail.ts`, `apps/api/src/routes/auth.ts`의 `/email-verification/*`, `/password-reset/request`
 2. **봇**(빈 테이블용). 제안 설계:
    - 서버 쪽 규칙형 봇. 엔진의 합법 액션과 자기 카드만 쓴다.
    - 좌석에 "BOT" 배지를 붙인다.
@@ -31,11 +37,7 @@
    - 관리자가 테이블별로 켜고 끈다.
    - 사람이 1명만 앉아 있을 때만 채우고, 사람이 오면 핸드가 끝난 뒤 자리를 비킨다.
    - 관련 코드: `apps/game-worker/src/room.ts`
-3. **Cloudflare 실제 배포**: `docs/DEPLOYMENT.md` 순서대로 진행한다.
-   - D1을 만들고 `database_id`를 입력한다.
-   - 두 Worker에 같은 `INTERNAL_SECRET`을 넣는다.
-   - `ADMIN_BOOTSTRAP_TOKEN`으로 최초 관리자를 만들고, 끝나면 이 시크릿을 삭제한다.
-   - 배포 순서는 game → api → admin이다. 외부에 공개되는 작업이므로 오너 확인 후 진행한다.
+3. **커스텀 도메인**(선택): 도메인을 사면 `docs/DEPLOYMENT.md` 4절대로 옮긴다. Resend 발신 도메인도 같은 도메인으로 인증할 수 있다.
 
 ## 새 기기에서 시작하기
 

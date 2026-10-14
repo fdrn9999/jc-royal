@@ -26,7 +26,7 @@
         {
           "binding": "DB",
           "database_name": "jc-royal-db-prod",
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "ea0b162f-0186-4312-a4ea-10f579e298f0",
           "migrations_dir": "../../packages/db/migrations"
         }
       ],

@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { Client } from '../support/client';
+import { Client, signupBody, WEB_ORIGIN } from '../support/client';
 import { prepareState, root, startWorker, type RunningWorker } from '../support/worker';
 import { isMyTurn, TableSocket } from '../support/ws';
 
@@ -23,18 +23,9 @@ describe('server restart recovery', () => {
     const base = worker.url;
 
     async function user(n: string) {
-      const c = new Client();
-      const r = await fetch(`${base}/api/auth/register`, {
-        method: 'POST',
-        headers: { Origin: c.origin, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: `${n}-${Date.now()}@restart.dev`, password: 'password123', nickname: `${n}${Date.now() % 100000}` }),
-      });
+      const c = new Client(WEB_ORIGIN, base);
+      const r = await c.post('/api/auth/register', await signupBody(c, { email: `${n}-${Date.now()}@restart.dev`, nickname: `${n}${Date.now() % 100000}` }));
       expect(r.status).toBe(201);
-      for (const sc of r.headers.getSetCookie()) {
-        const [pair] = sc.split(';');
-        const [k, ...v] = pair!.split('=');
-        c.cookies.set(k!, v.join('='));
-      }
       return c;
     }
     const ca = await user('ra');

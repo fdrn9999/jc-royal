@@ -1,2 +1,5 @@
 INTERNAL_SECRET=change-me-local-dev-secret
 # ADMIN_BOOTSTRAP_TOKEN=one-time-token-to-promote-first-super-admin
+# Password reset mail (optional). Also set MAIL_FROM to an address on a domain verified in Resend.
+# RESEND_API_KEY=re_xxx
+# MAIL_FROM=JC ROYAL <no-reply@your-verified-domain>

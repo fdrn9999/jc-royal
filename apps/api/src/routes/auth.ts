@@ -1,21 +1,31 @@
 import { applyLedger, schema } from '@jc/db';
 import {
+  ageOn,
   ChangePasswordSchema,
   DeleteAccountSchema,
+  EmailVerificationConfirmSchema,
+  EmailVerificationRequestSchema,
+  isoDate,
   LoginSchema,
+  MIN_SIGNUP_AGE,
+  PRIVACY_NOTICE_VERSION,
   RegisterSchema,
   ResetConfirmSchema,
   ResetRequestSchema,
   UpdateProfileSchema,
+  type EmailVerificationSentDto,
   type MeDto,
+  type SignupOptionsDto,
 } from '@jc/types';
-import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
-import type { AppEnv, AuthUser } from '../env';
+import type { AppEnv, AuthUser, Env } from '../env';
 import { requireUser } from '../lib/auth';
 import { sendMessages } from '../lib/community';
 import { DUMMY_HASH, hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
+import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
+import { notices } from '../lib/notices';
 import { clientIp, rateLimit } from '../lib/rate-limit';
 import { createSession, destroySession } from '../lib/session';
 
@@ -47,11 +57,113 @@ export function isUniqueViolation(e: unknown, column: string) {
   return target.includes(column);
 }
 
+const HOUR = 60 * 60 * 1000;
+const CODE_MINUTES = 10;
+const PROOF_MINUTES = 30;
+const RESEND_AFTER_SECONDS = 60;
+const MAX_CODE_ATTEMPTS = 5;
+
+/**
+ * Sign-up email verification is on whenever codes can be mailed, and always outside
+ * production (the code is returned as `devCode` there). In production without a mail
+ * provider it is off, because codes could not reach anyone.
+ */
+export const emailVerificationOn = (env: Env) => mailEnabled(env) || env.ENVIRONMENT !== 'production';
+
+/** Uniform 6-digit code (rejection sampling avoids modulo bias). */
+function sixDigitCode(): string {
+  const buf = new Uint32Array(1);
+  do crypto.getRandomValues(buf);
+  while (buf[0]! >= 4_294_000_000);
+  return String(buf[0]! % 1_000_000).padStart(6, '0');
+}
+
+const codeHash = (email: string, code: string) => sha256(`${email}:${code}`);
+
 export const authRoutes = new Hono<AppEnv>()
-  .post('/register', async (c) => {
-    await rateLimit(c, `register:${clientIp(c)}`, 10, 60 * 60 * 1000, { perIp: true });
-    const body = await parseBody(c, RegisterSchema);
+  .get('/signup-options', (c) => c.json<SignupOptionsDto>({ emailVerification: emailVerificationOn(c.env), privacyNoticeVersion: PRIVACY_NOTICE_VERSION }))
+  .post('/email-verification/request', async (c) => {
+    const body = await parseBody(c, EmailVerificationRequestSchema);
+    if (!emailVerificationOn(c.env)) fail(400, 'verification_off', 'email verification is not enabled');
+    await rateLimit(c, `verify-ip:${clientIp(c)}`, 20, HOUR, { perIp: true });
+    // Per-address cap so nobody can flood an inbox.
+    await rateLimit(c, `verify-email:${body.email}`, 5, HOUR);
     const db = c.var.db;
+    const ev = schema.emailVerifications;
+    // Sign-up reports a taken address anyway; saying so here saves a pointless mail.
+    const taken = await db.query.users.findFirst({ where: eq(schema.users.email, body.email), columns: { id: true } });
+    if (taken) fail(409, 'email_taken', 'email already registered');
+    const now = Date.now();
+    const prev = await db.query.emailVerifications.findFirst({ where: eq(ev.email, body.email), columns: { createdAt: true } });
+    const wait = prev ? Math.ceil((prev.createdAt + RESEND_AFTER_SECONDS * 1000 - now) / 1000) : 0;
+    if (wait > 0) {
+      c.header('Retry-After', String(wait));
+      fail(429, 'resend_too_soon', 'wait before requesting another code', { retryAfterSeconds: wait });
+    }
+    const code = sixDigitCode();
+    const row = { codeHash: await codeHash(body.email, code), attempts: 0, expiresAt: now + CODE_MINUTES * 60 * 1000, proofHash: null, verifiedAt: null, createdAt: now };
+    await db.batch([
+      // Sweep abandoned requests so unregistered addresses do not linger.
+      db.delete(ev).where(lt(ev.expiresAt, now - 24 * HOUR)),
+      db.insert(ev).values({ email: body.email, ...row }).onConflictDoUpdate({ target: ev.email, set: row }),
+    ]);
+    if (mailEnabled(c.env)) {
+      try {
+        await sendMail(c.env, { to: body.email, ...verificationCodeMail({ locale: body.locale, code, origin: c.env.APP_ORIGIN!, minutes: CODE_MINUTES }) });
+      } catch (e) {
+        console.error('verification mail failed', e);
+        await db.delete(ev).where(eq(ev.email, body.email));
+        fail(502, 'mail_failed', 'could not send the verification email');
+      }
+    }
+    return c.json<EmailVerificationSentDto>({
+      ok: true,
+      expiresInMinutes: CODE_MINUTES,
+      resendAfterSeconds: RESEND_AFTER_SECONDS,
+      ...(c.env.ENVIRONMENT !== 'production' ? { devCode: code } : {}),
+    });
+  })
+  .post('/email-verification/confirm', async (c) => {
+    const body = await parseBody(c, EmailVerificationConfirmSchema);
+    await rateLimit(c, `verify-confirm:${clientIp(c)}`, 60, HOUR, { perIp: true });
+    const db = c.var.db;
+    const ev = schema.emailVerifications;
+    const now = Date.now();
+    // Count the attempt before comparing, atomically, so parallel guesses cannot exceed the cap.
+    const [hit] = await db
+      .update(ev)
+      .set({ attempts: sql`${ev.attempts} + 1` })
+      .where(and(eq(ev.email, body.email), isNull(ev.verifiedAt), gt(ev.expiresAt, now), lt(ev.attempts, MAX_CODE_ATTEMPTS)))
+      .returning({ attempts: ev.attempts, codeHash: ev.codeHash });
+    if (!hit) {
+      const row = await db.query.emailVerifications.findFirst({ where: eq(ev.email, body.email), columns: { expiresAt: true, verifiedAt: true } });
+      if (row && !row.verifiedAt && row.expiresAt > now) fail(400, 'too_many_attempts', 'too many wrong codes; request a new one');
+      fail(400, 'code_expired', 'code expired; request a new one');
+    }
+    if ((await codeHash(body.email, body.code)) !== hit.codeHash) {
+      const left = MAX_CODE_ATTEMPTS - hit.attempts;
+      if (left <= 0) fail(400, 'too_many_attempts', 'too many wrong codes; request a new one');
+      fail(400, 'invalid_code', 'code does not match', { attemptsLeft: left });
+    }
+    const token = randomToken();
+    await db.update(ev).set({ proofHash: await sha256(token), verifiedAt: now, expiresAt: now + PROOF_MINUTES * 60 * 1000 }).where(eq(ev.email, body.email));
+    return c.json({ verificationToken: token, expiresInMinutes: PROOF_MINUTES });
+  })
+  .post('/register', async (c) => {
+    await rateLimit(c, `register:${clientIp(c)}`, 10, HOUR, { perIp: true });
+    const body = await parseBody(c, RegisterSchema);
+    if (ageOn(body.birthDate, isoDate()) < MIN_SIGNUP_AGE) fail(400, 'underage', `members must be ${MIN_SIGNUP_AGE} or older`);
+    const db = c.var.db;
+    const ev = schema.emailVerifications;
+    let emailVerifiedAt: number | null = null;
+    if (body.emailVerificationToken) {
+      const proof = await db.query.emailVerifications.findFirst({
+        where: and(eq(ev.email, body.email), eq(ev.proofHash, await sha256(body.emailVerificationToken)), gt(ev.expiresAt, Date.now())),
+        columns: { verifiedAt: true },
+      });
+      emailVerifiedAt = proof?.verifiedAt ?? null;
+    }
+    if (!emailVerifiedAt && emailVerificationOn(c.env)) fail(400, 'email_not_verified', 'verify the email address first');
     const nickTaken = await db.query.users.findFirst({ where: sql`lower(${schema.users.nickname}) = lower(${body.nickname})`, columns: { id: true } });
     if (nickTaken) fail(409, 'nickname_taken', 'nickname already in use');
     const id = crypto.randomUUID();
@@ -61,6 +173,11 @@ export const authRoutes = new Hono<AppEnv>()
         email: body.email,
         nickname: body.nickname,
         passwordHash: await hashPassword(body.password, Number(c.env.PBKDF2_ITERATIONS)),
+        locale: body.locale,
+        birthDate: body.birthDate,
+        emailVerifiedAt,
+        privacyConsentVersion: PRIVACY_NOTICE_VERSION,
+        privacyConsentAt: Date.now(),
       });
     } catch (e) {
       if (isUniqueViolation(e, 'nickname')) fail(409, 'nickname_taken', 'nickname already in use');
@@ -68,16 +185,13 @@ export const authRoutes = new Hono<AppEnv>()
       if (isUniqueViolation(e, 'email')) fail(409, 'email_taken', 'email already registered');
       throw e;
     }
+    // The proof is single-use. It survives a failed insert (e.g. a nickname race) so the member can retry.
+    if (body.emailVerificationToken) await db.delete(ev).where(eq(ev.email, body.email));
     const grant = Number(c.env.SIGNUP_GRANT);
     if (grant > 0) {
       await applyLedger(c.env.DB, { userId: id, type: 'signup_grant', amount: grant, idempotencyKey: `signup:${id}`, memo: 'welcome chips' });
     }
-    await sendMessages(db, {
-      userIds: [id],
-      category: 'system',
-      title: 'JC ROYAL에 오신 것을 환영합니다',
-      body: `가입 축하 가상 칩 ${grant.toLocaleString('en-US')}개가 지급되었습니다. 모든 칩은 현금 가치가 없는 플레이 전용 가상 칩입니다.`,
-    });
+    await sendMessages(db, { userIds: [id], category: 'system', ...notices(body.locale).welcome(grant) });
     await createSession(c, id, 'user');
     return c.json(await loadMe(c, id), 201);
   })
@@ -99,14 +213,22 @@ export const authRoutes = new Hono<AppEnv>()
   .post('/password-reset/request', async (c) => {
     const body = await parseBody(c, ResetRequestSchema);
     await rateLimit(c, `reset:${clientIp(c)}`, 5, 60 * 60 * 1000, { perIp: true });
+    // Per-address cap, applied whether or not the account exists, so nobody can flood an inbox.
+    await rateLimit(c, `reset-email:${body.email}`, 3, 60 * 60 * 1000);
     const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.email, body.email), eq(schema.users.status, 'active')) });
     let devToken: string | undefined;
     if (u) {
       const token = randomToken();
       await c.var.db.insert(schema.passwordResets).values({ tokenHash: await sha256(token), userId: u.id, expiresAt: Date.now() + 30 * 60 * 1000 });
-      // No mail provider is configured in this project. Outside production the
-      // token is returned so the flow can be exercised; in production an admin
-      // issues the link from the admin console (see docs/ADMIN_SECURITY.md).
+      if (mailEnabled(c.env)) {
+        const origin = c.env.APP_ORIGIN!;
+        const mail = passwordResetMail({ locale: u.locale, nickname: u.nickname, link: `${origin}/reset?token=${encodeURIComponent(token)}`, origin, minutes: 30 });
+        // Sent after the response so its latency does not reveal whether the account exists.
+        c.executionCtx.waitUntil(sendMail(c.env, { to: u.email, ...mail }).catch((e) => console.error('password reset mail failed', e)));
+      }
+      // Without a mail provider an admin issues the link from the admin console
+      // (docs/ADMIN_SECURITY.md). Outside production the token is also returned
+      // so the flow can be exercised.
       if (c.env.ENVIRONMENT !== 'production') devToken = token;
     }
     return c.json({ ok: true, ...(devToken ? { devToken } : {}) });
@@ -200,7 +322,7 @@ export const authRoutes = new Hono<AppEnv>()
     await db.batch([
       db
         .update(schema.users)
-        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', updatedAt: Date.now() })
+        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
     ]);

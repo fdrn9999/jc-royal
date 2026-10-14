@@ -4,14 +4,69 @@ import { SUPPORTED_MAX_SEATS } from './table';
 export const NICKNAME_RE = /^[\p{L}\p{N}_]{2,16}$/u;
 
 export const EmailSchema = z.string().trim().toLowerCase().email().max(254);
-export const PasswordSchema = z.string().min(8).max(128);
+/** New-password policy. The API enforces it and the web forms show it as a live checklist. */
+export const PASSWORD_RULES = [
+  { id: 'length', test: (p: string) => p.length >= 8 },
+  { id: 'upper', test: (p: string) => /[A-Z]/.test(p) },
+  { id: 'lower', test: (p: string) => /[a-z]/.test(p) },
+  { id: 'digit', test: (p: string) => /[0-9]/.test(p) },
+  { id: 'special', test: (p: string) => /[!-\/:-@\[-`{-~]/.test(p) },
+] as const;
+export const passwordOk = (p: string) => PASSWORD_RULES.every((r) => r.test(p));
+export const PasswordSchema = z.string().max(128).refine(passwordOk, 'password must have 8+ characters with upper, lower, digit and symbol');
 export const NicknameSchema = z.string().trim().regex(NICKNAME_RE);
+
+export const LocaleSchema = z.enum(['ko', 'en']);
+/** Version of the signup privacy notice. Bump it when the notice text changes; each signup stores the version it accepted. */
+export const PRIVACY_NOTICE_VERSION = '2026-10-14';
+
+/** Youngest age (full years) allowed to sign up; matches the "14 or older" agreement. */
+export const MIN_SIGNUP_AGE = 14;
+/** YYYY-MM-DD of a Date in UTC (the API's notion of "today"). */
+export const isoDate = (d: Date = new Date()) => d.toISOString().slice(0, 10);
+/** Full years between two YYYY-MM-DD dates. */
+export function ageOn(birthDate: string, today: string): number {
+  const [by, bm, bd] = birthDate.split('-').map(Number) as [number, number, number];
+  const [ty, tm, td] = today.split('-').map(Number) as [number, number, number];
+  return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0);
+}
+const realDate = (s: string) => {
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && isoDate(d) === s;
+};
+export const BirthDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(realDate, 'not a calendar date')
+  // One day of slack for members whose local date is already ahead of UTC.
+  .refine((s) => s >= '1900-01-01' && s <= isoDate(new Date(Date.now() + 86_400_000)), 'out of range');
 
 export const RegisterSchema = z.object({
   email: EmailSchema,
   password: PasswordSchema,
   nickname: NicknameSchema,
+  birthDate: BirthDateSchema,
+  /** Account language: used for mail and system messages, and shown to admins. */
+  locale: LocaleSchema.default('ko'),
+  /** Required notices, each accepted explicitly. */
+  agreements: z.object({ age14: z.literal(true), privacy: z.literal(true) }),
+  /** Proof from /email-verification/confirm. Required while sign-up email verification is on. */
+  emailVerificationToken: z.string().min(20).max(200).optional(),
 });
+export const EmailVerificationRequestSchema = z.object({ email: EmailSchema, locale: LocaleSchema.default('ko') });
+export const EmailVerificationConfirmSchema = z.object({ email: EmailSchema, code: z.string().regex(/^\d{6}$/) });
+export interface SignupOptionsDto {
+  /** True when sign-up needs a confirmed email code (mail is configured, or outside production). */
+  emailVerification: boolean;
+  privacyNoticeVersion: string;
+}
+export interface EmailVerificationSentDto {
+  ok: true;
+  expiresInMinutes: number;
+  resendAfterSeconds: number;
+  /** Outside production only, so the flow works without a mail provider. */
+  devCode?: string;
+}
 export const LoginSchema = z.object({ email: EmailSchema, password: z.string().min(1).max(128) });
 export const UpdateProfileSchema = z.object({
   nickname: NicknameSchema.optional(),
@@ -22,7 +77,7 @@ export const UpdateProfileSchema = z.object({
     .refine((u) => u.startsWith('https://'), 'https only')
     .nullable()
     .optional(),
-  locale: z.enum(['ko', 'en']).optional(),
+  locale: LocaleSchema.optional(),
 });
 export const ChangePasswordSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: PasswordSchema });
 export const ResetRequestSchema = z.object({ email: EmailSchema });

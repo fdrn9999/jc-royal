@@ -20,7 +20,10 @@
 
 - 회원 정지·해제, 권한 변경(슈퍼관리자만)
 - 가상 칩 지급·차감(멱등 키, 음수 잔액 불가)
-- 비밀번호 재설정 링크 발급
+- 비밀번호 재설정 링크 발급(자기 계정은 불가, 비밀번호 변경 사용)
+- 회원 정보 CSV 내보내기(`user.export` 감사 기록)
+
+대상이 관리자(ADMIN·SUPER_ADMIN)일 때 정지·해제, 칩 조정, 재설정 링크 발급은 슈퍼관리자만 할 수 있다. 재설정 링크는 계정을 넘겨받을 수 있는 토큰이기 때문이다.
 - 테이블 종료(진행 중 핸드가 끝난 뒤 전원 환급)
 - 종료된 핸드의 전체 카드 열람(`hand.view_sensitive` 감사 기록)
 - 정합성 이벤트 해결 처리
@@ -30,13 +33,21 @@
 - 진행 중인 핸드의 홀카드, 덱, 시드는 관리자 실시간 상태에도 포함하지 않는다. 테스트로 검증했다.
 - 모든 카드 정보는 핸드가 끝나 D1에 기록된 뒤에만, 위 재확인을 거쳐 열람할 수 있다.
 
+## 회원 정보 내보내기
+
+- 회원 목록에서 체크한 회원(한 번에 최대 1,000명)만 CSV로 내려받는다. 표시된 회원 전체 선택을 지원한다.
+- 담기는 항목: ID, 이메일, 닉네임, 계정 언어, 권한, 상태, 잔액, 가입 시각, 생년월일, 이메일 인증 시각, 개인정보 동의 버전·시각, 정지 사유. 비밀번호 해시와 세션 정보는 담지 않는다.
+- 근거: 가입 때 받는 개인정보 수집·이용 동의(`apps/web/src/legal/privacyNotice.ts`)의 "3. 관리자 조회와 파일 내보내기" 항목에 근거를 적었다. 문구를 바꾸면 `PRIVACY_NOTICE_VERSION`을 올린다.
+- 스프레드시트 수식 실행을 막기 위해 `=`·`+`·`-`·`@`로 시작하는 칸 앞에 `'`를 붙인다. 파일은 UTF-8(BOM)이라 Excel에서 한글이 깨지지 않는다.
+- 내보낸 파일은 목적을 달성하면 바로 삭제한다. 모든 내보내기는 행위자, 대상 회원 ID, 건수와 함께 감사 로그에 남는다.
+
 ## 감사 로그
 
 `admin_audit_log`에 행위자, 조치, 대상, 상세(JSON), IP, 시각을 남긴다. 기록하는 조치는 다음과 같다.
 
 ```
 admin.bootstrap, admin.login, admin.login.failed, admin.reauth, admin.reauth.failed,
-user.suspend, user.unsuspend, user.role, user.chips, user.reset_link,
+user.suspend, user.unsuspend, user.role, user.chips, user.reset_link, user.export,
 table.create, table.update, table.close, hand.view_sensitive,
 reconcile.run, reconcile.resolve, board.notice.create/update,
 board.post.status, board.comment.status, message.send
@@ -53,7 +64,7 @@ board.post.status, board.comment.status, message.send
 ## 비밀번호 분실
 
 - **관리자**: 다른 슈퍼관리자가 "재설정 링크 발급"을 한다.
-- **유일한 슈퍼관리자**: D1 콘솔에서 직접 조치해야 한다. 메일 서비스는 연동되어 있지 않다.
+- **유일한 슈퍼관리자**: 재설정 메일이 켜져 있으면 사용자 사이트의 비밀번호 찾기를 쓴다(`docs/DEPLOYMENT.md` 2절). 꺼져 있으면 D1 콘솔에서 직접 조치해야 한다.
 
 ## 운영 권장 사항
 

@@ -2,6 +2,7 @@ import { sound, type AudioSettings } from '@jc/audio';
 import type { ChatMessage, TableView } from '@jc/types';
 import { Button, Field, formatChips, Modal, THEMES } from '@jc/ui';
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { setPrefs, usePrefs } from '../lib/prefs';
 
@@ -122,7 +123,8 @@ function useAudioSettings(): AudioSettings {
 }
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { t, locale, setLocale } = useI18n();
+  const { t, locale } = useI18n();
+  const { chooseLocale } = useAuth();
   const prefs = usePrefs();
   const audio = useAudioSettings();
   return (
@@ -176,7 +178,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         <div className="jc-divider" />
         <Field label={t('settings.language')}>
           {(id) => (
-            <select id={id} value={locale} onChange={(e) => setLocale(e.target.value as 'ko' | 'en')} className="h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-base sm:text-sm">
+            <select id={id} value={locale} onChange={(e) => chooseLocale(e.target.value as 'ko' | 'en')} className="h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-base sm:text-sm">
               <option value="ko">한국어</option>
               <option value="en">English</option>
             </select>
