@@ -1,9 +1,10 @@
 
-Running 4 tests using 1 worker
+Running 5 tests using 1 worker
 
-  ✓  1 [desktop] › tests\e2e\admin.spec.ts:6:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified (5.2s)
-  ✓  2 [desktop] › tests\e2e\board.spec.ts:4:1 › board: write, comment, edit own content; others cannot edit (4.3s)
-  ✓  3 [desktop] › tests\e2e\game.spec.ts:4:1 › two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund (19.3s)
-  ✓  4 [mobile] › tests\e2e\mobile.spec.ts:4:1 › mobile: lobby → seat → playable action bar, no horizontal overflow (7.5s)
+  ✓  1 [desktop] › tests\e2e\admin.spec.ts:6:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified (5.7s)
+  ✓  2 [desktop] › tests\e2e\board.spec.ts:4:1 › board: write, comment, edit own content; others cannot edit (4.7s)
+  ✓  3 [desktop] › tests\e2e\game.spec.ts:4:1 › two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund (19.7s)
+  ✓  4 [desktop] › tests\e2e\register-view.spec.ts:3:1 › register: email = local part + domain picker with direct input (1.3s)
+  ✓  5 [mobile] › tests\e2e\mobile.spec.ts:4:1 › mobile: lobby → seat → playable action bar, no horizontal overflow (7.8s)
 
-  4 passed (51.4s)
+  5 passed (54.8s)
