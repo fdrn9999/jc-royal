@@ -60,6 +60,28 @@ describe('blinds, positions and betting rules', () => {
     expect(h.actorId()).toBe('p1');
   });
 
+  it('posts the small blind at the first dealt seat after the button (the button itself heads-up), the big blind next', () => {
+    // Play statistics name positions by seat order from the small blind, which relies on this.
+    for (let n = 2; n <= 9; n++) {
+      const layouts = [Array.from({ length: n }, (_, i) => i), Array.from({ length: n }, (_, i) => 9 - n + i), Array.from({ length: n }, (_, i) => Math.floor((i * 9) / n))];
+      for (const dealt of layouts) {
+        const after = (s: number) => dealt[(dealt.indexOf(s) + 1) % n]!;
+        for (const prev of [null, ...Array.from({ length: 9 }, (_, i) => i)]) {
+          const button = nextButtonSeat(prev, dealt, 9);
+          const h = HandEngine.start({
+            handId: `blinds-${n}-${button}`,
+            rules: { maxSeats: 9, smallBlind: 5, bigBlind: 10, turnMs: 20_000 },
+            seats: dealt.map((seatIndex, i) => ({ playerId: `p${i}`, seatIndex, stack: 1000, displayName: `P${i}` })),
+            buttonSeat: button,
+            now: 1_000,
+          });
+          const sb = n === 2 ? button : after(button);
+          expect(h.handView(), `${n} players at ${dealt}, button ${button}`).toMatchObject({ buttonSeat: button, sbSeat: sb, bbSeat: after(sb) });
+        }
+      }
+    }
+  });
+
   it('minimum raise is one big blind over the current bet, then the size of the last raise', async () => {
     const h = start([1000, 1000, 1000], { button: 0 });
     expect(h.legalOptions('p0')).toContainEqual({ type: 'raise', min: 20, max: 1000 });

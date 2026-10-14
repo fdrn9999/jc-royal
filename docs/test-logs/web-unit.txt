@@ -1,8 +1,7 @@
 > pnpm --filter @jc/web test   (실행: pnpm test, 2026-10-15)
 
-RUN  v4.1.11 <repo>/apps/web
- Test Files  3 passed (3)
-      Tests  54 passed (54)
-   Start at  03:49:12
-   Duration  1.08s (transform 585ms, setup 0ms, import 1.17s, tests 475ms, environment 0ms)
-Done
+ RUN  v4.1.11 <repo>/apps/web
+ Test Files  5 passed (5)
+      Tests  76 passed (76)
+   Start at  07:49:30
+   Duration  1.10s (transform 727ms, setup 0ms, import 1.44s, tests 513ms, environment 1ms)

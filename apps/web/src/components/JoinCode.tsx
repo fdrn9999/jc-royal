@@ -3,8 +3,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useI18n } from '../lib/i18n';
 
-/** Asks for a private table's join code, then opens the table to sit. The table room checks the code. */
-export function JoinCodeModal({ table, onClose }: { table: { id: string; name: string } | null; onClose: () => void }) {
+/**
+ * Asks for a private table's join code, then opens the table to sit (or, for a full table, to join its waitlist).
+ * The table room checks the code.
+ */
+export function JoinCodeModal({ table, then = 'sit', onClose }: { table: { id: string; name: string } | null; then?: 'sit' | 'wait'; onClose: () => void }) {
   const { t } = useI18n();
   const nav = useNavigate();
   const [code, setCode] = useState('');
@@ -19,8 +22,8 @@ export function JoinCodeModal({ table, onClose }: { table: { id: string; name: s
           <Button variant="ghost" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={code.trim().length < 4} onClick={() => table && nav(`/table/${table.id}?sit=1&code=${encodeURIComponent(code.trim())}`)} data-testid="join-code-go">
-            {t('lobby.join')}
+          <Button disabled={code.trim().length < 4} onClick={() => table && nav(`/table/${table.id}?${then}=1&code=${encodeURIComponent(code.trim())}`)} data-testid="join-code-go">
+            {then === 'wait' ? t('lobby.waitJoin') : t('lobby.join')}
           </Button>
         </>
       }

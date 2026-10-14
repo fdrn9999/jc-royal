@@ -129,7 +129,7 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 | 착석·일어서기 | 각각 원장 1 + `users` 1 + `table_sessions` 1(+ 인덱스) | 측정(원장 = 바이인 + 잔액 있는 환급) |
 | WS 연결 1회 | D1 `rate_limits` upsert 1행 | 측정(연결 수와 정확히 같음). 재연결이 잦으면 그만큼 쓴다 |
 | 로그인한 회원의 요청 | 세션 만료 갱신 최대 1분에 1행 | 코드(`apps/api/src/lib/session.ts`) |
-| 로비 목록 1회 | Workers 요청 1 + D1 읽기: 닫히지 않은 테이블 전부(+ 방장 조인) + 세션·회원 조회. 로비 화면은 5초마다 다시 부른다 | 코드(`apps/web/src/pages/Lobby.tsx`) |
+| 로비 목록 1회 | Workers 요청 1 + D1 읽기: 열린·닫는 중 테이블 전부(`tables_status_idx` 검색, + 방장 조인) + 세션·회원 조회. 로비 화면은 보이는 동안만 5초마다 다시 부른다(숨긴 탭은 멈춤, 요청이 겹치지 않음) | 코드(`apps/web/src/pages/Lobby.tsx`, `apps/web/src/lib/lobby.ts`) |
 | 앱 핑 | 웹 클라이언트가 테이블 소켓마다 25초에 한 번 `{t:'ping'}`, DO가 `pong` 응답 | 코드(`apps/web/src/game/useTableSocket.ts`, `room.ts`) |
 
 ### 대략적인 환산
@@ -144,7 +144,7 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 | D1 쓰기 | 핸드당 약 20행(새 행 7 + UPDATE 약 3 + 인덱스, 추정) × 60 = **약 1,200행** | 약 86만 행 | Paid 월 5,000만 → 상시 테이블 약 58개. 무료 일 10만 → 테이블 하루 약 83시간 |
 | 송신 데이터 | 280 × 2.2 KB × 60 ≈ 37 MB(소켓 1개당 약 4.6 MB) | 약 27 GB | DO 송신은 과금 없음. 모바일 사용자의 데이터 사용량에 영향 |
 
-**로비 폴링**: 로비를 연 사람 1명이 시간당 Workers 요청 720회와 D1 읽기 720 × (테이블 수 + 약 2)행을 쓴다. 100명이 테이블 50개짜리 로비를 열어 두면 시간당 요청 7.2만, D1 읽기 약 375만 행이다. 무료 플랜의 일 요청 10만은 약 1.4시간 만에 바닥난다. Paid에서는 월 1,000만 요청 포함분을 약 6일에 다 쓰고 이후 월 약 $13이 든다(읽기는 포함량 안).
+**로비 폴링**: 로비를 **화면에 띄워 둔** 사람 1명이 시간당 최대 Workers 요청 720회와 D1 읽기 720 × (테이블 수 + 약 2)행을 쓴다. 탭을 숨기거나 다른 앱으로 가 있는 동안은 0회이고, 돌아오면 1회 즉시 부른다. 100명이 테이블 50개짜리 로비를 계속 보고 있으면 시간당 요청 7.2만, D1 읽기 약 375만 행이다. 무료 플랜의 일 요청 10만은 약 1.4시간 만에 바닥난다. Paid에서는 월 1,000만 요청 포함분을 약 6일에 다 쓰고 이후 월 약 $13이 든다(읽기는 포함량 안). 실제로는 로비를 숨겨 둔 시간만큼 준다.
 
 **정리**
 - 운영은 Workers Paid를 쓴다. PBKDF2 10만 회 해싱이 무료 플랜의 호출당 CPU 10 ms를 넘을 수 있고, 무료 한도를 넘으면 요청이 실패한다.
@@ -152,7 +152,7 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 - **앱 핑 비용(권고)**: 수신 메시지라 요청에 잡히고, 잠든 DO를 깨워 실행 시간이 과금된다. `state.setWebSocketAutoResponse`로 고정 ping/pong 문자열에 응답하게 하면 DO를 깨우지 않고 실행 시간도 과금되지 않는다(공식 문서). 클라이언트는 `pong`을 받아도 아무것도 하지 않으므로(`useTableSocket.ts`) 요청·응답 문자열만 맞추면 된다. 게임 Worker 동작을 바꾸는 일이라 이번 작업에서는 권고만 한다.
 - **WS 연결마다 D1 쓰기**: 연결 레이트 리밋이 D1 `rate_limits`에 쓴다. 재연결이 많아지면 Workers Rate Limiting 바인딩으로 옮기는 것을 검토한다(`docs/STATUS.md` 알려진 문제 4).
 - **상태 메시지 크기**: 변화마다 화면 전체 상태(약 2 KB)를 보낸다. DO 과금은 없지만 모바일 데이터에 영향을 준다. 차분 전송은 별도 설계가 필요하다.
-- **로비**: 숨긴 탭에서 폴링을 멈추면 요청이 크게 준다.
+- **로비**: 숨긴 탭에서는 폴링을 멈춘다(적용됨). 보고 있는 로비 수가 많아지면 폴링 간격을 늘리거나 목록 응답을 짧게 캐시하는 것을 검토한다.
 
 **외부 유료 서비스**: 필요 없다.
 
@@ -161,7 +161,7 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 
 ## 6. 운영 점검표
 
-- [ ] D1 `database_id` 입력, 마이그레이션 적용(`0000_init`, `0001_community`, `0002_comment_replies`, `0003_academy`, `0004_signup_profile`, `0005_social`, `0006_social_safety`, `0007_social_play`, `0008_session_remember`, `0009_dm_seq`). GitHub Actions 배포는 배포 전에 자동 적용한다
+- [ ] D1 `database_id` 입력, 마이그레이션 적용(`0000_init`, `0001_community`, `0002_comment_replies`, `0003_academy`, `0004_signup_profile`, `0005_social`, `0006_social_safety`, `0007_social_play`, `0008_session_remember`, `0009_dm_seq`, `0010_hand_stats`). GitHub Actions 배포는 배포 전에 자동 적용한다. `0010_hand_stats`는 `hand_players`에 통계 열 5개와 부분 인덱스를 더하고, 같은 파일 안에서 기존 핸드 전체의 통계를 한 번 채운다(이후는 게임 워커가 핸드 기록 직후 채움). 기록 수에 비례해 실행 시간이 늘어나므로 운영 적용 전 `SELECT COUNT(*) FROM hand_players`로 규모를 확인한다
 - [ ] 두 Worker에 같은 `INTERNAL_SECRET`, 최초 관리자 생성 후 `ADMIN_BOOTSTRAP_TOKEN` 삭제
 - [ ] `ALLOWED_ORIGINS`·`ADMIN_ORIGIN`·`APP_ORIGIN`이 실제 운영 주소와 일치
 - [ ] 관리자 콘솔에서 테이블 생성(운영 DB에는 개발용 시드 테이블을 넣지 않는다)

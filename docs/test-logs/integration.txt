@@ -3,7 +3,7 @@
 
  RUN  v4.1.11 <repo>
 
- Test Files  10 passed (10)
-      Tests  87 passed (87)
-   Start at  03:49:23
-   Duration  128.24s (transform 166ms, setup 0ms, import 417ms, tests 114.20s, environment 1ms)
+ Test Files  14 passed (14)
+      Tests  105 passed (105)
+   Start at  07:49:44
+   Duration  199.02s (transform 311ms, setup 0ms, import 1.58s, tests 181.94s, environment 1ms)

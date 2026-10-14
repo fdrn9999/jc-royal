@@ -1,3 +1,3 @@
 > pnpm check:bundle   (node tests/bundle-check.mjs, 2026-10-15)
-entry index-DRKJLrJs.js: 633 KB; engine in: routes-BR1vi0S3.js
+entry index-0a8-9kk5.js + auth-CewpPbMc.js: 635 KB; engine in: routes-Bu47a3QM.js
 ✓ bundle guard passed

@@ -13,7 +13,7 @@ import { useI18n } from '../lib/i18n';
 const MIN_BB = [10, 20, 50, 100] as const;
 const MAX_BB = [50, 100, 200] as const;
 
-function Choice<T extends string | number>({ label, value, options, onChange, render, testid }: { label: string; value: T; options: readonly T[]; onChange: (v: T) => void; render: (v: T) => ReactNode; testid: string }) {
+export function Choice<T extends string | number>({ label, value, options, onChange, render, testid }: { label: string; value: T; options: readonly T[]; onChange: (v: T) => void; render: (v: T) => ReactNode; testid: string }) {
   return (
     <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-2">
       {options.map((o) => (

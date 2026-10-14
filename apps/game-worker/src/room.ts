@@ -13,6 +13,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { HandEngine, nextButtonSeat, type PersistedHand } from '@jc/poker-engine';
 import {
+  AUTO_REBUY_MAX_TIMES,
   ClientMessageSchema,
   MEMBER_IDLE_CLOSE_MS,
   PLAYER_REPORT_WINDOW_MS,
@@ -20,12 +21,25 @@ import {
   type ClientMessage,
   type ErrorCode,
   type MaxSeats,
+  type NoticeCode,
   type SeatView,
   type ServerMessage,
   type TableCue,
   type TableView,
 } from '@jc/types';
-import { buyIn, buyInCommitted, cashOut, loadTable, markTableClosed, publishLiveStats, recordHand, type TableRow } from './settlement';
+import {
+  buyIn,
+  buyInCommitted,
+  cashOut,
+  committedTopUp,
+  loadTable,
+  markTableClosed,
+  publishLiveStats,
+  recordHand,
+  topUp,
+  walletBalance,
+  type TableRow,
+} from './settlement';
 
 export interface Env {
   DB: D1Database;
@@ -60,7 +74,19 @@ interface SeatState {
   leaveAfterHand: boolean;
   timeouts: number;
   joinedAt: number;
+  /**
+   * A top-up in flight. 'queued' waits for the hand the player is in to end (nothing taken yet); 'debiting' is being
+   * written to D1, and after a restart or a failed call the ledger key decides whether the chips arrived. 'debiting'
+   * is only ever set for a key the ledger did not have yet, so a committed key found here has not been counted.
+   * `auto` marks an automatic rebuy.
+   */
+  topUp?: { key: string; amount: number; state: 'queued' | 'debiting'; auto?: boolean } | null;
+  /** Automatic rebuy after busting, turned on by the player for this seat only: chips per rebuy, total limit, used. */
+  autoRebuy?: { amount: number; cap: number; spent: number } | null;
 }
+
+/** A word for one player about a top-up or rebuy the room carried out on its own. */
+type Notice = { userId: string; code: NoticeCode; amount?: number };
 
 interface RoomState {
   v: 1;
@@ -269,6 +295,8 @@ export class TableRoom extends DurableObject<Env> {
             return Response.json({ ok: true, closed: this.room.closed, handInProgress: !!this.hand });
           case 'report-context':
             return Response.json(this.reportContext(url.searchParams.get('target') ?? '', url.searchParams.get('reporter') ?? ''));
+          case 'seat-check':
+            return Response.json(this.seatCheck(url.searchParams.get('user') ?? ''));
           default:
             return new Response('not found', { status: 404 });
         }
@@ -401,6 +429,27 @@ export class TableRoom extends DurableObject<Env> {
         await this.leave(a.userId, msg.reqId);
         this.send(ws, { t: 'ack', reqId: msg.reqId });
         return;
+      case 'topUp':
+        if (this.room.recentReqs.includes(msg.reqId)) return this.send(ws, { t: 'ack', reqId: msg.reqId });
+        await this.topUp(a.userId, msg.amount, msg.reqId);
+        this.send(ws, { t: 'ack', reqId: msg.reqId });
+        return;
+      case 'cancelTopUp': {
+        const seat = this.seatedSeat(a.userId);
+        if (seat.topUp?.state !== 'queued') return;
+        seat.topUp = null;
+        await this.save();
+        this.broadcast();
+        return;
+      }
+      case 'autoRebuy':
+        if (this.room.recentReqs.includes(msg.reqId)) return this.send(ws, { t: 'ack', reqId: msg.reqId });
+        this.setAutoRebuy(a.userId, msg);
+        this.remember(msg.reqId);
+        await this.save();
+        this.broadcast();
+        this.send(ws, { t: 'ack', reqId: msg.reqId });
+        return;
       case 'sitOut':
       case 'sitIn': {
         const i = this.seatIndexOf(a.userId);
@@ -436,20 +485,48 @@ export class TableRoom extends DurableObject<Env> {
     this.room.recentReqs = [...this.room.recentReqs, reqId].slice(-200);
   }
 
-  private async sit(a: Attachment, seatIndex: number, amount: number, reqId: string) {
+  /** Seat checks shared by `sit` and quick play's `seatCheck`: the table takes entries and this seat is free. */
+  private assertSeatFree(userId: string, codeOk: boolean, seatIndex: number) {
     const t = this.table!;
     if (this.room.closing || this.room.closed || t.status !== 'open') throw new CommandError('table_closed', 'table is closed');
     if (t.entryBlocked) throw new CommandError('entry_blocked', 'new entries are blocked');
-    if (!a.codeOk) throw new CommandError('forbidden', 'join code required');
+    if (!codeOk) throw new CommandError('forbidden', 'join code required');
     if (seatIndex < 0 || seatIndex >= t.maxSeats) throw new CommandError('bad_request', 'invalid seat');
-    if (this.seatIndexOf(a.userId) !== null) throw new CommandError('already_seated', 'already seated');
+    if (this.seatIndexOf(userId) !== null) throw new CommandError('already_seated', 'already seated');
     if (this.room.seats[seatIndex]) throw new CommandError('seat_taken', 'seat taken');
-    if (!Number.isSafeInteger(amount) || amount < t.minBuyIn || amount > t.maxBuyIn) throw new CommandError('buyin_out_of_range', 'buy-in out of range');
+  }
+
+  /** A held reservation or a waitlist that covers every open seat keeps others out. */
+  private assertNoWaitlistPriority(userId: string) {
     const res = this.room.reservation;
-    if (res && res.until > Date.now() && res.userId !== a.userId) throw new CommandError('seat_taken', 'a seat is reserved for the waitlist');
-    if (!res && this.room.waitlist.length > 0 && this.room.waitlist[0]!.userId !== a.userId && this.openSeats() <= this.room.waitlist.length) {
+    if (res && res.until > Date.now() && res.userId !== userId) throw new CommandError('seat_taken', 'a seat is reserved for the waitlist');
+    if (!res && this.room.waitlist.length > 0 && this.room.waitlist[0]!.userId !== userId && this.openSeats() <= this.room.waitlist.length) {
       throw new CommandError('seat_taken', 'waitlist has priority');
     }
+  }
+
+  /**
+   * Quick play asks before sending a player here: the first free seat `userId` could take right now, or why not.
+   * The wallet is not checked (the api compares it with the table's minimum) and nothing is held: `sit` re-checks.
+   */
+  private seatCheck(userId: string): { ok: true; seatIndex: number } | { ok: false; code: ErrorCode } {
+    const free = this.room.seats.findIndex((s, i) => !s && i < this.table!.maxSeats);
+    try {
+      if (free < 0) throw new CommandError('seat_taken', 'no free seat');
+      this.assertSeatFree(userId, !this.table!.isPrivate, free);
+      this.assertNoWaitlistPriority(userId);
+      return { ok: true, seatIndex: free };
+    } catch (e) {
+      if (e instanceof CommandError) return { ok: false, code: e.code };
+      throw e;
+    }
+  }
+
+  private async sit(a: Attachment, seatIndex: number, amount: number, reqId: string) {
+    const t = this.table!;
+    this.assertSeatFree(a.userId, a.codeOk, seatIndex);
+    if (!Number.isSafeInteger(amount) || amount < t.minBuyIn || amount > t.maxBuyIn) throw new CommandError('buyin_out_of_range', 'buy-in out of range');
+    this.assertNoWaitlistPriority(a.userId);
 
     const tableSessionId = crypto.randomUUID();
     const seat: SeatState = {
@@ -488,7 +565,7 @@ export class TableRoom extends DurableObject<Env> {
     return this.room.seats.filter((s) => !s).length;
   }
 
-  /** On restart: confirm or roll back seats whose buy-in outcome is unknown, finish cash-outs. */
+  /** On restart: confirm or roll back seats whose buy-in or top-up outcome is unknown, finish cash-outs. */
   private async recoverPendingSeats() {
     let changed = false;
     for (let i = 0; i < this.room.seats.length; i++) {
@@ -499,10 +576,13 @@ export class TableRoom extends DurableObject<Env> {
         if (ok) s.phase = 'seated';
         else this.room.seats[i] = null;
         changed = true;
-      } else if (s.phase === 'cashing' && !this.handHasPlayer(s.userId)) {
-        await cashOut(this.env.DB, { userId: s.userId, tableId: this.tableId!, tableSessionId: s.tableSessionId, amount: s.stack });
-        this.room.seats[i] = null;
-        changed = true;
+      } else if (!this.handHasPlayer(s.userId)) {
+        if (await this.resolveTopUp(s)) changed = true;
+        if (s.phase === 'cashing') {
+          await cashOut(this.env.DB, { userId: s.userId, tableId: this.tableId!, tableSessionId: s.tableSessionId, amount: s.stack });
+          this.room.seats[i] = null;
+          changed = true;
+        }
       }
     }
     if (changed) await this.save();
@@ -543,6 +623,10 @@ export class TableRoom extends DurableObject<Env> {
   private async standUp(i: number) {
     const seat = this.room.seats[i];
     if (!seat) return;
+    // Chips from a top-up whose outcome is unknown are counted first; one still waiting for a hand is simply
+    // dropped, since nothing was taken for it.
+    await this.resolveTopUp(seat);
+    seat.topUp = null;
     seat.phase = 'cashing';
     await this.save();
     await cashOut(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: seat.stack });
@@ -552,6 +636,167 @@ export class TableRoom extends DurableObject<Env> {
       this.room.reservation = { userId: head.userId, nickname: head.nickname, seatIndex: i, until: Date.now() + RESERVATION_MS };
     }
     await this.save();
+  }
+
+  // ------------------------------------------------------------------ top-ups & automatic rebuy
+
+  private seatedSeat(userId: string): SeatState {
+    const i = this.seatIndexOf(userId);
+    const seat = i === null ? null : this.room.seats[i]!;
+    if (!seat || seat.phase !== 'seated') throw new CommandError('forbidden', 'not seated');
+    return seat;
+  }
+
+  /**
+   * Adds chips from the wallet to a seated player's stack. As when sitting down, the stack afterwards must be within
+   * the table's buy-in range. While the player is in a hand it waits, taking nothing, and is applied when the hand
+   * ends, so a stack never grows mid-hand; otherwise it applies at once.
+   */
+  private async topUp(userId: string, amount: number, reqId: string) {
+    const t = this.table!;
+    const seat = this.seatedSeat(userId);
+    if (this.room.closing || this.room.closed || t.status !== 'open') throw new CommandError('table_closed', 'table is closed');
+    if (seat.leaveAfterHand) throw new CommandError('forbidden', 'leaving after this hand');
+    const inHand = this.handHasPlayer(userId);
+    // Commands run one at a time, so a top-up still marked as debiting here is one whose D1 call failed: settle it
+    // first (between hands only — chips never join a stack mid-hand).
+    if (seat.topUp?.state === 'debiting') {
+      if (inHand) throw new CommandError('conflict', 'a top-up is being applied');
+      await this.resolveTopUp(seat);
+      await this.save();
+    }
+    const key = `topup:${seat.tableSessionId}:${reqId}`;
+    // A request the room no longer remembers (only the last 200 ids are kept) but the ledger has: already counted.
+    if ((await committedTopUp(this.env.DB, key)) !== null) {
+      this.remember(reqId);
+      await this.save();
+      return;
+    }
+    const stack = inHand ? (this.hand!.finalStacks().get(userId) ?? seat.stack) : seat.stack;
+    if (stack + amount < t.minBuyIn || stack + amount > t.maxBuyIn) throw new CommandError('buyin_out_of_range', 'the stack would leave the buy-in range');
+    if (inHand) {
+      if ((await walletBalance(this.env.DB, userId)) < amount) throw new CommandError('insufficient_balance', 'not enough chips in wallet');
+      // A newer request replaces the one waiting.
+      seat.topUp = { key, amount, state: 'queued' };
+    } else if ((await this.debitTopUp(seat, { key, amount })) === 'insufficient') {
+      throw new CommandError('insufficient_balance', 'not enough chips in wallet');
+    }
+    this.remember(reqId);
+    await this.save();
+    this.broadcast();
+  }
+
+  /**
+   * Takes a top-up's chips from the wallet and adds them to the stack. The seat notes the attempt durably first, so
+   * if the room restarts or the D1 call fails half way, `resolveTopUp` asks the ledger whether the chips moved.
+   * A key the ledger already has was counted when it was committed (here or by `resolveTopUp`), so it is neither
+   * noted nor written again: it is 'duplicate' and adds nothing. Noting it would let `resolveTopUp` count it twice.
+   */
+  private async debitTopUp(seat: SeatState, p: { key: string; amount: number; auto?: boolean }): Promise<'applied' | 'duplicate' | 'insufficient'> {
+    if ((await committedTopUp(this.env.DB, p.key)) !== null) {
+      seat.topUp = null;
+      await this.save();
+      return 'duplicate';
+    }
+    seat.topUp = { ...p, state: 'debiting' };
+    await this.save();
+    const r = await topUp(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: p.amount, key: p.key, memo: p.auto ? 'auto rebuy' : 'top-up' });
+    seat.topUp = null;
+    if (r === 'applied') this.addChips(seat, p.amount, p.auto);
+    await this.save();
+    return r;
+  }
+
+  private addChips(seat: SeatState, amount: number, auto?: boolean) {
+    seat.stack += amount;
+    seat.buyIn += amount;
+    if (auto && seat.autoRebuy) seat.autoRebuy.spent += amount;
+  }
+
+  /**
+   * Settles a top-up whose D1 write may or may not have happened: the ledger decides, so its chips arrive once or not
+   * at all, and as many as the ledger took.
+   */
+  private async resolveTopUp(seat: SeatState): Promise<boolean> {
+    const p = seat.topUp;
+    if (p?.state !== 'debiting') return false;
+    const taken = await committedTopUp(this.env.DB, p.key);
+    if (taken !== null) this.addChips(seat, taken, p.auto);
+    seat.topUp = null;
+    return true;
+  }
+
+  /** Turns automatic rebuy on (only with the player's explicit consent, an amount and a total limit) or off. */
+  private setAutoRebuy(userId: string, msg: Extract<ClientMessage, { t: 'autoRebuy' }>) {
+    const t = this.table!;
+    const seat = this.seatedSeat(userId);
+    if (!msg.on) {
+      seat.autoRebuy = null;
+      return;
+    }
+    const { amount, cap } = msg;
+    if (msg.consent !== true || !amount || !cap) throw new CommandError('bad_request', 'consent, an amount and a limit are required');
+    if (amount < t.minBuyIn || amount > t.maxBuyIn) throw new CommandError('buyin_out_of_range', 'rebuy amount out of range');
+    if (cap < amount || cap > amount * AUTO_REBUY_MAX_TIMES) throw new CommandError('bad_request', 'limit out of range');
+    seat.autoRebuy = { amount, cap, spent: 0 };
+  }
+
+  /**
+   * Between hands: apply the top-ups that waited for the hand to end, then rebuy busted players who turned automatic
+   * rebuy on. Neither takes more than the player chose, and the stack stays within the buy-in range. `handId` is the
+   * hand just finished (one rebuy per hand). A seat whose D1 write fails keeps its state for the next attempt.
+   */
+  private async applyTopUps(handId: string | null): Promise<Notice[]> {
+    const t = this.table!;
+    const notices: Notice[] = [];
+    if (this.room.closing || t.status !== 'open') return notices;
+    for (const s of this.room.seats) {
+      if (!s || s.phase !== 'seated' || this.handHasPlayer(s.userId)) continue;
+      try {
+        if (await this.resolveTopUp(s)) await this.save();
+        const q = s.topUp;
+        if (q?.state === 'queued') {
+          // The hand may have changed the stack: never more than asked, never past the maximum.
+          const amount = Math.min(q.amount, t.maxBuyIn - s.stack);
+          if (s.leaveAfterHand || amount <= 0 || s.stack + amount < t.minBuyIn) {
+            s.topUp = null;
+            await this.save();
+            if (!s.leaveAfterHand) notices.push({ userId: s.userId, code: 'topup_dropped' });
+          } else {
+            const r = await this.debitTopUp(s, { key: q.key, amount });
+            if (r === 'applied') notices.push({ userId: s.userId, code: 'topup_applied', amount });
+            else if (r === 'insufficient') notices.push({ userId: s.userId, code: 'topup_insufficient' });
+          }
+        }
+        const auto = s.autoRebuy;
+        if (auto && s.stack === 0 && !s.leaveAfterHand && handId) {
+          const amount = Math.min(auto.amount, t.maxBuyIn);
+          let stop: NoticeCode | null = null;
+          // (Also when the table's range has since moved past the chosen amount.)
+          if (amount < t.minBuyIn || auto.spent + amount > auto.cap) stop = 'rebuy_cap';
+          else {
+            const r = await this.debitTopUp(s, { key: `rebuy:${s.tableSessionId}:${handId}`, amount, auto: true });
+            if (r === 'applied') notices.push({ userId: s.userId, code: 'rebuy_applied', amount });
+            else if (r === 'insufficient') stop = 'rebuy_insufficient';
+          }
+          if (stop) {
+            // Off for good: the busted player stands up as usual.
+            s.autoRebuy = null;
+            await this.save();
+            notices.push({ userId: s.userId, code: stop });
+          }
+        }
+      } catch (e) {
+        console.error('top-up failed', (e as Error).message);
+      }
+    }
+    return notices;
+  }
+
+  private notify(notices: Notice[]) {
+    for (const n of notices) {
+      for (const ws of this.sockets()) if (this.att(ws).userId === n.userId) this.send(ws, { t: 'notice', code: n.code, ...(n.amount ? { amount: n.amount } : {}) });
+    }
   }
 
   private async action(userId: string, msg: Extract<ClientMessage, { t: 'action' }>) {
@@ -625,6 +870,8 @@ export class TableRoom extends DurableObject<Env> {
     }
     // Results stay visible until the next hand starts.
     this.broadcast(cues);
+    // Top-ups that waited for this hand and automatic rebuys happen before busted players stand up.
+    const notices = await this.applyTopUps(h.handId);
     const left: TableCue[] = [];
     for (let i = 0; i < this.room.seats.length; i++) {
       const s = this.room.seats[i];
@@ -634,7 +881,8 @@ export class TableRoom extends DurableObject<Env> {
         left.push({ kind: 'leave', seatIndex: i });
       }
     }
-    if (left.length) this.broadcast(left);
+    if (left.length || notices.length) this.broadcast(left);
+    this.notify(notices);
     if (this.room.closing) await this.finishCloseIfIdle();
     await this.schedule();
   }
@@ -659,6 +907,8 @@ export class TableRoom extends DurableObject<Env> {
 
   private async startHand() {
     const t = this.table!;
+    // Normally done when the last hand settled; this catches anything a restart or a failed D1 call left behind.
+    this.notify(await this.applyTopUps(this.room.settledHandId));
     const dealt = this.eligibleSeats();
     if (dealt.length < 2 || this.room.closing || t.status !== 'open') {
       this.room.nextHandAt = null;
@@ -862,7 +1112,8 @@ export class TableRoom extends DurableObject<Env> {
         userId: s.userId,
         nickname: s.nickname,
         avatarUrl: s.avatarUrl,
-        stack: hi ? hi.stack : s.stack,
+        // Once the hand is settled the seat holds its final stack plus any top-up made since.
+        stack: hi && !h!.isSettled ? hi.stack : s.stack,
         streetBet: hi?.streetBet ?? 0,
         connected: connected.has(s.userId),
         lastAction: hi?.lastAction ?? null,
@@ -914,6 +1165,8 @@ export class TableRoom extends DurableObject<Env> {
         leaving: isSeated ? this.room.seats[mySeat]!.leaveAfterHand : false,
         inWaitlist: this.room.waitlist.some((w) => w.userId === a.userId),
         canSit,
+        topUpQueued: isSeated && this.room.seats[mySeat]!.topUp?.state === 'queued' ? this.room.seats[mySeat]!.topUp!.amount : null,
+        autoRebuy: isSeated ? (this.room.seats[mySeat]!.autoRebuy ?? null) : null,
       },
     };
   }

@@ -1,20 +1,64 @@
 import type { LobbyTableDto } from '@jc/types';
-import { Badge, Button, Empty, formatChips, Input, Spinner } from '@jc/ui';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Badge, Button, cx, Empty, formatChips, Input, Spinner } from '@jc/ui';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
 import { JoinCodeModal } from '../components/JoinCode';
+import { ANY, QuickPlayPanel, useLobbyFilters } from '../components/QuickPlay';
 import { CreateRoomModal } from '../components/Rooms';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { entryOf, latest, setFavourite, useTablePrefs, type Latest } from '../lib/lobby';
 
-type Filter = 'all' | 'beginner' | 'playing' | 'open' | 'empty' | 'hu' | 'six' | 'nine';
-const FILTERS: Filter[] = ['all', 'beginner', 'playing', 'open', 'empty', 'hu', 'six', 'nine'];
+type Filter = 'all' | 'fav' | 'recent' | 'beginner' | 'playing' | 'open' | 'empty';
+const FILTERS: Filter[] = ['all', 'fav', 'recent', 'beginner', 'playing', 'open', 'empty'];
+/** How often a visible lobby refreshes the list. A hidden one does not. */
+const POLL_MS = 5_000;
 
 function statusOf(t: LobbyTableDto): 'playing' | 'waiting' | 'empty' {
   if (t.playing) return 'playing';
   return t.seated > 0 ? 'waiting' : 'empty';
+}
+
+/**
+ * The table list: refreshed every POLL_MS while the page is visible, and at once when it becomes visible again, the
+ * window gets focus back or the connection returns. Requests never overlap and an outdated answer is never applied.
+ */
+function useLobbyTables() {
+  const [tables, setTables] = useState<LobbyTableDto[] | null>(null);
+  const [error, setError] = useState(false);
+  const feed = useRef<Latest | null>(null);
+  useEffect(() => {
+    const f = latest(
+      (signal) => api<LobbyTableDto[]>('/api/tables', { signal }),
+      (list) => {
+        setTables(list);
+        setError(false);
+      },
+      () => setError(true),
+    );
+    feed.current = f;
+    f.run();
+    const poll = () => {
+      // Coming back fires visibility and focus together: one request is enough.
+      if (document.visibilityState === 'visible' && Date.now() - f.startedAt >= 1_000) f.run();
+    };
+    const h = setInterval(poll, POLL_MS);
+    document.addEventListener('visibilitychange', poll);
+    window.addEventListener('focus', poll);
+    window.addEventListener('online', poll);
+    return () => {
+      f.stop();
+      clearInterval(h);
+      document.removeEventListener('visibilitychange', poll);
+      window.removeEventListener('focus', poll);
+      window.removeEventListener('online', poll);
+    };
+  }, []);
+  // The refresh button replaces a request already out rather than waiting for it.
+  const refresh = useCallback(() => void feed.current?.run(true), []);
+  return { tables, error, refresh };
 }
 
 export function LobbyPage() {
@@ -22,32 +66,29 @@ export function LobbyPage() {
   const nav = useNavigate();
   const { me } = useAuth();
   const academy = useProgress(me?.id);
-  const [tables, setTables] = useState<LobbyTableDto[] | null>(null);
-  const [error, setError] = useState(false);
+  const { tables, error, refresh } = useLobbyTables();
+  const { filters, blinds, setFilters, any } = useLobbyFilters(tables);
+  const prefs = useTablePrefs(me?.id);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [codeFor, setCodeFor] = useState<LobbyTableDto | null>(null);
+  const [codeFor, setCodeFor] = useState<{ table: LobbyTableDto; then: 'sit' | 'wait' } | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      setTables(await api<LobbyTableDto[]>('/api/tables'));
-      setError(false);
-    } catch {
-      setError(true);
-    }
-  }, []);
-  useEffect(() => {
-    void load();
-    const h = setInterval(load, 5_000);
-    return () => clearInterval(h);
-  }, [load]);
+  const favs = useMemo(() => new Set(prefs.fav), [prefs.fav]);
+  const visited = useMemo(() => new Map(prefs.recent.map((r) => [r.id, r.at])), [prefs.recent]);
+  const counts = useMemo(() => ({ fav: (tables ?? []).filter((tb) => favs.has(tb.id)).length, recent: (tables ?? []).filter((tb) => visited.has(tb.id)).length }), [tables, favs, visited]);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return (tables ?? []).filter((tb) => {
+    const list = (tables ?? []).filter((tb) => {
       if (needle && !tb.name.toLowerCase().includes(needle) && !`${tb.smallBlind}/${tb.bigBlind}`.includes(needle)) return false;
+      if (filters.maxSeats && tb.maxSeats !== filters.maxSeats) return false;
+      if (filters.bigBlind && tb.bigBlind !== filters.bigBlind) return false;
       switch (filter) {
+        case 'fav':
+          return favs.has(tb.id);
+        case 'recent':
+          return visited.has(tb.id);
         case 'beginner':
           return tb.beginner;
         case 'playing':
@@ -56,25 +97,31 @@ export function LobbyPage() {
           return tb.seated < tb.maxSeats;
         case 'empty':
           return tb.seated === 0;
-        case 'hu':
-          return tb.maxSeats === 2;
-        case 'six':
-          return tb.maxSeats === 6;
-        case 'nine':
-          return tb.maxSeats === 9;
         default:
           return true;
       }
     });
-  }, [tables, q, filter]);
+    if (filter === 'recent') return list.sort((a, b) => visited.get(b.id)! - visited.get(a.id)!);
+    // Favourites first, otherwise in the server's order.
+    return [...list.filter((tb) => favs.has(tb.id)), ...list.filter((tb) => !favs.has(tb.id))];
+  }, [tables, q, filter, filters.maxSeats, filters.bigBlind, favs, visited]);
 
-  function open(tb: LobbyTableDto, sit: boolean) {
-    if (tb.isPrivate && sit) {
-      setCodeFor(tb);
+  const narrowed = filter !== 'all' || q.trim() !== '' || !any;
+  const resetAll = () => {
+    setFilter('all');
+    setQ('');
+    setFilters(ANY);
+  };
+
+  function open(tb: LobbyTableDto, how: 'sit' | 'wait' | 'watch') {
+    if (tb.isPrivate && how !== 'watch') {
+      setCodeFor({ table: tb, then: how });
       return;
     }
-    nav(`/table/${tb.id}${sit ? '?sit=1' : ''}`);
+    nav(`/table/${tb.id}${how === 'watch' ? '' : `?${how}=1`}`);
   }
+
+  const filteredBy = [filters.maxSeats ? t('room.seatsN', { n: filters.maxSeats }) : null, filters.bigBlind ? blinds.find(([bb]) => bb === filters.bigBlind)?.map((x) => formatChips(x)).reverse().join('/') : null].filter(Boolean).join(' · ');
 
   return (
     <div className="flex flex-col gap-6">
@@ -100,27 +147,45 @@ export function LobbyPage() {
         </div>
         <div className="flex gap-2">
           <Input placeholder={t('lobby.search')} value={q} onChange={(e) => setQ(e.target.value)} className="sm:w-64" aria-label={t('lobby.search')} />
-          <Button variant="subtle" onClick={load} aria-label={t('lobby.refresh')}>
+          <Button variant="subtle" onClick={refresh} aria-label={t('lobby.refresh')} data-testid="lobby-refresh">
             ↻
           </Button>
-          <Button variant="outline" className="hidden sm:inline-flex" onClick={() => setCreating(true)} data-testid="room-create-open-wide">
+          {/* max-sm (not `hidden sm:inline-flex`): the button's own inline-flex would otherwise win and show it twice on phones. */}
+          <Button variant="outline" className="max-sm:hidden" onClick={() => setCreating(true)} data-testid="room-create-open-wide">
             ＋ {t('room.create')}
           </Button>
         </div>
       </div>
 
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1" role="tablist">
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            role="tab"
-            aria-selected={filter === f}
-            onClick={() => setFilter(f)}
-            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${filter === f ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory'}`}
-          >
-            {t(`lobby.filter.${f}` as MsgKey)}
-          </button>
-        ))}
+      <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} />
+
+      <div className="flex flex-col gap-2">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1" role="tablist">
+          {FILTERS.map((f) => {
+            const n = f === 'fav' || f === 'recent' ? counts[f] : 0;
+            return (
+              <button
+                key={f}
+                role="tab"
+                aria-selected={filter === f}
+                onClick={() => setFilter(f)}
+                data-testid={`lobby-filter-${f}`}
+                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${filter === f ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory'}`}
+              >
+                {t(`lobby.filter.${f}` as MsgKey)}
+                {n > 0 && <span className="ml-1 tabular-nums opacity-70">{n}</span>}
+              </button>
+            );
+          })}
+        </div>
+        {!any && (
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-300" data-testid="lobby-filtered">
+            {t('lobby.filteredBy', { what: filteredBy })}
+            <button type="button" className="jc-tap font-semibold text-gold-300 underline underline-offset-2" onClick={() => setFilters(ANY)}>
+              {t('quick.reset')}
+            </button>
+          </p>
+        )}
       </div>
 
       {tables === null && !error && (
@@ -128,15 +193,42 @@ export function LobbyPage() {
           <Spinner />
         </div>
       )}
-      {error && <Empty>{t('common.error')}</Empty>}
-      {tables && shown.length === 0 && <Empty>{t('lobby.none')}</Empty>}
+      {error && tables === null && (
+        <Empty>
+          <span className="flex flex-col items-center gap-3">
+            {t('common.error')}
+            <Button size="sm" variant="outline" onClick={refresh}>
+              {t('lobby.refresh')}
+            </Button>
+          </span>
+        </Empty>
+      )}
+      {error && tables !== null && (
+        <p className="rounded-lg border border-gold-500/25 bg-gold-500/10 px-3 py-2 text-sm text-gold-300" role="status" data-testid="lobby-stale">
+          {t('lobby.stale')}
+        </p>
+      )}
+      {tables && shown.length === 0 && (
+        <Empty>
+          <span className="flex flex-col items-center gap-3">
+            {filter === 'fav' && counts.fav === 0 ? t('lobby.noFav') : filter === 'recent' && counts.recent === 0 ? t('lobby.noRecent') : t('lobby.none')}
+            {narrowed && (
+              <Button size="sm" variant="outline" onClick={resetAll} data-testid="lobby-reset">
+                {t('quick.reset')}
+              </Button>
+            )}
+          </span>
+        </Empty>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {shown.map((tb) => {
           const st = statusOf(tb);
           const full = tb.seated >= tb.maxSeats;
+          const entry = entryOf(tb);
+          const fav = favs.has(tb.id);
           return (
-            <article key={tb.id} className="jc-panel group flex flex-col gap-4 p-5 transition hover:border-gold-500/40" data-testid="lobby-table">
+            <article key={tb.id} className="jc-panel group flex flex-col gap-4 p-5 transition hover:border-gold-500/40" data-testid="lobby-table" data-table={tb.id}>
               <header className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="truncate text-lg font-bold text-ivory">{tb.name}</h2>
@@ -145,6 +237,7 @@ export function LobbyPage() {
                       {st === 'playing' && <span className="size-1.5 rounded-full bg-success jc-pulse-gold" />}
                       {t(`lobby.status.${st}` as MsgKey)}
                     </Badge>
+                    {full && <span data-testid="full-badge"><Badge tone="red">{t('lobby.full')}</Badge></span>}
                     {tb.host && (
                       <span data-testid="member-badge" className="min-w-0 max-w-full">
                         <Badge className="max-w-full">
@@ -158,12 +251,24 @@ export function LobbyPage() {
                     {tb.entryBlocked && <Badge tone="red">{t('lobby.blocked')}</Badge>}
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="font-mono text-2xl font-semibold text-gold-300 tabular-nums">
-                    {tb.seated}
-                    <span className="text-base text-ink-400">/{tb.maxSeats}</span>
+                <div className="flex shrink-0 items-start gap-1">
+                  <div className="text-right">
+                    <div className="font-mono text-2xl font-semibold text-gold-300 tabular-nums">
+                      {tb.seated}
+                      <span className="text-base text-ink-400">/{tb.maxSeats}</span>
+                    </div>
+                    <div className="text-[11px] uppercase tracking-wider text-ink-400">{t('lobby.players')}</div>
                   </div>
-                  <div className="text-[11px] uppercase tracking-wider text-ink-400">{t('lobby.players')}</div>
+                  <button
+                    type="button"
+                    aria-pressed={fav}
+                    aria-label={t(fav ? 'lobby.unfav' : 'lobby.fav', { name: tb.name })}
+                    onClick={() => me && setFavourite(me.id, tb.id, !fav)}
+                    className={cx('jc-tap -mr-2 -mt-1.5 grid size-10 place-items-center rounded-lg text-xl transition hover:bg-white/5', fav ? 'text-gold-300' : 'text-ink-400 hover:text-ink-200')}
+                    data-testid="fav-toggle"
+                  >
+                    {fav ? '★' : '☆'}
+                  </button>
                 </div>
               </header>
               <dl className="grid grid-cols-2 gap-3 text-sm">
@@ -184,20 +289,33 @@ export function LobbyPage() {
                 <span>{t('lobby.spectators', { n: tb.spectators })}</span>
                 {tb.waitlist > 0 && <span>{t('lobby.waitlist', { n: tb.waitlist })}</span>}
               </div>
-              <div className="mt-auto grid grid-cols-2 gap-2">
-                <Button variant="outline" disabled={!tb.allowSpectators} onClick={() => open(tb, false)}>
-                  {t('lobby.spectate')}
-                </Button>
-                <Button disabled={tb.entryBlocked} onClick={() => open(tb, !full)}>
-                  {full ? t('lobby.full') : t('lobby.join')}
-                </Button>
+              <div className="mt-auto flex flex-col gap-2">
+                {entry === 'wait' && (
+                  <p className="text-xs text-ink-300" data-testid="lobby-wait-hint">
+                    {tb.allowSpectators ? t('lobby.waitHint') : t('lobby.waitHintHidden')}
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" disabled={!tb.allowSpectators} onClick={() => open(tb, 'watch')} data-testid="lobby-watch">
+                    {tb.allowSpectators ? t('lobby.spectate') : t('lobby.noSpectate')}
+                  </Button>
+                  <Button
+                    variant={entry === 'wait' ? 'outline' : 'gold'}
+                    disabled={entry === 'blocked' || entry === 'closing'}
+                    onClick={() => open(tb, entry === 'wait' ? 'wait' : 'sit')}
+                    data-testid="lobby-enter"
+                    data-entry={entry}
+                  >
+                    {t(`lobby.entry.${entry}` as MsgKey)}
+                  </Button>
+                </div>
               </div>
             </article>
           );
         })}
       </div>
 
-      <JoinCodeModal table={codeFor} onClose={() => setCodeFor(null)} />
+      <JoinCodeModal table={codeFor?.table ?? null} then={codeFor?.then} onClose={() => setCodeFor(null)} />
       <CreateRoomModal open={creating} onClose={() => setCreating(false)} />
     </div>
   );

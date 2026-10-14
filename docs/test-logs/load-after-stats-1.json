@@ -1,0 +1,136 @@
+{
+  "environment": "local wrangler dev (workerd) on the developer machine, one process for every table; not the Cloudflare edge",
+  "when": "2026-10-14T22:26:04.932Z",
+  "config": {
+    "tables": 10,
+    "players": 4,
+    "spectators": 2,
+    "hands": 5,
+    "raiseChance": 0.15
+  },
+  "sockets": 60,
+  "durationMs": {
+    "total": 41427,
+    "connectAll": 1168,
+    "play": 30532
+  },
+  "hands": {
+    "recordedInD1": 50,
+    "perTableInD1": [
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5
+    ],
+    "seenByClients": [
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5
+    ],
+    "perSecond": 1.64,
+    "stoppedEarly": []
+  },
+  "actions": {
+    "total": 1006,
+    "raises": 140,
+    "perHand": 20.1
+  },
+  "latencyMs": {
+    "signup": {
+      "n": 60,
+      "p50": 563,
+      "p95": 713,
+      "p99": 737,
+      "max": 737
+    },
+    "wsConnect": {
+      "n": 60,
+      "p50": 225,
+      "p95": 417,
+      "p99": 419,
+      "max": 419
+    },
+    "sit": {
+      "n": 40,
+      "p50": 132,
+      "p95": 173,
+      "p99": 173,
+      "max": 173
+    },
+    "actionRoundTrip": {
+      "n": 1006,
+      "p50": 55,
+      "p95": 388,
+      "p99": 677,
+      "max": 1005
+    },
+    "fanoutSlowestSocket": {
+      "n": 1006,
+      "p50": 55,
+      "p95": 388,
+      "p99": 677,
+      "max": 1005
+    },
+    "leave": {
+      "n": 40,
+      "p50": 77,
+      "p95": 188,
+      "p99": 215,
+      "max": 215
+    },
+    "lobbyList": {
+      "n": 28,
+      "p50": 18,
+      "p95": 993,
+      "p99": 1317,
+      "max": 1317
+    }
+  },
+  "messages": {
+    "clientToServer": 1086,
+    "serverToClient": 7274,
+    "serverToClientPerHand": 145,
+    "serverToClientBytes": 14051021,
+    "missedFanout": 0
+  },
+  "d1RowsAdded": {
+    "hands": 50,
+    "hand_players": 200,
+    "chip_ledger": 80,
+    "table_sessions": 40,
+    "rate_limits": 60,
+    "sessions": 0,
+    "admin_audit_log": 1,
+    "reconciliation_events": 0
+  },
+  "d1RowsAddedPerHand": {
+    "hands": 1,
+    "hand_players": 4
+  },
+  "problems": {
+    "clientErrors": [],
+    "serverErrorMessages": 0,
+    "unexpectedCloses": 0,
+    "lobbyFailures": 0
+  },
+  "conservation": {
+    "playerWallets": 400000,
+    "expected": 400000,
+    "spectatorsUntouched": true,
+    "reconcileMismatches": 0,
+    "openTableSessions": 0
+  }
+}

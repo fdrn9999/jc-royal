@@ -9,7 +9,8 @@
  * the original row, so retries can never grant, debit or refund twice.
  */
 
-export type LedgerType = 'signup_grant' | 'buy_in' | 'cash_out' | 'admin_adjust' | 'reconcile';
+/** `top_up` adds chips to an open table session (a player's top-up or automatic rebuy). */
+export type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile';
 
 export interface LedgerOp {
   userId: string;

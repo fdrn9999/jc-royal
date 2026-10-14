@@ -9,12 +9,10 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { I18nProvider, useI18n } from './lib/i18n';
 import { applyInitialTheme } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
-import { BoardPage, PostEditorPage, PostPage } from './pages/Board';
 import { ConversationPage, FriendSettingsPage, FriendsPage } from './pages/Friends';
 import { LobbyPage } from './pages/Lobby';
 import { MessagesPage } from './pages/Messages';
-import { HandDetailPage, MePage } from './pages/Me';
-import { TablePage } from './pages/Table';
+import { TableRoute } from './pages/Table';
 
 applyInitialTheme();
 
@@ -54,6 +52,18 @@ function Legal({ kind }: { kind: 'privacy' | 'terms' }) {
   );
 }
 
+/** My page (with the statistics) and the board are away from the lobby and the table, so they load on demand too. */
+function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, name: keyof M & string) {
+  const C = lazy(() => load().then((m) => ({ default: m[name] as ComponentType })));
+  return (
+    <Suspense fallback={<Splash />}>
+      <C />
+    </Suspense>
+  );
+}
+const loadMe = () => import('./pages/Me');
+const loadBoard = () => import('./pages/Board');
+
 /** Keeps Academy progress in sync with the server while someone is signed in. */
 function AcademySync() {
   const { me } = useAuth();
@@ -88,7 +98,7 @@ const router = createBrowserRouter([
   // Public: sign-up links here before anyone has an account.
   { path: '/privacy', element: <Legal kind="privacy" /> },
   { path: '/terms', element: <Legal kind="terms" /> },
-  { path: '/table/:id', element: <RequireAuth><TablePage /></RequireAuth> },
+  { path: '/table/:id', element: <RequireAuth><TableRoute /></RequireAuth> },
   { path: '/academy/practice/free', element: <RequireAuth><Academy page="FreePracticePage" /></RequireAuth> },
   { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },
   {
@@ -101,12 +111,12 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: '/', element: <LobbyPage /> },
-      { path: '/me', element: <MePage /> },
-      { path: '/me/hands/:id', element: <HandDetailPage /> },
-      { path: '/board', element: <BoardPage /> },
-      { path: '/board/write', element: <PostEditorPage /> },
-      { path: '/board/:id', element: <PostPage /> },
-      { path: '/board/:id/edit', element: <PostEditorPage /> },
+      { path: '/me', element: onDemand(loadMe, 'MePage') },
+      { path: '/me/hands/:id', element: onDemand(loadMe, 'HandDetailPage') },
+      { path: '/board', element: onDemand(loadBoard, 'BoardPage') },
+      { path: '/board/write', element: onDemand(loadBoard, 'PostEditorPage') },
+      { path: '/board/:id', element: onDemand(loadBoard, 'PostPage') },
+      { path: '/board/:id/edit', element: onDemand(loadBoard, 'PostEditorPage') },
       { path: '/messages', element: <MessagesPage /> },
       { path: '/friends', element: <FriendsPage /> },
       { path: '/friends/settings', element: <FriendSettingsPage /> },

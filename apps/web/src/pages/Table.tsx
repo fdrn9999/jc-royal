@@ -7,15 +7,17 @@ import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { HandRankingChart } from '../academy/HandChart';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
+import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
-import { BuyInModal, ChatPanel, SettingsModal } from '../game/Panels';
+import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { rememberVisit } from '../lib/lobby';
 import { usePrefs } from '../lib/prefs';
 
 function useCountdown(target: number | null) {
@@ -28,10 +30,20 @@ function useCountdown(target: number | null) {
   return target ? Math.max(0, Math.ceil((target - now) / 1000)) : null;
 }
 
+/** Moving to another table remounts the page, so nothing from the previous table (state, dialogs, ?sit) carries over. */
+export function TableRoute() {
+  const { id = '' } = useParams();
+  return <TablePage key={id} />;
+}
+
 export function TablePage() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const code = params.get('code');
+  // Sent here by quick play: if the seat is gone on arrival, offer the next table instead of a dead end.
+  const quick = useMemo(() => parseQuick(params.get('quick')), [params]);
+  const quickPlay = useQuickPlay();
+  const [quickMissed, setQuickMissed] = useState(false);
   const { t, err } = useI18n();
   const { me, refresh } = useAuth();
   const nav = useNavigate();
@@ -50,6 +62,8 @@ export function TablePage() {
   // Table chat from players I muted on this device or blocked; it hides their lines for me only.
   const hiddenChat = useHiddenChat(me?.id);
   const [toast, setToast] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [topUpOpen, setTopUpOpen] = useState(false);
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
@@ -74,19 +88,50 @@ export function TablePage() {
     return () => clearTimeout(h);
   }, [sock.lastError, err]);
 
+  // What happened to my top-up or automatic rebuy after a hand; the wallet changed (or a request ended), so refresh it.
+  useEffect(() => {
+    if (!sock.lastNotice) return;
+    setNotice(t(`notice.${sock.lastNotice.code}` as MsgKey, { amount: formatChips(sock.lastNotice.amount ?? 0) }));
+    void refresh();
+    const h = setTimeout(() => setNotice(null), 6_000);
+    return () => clearTimeout(h);
+  }, [sock.lastNotice, t, refresh]);
+
   // ?sit=1 from the lobby: open the buy-in dialog on the first free seat.
   useEffect(() => {
     if (!s || params.get('sit') !== '1') return;
     if (s.you.seatIndex === null && s.you.canSit) {
       const free = s.seats.find((x) => x.state === 'empty');
       if (free) setBuySeat(free.seatIndex);
+      else if (quick) setQuickMissed(true);
+    } else if (s.you.seatIndex === null && quick) {
+      setQuickMissed(true);
     } else if (s.you.seatIndex === null && s.seats.every((x) => x.state !== 'empty')) {
       setToast(t('invite.fullNow'));
       setTimeout(() => setToast(null), 5_000);
     }
     params.delete('sit');
     setParams(params, { replace: true });
-  }, [s, params, setParams, t]);
+  }, [s, params, setParams, t, quick]);
+
+  // ?wait=1 from a full table in the lobby: join the waitlist, or take the seat if one opened up meanwhile.
+  useEffect(() => {
+    if (!s || params.get('wait') !== '1') return;
+    if (s.you.seatIndex === null) {
+      const free = s.you.canSit ? s.seats.find((x) => x.state === 'empty') : undefined;
+      if (free) setBuySeat(free.seatIndex);
+      else if (!s.you.inWaitlist) sock.send({ t: 'waitlist', join: true });
+    }
+    params.delete('wait');
+    setParams(params, { replace: true });
+  }, [s, params, setParams, sock]);
+
+  // The lobby lists tables I opened under "recent".
+  const opened = !!s;
+  const myId = me?.id;
+  useEffect(() => {
+    if (opened && myId) rememberVisit(myId, id);
+  }, [opened, myId, id]);
 
   const anchor = s?.you.seatIndex ?? 0;
   const layout = useTableLayout(area, s?.table.maxSeats, anchor);
@@ -131,9 +176,14 @@ export function TablePage() {
     try {
       await sock.request({ t: 'sit', seatIndex: buySeat, buyIn: amount });
       setBuySeat(null);
+      setQuickMissed(false);
       void refresh();
     } catch (e) {
-      setBuyErr(err(e instanceof RequestError ? e.code : null));
+      const code = e instanceof RequestError ? e.code : null;
+      if (quick && (code === 'seat_taken' || code === 'table_closed' || code === 'entry_blocked')) {
+        setBuySeat(null);
+        setQuickMissed(true);
+      } else setBuyErr(err(code));
     } finally {
       setBuyBusy(false);
     }
@@ -236,6 +286,30 @@ export function TablePage() {
           )}
         </div>
       )}
+      {quick && quickMissed && !seated && (
+        <div className="z-40 flex flex-col gap-2 bg-gold-500/15 px-4 py-2 text-sm text-gold-300 sm:items-center" role="status" data-testid="quick-missed">
+          {quickPlay.miss ? (
+            <>
+              <QuickMissNote miss={quickPlay.miss} filtered={false} />
+              <Link to="/" className="self-start text-xs font-semibold text-gold-300 underline underline-offset-2 sm:self-center">
+                {t('nav.lobby')}
+              </Link>
+            </>
+          ) : (
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
+              <span>{t('quick.missed')}</span>
+              <span className="flex gap-2">
+                <Button size="sm" loading={quickPlay.busy} onClick={() => quickPlay.run(quick.filters, [...new Set([...quick.tried, id])])} data-testid="quick-another">
+                  {t('quick.another')}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setQuickMissed(false)}>
+                  {s?.table.allowSpectators === false ? t('quick.stayHere') : t('quick.stay')}
+                </Button>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/* table area */}
@@ -261,6 +335,11 @@ export function TablePage() {
           {/* bottom: action bar / status */}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
             {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert">{toast}</div>}
+            {notice && (
+              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-2 text-sm text-gold-300" role="status" data-testid="table-notice">
+                {notice}
+              </div>
+            )}
             {s && prefs.beginner && hand && (
               <div className="flex flex-col items-center gap-1.5 sm:items-end">
                 <StageNote s={s} />
@@ -296,7 +375,16 @@ export function TablePage() {
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
                 {s.you.leaving && <span className="text-gold-300">{t('table.leavingAfterHand')}</span>}
-                {!seated && <span className="text-ink-300">{t('table.spectating')}</span>}
+                {!seated && (
+                  <span className="text-ink-300" data-testid="viewer-status">
+                    {s.you.inWaitlist && me && s.waitlist.includes(me.nickname)
+                      ? t('table.waitingN', { n: s.waitlist.indexOf(me.nickname) + 1 })
+                      : s.table.allowSpectators && !s.you.inWaitlist
+                        ? t('table.spectating')
+                        : null}
+                    {!s.table.allowSpectators && <span className="block text-xs text-ink-400">{t('table.noSpectate')}</span>}
+                  </span>
+                )}
                 {!seated && s.reservation && <span className="text-gold-300">{t('table.reserved', { name: s.reservation.nickname })}</span>}
                 {!seated && !s.you.canSit && s.seats.every((x) => x.state !== 'empty') && (
                   <Button size="sm" variant="outline" onClick={() => sock.send({ t: 'waitlist', join: !s.you.inWaitlist })}>
@@ -305,6 +393,24 @@ export function TablePage() {
                 )}
                 {!seated && s.table.isPrivate && !s.you.canSit && !code && <span className="text-ink-400">{t('table.privateSeatLocked')}</span>}
                 {seated && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
+                {seated && s.you.topUpQueued !== null && (
+                  <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
+                    {t('topup.queued', { amount: formatChips(s.you.topUpQueued) })}
+                    <button type="button" className="jc-tap grid size-6 place-items-center rounded-full hover:bg-gold-500/20" onClick={() => sock.send({ t: 'cancelTopUp' })} aria-label={t('topup.cancel')} data-testid="topup-cancel">
+                      ✕
+                    </button>
+                  </span>
+                )}
+                {seated && s.you.autoRebuy && (
+                  <span className="rounded-full border border-white/10 px-2.5 py-0.5 font-mono text-xs text-ink-200" data-testid="rebuy-badge">
+                    {t('rebuy.badge', { spent: formatChips(s.you.autoRebuy.spent), cap: formatChips(s.you.autoRebuy.cap) })}
+                  </span>
+                )}
+                {seated && !s.you.leaving && (
+                  <Button size="sm" variant="outline" onClick={() => setTopUpOpen(true)} data-testid="topup-open">
+                    {t('topup.open')}
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -313,6 +419,7 @@ export function TablePage() {
         {/* chat sidebar (desktop) / drawer (mobile) */}
         <aside
           data-allow-zoom
+          data-no-shortcuts
           className={cx(
             'jc-tap z-50 flex w-full flex-col border-l border-gold-500/10 bg-ink-950/95 p-3 backdrop-blur lg:static lg:flex lg:w-80',
             chatOpen ? 'fixed inset-x-0 bottom-0 top-14' : 'hidden',
@@ -361,6 +468,17 @@ export function TablePage() {
           onConfirm={sit}
           busy={buyBusy}
           error={buyErr}
+        />
+      )}
+      {s && seated && (
+        <TopUpModal
+          open={topUpOpen}
+          onClose={() => setTopUpOpen(false)}
+          state={s}
+          wallet={me?.balance ?? 0}
+          request={sock.request}
+          onCancelQueued={() => sock.send({ t: 'cancelTopUp' })}
+          onDone={() => void refresh()}
         />
       )}
       <SettingsModal open={settings} onClose={() => setSettings(false)} />

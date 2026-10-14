@@ -7,6 +7,7 @@ import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
+import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
 import { ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -115,12 +116,20 @@ export function MePage() {
 
       <Panel title={t('me.stats')}>
         {st ? (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3" data-testid="stats">
             <Stat label={t('me.handsPlayed')} value={formatChips(st.handsPlayed)} />
             <Stat label={t('me.handsWon')} value={formatChips(st.handsWon)} sub={`${t('me.winRate')} ${st.winRate}%`} />
-            <Stat label={t('me.totalWon')} value={formatChips(st.totalWon)} sub={`${t('me.biggest')} ${formatChips(st.biggestPot)}`} />
+            <Stat label={t('me.totalWon')} value={formatChips(st.totalWon)} sub={t('me.totalWonHint')} />
             <Stat label={t('me.net')} value={<span className={st.netChips >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}>{signed(st.netChips)}</span>} />
-            <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-4">
+            <Stat label={t('me.largestPot')} value={formatChips(st.largestPot)} sub={t('me.largestPotHint')} />
+            <Stat label={t('me.avgPot')} value={st.avgPot === null ? '—' : formatChips(st.avgPot)} sub={t('me.avgPotHint')} />
+            <Stat label={t('me.biggestWin')} value={formatChips(st.biggestWin)} sub={t('me.biggestWinHint')} />
+            <RatioStat label="VPIP" ratio={st.vpip} hint={t('me.vpipHint')} testid="stats-vpip" />
+            <RatioStat label="PFR" ratio={st.pfr} hint={t('me.pfrHint')} testid="stats-pfr" />
+            <RatioStat label={t('me.raiseShare')} ratio={st.raiseShare} hint={t('me.raiseShareHint')} testid="stats-raise-share" />
+            <RatioStat label={t('me.wtsd')} ratio={st.wtsd} hint={t('me.wtsdHint')} testid="stats-wtsd" />
+            <RatioStat label={t('me.wsd')} ratio={st.wsd} hint={t('me.wsdHint')} testid="stats-wsd" />
+            <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{t('me.bestHand')}</div>
               {st.bestHand ? (
                 <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -134,6 +143,15 @@ export function MePage() {
               ) : (
                 <div className="mt-1 text-sm text-ink-400">{t('me.none')}</div>
               )}
+            </div>
+            <div className="col-span-2 md:col-span-3">
+              <PositionTable positions={st.positions} />
+            </div>
+            <div className="col-span-2 md:col-span-3">
+              <StatsTrend />
+            </div>
+            <div className="col-span-2 md:col-span-3">
+              <StatDefinitions />
             </div>
           </div>
         ) : (

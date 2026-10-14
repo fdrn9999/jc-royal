@@ -34,7 +34,8 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/ledger?limit&before` | 칩 변동 내역 |
-| GET | `/stats` | 플레이·승리 핸드, 승률, 총 획득, 순손익, 최대 팟, 최고 핸드 |
+| GET | `/stats` | 본인 것만. 카드를 받은 핸드만 세고 관전은 빠진다. 플레이 핸드, 승리 핸드(`pot_won > 0`: 팟 일부라도 획득, 스플릿 포함, 콜 안 된 베팅만 돌려받은 핸드 제외)와 승률, 총 획득(`pot_won` 합), 순손익, 참여한 최대·평균 팟(`largestPot`, `avgPot`: 내 칩이 들어간 핸드에서 실제로 다툰 팟, 콜 안 된 베팅 반환분 제외), 한 핸드 최대 순이익(`biggestWin`), 최고 핸드, `vpip`·`pfr`(분모: 행동 기록을 읽은 핸드), `raiseShare`(PFR ÷ VPIP 핸드), `wtsd`(쇼다운 ÷ 플랍을 본 핸드), `wsd`(팟 획득 ÷ 쇼다운), `positions`(EP·MP·CO·BTN·SB·BB 순서, 핸드·VPIP·PFR·손익). 비율은 `{ n, of }`이며 `of = 0`이면 화면에 —. 계산 정의는 `packages/db/src/handStats.ts` |
+| GET | `/stats/trend?days=7\|30\|90&tz=<분>` | 기간별 일 순손익. `tz`는 UTC 기준 동쪽으로의 분(−720~840, 한국 540). 그 시간대 날짜로 나눈 `{ day: 'YYYY-MM-DD', hands, net }`를 오래된 순으로 주고, 핸드가 없는 날은 뺀다. 잘못된 값은 400 `bad_request` |
 | GET | `/hands?limit&before` | 최근 핸드 |
 | GET | `/hands/:id` | 핸드 상세(본인 카드와 쇼다운 카드만) |
 | GET | `/posts` · `/comments` | 내가 쓴 글과 댓글 |
@@ -45,9 +46,12 @@
 |---|---|---|
 | GET | `/api/tables` | 로비(종료된 테이블 제외, 실시간 착석·진행·대기·관전 수, `beginner` 입문 테이블 여부) |
 | GET | `/api/tables/:id` | 단일 테이블 |
+| POST | `/api/tables/quick` | 빠른 참가 `{maxSeats?: 2\|6\|9, bigBlind?, exclude?: string[]}` → `{table, seatIndex}`. 칩은 쓰지 않음(바이인은 테이블에서 착석 요청으로) |
 | GET(upgrade) | `/ws/tables/:id?code=` | WebSocket. 세션 쿠키와 Origin 필수. 비공개 테이블은 참가 코드가 있어야 착석 가능 → `docs/WEBSOCKET_PROTOCOL.md` |
 
 로비 응답의 각 테이블에는 `roomType`(`official`/`member`)과 `host`(회원 방이면 `{id,nickname}`, 공식 테이블이면 `null`)가 있습니다. 공식 테이블이 먼저, 회원 방이 뒤에 나옵니다.
+
+빠른 참가는 열린 공개 테이블(비공개·입장 제한 제외, 이미 앉아 있는 테이블과 `exclude` 제외) 가운데 `maxSeats`·`bigBlind`가 일치하는 것만 봅니다. 순서는 로비 수치상 빈자리가 있어 보이는 테이블 → 입문자(완료 핸드 50 미만)에게는 입문 테이블 먼저, 그 밖의 플레이어에게는 입문 테이블을 나중에 → 착석 인원이 많은 순 → 낮은 블라인드 → 공식 테이블 → id 순입니다. 로비 수치는 늦을 수 있으므로 상위 5개 테이블에 차례로 테이블 룸(Durable Object)의 착석 검사(`sit`과 같은 검사, 지갑 제외)를 물어 처음 통과한 테이블을 돌려줍니다. 자리를 잡아 두지는 않으므로 실제 착석은 `sit`이 다시 검사합니다. 실패 코드는 `404 no_table`(조건에 맞는 테이블 없음), `409 insufficient_balance`(`details: {minBuyIn, balance}`, 맞는 테이블 중 가장 낮은 최소 바이인도 지갑보다 큼), `409 tables_full`(검사한 테이블이 모두 찼거나 대기 명단 우선)입니다.
 
 ## 회원 방 `/api/rooms` (로그인 필요)
 

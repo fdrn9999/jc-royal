@@ -1,9 +1,6 @@
-import { execFile } from 'node:child_process';
-import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { BASE, Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
-import { root } from '../support/worker';
+import { d1 } from '../support/d1';
 
 let admin: Client;
 
@@ -12,17 +9,6 @@ beforeAll(async () => {
   expect((await admin.get('/api/admin/auth/me')).status).toBe(200);
 });
 
-/**
- * Runs SQL against the local D1 the test worker uses (outside the application, like an operator console).
- * Asynchronous on purpose: a blocking spawnSync of a few seconds keeps the HTTP client from noticing that the dev
- * server closed its idle keep-alive connection, and the next request then fails with ECONNRESET.
- */
-async function d1<T = Record<string, unknown>>(sql: string): Promise<T[]> {
-  const wrangler = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
-  const { stdout } = await promisify(execFile)(process.execPath, [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', resolve(root, 'tests/.state/main'), '-c', 'apps/api/wrangler.jsonc', '--json', '--command', sql], { cwd: root, encoding: 'utf8' });
-  const out = JSON.parse(stdout.slice(stdout.indexOf('['))) as { results: T[] }[];
-  return out.flatMap((x) => x.results);
-}
 /** One row of named counts, e.g. `SELECT (SELECT COUNT(*) …) AS dms, …`. */
 const counts = async (sql: string) => (await d1<Record<string, number>>(sql))[0]!;
 

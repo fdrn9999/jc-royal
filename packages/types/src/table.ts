@@ -104,6 +104,10 @@ export interface TableView {
     leaving: boolean;
     inWaitlist: boolean;
     canSit: boolean;
+    /** A top-up waiting for the current hand to end; nothing is taken from the wallet until then. */
+    topUpQueued: number | null;
+    /** Automatic rebuy for this seat (off unless the player turned it on): chips per rebuy, total limit, used so far. */
+    autoRebuy: { amount: number; cap: number; spent: number } | null;
   };
 }
 

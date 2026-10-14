@@ -16,6 +16,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261014.1
         version: 5.20261014.1
+      '@jc/poker-engine':
+        specifier: workspace:*
+        version: link:packages/poker-engine
       '@jc/types':
         specifier: workspace:*
         version: link:packages/types

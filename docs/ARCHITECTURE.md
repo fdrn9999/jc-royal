@@ -56,6 +56,8 @@
 | 바이인 진행 중 좌석 | `phase: 'pending'` | 재시작 시 D1 원장 키 존재 여부로 확정 또는 취소 |
 | 환급 진행 중 좌석 | `phase: 'cashing'` | 재시작 시 멱등 환급 재시도 |
 | 정산된 핸드 | `settledHandId` | 미반영 시 재정산, D1 기록은 `INSERT OR IGNORE` |
+| 대기 중 충전 | 좌석 `topUp.state: 'queued'` | 그대로 유지, 다음 정산(또는 핸드 시작 직전)에 적용 |
+| 차감 중 충전 | 좌석 `topUp.state: 'debiting'` | 재시작 시 D1 원장 키가 있으면 원장이 차감한 금액만큼 스택에 반영, 없으면 취소. 원장에 이미 있는 키로는 이 표시를 만들지 않음(한 번만 반영) |
 
 ## 칩 경제
 
@@ -67,9 +69,12 @@
   | 가입 지급 | `signup:<user>` |
   | 바이인 | `buyin:<tableSession>` |
   | 환급 | `cashout:<tableSession>` |
+  | 스택 충전 | `topup:<tableSession>:<reqId>` |
+  | 자동 리바이 | `rebuy:<tableSession>:<handId>` |
   | 관리자 조정 | `admin:<key>` |
 
 - **테이블 칩**: 바이인 후에는 DO의 좌석 스택이 된다. 핸드 중에는 엔진 스냅샷이 기준이다.
+- **스택 충전(`top_up`)**: 핸드 사이에만 스택에 더한다. 핸드에 참여 중인 요청은 차감 없이 대기했다가 정산 직후 적용한다. 충전 후 스택은 테이블 바이인 범위 안이어야 하고, 같은 착석 세션 안에서 원장 키로 한 번만 차감된다. 자동 리바이는 기본 꺼짐이며, 켤 때 명시적 동의·1회 금액·총 한도가 필요하다(한도를 다 쓰거나 지갑이 부족하면 꺼진다).
 - **검증 두 가지**:
   1. 게임 내 칩 보존: 매 액션마다 스택+팟 합계를 확인한다.
   2. 원장 검증: 관리자 정합성 검사에서 `balance = Σ ledger`인지, 열린 착석 세션 수와 룸 좌석 수가 맞는지 확인한다. 불일치는 `reconciliation_events`에 기록하고, 관리자가 명시적으로 해결 처리한다.
@@ -78,6 +83,8 @@
 ## 데이터 모델 (D1)
 
 `users`, `sessions`, `password_resets`, `chip_ledger`, `tables`, `table_sessions`, `hands`, `hand_players`, `admin_audit_log`, `reconciliation_events`, `rate_limits`, `posts`, `post_hands`, `comments`, `messages` — 정의는 `packages/db/src/schema.ts`, 마이그레이션은 `packages/db/migrations/`.
+
+**플레이 통계**: `hand_players`의 `position`·`vpip`·`pfr`·`saw_flop`·`pot_won`은 핸드 이벤트 로그(`hands.event_log`)에서 계산한 값이다. 계산은 `packages/db/src/handStats.ts`의 SQL 하나(`HAND_STATS_SQL`)뿐이며, 게임 워커가 핸드 기록 직후 실행하고 마이그레이션 `0010`이 같은 SQL로 기존 핸드를 채운다. `pot_won`이 비어 있는 행만 처리하므로 몇 번을 돌려도 결과가 같고, 실행이 실패해도 다음 핸드 기록 때 다시 채운다. 로그에서 행동을 읽을 수 없는 핸드는 `vpip`·`pfr`·`saw_flop`을 NULL로 두어 해당 지표의 분모에서 뺀다(추정하지 않음). 마이페이지 통계 API는 이 열을 모아 본인 것만 돌려준다.
 
 ## 원본 저장소에서 가져온 것
 

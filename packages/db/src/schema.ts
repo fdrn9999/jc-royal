@@ -88,7 +88,7 @@ export const chipLedger = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id),
     type: text('type', {
-      enum: ['signup_grant', 'buy_in', 'cash_out', 'admin_adjust', 'reconcile'],
+      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'],
     }).notNull(),
     /** Signed delta applied to users.balance. */
     amount: integer('amount').notNull(),
@@ -197,8 +197,21 @@ export const handPlayers = sqliteTable(
     bestFive: text('best_five'),
     wentToShowdown: integer('went_to_showdown', { mode: 'boolean' }).notNull(),
     endedAt: integer('ended_at').notNull(),
+    // Statistics derived from the hand's public action log by HAND_STATS_SQL (see handStats.ts). NULL until it ran;
+    // vpip/pfr/saw_flop/position stay NULL when the log can't be read.
+    position: text('position'),
+    vpip: integer('vpip', { mode: 'boolean' }),
+    pfr: integer('pfr', { mode: 'boolean' }),
+    sawFlop: integer('saw_flop', { mode: 'boolean' }),
+    /** Chips won from the pot, without the player's own uncalled chips handed back. */
+    potWon: integer('pot_won'),
   },
-  (t) => [primaryKey({ columns: [t.handId, t.userId] }), index('hp_user_idx').on(t.userId, t.endedAt)],
+  (t) => [
+    primaryKey({ columns: [t.handId, t.userId] }),
+    index('hp_user_idx').on(t.userId, t.endedAt),
+    // Rows HAND_STATS_SQL still has to fill.
+    index('hp_stats_todo_idx').on(t.handId).where(sql`pot_won IS NULL`),
+  ],
 );
 
 export const adminAuditLog = sqliteTable(

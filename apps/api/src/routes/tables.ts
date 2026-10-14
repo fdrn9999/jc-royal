@@ -1,15 +1,19 @@
 import { schema } from '@jc/db';
-import type { LobbyTableDto } from '@jc/types';
-import { and, asc, desc, eq, ne } from 'drizzle-orm';
+import { NEWCOMER_HANDS, QuickPlaySchema, type LobbyTableDto, type QuickPlayDto } from '@jc/types';
+import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import { Hono, type Context, type Handler } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { sha256 } from '../lib/crypto';
-import { fail } from '../lib/http';
+import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { roomCall } from '../lib/room';
 import { resolveSession } from '../lib/session';
 
 type TableRow = typeof schema.tables.$inferSelect;
+
+/** Tables quick play asks the room about, best ranked first, before giving up with tables_full. */
+const QUICK_PLAY_CHECKS = 5;
 
 export function toLobbyDto(t: TableRow, hostNickname: string | null = null): LobbyTableDto {
   return {
@@ -54,11 +58,69 @@ const withHost = (c: Context<AppEnv>) =>
 export const tableRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
   .get('/', async (c) => {
+    // `IN` (not `<> 'closed'`) so SQLite searches tables_status_idx instead of scanning every closed room ever made.
     const rows = await withHost(c)
-      .where(ne(schema.tables.status, 'closed'))
+      .where(inArray(schema.tables.status, ['open', 'closing']))
       // Official tables first, then members' rooms.
       .orderBy(desc(schema.tables.roomType), asc(schema.tables.bigBlind), asc(schema.tables.name));
     return c.json(rows.map((r) => toLobbyDto(r.t, r.host)));
+  })
+  /**
+   * Quick play: picks a public open table for the caller. Newcomers (under NEWCOMER_HANDS hands) get beginner tables
+   * first and others get them last; then tables that look like they have room, with players already seated, at lower
+   * stakes. The lobby counts can be stale, so the table room itself confirms a free seat before a table is returned.
+   * Nothing is paid here: the player confirms the buy-in at the table through the normal seat request.
+   */
+  .post('/quick', async (c) => {
+    const body = await parseBody(c, QuickPlaySchema);
+    const me = c.var.user!;
+    await rateLimit(c, `quick-play:${me.id}`, 30, 60_000);
+    const T = schema.tables;
+    const rows = await withHost(c).where(
+      and(
+        eq(T.status, 'open'),
+        eq(T.isPrivate, false),
+        eq(T.entryBlocked, false),
+        body.maxSeats ? eq(T.maxSeats, body.maxSeats) : undefined,
+        body.bigBlind ? eq(T.bigBlind, body.bigBlind) : undefined,
+      ),
+    );
+    const seatedAt = new Set(
+      (
+        await c.var.db
+          .select({ tableId: schema.tableSessions.tableId })
+          .from(schema.tableSessions)
+          .where(and(eq(schema.tableSessions.userId, me.id), eq(schema.tableSessions.status, 'seated')))
+      ).map((r) => r.tableId),
+    );
+    const skip = new Set(body.exclude);
+    const matches = rows.filter((r) => !seatedAt.has(r.t.id) && !skip.has(r.t.id));
+    if (!matches.length) fail(404, 'no_table', 'no open table matches');
+    const affordable = matches.filter((r) => r.t.minBuyIn <= me.balance);
+    if (!affordable.length) {
+      fail(409, 'insufficient_balance', 'not enough chips for any matching table', { minBuyIn: Math.min(...matches.map((r) => r.t.minBuyIn)), balance: me.balance });
+    }
+
+    const played = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM (SELECT 1 FROM hand_players WHERE user_id = ?1 LIMIT ?2)')
+      .bind(me.id, NEWCOMER_HANDS)
+      .first<{ n: number }>();
+    const newcomer = (played?.n ?? 0) < NEWCOMER_HANDS;
+    const looksOpen = (t: TableRow) => t.maxSeats - t.liveSeated > t.liveWaitlist;
+    const rank = (t: TableRow) => [looksOpen(t) ? 0 : 1, t.beginner === newcomer ? 0 : 1, -t.liveSeated, t.bigBlind, t.roomType === 'official' ? 0 : 1];
+    const ranked = affordable.sort((a, b) => {
+      const ra = rank(a.t);
+      const rb = rank(b.t);
+      for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i]! - rb[i]!;
+      return a.t.id < b.t.id ? -1 : a.t.id > b.t.id ? 1 : 0;
+    });
+    for (const r of ranked.slice(0, QUICK_PLAY_CHECKS)) {
+      const check = await roomCall(c, r.t.id, 'seat-check', { user: me.id });
+      if (check?.ok === true && typeof check.seatIndex === 'number') {
+        const out: QuickPlayDto = { table: toLobbyDto(r.t, r.host), seatIndex: check.seatIndex };
+        return c.json(out);
+      }
+    }
+    fail(409, 'tables_full', 'every matching table is full right now');
   })
   .get('/:id', async (c) => {
     const [r] = await withHost(c).where(eq(schema.tables.id, c.req.param('id')));

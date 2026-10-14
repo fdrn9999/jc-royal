@@ -77,7 +77,7 @@ test('mobile: touch guards — no-zoom game surface, 16px inputs, two-tap risky 
   await a.page.waitForTimeout(400);
   if (await fold.isVisible()) {
     await fold.click();
-    await expect(fold).toHaveText(/한 번 더|Tap again/);
+    await expect(fold).toHaveText(/한 번 더|Press again/);
     await expect(bar).toBeVisible();
     await a.page.screenshot({ path: info.outputPath('fold-armed.png') });
     await expect(fold).toHaveText(/^(폴드|Fold)$/, { timeout: 4000 }); // disarms by itself
