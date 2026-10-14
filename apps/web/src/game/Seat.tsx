@@ -27,6 +27,7 @@ function TimerRing({ deadline, totalMs }: { deadline: number; totalMs: number })
   return (
     <span
       aria-hidden
+      data-tour="timer"
       className={cx('absolute -inset-[3px] rounded-full', frac <= 0.25 && 'animate-pulse')}
       style={{ background: `conic-gradient(${color} ${frac * 360}deg, rgba(255,255,255,0.08) 0)` }}
     />
@@ -142,7 +143,7 @@ export function Seat(p: SeatProps) {
                 </span>
               )}
               {p.blind && (
-                <span className={cx('rounded-full border px-1.5 text-[9px] font-bold leading-4', p.blind === 'SB' ? 'border-info/50 bg-[#16263b] text-[#a9c8ee]' : 'border-danger/50 bg-[#3a1618] text-[#f0a0a2]')}>{p.blind}</span>
+                <span data-tour={`blind-${p.blind}`} className={cx('rounded-full border px-1.5 text-[9px] font-bold leading-4', p.blind === 'SB' ? 'border-info/50 bg-[#16263b] text-[#a9c8ee]' : 'border-danger/50 bg-[#3a1618] text-[#f0a0a2]')}>{p.blind}</span>
               )}
             </span>
           )}

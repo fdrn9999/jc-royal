@@ -1,23 +1,9 @@
 import type { Card } from '@jc/types';
-import { HandEngine, standardDeck, type HandRules, type HandSeat } from '../src';
+import { HandEngine, type HandRules, type HandSeat } from '../src';
 
 export const RULES: HandRules = { maxSeats: 6, smallBlind: 5, bigBlind: 10, turnMs: 20_000 };
 
-/**
- * Builds a 52-card deck in the order the adapter consumes it:
- * hole cards (dealing order = clockwise starting left of the button, two each),
- * then burn, flop×3, burn, turn, burn, river, then the rest.
- */
-export function stackedDeck(holes: Card[][], board: Card[]): Card[] {
-  const used = new Set<string>([...holes.flat(), ...board]);
-  const rest = standardDeck().filter((c) => !used.has(c));
-  const take = () => rest.shift()!;
-  const out: Card[] = [];
-  for (const h of holes) out.push(...h);
-  out.push(take(), board[0]!, board[1]!, board[2]!, take(), board[3]!, take(), board[4]!);
-  out.push(...rest);
-  return out;
-}
+export { stackedDeck } from '../src';
 
 export function seats(stacks: number[], startIndex = 0): HandSeat[] {
   return stacks.map((stack, i) => ({ playerId: `p${i}`, seatIndex: startIndex + i, stack, displayName: `P${i}` }));

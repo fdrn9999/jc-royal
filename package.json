@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "pnpm -r run typecheck",
-    "test": "pnpm --filter @jc/poker-engine test",
+    "test": "pnpm --filter @jc/poker-engine --filter @jc/web test",
     "test:integration": "vitest run --config tests/vitest.config.ts",
     "test:e2e": "playwright test -c tests/playwright.config.ts",
     "build": "pnpm --filter @jc/web build && pnpm --filter @jc/admin build",

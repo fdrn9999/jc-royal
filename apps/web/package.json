@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@jc/audio": "workspace:*",
+    "@jc/poker-engine": "workspace:*",
     "@jc/types": "workspace:*",
     "@jc/ui": "workspace:*",
     "react": "^19.2.0",
@@ -24,6 +26,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.1.2",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "vitest": "^4.1.11"
   }
 }

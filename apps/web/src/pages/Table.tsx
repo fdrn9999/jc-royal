@@ -1,29 +1,17 @@
 import { sound } from '@jc/audio';
-import { handLabelKey, type ActionType, type Card, type TableView } from '@jc/types';
-import { Button, ChipStack, cx, formatChips, Logo, PlayingCard } from '@jc/ui';
+import type { ActionType, TableView } from '@jc/types';
+import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { HandRankingChart } from '../academy/HandChart';
 import { ActionBar } from '../game/ActionBar';
-import { CueLayer } from '../game/CueLayer';
-import { seatLayout, POT_POINT } from '../game/layout';
+import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal } from '../game/Panels';
-import { Seat } from '../game/Seat';
+import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
-
-function useBoxSize<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [size, setSize] = useState({ w: 1200, h: 700 });
-  useEffect(() => {
-    if (!ref.current) return;
-    const ro = new ResizeObserver(([e]) => e && setSize({ w: e.contentRect.width, h: e.contentRect.height }));
-    ro.observe(ref.current);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, size] as const;
-}
 
 function useCountdown(target: number | null) {
   const [now, setNow] = useState(Date.now());
@@ -50,6 +38,7 @@ export function TablePage() {
   const [buyErr, setBuyErr] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chart, setChart] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
@@ -86,28 +75,9 @@ export function TablePage() {
     setParams(params, { replace: true });
   }, [s, params, setParams]);
 
-  const portrait = area.w / Math.max(1, area.h) < 0.95;
-  // Short viewports (landscape phones, open keyboard) get the dense layout too.
-  const compact = area.w < 640 || area.h < 520;
   const anchor = s?.you.seatIndex ?? 0;
-  const plateHalfPx = compact ? 60 : 76;
+  const layout = useTableLayout(area, s?.table.maxSeats, anchor);
 
-  // Table box: keep the felt proportions inside the available area.
-  const box = useMemo(() => {
-    const ratio = portrait ? 0.68 : 1.75;
-    let w = area.w;
-    let h = w / ratio;
-    if (h > area.h) {
-      h = area.h;
-      w = h * ratio;
-    }
-    return { w, h };
-  }, [area, portrait]);
-
-  const geometry = useMemo(
-    () => (s ? seatLayout(s.table.maxSeats, anchor, portrait, Math.min(45, (plateHalfPx / Math.max(1, box.w)) * 100)) : []),
-    [s?.table.maxSeats, anchor, portrait, plateHalfPx, box.w], // eslint-disable-line react-hooks/exhaustive-deps
-  );
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
   const nextIn = useCountdown(s?.nextHandAt ?? null);
@@ -126,10 +96,6 @@ export function TablePage() {
     return () => clearInterval(h);
   }, [myTurn, hand?.deadline]);
 
-  const winners = useMemo(() => new Map((hand?.result?.winners ?? []).map((w) => [w.seatIndex, w.amount])), [hand?.result]);
-  const showdown = useMemo(() => new Map((hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x])), [hand?.result]);
-  const topWinner = hand?.result?.winners?.[0]?.seatIndex;
-  const winningFive = topWinner !== undefined ? (showdown.get(topWinner)?.bestFive ?? []) : [];
 
   const onAct = useCallback((type: ActionType, amount?: number) => sock.act(type, amount), [sock]);
 
@@ -174,8 +140,6 @@ export function TablePage() {
             ? t('table.connecting')
             : null;
 
-  // Chips already gathered in the middle; after settlement they have been paid out.
-  const collected = hand && hand.stage !== 'settled' ? hand.potTotal - s!.seats.reduce((a, x) => a + x.streetBet, 0) : 0;
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
   const canChat = !!s && (seated || s.table.allowSpectators);
@@ -206,6 +170,10 @@ export function TablePage() {
           <Button size="sm" variant="ghost" className="lg:hidden" onClick={() => setChatOpen((o) => !o)} aria-label={t('table.chat')} aria-expanded={chatOpen}>
             💬
           </Button>
+          <Button size="sm" variant="ghost" className="px-2 sm:px-3" onClick={() => setChart(true)} aria-label={t('table.handChart')} data-testid="hand-chart-open">
+            <span aria-hidden className="sm:hidden">♠≡</span>
+            <span className="hidden sm:inline">{t('table.handChart')}</span>
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
             ⚙
           </Button>
@@ -232,87 +200,36 @@ export function TablePage() {
         <div className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
           <div ref={areaRef} className="relative mx-2 mb-[6.75rem] mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-24 sm:mt-6">
             {s && (
-              <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'}>
-                {/* rail + felt */}
-                <div className="absolute rounded-[50%] p-[1.2%] shadow-[0_30px_80px_rgba(0,0,0,0.7)]" style={{ inset: portrait ? '9% 11%' : '11% 9%', background: 'var(--t-rail)' }}>
-                  <div className="relative size-full rounded-[50%] p-[0.6%]" style={{ background: 'var(--t-rail-inner)' }}>
-                    <div className="relative size-full overflow-hidden rounded-[50%] shadow-[inset_0_6px_30px_rgba(0,0,0,0.7)]" style={{ background: 'var(--t-felt)' }}>
-                      <div className="absolute inset-[9%] rounded-[50%] border" style={{ borderColor: 'var(--t-felt-line)' }} />
-                      <div className="absolute inset-x-0 flex justify-center" style={{ top: portrait ? '16%' : '12%', opacity: 'var(--t-watermark-opacity)' }}>
-                        <Logo size={Math.min(box.w, box.h) * 0.18} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* pot + board */}
-                <div className="absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2" style={{ top: `${POT_POINT.y + 7}%` }}>
-                  <div className="flex min-h-7 items-center gap-2" data-testid="pot">
-                    {collected > 0 && <ChipStack amount={collected} />}
-                    {hand && hand.pots.length > 1 && hand.stage !== 'settled' && (
-                      <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] text-ink-200">{hand.pots.map((p, i) => `${i === 0 ? t('table.pot') : t('table.sidePot', { n: i })} ${formatChips(p.amount, true)}`).join(' · ')}</span>
-                    )}
-                  </div>
-                  <div className="flex gap-1 rounded-xl bg-black/35 p-1.5 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)] sm:gap-1.5 sm:p-2" data-testid="board">
-                    {Array.from({ length: 5 }, (_, i) => {
-                      const c = hand?.board[i] as Card | undefined;
-                      return c ? (
-                        <PlayingCard key={`${hand!.id}-${c}`} card={c} size={compact ? '2.1rem' : 'clamp(2.4rem,4.2vw,3.6rem)'} animate="flip" highlight={winningFive.includes(c)} style={{ animationDelay: `${(i % 3) * 120}ms` }} />
-                      ) : (
-                        <div key={i} className="jc-card border border-dashed border-white/10 bg-black/10" style={{ ['--card-size' as string]: compact ? '2.1rem' : 'clamp(2.4rem,4.2vw,3.6rem)', boxShadow: 'none' }} />
-                      );
-                    })}
-                  </div>
-                  {/* Fixed-height status slot: text changes never move the board. */}
-                  <div className="flex h-5 items-center text-xs tracking-[0.06em] text-ink-200/80" data-testid="table-status" aria-live="polite">
-                    {!hand ? (nextIn !== null ? t('table.nextHand', { s: nextIn }) : t('table.waiting')) : hand.stage === 'settled' && nextIn !== null ? t('table.nextHand', { s: nextIn }) : null}
-                  </div>
-                </div>
-
-                {/* seats, bets, dealer button */}
-                {s.seats.map((seat) => {
-                  const g = geometry[seat.seatIndex]!;
-                  const sd = showdown.get(seat.seatIndex);
-                  const label = sd ? t(`hand.${handLabelKey(sd.rankClass, sd.bestFive)}` as MsgKey) : null;
-                  return (
-                    <div key={seat.seatIndex}>
-                      <Seat
-                        seat={seat}
-                        isMe={seat.seatIndex === mySeat}
-                        isActor={!!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled'}
-                        deadline={hand?.deadline ?? null}
-                        turnMs={s.table.turnSeconds * 1000}
-                        isDealer={hand?.buttonSeat === seat.seatIndex}
-                        blind={hand && hand.stage === 'preflop' ? (hand.sbSeat === seat.seatIndex ? 'SB' : hand.bbSeat === seat.seatIndex ? 'BB' : null) : null}
-                        winAmount={winners.get(seat.seatIndex) ?? null}
-                        handLabel={label}
-                        bestFive={sd?.bestFive ?? null}
-                        newHandKey={hand?.id ?? null}
-                        canSit={!seated && s.you.canSit}
-                        onSit={() => setBuySeat(seat.seatIndex)}
-                        compact={compact}
-                        style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
-                      />
-                      {seat.streetBet > 0 && hand?.stage !== 'settled' && (
-                        <div className="absolute z-20 -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
-                          <ChipStack amount={seat.streetBet} size={compact ? '1rem' : '1.25rem'} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                <CueLayer cues={sock.cues} consume={sock.consumeCues} geometry={geometry} mySeat={mySeat} reducedMotion={reducedMotion} />
-              </div>
+              <TableScene
+                s={s}
+                layout={layout}
+                mySeat={mySeat}
+                canSit={!seated && s.you.canSit}
+                onSit={setBuySeat}
+                nextIn={nextIn}
+                cues={sock.cues}
+                consumeCues={sock.consumeCues}
+                reducedMotion={reducedMotion}
+              />
             )}
           </div>
 
           {/* bottom: action bar / status */}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
             {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert">{toast}</div>}
+            {s && prefs.beginner && hand && (
+              <div className="flex flex-col items-center gap-1.5 sm:items-end">
+                <StageNote s={s} />
+                {seated && <CurrentHandPill s={s} />}
+              </div>
+            )}
             {s && myTurn && (
               <>
-                <div className="hidden rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:block sm:self-end">{t('table.yourTurn')}</div>
+                {prefs.beginner ? (
+                  <ActionHelp s={s} />
+                ) : (
+                  <div className="hidden rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:block sm:self-end">{t('table.yourTurn')}</div>
+                )}
                 <ActionBar state={s} onAct={onAct} busy={sock.acting} />
               </>
             )}
@@ -380,6 +297,12 @@ export function TablePage() {
         />
       )}
       <SettingsModal open={settings} onClose={() => setSettings(false)} />
+      <Modal open={chart} onClose={() => setChart(false)} title={t('table.handChart')}>
+        <HandRankingChart compact />
+        <Link to="/academy/hands" className="mt-3 inline-block text-sm text-gold-300 hover:underline">
+          {t('table.toAcademy')} →
+        </Link>
+      </Modal>
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import type { LobbyTableDto } from '@jc/types';
 import { Badge, Button, Empty, Field, formatChips, Input, Modal, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
+import { tutorialComplete, useProgress } from '../academy/progress';
+import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
@@ -16,6 +18,8 @@ function statusOf(t: LobbyTableDto): 'playing' | 'waiting' | 'empty' {
 export function LobbyPage() {
   const { t } = useI18n();
   const nav = useNavigate();
+  const { me } = useAuth();
+  const academy = useProgress(me?.id);
   const [tables, setTables] = useState<LobbyTableDto[] | null>(null);
   const [error, setError] = useState(false);
   const [q, setQ] = useState('');
@@ -71,6 +75,16 @@ export function LobbyPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {!tutorialComplete(academy) && (
+        <Link to="/academy" className="jc-panel jc-tap flex items-center gap-3 border-gold-500/30 p-4 transition hover:border-gold-400/60" data-testid="lobby-academy">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-xl text-gold-300">♠</span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-bold text-ivory">{t('lobby.academyTitle')}</span>
+            <span className="block text-xs text-ink-300">{t('lobby.academyBody')}</span>
+          </span>
+          <span className="hidden shrink-0 text-sm font-semibold text-gold-300 sm:inline">{t('lobby.academyCta')} →</span>
+        </Link>
+      )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('lobby.title')}</h1>

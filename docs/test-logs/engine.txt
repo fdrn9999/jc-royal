@@ -1,42 +1,13 @@
 
+> @jc/poker-engine@0.0.0 test C:\Users\ckato\OneDrive\문서\jc-royal\packages\poker-engine
+> vitest run
+
+
  RUN  v4.1.11 C:/Users/ckato/OneDrive/문서/jc-royal/packages/poker-engine
 
-stdout | test/size.test.ts > persisted size > a long 9-handed hand stays well below the Durable Object value limit (2 MiB)
-events=154 persisted=101.1 KiB
 
- ✓ test/size.test.ts > persisted size > a long 9-handed hand stays well below the Durable Object value limit (2 MiB) 47ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > royal flush wins at showdown 14ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > straight flush wins at showdown 3ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > four of a kind wins at showdown 2ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > full house wins at showdown 2ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > flush wins at showdown 3ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > straight wins at showdown 2ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > three of a kind wins at showdown 2ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > two pair wins at showdown 2ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > one pair wins at showdown 2ms
- ✓ test/rules.test.ts > hand evaluation through showdown (engine evaluator) > high card wins at showdown 2ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > 3-handed: SB completes for 5, BB keeps the option to check (engine bootstrap fix) 5ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > heads-up: button posts SB and acts first preflop, BB acts first after the flop 1ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > minimum raise is one big blind over the current bet, then the size of the last raise 1ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > a short all-in does not reopen raising for players who already acted 2ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > multi-way all-in with different stacks builds side pots and conserves chips 8ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > split pot on a board play, with an odd chip awarded deterministically 2ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > when everyone else folds the last player wins without revealing cards 1ms
- ✓ test/rules.test.ts > blinds, positions and betting rules > a player who cannot cover the big blind posts all-in and can still win 1ms
- ✓ test/rules.test.ts > server-side guards > rejects out-of-turn actions, illegal amounts and duplicate intent ids 1ms
- ✓ test/rules.test.ts > server-side guards > turn timeout checks when free and folds when facing a bet 1ms
- ✓ test/rules.test.ts > server-side guards > never exposes other players hole cards before showdown 1ms
- ✓ test/rules.test.ts > server-side guards > restores from a JSON-serialised log mid-hand and continues identically 13ms
- ✓ test/rules.test.ts > server-side guards > rotates the dealer button to the next dealt seat 0ms
- ✓ test/rules.test.ts > server-side guards > produces a hand record with public actions and per-player net results 1ms
- ✓ test/property.test.ts > property: random legal play > uniform choices: conserves chips, settles, replays identically, keeps cards private 2156ms
-stdout | test/property.test.ts > property: random legal play > fold-averse choices (reaches showdowns and side pots)
-coverage {"hands":2000,"showdowns":2000,"sidePots":1844,"stalls":104}
-
- ✓ test/property.test.ts > property: random legal play > fold-averse choices (reaches showdowns and side pots) 2316ms
-
- Test Files  3 passed (3)
-      Tests  27 passed (27)
-   Start at  15:13:05
-   Duration  4.83s (transform 218ms, setup 0ms, import 582ms, tests 4.60s, environment 0ms)
+ Test Files  4 passed (4)
+      Tests  45 passed (45)
+   Start at  17:09:01
+   Duration  5.90s (transform 357ms, setup 0ms, import 1.03s, tests 6.00s, environment 0ms)
 

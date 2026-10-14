@@ -23,8 +23,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
-      - name: Engine rules + property tests
-        run: pnpm --filter @jc/poker-engine test
+      - name: Engine + academy unit tests
+        run: pnpm test
       - name: Build web + admin
         run: pnpm --filter @jc/web build && pnpm --filter @jc/admin build
       - name: Integration tests (wrangler dev / workerd, local D1 + Durable Objects)

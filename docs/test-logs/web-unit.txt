@@ -1,0 +1,13 @@
+
+> @jc/web@0.0.0 test C:\Users\ckato\OneDrive\문서\jc-royal\apps\web
+> vitest run
+
+
+ RUN  v4.1.11 C:/Users/ckato/OneDrive/문서/jc-royal/apps/web
+
+
+ Test Files  1 passed (1)
+      Tests  28 passed (28)
+   Start at  17:09:08
+   Duration  565ms (transform 204ms, setup 0ms, import 342ms, tests 65ms, environment 0ms)
+

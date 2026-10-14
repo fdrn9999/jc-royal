@@ -11,6 +11,7 @@
 - **단일 규칙 기준**: 게임 판정은 [poker-engine-ts](https://github.com/Ge-limin/poker-engine-ts)만 한다. 서버 권한형이며, 플레이어마다 볼 수 있는 정보만 투영한다.
 - **테이블 = Durable Object**: 상태 변경을 직렬화하고, 이벤트 로그로 복구하며, WebSocket Hibernation을 쓴다.
 - **칩 무결성**: 멱등 원장, 매 액션 칩 보존 검사, 정합성 검사를 한다.
+- **포커 아카데미**: 카드 기초부터 족보, 홀덤 규칙, 베팅 액션, 실제 테이블 화면의 연습 게임(브라우저 내 엔진, 칩·기록 미사용)까지. 게임 중 족보표와 초보자 모드를 제공한다.
 - **UI**: [Elite-Poker](https://github.com/opadips/Elite-Poker) UI를 JC ROYAL 브랜드로 재작성했다. 테마 4종, 애니메이션, Web Audio, 한국어/영어, 모바일을 지원한다.
 
 ## 빠른 시작
@@ -29,6 +30,7 @@ pnpm dev:admin       # http://localhost:5174
 
 ```
 apps/web            사용자 사이트 (React + Vite + Tailwind)
+  src/academy       포커 아카데미 (레슨, 퀴즈, 연습 시나리오 · 지연 로딩)
 apps/admin          관리자 콘솔 + 호스트 Worker
 apps/api            Hono REST · 인증 · WS 진입 (Worker)
 apps/game-worker    TableRoom Durable Object (Worker)

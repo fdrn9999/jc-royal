@@ -350,12 +350,44 @@
   animation: jc-winner-glow 1.4s ease-in-out infinite;
 }
 
+/* Academy feedback: correct answers pop, wrong ones shake. */
+@keyframes jc-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.jc-pop {
+  animation: jc-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes jc-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+.jc-shake {
+  animation: jc-shake 0.36s ease-in-out;
+}
+/* Highlight ring the academy tour draws around a table element. */
+.jc-spot {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 14px;
+  box-shadow: 0 0 0 3px var(--color-gold-400), 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  transition: all 0.3s ease;
+  z-index: 45;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .jc-flip-in,
   .jc-deal-in,
   .jc-pulse-gold,
-  .jc-winner {
+  .jc-winner,
+  .jc-pop,
+  .jc-shake {
     animation: none !important;
+  }
+  .jc-spot {
+    transition: none;
   }
 }
 

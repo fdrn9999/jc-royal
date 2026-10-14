@@ -1,5 +1,5 @@
 import { Logo, Spinner } from '@jc/ui';
-import { StrictMode, type ReactNode } from 'react';
+import { lazy, StrictMode, Suspense, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
 import { AppShell } from './components/AppShell';
@@ -22,6 +22,23 @@ function Splash() {
       <Logo size={88} />
       <Spinner className="text-gold-400" />
     </div>
+  );
+}
+
+/** Academy pages share one lazy chunk so the offline engine never lands in the main bundle. */
+const loadAcademy = () => import('./academy/routes');
+type AcademyPageName = keyof Awaited<ReturnType<typeof loadAcademy>>;
+const academyPages = new Map<AcademyPageName, ComponentType>();
+function Academy({ page }: { page: AcademyPageName }) {
+  let C = academyPages.get(page);
+  if (!C) {
+    C = lazy(() => loadAcademy().then((m) => ({ default: m[page] })));
+    academyPages.set(page, C);
+  }
+  return (
+    <Suspense fallback={<Splash />}>
+      <C />
+    </Suspense>
   );
 }
 
@@ -50,6 +67,7 @@ const router = createBrowserRouter([
   { path: '/register', element: <GuestOnly><RegisterPage /></GuestOnly> },
   { path: '/reset', element: <ResetPage /> },
   { path: '/table/:id', element: <RequireAuth><TablePage /></RequireAuth> },
+  { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },
   {
     element: (
       <RequireAuth>
@@ -67,6 +85,13 @@ const router = createBrowserRouter([
       { path: '/board/:id', element: <PostPage /> },
       { path: '/board/:id/edit', element: <PostEditorPage /> },
       { path: '/messages', element: <MessagesPage /> },
+      { path: '/academy', element: <Academy page="AcademyPage" /> },
+      { path: '/academy/cards', element: <Academy page="CardsLesson" /> },
+      { path: '/academy/hands', element: <Academy page="HandsLesson" /> },
+      { path: '/academy/holdem', element: <Academy page="HoldemLesson" /> },
+      { path: '/academy/actions', element: <Academy page="ActionsLesson" /> },
+      { path: '/academy/practice', element: <Academy page="PracticeListPage" /> },
+      { path: '/academy/progress', element: <Academy page="ProgressPage" /> },
       { path: '*', element: <NotFound /> },
     ],
   },

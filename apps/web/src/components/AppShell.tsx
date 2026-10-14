@@ -45,6 +45,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink to="/" end className={link}>
               {t('nav.lobby')}
             </NavLink>
+            <NavLink to="/academy" className={link}>
+              {t('nav.academy')}
+            </NavLink>
             <NavLink to="/board" className={link}>
               {t('nav.board')}
             </NavLink>
@@ -77,14 +80,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 sm:pb-10">{children}</main>
       {/* Mobile bottom navigation */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
-        <NavLink to="/" end className={({ isActive }) => `py-3 text-center text-sm font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+        <NavLink to="/" end className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
           {t('nav.lobby')}
         </NavLink>
-        <NavLink to="/board" className={({ isActive }) => `py-3 text-center text-sm font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
+        <NavLink to="/academy" className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`} data-testid="nav-academy">
+          {t('nav.academy')}
+        </NavLink>
+        <NavLink to="/board" className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
           {t('nav.board')}
         </NavLink>
-        <NavLink to="/me" className={({ isActive }) => `py-3 text-center text-sm font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
+        <NavLink to="/me" className={({ isActive }) => `py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`}>
           {t('nav.me')}
         </NavLink>
       </nav>

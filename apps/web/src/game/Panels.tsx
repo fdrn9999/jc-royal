@@ -165,6 +165,10 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             <input type="checkbox" checked={prefs.fourColor} onChange={(e) => setPrefs({ fourColor: e.target.checked })} className="size-4 accent-[var(--color-gold-500)]" />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
+            {t('settings.beginner')}
+            <input type="checkbox" checked={prefs.beginner} onChange={(e) => setPrefs({ beginner: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-beginner" />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
             {t('settings.confirmRisky')}
             <input type="checkbox" checked={prefs.confirmRisky} onChange={(e) => setPrefs({ confirmRisky: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" />
           </label>

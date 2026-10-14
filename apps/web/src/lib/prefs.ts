@@ -7,10 +7,12 @@ export interface Prefs {
   fourColor: boolean;
   /** Require a second tap for fold-when-check-is-free, large calls and all-in. */
   confirmRisky: boolean;
+  /** Beginner aids at the table: current hand, action help, street notes. Independent of confirmRisky. */
+  beginner: boolean;
 }
 
 const KEY = 'jc.prefs';
-const DEFAULTS: Prefs = { theme: 'royal', fourColor: false, confirmRisky: true };
+const DEFAULTS: Prefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false };
 let current: Prefs = load();
 const listeners = new Set<() => void>();
 

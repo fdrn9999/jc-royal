@@ -6,9 +6,10 @@
 
 | 계층 | 명령 | 결과 | 로그 |
 |---|---|---|---|
-| 엔진 규칙·속성 | `pnpm --filter @jc/poker-engine test` | **27 / 27 통과** | `test-logs/engine.txt` |
+| 엔진 규칙·속성·평가기 | `pnpm --filter @jc/poker-engine test` | **45 / 45 통과** | `test-logs/engine.txt` |
+| 아카데미 단위(웹) | `pnpm --filter @jc/web test` | **28 / 28 통과** | `test-logs/web-unit.txt` |
 | 통합(실제 workerd) | `pnpm test:integration` | **42 / 42 통과** | `test-logs/integration.txt` |
-| E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e` | **5 / 5 통과** | `test-logs/e2e.txt` |
+| E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e` | **12 / 12 통과** | `test-logs/e2e.txt` |
 | 타입 검사 | `pnpm typecheck` | 오류 0 | — |
 
 > 이 PC에서는 Playwright 전용 Chromium 다운로드가 네트워크 오류(ECONNRESET)로 실패해, 설치된 Chrome을 `channel: 'chrome'`으로 사용했다. CI(ubuntu)에서는 Playwright Chromium을 쓴다.
@@ -121,3 +122,24 @@
 - 비밀번호 재설정 메일은 발송되지 않는다(메일 서비스 미연동, 운영에서는 관리자가 링크를 발급).
 - 부하·성능 테스트(수백 개 동시 테이블)는 수행하지 않았다. 로컬 workerd는 Cloudflare 엣지 성능을 대표하지 않는다.
 - 로컬 `wrangler dev`에서는 서버가 닫은 소켓이 클라이언트에서 CLOSING 상태로 남는다(서버 쪽 동작은 정상, 테스트에 명시).
+
+---
+
+## 포커 아카데미 (2026-10-14 추가)
+
+| 요구 | 테스트 | 결과 |
+|---|---|---|
+| 현재 패 평가기가 엔진과 일치 | `evaluate.test.ts` 속성 테스트: 무작위 2~3인 150건에서 족보·승자 모두 HandEngine 쇼다운과 동일 | ✅ |
+| 카드 종류·숫자 판별, 퀴즈 판정 | `academy.test.ts` Lesson 1 (선택·정렬·문양 우열 없음) | ✅ |
+| 족보 비교(킥커·스플릿·풀하우스 트리플 우선 등) | 비교 문제 11개의 설명 문구와 엔진 판정 일치 | ✅ |
+| 포지션·액션 순서 | 2·3·6·9인 프리플랍/포스트플랍 순서를 실제 엔진 진행과 비교 | ✅ |
+| 진행 상태 저장·마이그레이션·재시작·계정 분리 | `progress store` 3건 | ✅ |
+| 연습 시나리오 완료 조건 | A~H 전부 스크립트대로 끝까지 진행, 승자·칩 보존·사이드 팟(300/400) 확인 | ✅ |
+| 아카데미 진입, 오답 후 재시도, 진행 복원(다른 계정에는 미표시), 재시작 | `academy.spec.ts` | ✅ |
+| 족보 비교, 포인터 드래그 정렬, 홀덤 단계, 베팅 액션 실습 | `academy.spec.ts` | ✅ |
+| 연습 게임: WebSocket 미개설, 지갑·원장·핸드 기록 불변 | `academy.spec.ts` | ✅ |
+| 실제 테이블 족보표(연결 유지), 초보자 모드 현재 패 | `academy.spec.ts` | ✅ |
+| 모바일: 터치 탭 퀴즈·스왑 정렬, 가로 스크롤 없음, 카드 탭 시 스크롤 없음, 바텀시트, 액션바 화면 내 | `academy-mobile.spec.ts` | ✅ |
+| 기존 멀티플레이 회귀 | 기존 E2E 6건 + 통합 42건 | ✅ |
+
+모바일 테스트는 Chrome 모바일 에뮬레이션(Pixel 7, 터치 활성)이다. iOS Safari·Android 실기기 검증은 하지 않았다.

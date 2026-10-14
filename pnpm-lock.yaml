@@ -133,6 +133,9 @@ importers:
       '@jc/audio':
         specifier: workspace:*
         version: link:../../packages/audio
+      '@jc/poker-engine':
+        specifier: workspace:*
+        version: link:../../packages/poker-engine
       '@jc/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -170,6 +173,9 @@ importers:
       vite:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
   packages/audio:
     devDependencies:

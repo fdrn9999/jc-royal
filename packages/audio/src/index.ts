@@ -18,7 +18,12 @@ export type SoundId =
   | 'fold'
   | 'timer'
   | 'showdown'
-  | 'win';
+  | 'win'
+  // Academy feedback
+  | 'select'
+  | 'correct'
+  | 'wrong'
+  | 'complete';
 
 export interface AudioSettings {
   master: number;
@@ -203,6 +208,20 @@ class SoundEngine {
           this.tone({ type: 'sine', freq: f * 2, duration: 0.22, volume: 0.05, start: i * 0.11 });
         });
         this.tone({ type: 'sine', freq: 1318.5, duration: 0.5, volume: 0.1, start: notes.length * 0.11 });
+        return;
+      }
+      case 'select':
+        this.tone({ type: 'triangle', freq: 660, endFreq: 880, duration: 0.06, volume: 0.07 });
+        return;
+      case 'correct':
+        this.tone({ type: 'triangle', freq: 659.25, duration: 0.14, volume: 0.11 });
+        this.tone({ type: 'triangle', freq: 987.77, duration: 0.22, volume: 0.11, start: 0.09 });
+        return;
+      case 'wrong':
+        this.tone({ type: 'sawtooth', freq: 220, endFreq: 165, duration: 0.22, volume: 0.05 });
+        return;
+      case 'complete': {
+        [523.25, 783.99, 1046.5].forEach((f, i) => this.tone({ type: 'triangle', freq: f, duration: 0.28, volume: 0.12, start: i * 0.1 }));
         return;
       }
     }

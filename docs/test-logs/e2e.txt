@@ -1,10 +1,17 @@
 
-Running 5 tests using 1 worker
+Running 12 tests using 1 worker
 
-  ✓  1 [desktop] › tests\e2e\admin.spec.ts:6:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified (5.7s)
-  ✓  2 [desktop] › tests\e2e\board.spec.ts:4:1 › board: write, comment, edit own content; others cannot edit (4.7s)
-  ✓  3 [desktop] › tests\e2e\game.spec.ts:4:1 › two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund (19.7s)
-  ✓  4 [desktop] › tests\e2e\register-view.spec.ts:3:1 › register: email = local part + domain picker with direct input (1.3s)
-  ✓  5 [mobile] › tests\e2e\mobile.spec.ts:4:1 › mobile: lobby → seat → playable action bar, no horizontal overflow (7.8s)
+  ✓   1 [desktop] › tests\e2e\academy.spec.ts:8:1 › academy: onboarding, card lesson with wrong-then-right answers, progress restored per account (9.5s)
+  ✓   2 [desktop] › tests\e2e\academy.spec.ts:49:1 › academy: hand comparison (engine-judged), drag sorting, hold’em streets, action demo (6.3s)
+  ✓   3 [desktop] › tests\e2e\academy.spec.ts:87:1 › academy practice: real table UI offline — no socket, wallet unchanged, scenario completes (17.0s)
+  ✓   4 [desktop] › tests\e2e\academy.spec.ts:125:1 › real table: hand chart opens without dropping the game; beginner mode shows the current hand (9.4s)
+  ✓   5 [desktop] › tests\e2e\admin.spec.ts:6:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified (6.4s)
+  ✓   6 [desktop] › tests\e2e\board.spec.ts:4:1 › board: write, comment, edit own content; others cannot edit (5.8s)
+  ✓   7 [desktop] › tests\e2e\game.spec.ts:4:1 › two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund (19.4s)
+  ✓   8 [desktop] › tests\e2e\register-view.spec.ts:3:1 › register: email = local part + domain picker with direct input (1.6s)
+  ✓   9 [mobile] › tests\e2e\academy-mobile.spec.ts:7:1 › mobile academy: bottom nav, touch quiz (tap select + tap-to-swap sort), no overflow, no page scroll on card taps (12.3s)
+  ✓  10 [mobile] › tests\e2e\academy-mobile.spec.ts:40:1 › mobile practice: raise with presets by touch, hand chart as a bottom sheet, actions stay on screen (10.1s)
+  ✓  11 [mobile] › tests\e2e\mobile.spec.ts:4:1 › mobile: lobby → seat → playable action bar, no horizontal overflow (8.0s)
+  ✓  12 [mobile] › tests\e2e\mobile.spec.ts:30:1 › mobile: touch guards — no-zoom game surface, 16px inputs, two-tap risky fold, BB stepper (14.4s)
 
-  5 passed (54.8s)
+  12 passed (2.4m)

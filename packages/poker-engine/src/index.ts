@@ -1,5 +1,7 @@
 export * from './deck';
+export * from './evaluate';
 export * from './hand';
+export * from './tutorial';
 export { ENGINE_VERSION } from 'poker-engine-ts';
 
 /**

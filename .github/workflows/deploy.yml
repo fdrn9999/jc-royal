@@ -27,7 +27,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm --filter @jc/poker-engine test
+      - run: pnpm typecheck && pnpm test
       - run: pnpm --filter @jc/web build && pnpm --filter @jc/admin build
       - name: Apply D1 migrations
         run: pnpm exec wrangler d1 migrations apply jc-royal-db-prod --remote --env production -c apps/api/wrangler.jsonc

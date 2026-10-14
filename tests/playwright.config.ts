@@ -17,7 +17,7 @@ export default defineConfig({
     ...(channel ? { channel } : {}),
   },
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'], ...(channel ? { channel } : {}) }, testIgnore: /mobile.spec.ts/ },
+    { name: 'desktop', use: { ...devices['Desktop Chrome'], ...(channel ? { channel } : {}) }, testIgnore: /mobile\.spec\.ts/ },
     { name: 'mobile', use: { ...devices['Pixel 7'], ...(channel ? { channel } : {}) }, testMatch: /mobile\.spec\.ts/ },
   ],
   webServer: [
