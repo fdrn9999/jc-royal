@@ -22,6 +22,8 @@ export interface TableSocketApi {
   act: (type: ActionType, amount?: number) => boolean;
   /** True while an action is in flight (until the next state arrives). */
   acting: boolean;
+  /** Skip the backoff wait and reconnect now (no-op while connected). */
+  reconnect: () => void;
 }
 
 export class RequestError extends Error {
@@ -48,6 +50,7 @@ export function useTableSocket(tableId: string, code: string | null): TableSocke
   const stateRef = useRef<TableView | null>(null);
   const cueSeq = useRef(0);
   const stop = useRef(false);
+  const kick = useRef<() => void>(() => {});
 
   useEffect(() => {
     stop.current = false;
@@ -123,6 +126,7 @@ export function useTableSocket(tableId: string, code: string | null): TableSocke
         }
       };
       ws.onclose = (ev) => {
+        if (wsRef.current !== ws) return; // superseded by a manual reconnect
         clearInterval(ping);
         for (const p of pending.current.values()) p.reject(new RequestError('internal', 'connection closed'));
         pending.current.clear();
@@ -142,9 +146,19 @@ export function useTableSocket(tableId: string, code: string | null): TableSocke
         timer = setTimeout(() => !stop.current && connect(), delay);
       };
     };
+    kick.current = () => {
+      const rs = wsRef.current?.readyState;
+      if (stop.current || rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
+      clearTimeout(timer);
+      attempt = 0;
+      connect();
+    };
     connect();
+    // Mobile browsers drop sockets in the background: resync, or reconnect at once on return.
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ t: 'sync' }));
+      if (document.visibilityState !== 'visible') return;
+      if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ t: 'sync' }));
+      else kick.current();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -187,6 +201,7 @@ export function useTableSocket(tableId: string, code: string | null): TableSocke
   }, []);
 
   const consumeCues = useCallback((upToId: number) => setCues((q) => q.filter((c) => c.id > upToId)), []);
+  const reconnect = useCallback(() => kick.current(), []);
 
-  return { status, state, chat, cues, consumeCues, lastError, request, send, act, acting };
+  return { status, state, chat, cues, consumeCues, lastError, request, send, act, acting, reconnect };
 }

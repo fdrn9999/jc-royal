@@ -160,6 +160,69 @@
   }
 }
 
+/* ------------------------------------------------------------------ touch */
+
+/*
+ * Game surfaces (table + action bar): no pinch / double-tap zoom, no panning,
+ * no long-press callout or text selection. Taps still fire clicks. Applied to
+ * the game screen only — other pages keep normal zoom for accessibility.
+ */
+.jc-game-surface {
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.jc-game-surface input:not([type='range']),
+.jc-game-surface textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* Buttons and scrollable game panels: no double-tap zoom delay, panning allowed. */
+.jc-tap {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Bet slider with a finger-sized track and thumb. */
+.jc-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2.75rem;
+  background: transparent;
+  touch-action: none;
+  cursor: pointer;
+}
+.jc-range::-webkit-slider-runnable-track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(212, 175, 55, 0.55), rgba(212, 175, 55, 0.18));
+}
+.jc-range::-moz-range-track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(212, 175, 55, 0.55), rgba(212, 175, 55, 0.18));
+}
+.jc-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-top: -0.625rem;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #f3dd9b, #b48e22);
+  border: 2px solid #0a0b0d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+.jc-range::-moz-range-thumb {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #f3dd9b, #b48e22);
+  border: 2px solid #0a0b0d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
 /* ------------------------------------------------------------------ cards */
 
 .jc-card {

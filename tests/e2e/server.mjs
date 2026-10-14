@@ -21,7 +21,7 @@ const seed = resolve(root, 'tests/.state/e2e-seed.sql');
 writeFileSync(
   seed,
   `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds) VALUES
-   ('e2e-hu', 'E2E Heads-up', 2, 5, 10, 100, 1000, 30), ('e2e-six', 'E2E Six', 6, 5, 10, 100, 1000, 30);`,
+   ('e2e-hu', 'E2E Heads-up', 2, 5, 10, 100, 1000, 30), ('e2e-six', 'E2E Six', 6, 5, 10, 100, 1000, 30), ('e2e-touch', 'E2E Touch', 2, 5, 10, 100, 1000, 30);`,
 );
 run(['d1', 'execute', 'jc-royal-db', '--local', '--persist-to', state, '-c', 'apps/api/wrangler.jsonc', '--file', seed]);
 const child = spawn(

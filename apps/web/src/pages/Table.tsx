@@ -55,6 +55,14 @@ export function TablePage() {
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => sound.installAutoUnlock(), []);
+  // iOS Safari ignores user-scalable=no; block pinch zoom on the game screen except in the chat panel.
+  useEffect(() => {
+    const block = (e: Event) => {
+      if (!(e.target as Element | null)?.closest?.('[data-allow-zoom]')) e.preventDefault();
+    };
+    document.addEventListener('gesturestart', block);
+    return () => document.removeEventListener('gesturestart', block);
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.fourColor = prefs.fourColor ? '1' : '';
   }, [prefs.fourColor]);
@@ -79,7 +87,8 @@ export function TablePage() {
   }, [s, params, setParams]);
 
   const portrait = area.w / Math.max(1, area.h) < 0.95;
-  const compact = area.w < 640;
+  // Short viewports (landscape phones, open keyboard) get the dense layout too.
+  const compact = area.w < 640 || area.h < 520;
   const anchor = s?.you.seatIndex ?? 0;
   const plateHalfPx = compact ? 60 : 76;
 
@@ -174,7 +183,7 @@ export function TablePage() {
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }}>
       {/* top bar */}
-      <header className="z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
+      <header className="jc-game-surface z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
         <Link to="/" aria-label={t('nav.lobby')} className="shrink-0">
           <Logo size={32} />
         </Link>
@@ -194,7 +203,7 @@ export function TablePage() {
               <span className="hidden sm:inline">{s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}</span>
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="lg:hidden" onClick={() => setChatOpen((o) => !o)}>
+          <Button size="sm" variant="ghost" className="lg:hidden" onClick={() => setChatOpen((o) => !o)} aria-label={t('table.chat')} aria-expanded={chatOpen}>
             💬
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
@@ -207,11 +216,20 @@ export function TablePage() {
         </div>
       </header>
 
-      {banner && <div className="z-40 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status">{banner}</div>}
+      {banner && (
+        <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status">
+          {banner}
+          {sock.status === 'reconnecting' && (
+            <button className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" onClick={sock.reconnect}>
+              {t('table.reconnectNow')}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/* table area */}
-        <div className="relative flex min-w-0 flex-1 flex-col">
+        <div className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
           <div ref={areaRef} className="relative mx-2 mb-[6.75rem] mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-24 sm:mt-6">
             {s && (
               <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'}>
@@ -317,14 +335,20 @@ export function TablePage() {
 
         {/* chat sidebar (desktop) / drawer (mobile) */}
         <aside
+          data-allow-zoom
           className={cx(
-            'z-50 flex w-full flex-col border-l border-gold-500/10 bg-ink-950/95 p-3 backdrop-blur lg:static lg:flex lg:w-80',
+            'jc-tap z-50 flex w-full flex-col border-l border-gold-500/10 bg-ink-950/95 p-3 backdrop-blur lg:static lg:flex lg:w-80',
             chatOpen ? 'fixed inset-x-0 bottom-0 top-14' : 'hidden',
           )}
         >
+          {chatOpen && myTurn && (
+            <button className="jc-pulse-gold mb-2 rounded-xl border border-gold-400/60 bg-gold-500/20 px-3 py-2.5 text-sm font-bold text-gold-300 lg:hidden" onClick={() => setChatOpen(false)} data-testid="chat-your-turn">
+              {t('table.yourTurn')} · {t('table.backToTable')} ↓
+            </button>
+          )}
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-xs font-bold tracking-[0.08em] text-gold-300">{t('table.chat')}</h2>
-            <button className="text-ink-300 lg:hidden" onClick={() => setChatOpen(false)} aria-label={t('common.close')}>
+            <button className="grid size-10 place-items-center text-ink-300 lg:hidden" onClick={() => setChatOpen(false)} aria-label={t('common.close')}>
               ✕
             </button>
           </div>

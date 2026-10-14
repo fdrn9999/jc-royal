@@ -5,10 +5,12 @@ import { useSyncExternalStore } from 'react';
 export interface Prefs {
   theme: ThemeId;
   fourColor: boolean;
+  /** Require a second tap for fold-when-check-is-free, large calls and all-in. */
+  confirmRisky: boolean;
 }
 
 const KEY = 'jc.prefs';
-const DEFAULTS: Prefs = { theme: 'royal', fourColor: false };
+const DEFAULTS: Prefs = { theme: 'royal', fourColor: false, confirmRisky: true };
 let current: Prefs = load();
 const listeners = new Set<() => void>();
 

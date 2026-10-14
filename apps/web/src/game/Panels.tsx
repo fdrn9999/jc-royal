@@ -102,10 +102,10 @@ export function ChatPanel({ chat, onSend, canChat }: { chat: ChatMessage[]; onSe
             maxLength={200}
             onChange={(e) => setText(e.target.value)}
             placeholder={t('table.chatPlaceholder')}
-            className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm"
+            className="h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-3 text-base sm:h-9 sm:text-sm"
             aria-label={t('table.chat')}
           />
-          <Button size="sm" type="submit">
+          <Button size="sm" type="submit" className="h-11! sm:h-9!" aria-label={t('table.chat')}>
             ↵
           </Button>
         </form>
@@ -164,11 +164,15 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             {t('settings.fourColor')}
             <input type="checkbox" checked={prefs.fourColor} onChange={(e) => setPrefs({ fourColor: e.target.checked })} className="size-4 accent-[var(--color-gold-500)]" />
           </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            {t('settings.confirmRisky')}
+            <input type="checkbox" checked={prefs.confirmRisky} onChange={(e) => setPrefs({ confirmRisky: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" />
+          </label>
         </section>
         <div className="jc-divider" />
         <Field label={t('settings.language')}>
           {(id) => (
-            <select id={id} value={locale} onChange={(e) => setLocale(e.target.value as 'ko' | 'en')} className="h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm">
+            <select id={id} value={locale} onChange={(e) => setLocale(e.target.value as 'ko' | 'en')} className="h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-base sm:text-sm">
               <option value="ko">한국어</option>
               <option value="en">English</option>
             </select>
