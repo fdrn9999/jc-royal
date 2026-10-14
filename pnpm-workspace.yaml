@@ -5,3 +5,5 @@ onlyBuiltDependencies:
   - esbuild
   - workerd
   - sharp
+patchedDependencies:
+  poker-engine-ts@0.1.3: patches/poker-engine-ts@0.1.3.patch

@@ -1,0 +1,26 @@
+diff --git a/dist/chunk-G7UTOEPN.js b/dist/chunk-G7UTOEPN.js
+index f017a967f3342557b6e32dc20a8e7ce5db943318..486cccdd619e306e8d8d12c492678046e09a54f3 100644
+--- a/dist/chunk-G7UTOEPN.js
++++ b/dist/chunk-G7UTOEPN.js
+@@ -290,7 +290,7 @@ function reduce(snapshot, event) {
+     allInPlayers
+   });
+   const roundContributionsAfter = calculateRoundContributions(updatedRound);
+-  const actorsThisRound = new Set(updatedRound.turns.map((turn) => turn.actor));
++  const actorsThisRound = new Set(updatedRound.turns.filter((turn) => turn.action.type !== "post-blind" && turn.action.type !== "post-ante").map((turn) => turn.actor));
+   let nextActor = determineNextActor({
+     round: updatedRound,
+     seating,
+diff --git a/dist/chunk-XXXP5TKL.js b/dist/chunk-XXXP5TKL.js
+index 9f19a14536434205f67f8e82c36ef1104c0ef124..827f690b169c08a6e801a9b9714ddff44206f7b2 100644
+--- a/dist/chunk-XXXP5TKL.js
++++ b/dist/chunk-XXXP5TKL.js
+@@ -259,7 +259,7 @@ var selectSimulationView = memoizeBySnapshot(
+ );
+ function derivePlayersLeftToAct(snapshot, round, foldedPlayers, allInPlayers) {
+   const computation = deriveRoundComputation(round);
+-  const actorsThisRound = new Set(round.turns.map((turn) => turn.actor));
++  const actorsThisRound = new Set(round.turns.filter((turn) => turn.action.type !== "post-blind" && turn.action.type !== "post-ante").map((turn) => turn.actor));
+   const actorOrder = deriveTurnOrderActors(round, snapshot.seating);
+   const pendingEliminations = new Set(snapshot.flags.pendingEliminations);
+   const eligiblePlayers = actorOrder.filter((playerId) => {
