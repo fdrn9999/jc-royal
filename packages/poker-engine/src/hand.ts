@@ -562,7 +562,8 @@ export class HandEngine {
       if (!id) continue;
       const inHand = (s.cards.holeCards[id]?.length ?? 0) > 0;
       let lastAction: SeatHandInfo['lastAction'] = null;
-      if (round && round.stage === s.hand.stage) {
+      // During play: actions of the current street. Once settled: the final street's actions.
+      if (round && (round.stage === s.hand.stage || s.hand.stage === 'settled')) {
         for (const t of round.turns) {
           if (t.actor !== id) continue;
           const mapped = mapActionType(t.action);
@@ -621,6 +622,7 @@ export class HandEngine {
     return {
       id: this.meta.handId,
       number: 0,
+      seq: this.version,
       stage: s.hand.stage as HandStage,
       buttonSeat: this.meta.buttonSeat,
       sbSeat: seatIdx(sbId),

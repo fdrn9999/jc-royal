@@ -1,0 +1,17 @@
+{
+  "name": "@jc/game-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@jc/db": "workspace:*",
+    "@jc/poker-engine": "workspace:*",
+    "@jc/types": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": { "@jc/config": "workspace:*", "@cloudflare/workers-types": "^5.20261014.1" }
+}

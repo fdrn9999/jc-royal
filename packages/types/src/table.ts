@@ -51,6 +51,8 @@ export interface HandResultView {
 export interface HandView {
   id: string;
   number: number;
+  /** Engine event sequence; action messages must echo it (stale views are rejected). */
+  seq: number;
   stage: HandStage;
   buttonSeat: number;
   sbSeat: number | null;
@@ -84,12 +86,21 @@ export interface TableView {
   seats: SeatView[];
   hand: HandView | null;
   spectatorCount: number;
+  /** Nicknames in waitlist order. */
   waitlist: string[];
+  /** A freed seat held for the head of the waitlist. */
+  reservation: { nickname: string; until: number } | null;
+  /** Epoch ms when the next hand is scheduled, if any. */
+  nextHandAt: number | null;
   you: {
     userId: string;
     seatIndex: number | null;
     legal: LegalOption[];
     sittingOut: boolean;
+    /** Leaving after the current hand. */
+    leaving: boolean;
+    inWaitlist: boolean;
+    canSit: boolean;
   };
 }
 

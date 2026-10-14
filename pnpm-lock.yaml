@@ -16,6 +16,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261014.1
         version: 5.20261014.1
+      '@jc/types':
+        specifier: workspace:*
+        version: link:packages/types
       '@playwright/test':
         specifier: ^1.64.0
         version: 1.64.0
@@ -62,6 +65,28 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(tsx@4.23.15))
+
+  apps/game-worker:
+    dependencies:
+      '@jc/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@jc/poker-engine':
+        specifier: workspace:*
+        version: link:../../packages/poker-engine
+      '@jc/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20261014.1
+        version: 5.20261014.1
+      '@jc/config':
+        specifier: workspace:*
+        version: link:../../packages/config
 
   packages/config: {}
 

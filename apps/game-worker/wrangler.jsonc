@@ -1,0 +1,37 @@
+{
+  // JC ROYAL — table rooms (Durable Objects, WebSocket hibernation).
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "jc-royal-game",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jc-royal-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "TABLES", "class_name": "TableRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TableRoom"] }],
+  "vars": { "ENVIRONMENT": "development" },
+  "observability": { "enabled": true },
+  "env": {
+    "production": {
+      "name": "jc-royal-game-prod",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "jc-royal-db-prod",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
+      "durable_objects": { "bindings": [{ "name": "TABLES", "class_name": "TableRoom" }] },
+      "vars": { "ENVIRONMENT": "production" }
+    }
+  }
+}

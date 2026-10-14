@@ -19,8 +19,8 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
     /** Client-generated id; the same id is never applied twice. */
     intentId: z.string().min(8).max(64),
     handId: z.string().min(1).max(128),
-    /** TableView.version the client acted on. */
-    version: z.number().int().nonnegative(),
+    /** HandView.seq the client acted on. */
+    seq: z.number().int().nonnegative(),
     type: z.enum(['fold', 'check', 'call', 'bet', 'raise', 'allin']),
     /** For bet/raise: the street total ("raise to"). Ignored otherwise. */
     amount: z.number().int().nonnegative().optional(),
