@@ -44,7 +44,7 @@ function Check({ ok, label }: { ok: boolean; label: string }) {
 export function PasswordRules({ value, id }: { value: string; id?: string }) {
   const { t } = useI18n();
   return (
-    <ul id={id} className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs sm:grid-cols-3">
+    <ul id={id} className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs sm:grid-cols-4">
       {PASSWORD_RULES.map((r) => (
         <Check key={r.id} ok={r.test(value)} label={t(`auth.rule.${r.id}`)} />
       ))}

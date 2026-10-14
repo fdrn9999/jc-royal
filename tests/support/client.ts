@@ -2,7 +2,7 @@
 export const BASE = () => process.env.TEST_BASE_URL ?? 'http://127.0.0.1:8799';
 export const WEB_ORIGIN = 'http://localhost:5173';
 
-/** Meets the password policy (upper, lower, digit, symbol, 8+). */
+/** Meets the password policy (letter, digit, symbol, 8+). */
 export const PASSWORD = 'Password123!';
 export const BIRTH_DATE = '1990-01-01';
 

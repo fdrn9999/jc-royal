@@ -78,7 +78,11 @@ export function ChatPanel({ chat, onSend, canChat }: { chat: ChatMessage[]; onSe
   const { t } = useI18n();
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [chat.length]);
+  useEffect(() => {
+    // Block body on purpose: newer Chrome returns a Promise from scrollIntoView,
+    // and React would call a returned value as the effect cleanup.
+    end.current?.scrollIntoView({ block: 'end' });
+  }, [chat.length]);
   function submit(e: FormEvent) {
     e.preventDefault();
     const v = text.trim();

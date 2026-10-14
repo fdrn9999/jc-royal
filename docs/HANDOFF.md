@@ -1,20 +1,20 @@
 # 인수인계 (다음 세션용)
 
-> 새 기기 또는 새 Claude 세션은 이 파일부터 읽는다. 마지막 갱신: 2026-10-14 (첫 운영 배포)
+> 새 기기 또는 새 Claude 세션은 이 파일부터 읽는다. 마지막 갱신: 2026-10-14 (가입 개편 운영 반영, 최초 관리자 생성)
 
 ## 현재 상태
 
 - `docs/DIRECTIVE.md` Phase 1~9와 포커 아카데미를 구현했다.
 - 검증 결과는 `docs/TEST_REPORT.md`와 `docs/STATUS.md`에 있다.
-- **운영 배포 완료**(2026-10-14, 로컬 wrangler, Workers Paid):
+- **운영 배포 완료**(2026-10-14, Workers Paid. 첫 배포는 로컬 wrangler, 이후 GitHub Actions):
   - 사용자 사이트: https://play.jcroyal.workers.dev
   - 관리자 콘솔: https://admin.jcroyal.workers.dev
   - Worker: `jc-royal-game-prod` → `play` → `admin`
-  - D1: `jc-royal-db-prod`(APAC), 마이그레이션 `0000`~`0003` 적용
+  - D1: `jc-royal-db-prod`(APAC), 마이그레이션 `0000`~`0004` 적용
   - 시크릿: 두 Worker에 `INTERNAL_SECRET`, `play`에 `RESEND_API_KEY`
-- 최초 슈퍼관리자: ckato9173@gmail.com. 부트스트랩 후 `ADMIN_BOOTSTRAP_TOKEN`은 삭제한다.
+- 최초 슈퍼관리자: ckato9173@gmail.com(부트스트랩 완료, `ADMIN_BOOTSTRAP_TOKEN` 삭제함). 다른 관리자는 이 계정이 콘솔에서 권한을 준다.
 - **배포 자동화**: `main`에 push하고 CI가 통과하면 GitHub Actions가 운영에 배포한다(`docs/DEPLOYMENT.md` 3절). 저장소 시크릿 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 있어야 동작한다.
-- **가입·회원 정보 개편**(브랜치 `chore/production-deploy-prep`): 이메일 인증번호, 생년월일(만 14세), 필수 동의, 비밀번호 규칙, 계정 언어, 관리자 CSV 내보내기. 운영에 반영하려면 마이그레이션 `0004_signup_profile`이 필요하다(Actions 배포는 자동 적용).
+- **가입·회원 정보 개편**(운영 반영됨): 이메일 인증번호(메일 설정 전까지 꺼짐), 생년월일(만 14세), 필수 동의, 비밀번호 규칙(8자 이상, 영문·숫자·특수문자), 이메일 도메인 직접 선택, 계정 언어, 관리자 CSV 내보내기.
 
 ## 꼭 알아야 할 결정 사항
 

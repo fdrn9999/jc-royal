@@ -12,7 +12,8 @@ const CUSTOM = '__custom__';
 export function EmailInput({ id, onChange, disabled }: { id: string; onChange: (email: string) => void; disabled?: boolean }) {
   const { t } = useI18n();
   const [local, setLocal] = useState('');
-  const [domain, setDomain] = useState<string>(EMAIL_DOMAINS[0]);
+  // No preselected domain: a default made people sign up with the wrong address.
+  const [domain, setDomain] = useState<string>('');
   const [custom, setCustom] = useState('');
 
   useEffect(() => {
@@ -55,14 +56,20 @@ export function EmailInput({ id, onChange, disabled }: { id: string; onChange: (
           onChange={(e) => setDomain(e.target.value)}
           disabled={disabled}
           aria-label={t('auth.emailDomain')}
-          className="h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-2 text-ivory focus:border-gold-500/70 focus:outline-none disabled:opacity-60"
+          required
+          className={`h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-2 focus:border-gold-500/70 focus:outline-none disabled:opacity-60 ${domain ? 'text-ivory' : 'text-ink-400'}`}
         >
+          <option value="" disabled>
+            {t('auth.emailSelect')}
+          </option>
           {EMAIL_DOMAINS.map((d) => (
-            <option key={d} value={d}>
+            <option key={d} value={d} className="text-ivory">
               {d}
             </option>
           ))}
-          <option value={CUSTOM}>{t('auth.emailCustom')}</option>
+          <option value={CUSTOM} className="text-ivory">
+            {t('auth.emailCustom')}
+          </option>
         </select>
       </div>
       {domain === CUSTOM && (

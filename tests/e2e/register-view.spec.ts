@@ -4,8 +4,15 @@ test('register: email = local part + domain picker with direct input', async ({ 
   await page.goto('/register');
   const local = page.getByLabel(/이메일 아이디|Email name/);
   const domain = page.getByLabel(/이메일 도메인|Email domain/);
-  await expect(domain).toHaveValue('naver.com');
+  // No domain is preselected: the address stays incomplete until one is picked.
+  await expect(domain).toHaveValue('');
+  await expect(domain.locator('option:checked')).toHaveText(/선택하세요|Select/);
   await expect(page.getByLabel(/도메인 직접 입력|^Domain$/)).toHaveCount(0);
+  const send = page.getByRole('button', { name: /인증번호 받기|Send code/ });
+  await local.fill('royal.player');
+  await expect(send).toBeDisabled();
+  await domain.selectOption('naver.com');
+  await expect(send).toBeEnabled();
   // Pasting a full address fills both parts.
   await local.fill('royal.player@gmail.com');
   await expect(local).toHaveValue('royal.player');

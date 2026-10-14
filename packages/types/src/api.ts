@@ -7,13 +7,13 @@ export const EmailSchema = z.string().trim().toLowerCase().email().max(254);
 /** New-password policy. The API enforces it and the web forms show it as a live checklist. */
 export const PASSWORD_RULES = [
   { id: 'length', test: (p: string) => p.length >= 8 },
-  { id: 'upper', test: (p: string) => /[A-Z]/.test(p) },
-  { id: 'lower', test: (p: string) => /[a-z]/.test(p) },
+  // Any English letter; upper and lower case are not both required.
+  { id: 'letter', test: (p: string) => /[A-Za-z]/.test(p) },
   { id: 'digit', test: (p: string) => /[0-9]/.test(p) },
   { id: 'special', test: (p: string) => /[!-\/:-@\[-`{-~]/.test(p) },
 ] as const;
 export const passwordOk = (p: string) => PASSWORD_RULES.every((r) => r.test(p));
-export const PasswordSchema = z.string().max(128).refine(passwordOk, 'password must have 8+ characters with upper, lower, digit and symbol');
+export const PasswordSchema = z.string().max(128).refine(passwordOk, 'password must have 8+ characters with a letter, a digit and a symbol');
 export const NicknameSchema = z.string().trim().regex(NICKNAME_RE);
 
 export const LocaleSchema = z.enum(['ko', 'en']);

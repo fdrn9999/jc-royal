@@ -15,6 +15,13 @@ test('two browsers: join, buy in, play a hand to showdown, refresh, stand up wit
   await b.page.locator('[data-testid^=sit-]').first().click();
   await b.page.getByTestId('buyin-confirm').click();
 
+  // A new chat line re-runs the chat list's scroll effect; the table must keep running
+  // (Chrome's scrollIntoView returns a Promise, which must not become an effect cleanup).
+  const chat = a.page.getByRole('textbox', { name: /채팅|Chat/ });
+  await chat.fill('gl hf');
+  await chat.press('Enter');
+  for (const p of [a.page, b.page]) await expect(p.getByText('gl hf')).toBeVisible();
+
   // The hand starts automatically; each player sees exactly two face-up cards of their own.
   for (const p of [a.page, b.page]) await expect(p.getByTestId('board')).toBeVisible();
   await expect(async () => {

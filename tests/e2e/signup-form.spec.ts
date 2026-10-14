@@ -37,16 +37,18 @@ test('sign-up form: email code, live password rules, eye toggle, birth date, con
 
   // Password rules turn green one by one.
   const pw = page.getByLabel(/^(비밀번호|Password)$/);
-  await pw.fill('abc');
-  await expect(rule(page, /영문 소문자|Lowercase letter/)).toHaveClass(/text-success/);
-  await expect(rule(page, /영문 대문자|Uppercase letter/)).toHaveClass(/text-ink-400/);
+  await pw.fill('123');
+  await expect(rule(page, /^영문|^Letter/)).toHaveClass(/text-ink-400/);
+  await expect(rule(page, /^숫자|Number/)).toHaveClass(/text-success/);
   await expect(rule(page, /8자 이상|8\+ characters/)).toContainText(/미충족|not met/);
-  await pw.fill('abcDEF12');
+  // Lower case alone satisfies the letter rule.
+  await pw.fill('abcdef12');
+  await expect(rule(page, /^영문|^Letter/)).toHaveClass(/text-success/);
   await expect(rule(page, /특수문자|Symbol/)).toHaveClass(/text-ink-400/);
   await expect(rule(page, /8자 이상|8\+ characters/)).toHaveClass(/text-success/);
   await page.screenshot({ path: 'test-results/signup-rules-partial.png', fullPage: true });
   await pw.fill(PASSWORD);
-  for (const r of [/8자 이상|8\+ characters/, /영문 대문자|Uppercase/, /영문 소문자|Lowercase/, /^숫자|Number/, /특수문자|Symbol/]) {
+  for (const r of [/8자 이상|8\+ characters/, /^영문|^Letter/, /^숫자|Number/, /특수문자|Symbol/]) {
     await expect(rule(page, r)).toHaveClass(/text-success/);
   }
 

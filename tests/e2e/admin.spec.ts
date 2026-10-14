@@ -22,7 +22,13 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   // Create a table → visible in the player lobby.
   await page.getByRole('link', { name: /^테이블$|^Tables$/ }).click();
   await page.getByTestId('create-table').click();
-  await page.getByLabel(/^이름$|^Name$/).fill('E2E 로열 라운지');
+  // Typing key by key must keep focus in the field (each keystroke re-renders the page).
+  const name = page.getByLabel(/^이름$|^Name$/);
+  await name.click();
+  await name.pressSequentially('Royal');
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue('Royal');
+  await name.fill('E2E 로열 라운지');
   await page.getByRole('button', { name: /^저장$|^Save$/ }).click();
   await expect(page.getByText('E2E 로열 라운지')).toBeVisible();
   await member.page.reload();
@@ -40,6 +46,9 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByTestId('reauth-confirm').click();
   await expect(page.getByText('+777')).toBeVisible();
+  // The member's already-open tab picks up the new balance on return, without a reload.
+  await member.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(member.page.getByTestId('balance')).toContainText('10,777');
 
   // The member sees the new balance and an automatic event message.
   await member.page.goto('/messages');

@@ -1,6 +1,6 @@
 import { expect, type Browser, type Page } from '@playwright/test';
 
-/** Meets the password policy (upper, lower, digit, symbol, 8+). */
+/** Meets the password policy (letter, digit, symbol, 8+). */
 export const PASSWORD = 'Password123!';
 
 let n = 0;

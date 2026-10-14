@@ -24,7 +24,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      setMe(await api<MeDto>('/api/auth/me'));
+      const next = await api<MeDto>('/api/auth/me');
+      // Keep the same object when nothing changed so effects keyed on `me` stay quiet.
+      setMe((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setMe(null);
       else throw e;
@@ -35,6 +37,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  // The balance can change while this tab is in the background (admin grants,
+  // another tab), so re-read the account whenever the player comes back.
+  useEffect(() => {
+    let last = 0;
+    const onReturn = () => {
+      // Switching tabs fires both events; one request is enough.
+      if (document.visibilityState !== 'visible' || Date.now() - last < 2000) return;
+      last = Date.now();
+      refresh().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('focus', onReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', onReturn);
+      window.removeEventListener('focus', onReturn);
+    };
   }, [refresh]);
 
   useEffect(() => {

@@ -102,8 +102,9 @@ describe('auth & sessions', () => {
 
   it('password changes and resets enforce the password policy', async () => {
     const { client, email } = await newUser();
-    expect((await client.post('/api/auth/me/password', { currentPassword: PASSWORD, newPassword: 'alllowercase1!' })).status).toBe(400);
-    expect((await client.post('/api/auth/me/password', { currentPassword: PASSWORD, newPassword: 'Changed123!' })).status).toBe(200);
+    expect((await client.post('/api/auth/me/password', { currentPassword: PASSWORD, newPassword: '12345678!' })).status).toBe(400);
+    // One letter of either case is enough.
+    expect((await client.post('/api/auth/me/password', { currentPassword: PASSWORD, newPassword: 'changed123!' })).status).toBe(200);
     const anon = new Client();
     const req = await anon.post('/api/auth/password-reset/request', { email });
     expect((await anon.post('/api/auth/password-reset/confirm', { token: req.body.devToken, newPassword: 'NoSymbol123' })).status).toBe(400);
@@ -201,11 +202,12 @@ describe('sign-up: email code, birth date, agreements, password policy', () => {
   it('rejects passwords that miss a rule', async () => {
     const c = new Client();
     const body = await signupBody(c, fresh());
-    for (const password of ['Short1!', 'alllowercase1!', 'ALLUPPERCASE1!', 'NoDigitsHere!', 'NoSymbol1234']) {
+    for (const password of ['Short1!', '12345678!', 'NoDigitsHere!', 'NoSymbol1234']) {
       const r = await c.post('/api/auth/register', { ...body, password });
       expect(r.status, password).toBe(400);
     }
-    expect((await c.post('/api/auth/register', body)).status).toBe(201);
+    // Upper and lower case are not both required.
+    expect((await c.post('/api/auth/register', { ...body, password: 'alllowercase1!' })).status).toBe(201);
   });
 
   it('stores the account language and writes system messages in it', async () => {
