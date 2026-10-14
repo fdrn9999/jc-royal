@@ -331,6 +331,15 @@ export const authRoutes = new Hono<AppEnv>()
       // Friends, pending requests and blocks (made by or against the account) go with it.
       db.delete(schema.friendships).where(or(eq(schema.friendships.userA, me.id), eq(schema.friendships.userB, me.id))),
       db.delete(schema.userBlocks).where(or(eq(schema.userBlocks.blockerId, me.id), eq(schema.userBlocks.blockedId, me.id))),
+      // 1:1 conversations both ways: the other member can no longer open them, so nothing is kept for anyone. A report
+      // already filed keeps its own copy of the reported messages (reports.context) for review.
+      db.delete(schema.directMessages).where(or(eq(schema.directMessages.senderId, me.id), eq(schema.directMessages.recipientId, me.id))),
+      db.delete(schema.messages).where(eq(schema.messages.userId, me.id)),
+      db.delete(schema.academyProgress).where(eq(schema.academyProgress.userId, me.id)),
+      db.delete(schema.userBadges).where(eq(schema.userBadges.userId, me.id)),
+      db.delete(schema.passwordResets).where(eq(schema.passwordResets.userId, me.id)),
+      // Kept, under the pseudonymous id only: chip ledger, hands and seats (integrity), posts and comments (shown as
+      // a withdrawn member), and reports. See docs/PRIVACY_OPERATIONS.md.
     ]);
     await destroySession(c, 'user');
     return c.json({ ok: true });

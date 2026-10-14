@@ -26,6 +26,8 @@ export interface AuthorDto {
   nickname: string;
   avatarUrl: string | null;
   isAdmin: boolean;
+  /** The author deleted their account: the post stays, shown as "withdrawn member" with no nickname or avatar. */
+  withdrawn?: true;
 }
 
 export interface PostListItemDto {

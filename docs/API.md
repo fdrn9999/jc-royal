@@ -23,7 +23,7 @@
 | GET | `/nickname-available?nickname=` | `{available}` |
 | POST | `/me/password` | `{currentPassword,newPassword}`(가입과 같은 비밀번호 규칙) → 다른 기기 세션 폐기 |
 | GET | `/me/sessions` · DELETE `/me/sessions/:id` | 로그인 세션 목록과 폐기 |
-| POST | `/me/delete` | `{password}` → 탈퇴(착석 중이면 409 `seated`) |
+| POST | `/me/delete` | `{password}` → 탈퇴(착석 중이면 409 `seated`). 계정 정보 비식별화, 세션·친구·차단·1:1 메시지(양쪽)·쪽지·아카데미 진도·재설정 링크 삭제. 원장·핸드·게시글·신고는 회원 ID로 남는다(`docs/PRIVACY_OPERATIONS.md` 3절) |
 | POST | `/password-reset/request` | `{email}` → 항상 200(IP당 5회, 이메일당 3회/시간 초과 시 429). 메일 설정 시 재설정 메일 발송. 개발 환경에서만 `devToken` 반환 |
 | POST | `/password-reset/confirm` | `{token,newPassword}`(가입과 같은 비밀번호 규칙) → 1회용. 모든 세션 폐기 |
 
@@ -90,6 +90,8 @@
 | POST | `/posts/:id/comments` | `{body(≤1000), parentId?}`. 답글의 답글은 같은 묶음에 `@닉네임`으로 붙음 |
 | PATCH / DELETE | `/comments/:id` | 작성자만 가능. 답글이 있는 댓글을 삭제하면 자리표시로 남음 |
 
+탈퇴한 회원의 글·댓글은 작성자가 `{id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true}`로 오고 화면은 "탈퇴한 회원"으로 표시한다. 탈퇴한 회원에게 단 답글의 `replyTo`는 `null`.
+
 ## 쪽지 `/api/messages` (수신 전용)
 
 | 메서드 | 경로 | 설명 |
@@ -125,7 +127,7 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/dashboard` | 회원 수, 접속자, 테이블·진행 게임, WS 연결, 핸드 수, 서버 상태, 문제 상황 |
-| GET | `/users?q&status&locale&limit(≤200)` · `/users/:id` | 검색(계정 언어 `locale` 포함·필터)과 상세(언어, 생년월일, 이메일 인증 시각, 개인정보 동의 버전·시각, 원장, 착석, 원장 정합성) |
+| GET | `/users?q&status&locale&limit(≤200)` · `/users/:id` | 검색(계정 언어 `locale` 포함·필터)과 상세(언어, 생년월일, 이메일 인증 시각, 개인정보 동의 버전·시각, 원장, 착석, 원장 정합성). 조회마다 감사 로그 `user.list`·`user.view` |
 | POST | `/users/export` 🔒 | `{userIds(1-1000)}` → `{filename, count, csv}`. 열: id, email, nickname, language, role, status, balance, joined_at_utc, birth_date, email_verified_at_utc, privacy_notice_version, privacy_agreed_at_utc, suspended_reason. `=`·`+`·`-`·`@`로 시작하는 칸은 `'`를 붙여 수식 실행 방지. 감사 로그 `user.export`(대상 ID, 건수) |
 | POST | `/users/:id/suspend` 🔒 · `/unsuspend` 🔒 | 정지·해제(세션 폐기, 회원 계정 언어로 제재 쪽지 자동 발송) |
 | POST | `/users/:id/role` 🔒 | 슈퍼관리자만. 대상의 관리자 세션 즉시 폐기 |

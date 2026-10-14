@@ -18,7 +18,7 @@ export const NicknameSchema = z.string().trim().regex(NICKNAME_RE);
 
 export const LocaleSchema = z.enum(['ko', 'en']);
 /** Version of the signup privacy notice. Bump it when the notice text changes; each signup stores the version it accepted. */
-export const PRIVACY_NOTICE_VERSION = '2026-10-14';
+export const PRIVACY_NOTICE_VERSION = '2026-10-15';
 
 /** Youngest age (full years) allowed to sign up; matches the "14 or older" agreement. */
 export const MIN_SIGNUP_AGE = 14;

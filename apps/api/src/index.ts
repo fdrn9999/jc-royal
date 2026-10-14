@@ -1,6 +1,7 @@
 import { createDb } from '@jc/db';
 import { Hono } from 'hono';
-import type { AppEnv } from './env';
+import type { AppEnv, Env } from './env';
+import { housekeeping } from './lib/housekeeping';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
 import { academyRoutes } from './routes/academy';
 import { adminRoutes } from './routes/admin';
@@ -53,4 +54,10 @@ app.onError((err, c) => {
   return c.json({ error: { code: 'internal', message: 'internal error' } }, 500);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  /** Cron trigger (wrangler.jsonc `triggers`): deletes expired short-lived rows. Awaited, so a failure shows as a failed run. */
+  async scheduled(_event, env) {
+    console.log('housekeeping', JSON.stringify(await housekeeping(env.DB)));
+  },
+} satisfies ExportedHandler<Env>;

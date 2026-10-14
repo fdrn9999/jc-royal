@@ -60,7 +60,10 @@ export const academyRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, badges: await badgesOf(c, uid) });
   })
   .get('/badges', async (c) => c.json(await badgesOf(c, c.var.user!.id)))
-  /** Anonymous counters: the user id is only used for rate limiting, never stored. */
+  /**
+   * Anonymous counters: academy_stats never holds a user id. The id appears only in this request's rate-limit key,
+   * a rate_limits row that the daily housekeeping deletes once its window is long over.
+   */
   .post('/events', async (c) => {
     await rateLimit(c, `academy-events:${c.var.user!.id}`, 30, 60_000);
     const { events } = await parseBody(c, AcademyEventsSchema);

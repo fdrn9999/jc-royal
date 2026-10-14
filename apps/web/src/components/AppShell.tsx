@@ -6,6 +6,22 @@ import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useUnread } from '../lib/unread';
 
+/** Links to /privacy and /terms (public pages), shown in page footers. */
+export function LegalLinks({ className = '' }: { className?: string }) {
+  const { t } = useI18n();
+  return (
+    <nav className={`flex items-center justify-center gap-3 text-[11px] text-ink-400 ${className}`} aria-label={`${t('legal.privacy')} / ${t('legal.terms')}`}>
+      <Link to="/privacy" className="py-1 font-semibold hover:text-ivory">
+        {t('legal.privacy')}
+      </Link>
+      <span aria-hidden>·</span>
+      <Link to="/terms" className="py-1 hover:text-ivory">
+        {t('legal.terms')}
+      </Link>
+    </nav>
+  );
+}
+
 export function LangToggle() {
   const { locale } = useI18n();
   const { chooseLocale } = useAuth();
@@ -102,7 +118,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 pb-24 pt-6 sm:pb-10">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 pb-6 pt-6">{children}</main>
+      <footer className="mx-auto max-w-7xl px-4 pb-24 sm:pb-8">
+        <LegalLinks />
+      </footer>
       <SettingsModal open={settings} onClose={() => setSettings(false)} onLogout={me ? signOut : undefined} />
       {/* Mobile bottom navigation */}
       <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
@@ -145,6 +164,7 @@ export function AuthLayout({ children, title }: { children: ReactNode; title: st
           {children}
         </div>
         <p className="mt-6 text-center text-[11px] text-ink-400">{t('app.virtual')}</p>
+        <LegalLinks className="mt-2" />
       </div>
     </div>
   );

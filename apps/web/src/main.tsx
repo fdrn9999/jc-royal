@@ -44,6 +44,16 @@ function Academy({ page }: { page: AcademyPageName }) {
   );
 }
 
+/** The full policy texts are long and rarely read, so they load on demand like the Academy. */
+const LegalPage = lazy(() => import('./pages/Legal').then((m) => ({ default: m.LegalPage })));
+function Legal({ kind }: { kind: 'privacy' | 'terms' }) {
+  return (
+    <Suspense fallback={<Splash />}>
+      <LegalPage kind={kind} />
+    </Suspense>
+  );
+}
+
 /** Keeps Academy progress in sync with the server while someone is signed in. */
 function AcademySync() {
   const { me } = useAuth();
@@ -75,6 +85,9 @@ const router = createBrowserRouter([
   { path: '/login', element: <GuestOnly><LoginPage /></GuestOnly> },
   { path: '/register', element: <GuestOnly><RegisterPage /></GuestOnly> },
   { path: '/reset', element: <ResetPage /> },
+  // Public: sign-up links here before anyone has an account.
+  { path: '/privacy', element: <Legal kind="privacy" /> },
+  { path: '/terms', element: <Legal kind="terms" /> },
   { path: '/table/:id', element: <RequireAuth><TablePage /></RequireAuth> },
   { path: '/academy/practice/free', element: <RequireAuth><Academy page="FreePracticePage" /></RequireAuth> },
   { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },

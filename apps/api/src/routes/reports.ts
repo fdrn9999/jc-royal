@@ -6,6 +6,7 @@ import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { audit } from './admin-auth';
 import { isUniqueViolation } from './auth';
 import { INTERNAL_HEADER } from './tables';
 
@@ -225,7 +226,10 @@ export const adminReportRoutes = new Hono<AppEnv>()
     }
     const sql = `${REPORT_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY r.created_at DESC LIMIT 200`;
     const [list, open] = await c.env.DB.batch([c.env.DB.prepare(sql).bind(...args), c.env.DB.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status = 'open'`)]);
-    return c.json({ items: (list!.results as ReportRow[]).map(toReport), openCount: (open!.results[0] as { n: number }).n });
+    const items = (list!.results as ReportRow[]).map(toReport);
+    // Evidence can quote 1:1 messages and table chat, so every look is recorded with what it showed.
+    await audit(c, 'report.view', undefined, { status, userId: userId ?? null, count: items.length, dm: items.filter((r) => r.targetType === 'dm').map((r) => r.id) });
+    return c.json({ items, openCount: (open!.results[0] as { n: number }).n });
   })
   /**
    * Closes a report, and every other open report on the same target, optionally hiding the reported content.

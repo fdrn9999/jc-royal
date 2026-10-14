@@ -84,6 +84,8 @@ const admin = new Hono<AppEnv>()
       .orderBy(desc(schema.users.createdAt))
       .limit(limit)
       .offset(offset);
+    // The list shows email addresses, so every look is recorded (search terms and how many members it showed).
+    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, offset, count: rows.length });
     return c.json(rows);
   })
   /** Member data export for the selected members. The notice members accept at signup covers this use. */
@@ -132,6 +134,8 @@ const admin = new Hono<AppEnv>()
       c.env.DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
     ]);
     const ledgerSum = await c.env.DB.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM chip_ledger WHERE user_id = ?1`).bind(id).first<{ s: number }>();
+    // Full profile incl. birth date and consent record.
+    await audit(c, 'user.view', { type: 'user', id });
     const { passwordHash: _ph, ...safe } = u;
     return c.json({ user: safe, ledger, openSeats: seats, hands: hands ?? { n: 0, net: 0 }, ledgerConsistent: (ledgerSum?.s ?? 0) === u.balance });
   })

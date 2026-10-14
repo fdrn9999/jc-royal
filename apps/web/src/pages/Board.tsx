@@ -14,6 +14,7 @@ type Card = Parameters<typeof PlayingCard>[0]['card'];
 function AuthorName({ a, onPick }: { a: PostListItemDto['author']; onPick?: (a: AuthorDto) => void }) {
   const { t } = useI18n();
   const { me } = useAuth();
+  if (a.withdrawn) return <span className="font-normal italic text-ink-400" data-testid="author-withdrawn">{t('board.withdrawn')}</span>;
   const name = onPick && a.id !== me?.id ? (
     <button type="button" className="font-semibold text-ink-100 hover:text-gold-300 hover:underline" onClick={() => onPick(a)} data-testid="author-name">{a.nickname}</button>
   ) : (
@@ -223,7 +224,7 @@ function CommentItem({ c, onRun, onReply, replyTo, postId, onPick, onReport }: {
       )}
       {replyTo === c.id && (
         <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!reply.trim()) return; void onRun(async () => { await api(`/api/board/posts/${postId}/comments`, { body: { body: reply, parentId: c.id } }); setReply(''); onReply(null); }); }}>
-          <Input autoFocus value={reply} maxLength={1000} onChange={(e) => setReply(e.target.value)} placeholder={t('board.replyPlaceholder', { name: c.author.nickname })} aria-label={t('board.reply')} />
+          <Input autoFocus value={reply} maxLength={1000} onChange={(e) => setReply(e.target.value)} placeholder={t('board.replyPlaceholder', { name: c.author.withdrawn ? t('board.withdrawn') : c.author.nickname })} aria-label={t('board.reply')} />
           <Button type="submit" size="sm" disabled={!reply.trim()} data-testid="reply-submit">{t('board.reply')}</Button>
         </form>
       )}
