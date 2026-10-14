@@ -1,5 +1,5 @@
 import { evaluateBest } from '@jc/poker-engine';
-import { badgesFor, type Card, type TableView } from '@jc/types';
+import { ACADEMY_REVIEW_SIZE, BADGES, badgesFor, plausibleBadges, type Card, type TableView } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import { coachActive, coachTip } from '../src/academy/coach';
 import { COMPARE_QUESTIONS } from '../src/academy/data/handQuiz';
@@ -64,6 +64,90 @@ describe('progress v2: migration and cross-device merge', () => {
     expect(badgesFor(p)).toEqual(['first-step', 'card-reader']);
     p = P.finishReview(P.finishReview(P.finishReview(p, 5), 6), 7);
     expect(badgesFor(p)).toContain('sharp-eye');
+  });
+});
+
+describe('badge plausibility (what the server awards)', () => {
+  const DAY = 24 * 60 * 60_000;
+  const since = Date.UTC(2026, 9, 1); // account created
+  const t0 = since + DAY;
+  const now = t0 + DAY;
+  const STEPS = { cards: 4, hands: 5, holdem: 5, actions: 4 } as const;
+  const ALL = [...BADGES].sort();
+  const award = (p: unknown, at = now) => plausibleBadges(JSON.parse(JSON.stringify(p)), { now: at, since }).sort();
+  // What the pages do: the lesson shell records every step it shows and offers "finish" on the last one,
+  // practice completes with its eighth scenario, and a review set ends after 8 solved questions.
+  const study = (p: P.Progress, id: keyof typeof STEPS, at: number) => {
+    for (let s = 0; s < STEPS[id]; s++) p = P.startLesson(p, id, s, at + s * 60_000);
+    return P.completeLesson(p, id, at + STEPS[id] * 60_000);
+  };
+  const practise = (p: P.Progress, ids: readonly P.ScenarioId[], at: number) => ids.reduce((q, s, i) => P.completeScenario(P.startScenario(q, s), s, at + i * 60_000), p);
+  const reviewSet = (p: P.Progress) => {
+    for (let q = 0; q < ACADEMY_REVIEW_SIZE; q++) {
+      if (q === 2) p = P.recordAnswer(p, false, 'kicker'); // a wrong try, then the retry
+      p = P.recordAnswer(p, true, 'kicker');
+    }
+    return P.finishReview(p, ACADEMY_REVIEW_SIZE - 1);
+  };
+  const everything = (at = t0) => {
+    let p = P.emptyProgress();
+    for (const [i, id] of (['cards', 'hands', 'holdem', 'actions'] as const).entries()) p = study(p, id, at + i * 600_000);
+    p = practise(p, P.SCENARIO_IDS, at + 3_600_000);
+    for (let i = 0; i < 3; i++) p = reviewSet(p);
+    return p;
+  };
+
+  it('honest study earns every badge, also after a two-device merge and a v1 upgrade', () => {
+    expect(award(everything())).toEqual(ALL);
+    // A fast device clock (within a day) does not hold anything back.
+    expect(award(everything(now + DAY - 3 * 3_600_000))).toEqual(ALL);
+
+    let phone = study(study(P.emptyProgress(), 'cards', t0), 'hands', t0 + 600_000);
+    phone = reviewSet(reviewSet(practise(phone, ['A', 'B', 'C', 'D'], t0 + 3_600_000)));
+    let pc = study(study(P.emptyProgress(), 'holdem', t0 + 1_200_000), 'actions', t0 + 1_800_000);
+    pc = reviewSet(practise(pc, ['E', 'F', 'G', 'H'], t0 + 7_200_000));
+    const merged = P.merge(phone, pc);
+    expect(award(merged)).toEqual([...badgesFor(merged)].sort()); // the check never withholds an honest badge
+    expect(award(merged)).toEqual(['card-reader', 'first-step', 'hand-expert', 'practice-graduate', 'rule-keeper']);
+    expect(award(reviewSet(merged))).toContain('sharp-eye');
+
+    const v1 = P.migrate({ v: 1, lessons: { cards: { startedAt: t0, completedAt: t0 + 300_000, step: 3 } }, quiz: { correct: 4, wrong: 1 }, practice: { A: t0 }, onboarded: true });
+    expect(award(v1)).toEqual(['card-reader', 'first-step']);
+  });
+
+  it('forged or impossible claims are ignored, rule by rule', () => {
+    const forge = (fn: (d: Record<string, any>) => void) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+      const d = JSON.parse(JSON.stringify(everything()));
+      fn(d);
+      return award(d);
+    };
+    const without = (...lost: string[]) => ALL.filter((b) => !lost.includes(b));
+    const cards = ['card-reader', 'academy-graduate'];
+    expect(forge((d) => (d.lessons.cards.completedAt = now + 2 * DAY))).toEqual(without(...cards)); // in the future
+    expect(forge((d) => (d.lessons.cards.completedAt = since - 2 * DAY))).toEqual(without(...cards)); // before the account
+    expect(forge((d) => (d.lessons.cards.completedAt = 1))).toEqual(without(...cards));
+    expect(forge((d) => (d.lessons.cards.startedAt = d.lessons.cards.completedAt + 2 * DAY))).toEqual(without(...cards)); // finished before it started
+    expect(forge((d) => (d.lessons.cards.startedAt = 0))).toEqual(without(...cards));
+    expect(forge((d) => delete d.lessons.cards.startedAt)).toEqual(without(...cards));
+    expect(forge((d) => (d.lessons.cards.step = 2))).toEqual(without(...cards)); // never reached the last step
+    expect(forge((d) => (d.lessons.cards.step = -1))).toEqual(without(...cards));
+    expect(forge((d) => (d.lessons.cards.completedAt = String(d.lessons.cards.completedAt)))).toEqual(without(...cards));
+    expect(forge((d) => (d.lessons.cards.completedAt += 0.5))).toEqual(without(...cards));
+    expect(forge((d) => (d.lessons.cards.completedAt = 1e300))).toEqual(without(...cards));
+    expect(forge((d) => (d.lessons.practice.completedAt = 1))).toEqual(without('academy-graduate'));
+    expect(forge((d) => (d.practice.H = 1))).toEqual(without('practice-graduate'));
+    expect(forge((d) => (d.practice.H = 'yes'))).toEqual(without('practice-graduate'));
+    expect(forge((d) => (d.quiz = { correct: 0, wrong: 0 }))).toEqual(without('sharp-eye')); // review sets with no answers
+    expect(forge((d) => (d.review.sessions = 99))).toEqual(without('sharp-eye'));
+    expect(forge((d) => (d.quiz.correct = '999'))).toEqual(without('sharp-eye'));
+    expect(forge((d) => (d.review.sessions = 2.5))).toEqual(without('sharp-eye'));
+    for (const junk of [null, 'x', 42, [], { lessons: 'x', practice: [1], review: null }]) expect(plausibleBadges(junk, { now, since })).toEqual([]);
+  });
+
+  it('a completion dated beyond the clock allowance counts once the server clock catches up', () => {
+    const ahead = everything(now + 3 * DAY);
+    expect(award(ahead)).toEqual(['sharp-eye']); // only the review badge, which carries no time
+    expect(award(ahead, now + 3 * DAY)).toEqual(ALL);
   });
 });
 

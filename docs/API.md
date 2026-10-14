@@ -66,9 +66,18 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/progress` | `{data, version, updatedAt, badges}`. 저장된 진도가 없으면 `data: null` |
-| PUT | `/progress` | `{version, updatedAt, data(≤32KB)}`. `updatedAt`이 더 새로울 때만 덮어씀(클라이언트가 로컬·서버 진도를 병합한 뒤 전송). 진도에서 계산한 배지를 1회만 부여(`INSERT OR IGNORE`). 분당 60회 |
+| PUT | `/progress` | `{version, updatedAt, data(≤32KB)}`. `updatedAt`이 더 새로울 때만 덮어씀(클라이언트가 로컬·서버 진도를 병합한 뒤 전송). 진도 중 아래 타당성 검사를 통과한 부분으로만 배지를 계산해 1회만 부여(`INSERT OR IGNORE`, 지급 시각은 처음 지급될 때 고정). 검사에 걸린 진도도 그대로 저장되며 배지만 주지 않음. 분당 60회 |
 | GET | `/badges` | 내 배지 |
 | POST | `/events` | `{events: [{kind:'question', id, correct} \| {kind:'lesson'\|'scenario', id, phase:'start'\|'complete'}]}`(최대 50). 사용자 ID 없이 항목별 카운터만 증가. 분당 30회 |
+
+**배지의 성격:** 배지는 본인 학습 기록으로 받는 **장식용 표시**이며 공식 수료 증명이 아니다. 레슨·퀴즈는 브라우저에서 진행되고 서버가 채점하지 않으므로, 서버는 공부했다는 사실을 증명할 수 없다. 배지는 본인 화면(아카데미·진행 현황·마이페이지)에만 보이고, 다른 사용자·관리자 화면이나 게임 로직, 칩·원장에는 쓰이지 않는다. 화면에도 이 점을 안내한다.
+
+**타당성 검사(`plausibleBadges`, `packages/types/src/academy.ts`):** 실제 앱이 만들 수 없는 진도는 배지에 세지 않는다. 시계 오차는 24시간(`BADGE_CLOCK_SKEW_MS`)까지 허용한다.
+- 레슨 완료: `startedAt`·`completedAt`이 정수 ms이고 가입 시각~서버 현재 시각 사이, 시작 ≤ 완료, `step`이 그 레슨의 마지막 단계(카드 3, 족보 4, 홀덤 4, 액션 3, 연습 0) 이상.
+- 연습 시나리오: 완료 시각이 같은 범위의 정수 ms.
+- 복습 세트(`review.sessions`): 한 세트는 8문제를 모두 맞혀야 끝나므로 `quiz.correct + quiz.wrong ≥ sessions × 8`일 때만 인정.
+- 모든 규칙은 기기 간 병합(가장 이른 시각, 가장 큰 단계·카운터) 뒤에도 성립한다. 서버 시각보다 24시간 넘게 앞선 시각은 그 시각이 지난 뒤의 다음 동기화에서 인정된다.
+- 이미 지급된 배지는 회수하지 않으며(검사 도입 전 지급분 포함) DB 스키마 변경은 없다.
 
 ## 게시판 `/api/board`
 

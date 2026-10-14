@@ -1,4 +1,5 @@
 import { sound } from '@jc/audio';
+import { ACADEMY_REVIEW_SIZE } from '@jc/types';
 import { Button, cx } from '@jc/ui';
 import { useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -32,7 +33,7 @@ export function ReviewPage() {
   const [done, setDone] = useState<number | null>(null);
   const firstTry = useRef(new Map<string, boolean>());
   // Built once per set: the mix is decided by the mistakes at the start of the set.
-  const questions = useMemo<Question[] | null>(() => (mode ? buildReview(p, seeded(seed), 8, mode === 'random') : null), [mode, seed]); // eslint-disable-line react-hooks/exhaustive-deps
+  const questions = useMemo<Question[] | null>(() => (mode ? buildReview(p, seeded(seed), ACADEMY_REVIEW_SIZE, mode === 'random') : null), [mode, seed]); // eslint-disable-line react-hooks/exhaustive-deps
   const weak = weakTopics(p);
 
   const start = (m: 'review' | 'random') => {
