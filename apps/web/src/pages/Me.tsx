@@ -2,6 +2,10 @@ import { handLabelKey, NICKNAME_RE, type HandSummaryDto, type LedgerEntryDto, ty
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { BadgeShelf } from '../academy/Badges';
+import { useTr } from '../academy/content';
+import { lessonLinksFor } from '../academy/handLinks';
+import { useBadges } from '../academy/sync';
 import { SettingsModal } from '../game/Panels';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -34,6 +38,7 @@ export function MePage() {
   const { me, setMe, logout } = useAuth();
   const nav = useNavigate();
   const stats = useLoad<StatsDto>('/api/me/stats');
+  const badgeCount = useBadges().length;
   const hands = useLoad<HandSummaryDto[]>('/api/me/hands?limit=15');
   const ledger = useLoad<LedgerEntryDto[]>('/api/me/ledger?limit=20');
   const myPosts = useLoad<PostListItemDto[]>('/api/me/posts');
@@ -134,6 +139,10 @@ export function MePage() {
         ) : (
           <Empty>{t('common.loading')}</Empty>
         )}
+      </Panel>
+
+      <Panel title={t('me.badges')} actions={<Link to="/academy" className="text-xs text-gold-300 hover:underline">{t('nav.academy')} →</Link>}>
+        {badgeCount > 0 ? <BadgeShelf showLocked={false} /> : <p className="text-sm text-ink-400">{t('me.noBadges')}</p>}
       </Panel>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -291,9 +300,11 @@ export function HandDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useI18n();
   const { data, error } = useLoad<HandDetail>(`/api/me/hands/${encodeURIComponent(id)}`);
+  const tr = useTr();
   if (error) return <Empty>{t('notFound')}</Empty>;
   if (!data) return <Empty>{t('common.loading')}</Empty>;
   const name = (seat: number) => data.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
+  const links = lessonLinksFor(data);
   const actionText = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   return (
     <div className="flex flex-col gap-6">
@@ -305,6 +316,23 @@ export function HandDetailPage() {
         <div className="flex gap-1.5">{data.board.length ? data.board.map((c) => <PlayingCard key={c} card={c as Card} size="2.8rem" />) : <span className="text-sm text-ink-400">—</span>}</div>
         <div className="mt-2 text-xs text-ink-400">{formatDate(data.endedAt, locale)}</div>
       </Panel>
+      {links.length > 0 && (
+        <Panel title={t('replay.lessons')}>
+          <ul className="flex flex-col gap-2" data-testid="hand-lessons">
+            {links.map((x) => (
+              <li key={x.id}>
+                <Link to={x.to} className="jc-tap flex items-center gap-3 rounded-xl border border-gold-500/20 bg-gold-500/5 p-3 hover:border-gold-400/50" data-link={x.id}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-gold-300">{tr(x.title)}</span>
+                    <span className="block text-xs text-ink-300">{tr(x.why)}</span>
+                  </span>
+                  <span className="text-gold-300">→</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('lobby.players')}>
           <ul className="divide-y divide-white/5">

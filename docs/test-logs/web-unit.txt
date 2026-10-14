@@ -6,8 +6,8 @@
  RUN  v4.1.11 C:/Users/ckato/OneDrive/문서/jc-royal/apps/web
 
 
- Test Files  1 passed (1)
-      Tests  28 passed (28)
-   Start at  17:09:08
-   Duration  565ms (transform 204ms, setup 0ms, import 342ms, tests 65ms, environment 0ms)
+ Test Files  2 passed (2)
+      Tests  43 passed (43)
+   Start at  17:50:54
+   Duration  786ms (transform 417ms, setup 0ms, import 719ms, tests 319ms, environment 0ms)
 

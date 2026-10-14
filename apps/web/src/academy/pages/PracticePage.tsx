@@ -16,7 +16,8 @@ import { currentHand, l, useTr, type L } from '../content';
 import { HAND_RANKS } from '../data/hands';
 import { PracticeSession } from '../practice/runner';
 import { buildScenarios, type PracticeQuestion, type Scenario } from '../practice/scenarios';
-import { completeScenario, recordAnswer, SCENARIO_IDS, updateProgress, useProgress, type ScenarioId } from '../progress';
+import { completeScenario, missScenario, recordAnswer, SCENARIO_IDS, startScenario, updateProgress, useProgress, type ScenarioId, type Topic } from '../progress';
+import { track } from '../sync';
 import { HandRankingChart, UI } from '../ui';
 
 const T = {
@@ -37,6 +38,11 @@ const T = {
   me: l('내가 승리', 'I win'),
   opp: l('상대 승리', 'Opponent wins'),
   split: l('무승부', 'Split'),
+  fault: l('연습 진행 중 문제가 생겼습니다. 시나리오를 처음부터 다시 시작해 주세요.', 'Something went wrong in this practice. Please restart the scenario.'),
+  stats: l('시도 {tries}회 · 실수 {misses}회', 'Attempts {tries} · mistakes {misses}'),
+  free: l('자유 연습', 'Free practice'),
+  freeDesc: l('정답 안내 없이 규칙 기반 봇과 직접 판단하며 플레이', 'No coaching: decide for yourself against rule-based bots'),
+  guided: l('가이드 연습', 'Guided practice'),
 };
 
 export function PracticeListPage() {
@@ -51,15 +57,26 @@ export function PracticeListPage() {
       </Link>
       <h1 className="font-display text-xl font-bold tracking-[0.08em] text-gold-300 sm:text-2xl">{tr(T.title)}</h1>
       <p className="text-sm text-ink-300">{tr(T.sub)}</p>
+      <Link to="/academy/practice/free" className="jc-tap jc-panel flex items-center gap-3 border-gold-500/40 p-4 transition hover:border-gold-400/70" data-testid="scenario-free">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-xl text-gold-300">♣</span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-bold text-ivory">{tr(T.free)}</span>
+          <span className="block text-xs text-ink-300">{tr(T.freeDesc)}</span>
+        </span>
+        <span className="text-xs font-semibold text-gold-300">{tr(T.play)} →</span>
+      </Link>
+      <h2 className="mt-2 text-sm font-bold tracking-[0.06em] text-gold-300">{tr(T.guided)}</h2>
       <div className="grid gap-2 sm:grid-cols-2">
         {scenarios.map((s) => {
           const done = !!p.practice[s.id];
+          const st = p.scenarioStats[s.id];
           return (
             <Link key={s.id} to={`/academy/practice/${s.id}`} className="jc-tap jc-panel flex items-center gap-3 p-4 transition hover:border-gold-500/40" data-testid={`scenario-${s.id}`}>
               <span className={cx('grid size-11 shrink-0 place-items-center rounded-xl font-display text-lg font-bold', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-gold-300')}>{done ? '✓' : s.id}</span>
               <span className="min-w-0 flex-1">
                 <span className="block font-bold text-ivory">{tr(s.title)}</span>
                 <span className="block text-xs text-ink-300">{tr(s.goal)}</span>
+                {st && <span className="block text-[11px] text-ink-400">{tr(T.stats, { tries: st.tries, misses: st.misses })}</span>}
               </span>
               <span className="text-xs font-semibold text-gold-300">{done ? tr(T.done) : tr(T.play)}</span>
             </Link>
@@ -130,20 +147,41 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
   const [answered, setAnswered] = useState<Set<number>>(() => new Set());
   const [finished, setFinished] = useState(false);
   const [chart, setChart] = useState(false);
+  const [fault, setFault] = useState(false);
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
   const layout = useTableLayout(area, view.table.maxSeats, sc.hero);
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
   const delay = reducedMotion ? 350 : 800;
 
   useEffect(() => sound.installAutoUnlock(), []);
+  useEffect(() => {
+    if (me) updateProgress(me.id, (p) => startScenario(p, sc.id));
+    track({ kind: 'scenario', id: sc.id, phase: 'start' });
+  }, [sc.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const refresh = useCallback(() => {
     setView(s.view());
     setCues([...s.cues]);
   }, [s]);
+  /** Runs one engine step; an unexpected error stops the loop and offers a restart instead of freezing. */
+  const guard = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      setBusy(true);
+      try {
+        await fn();
+      } catch (e) {
+        console.error(`[practice] scenario ${sc.id} stopped`, e);
+        setFault(true);
+      } finally {
+        refresh();
+        setBusy(false);
+      }
+    },
+    [refresh, sc.id],
+  );
 
   // Drive the hand: questions first, then opponents / auto-play, waiting for the hero when it is their turn.
   useEffect(() => {
-    if (asked || finished || busy) return;
+    if (asked || finished || busy || fault) return;
     const due = sc.questions.findIndex((q, i) => !answered.has(i) && questionDue(q, s));
     if (due >= 0) {
       setAsked(buildQuestion(sc.questions[due]!, due, s.view(), sc, tr, t));
@@ -151,24 +189,16 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
     }
     if (s.settled) {
       if (me) updateProgress(me.id, (p) => completeScenario(p, sc.id, Date.now()));
+      track({ kind: 'scenario', id: sc.id, phase: 'complete' });
       sound.play('complete');
       setFinished(true);
       return;
     }
     const heroTurn = s.isHeroTurn();
     if (heroTurn && s.currentStep()) return; // waiting for the player
-    const h = setTimeout(async () => {
-      setBusy(true);
-      try {
-        if (heroTurn) await s.heroAct(s.autoHeroAction().type);
-        else await s.step();
-      } finally {
-        refresh();
-        setBusy(false);
-      }
-    }, delay);
+    const h = setTimeout(() => void guard(() => (heroTurn ? s.heroAct(s.autoHeroAction().type) : s.step())), delay);
     return () => clearTimeout(h);
-  }, [view, asked, finished, busy, answered, s, sc, me, delay, refresh, tr, t]);
+  }, [view, asked, finished, busy, fault, answered, s, sc, me, delay, guard, tr, t]);
 
   const onAct = useCallback(
     async (type: ActionType, amount?: number) => {
@@ -177,25 +207,22 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
         const step = s.currentStep();
         const want = step ? (Array.isArray(step.expect) ? step.expect : [step.expect]).map((x) => t(`action.${x}` as MsgKey)).join(' / ') : '';
         setWarn(`${tr(T.offScript)}${want}${step?.minTo ? ` (≥ ${step.minTo})` : ''}`);
+        if (me) updateProgress(me.id, (p) => missScenario(p, sc.id, 'actions'));
         sound.play('wrong');
         return;
       }
       setWarn(null);
-      setBusy(true);
-      try {
-        await s.heroAct(type, amount);
-      } finally {
-        refresh();
-        setBusy(false);
-      }
+      await guard(() => s.heroAct(type, amount));
     },
-    [s, refresh, t, tr],
+    [s, guard, t, tr, me, sc.id],
   );
 
   const answer = (opt: string) => {
     if (!asked || asked.picked === asked.answer) return;
     const ok = opt === asked.answer;
-    if (me) updateProgress(me.id, (p) => recordAnswer(p, ok));
+    const topic: Topic = asked.q.kind === 'handName' ? 'hand-names' : asked.q.kind === 'mainPot' ? 'pots' : 'hand-order';
+    if (me) updateProgress(me.id, (p) => (ok ? recordAnswer(p, true, topic) : missScenario(p, sc.id, topic)));
+    track({ kind: 'question', id: `practice:${sc.id}:${asked.index}`, correct: ok });
     sound.play(ok ? 'correct' : 'wrong');
     setAsked({ ...asked, picked: opt });
   };
@@ -214,6 +241,7 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
   const actor = view.hand?.actorSeat;
   const thinking = !heroTurn && !asked && !finished && actor !== null && actor !== undefined && actor !== sc.hero ? sc.seats.find((x) => x.index === actor)?.name : null;
   const idx = SCENARIO_IDS.indexOf(sc.id);
+  const stats = useProgress(me?.id).scenarioStats[sc.id];
   const nextId = SCENARIO_IDS[idx + 1];
 
   return (
@@ -287,9 +315,20 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
               )}
             </div>
           )}
+          {fault && (
+            <div className="jc-panel pointer-events-auto flex w-full max-w-md flex-col gap-2 border-danger/50 p-4" role="alert" data-testid="practice-fault">
+              <p className="text-sm text-[#f3c3c4]">{tr(T.fault)}</p>
+              <Button onClick={onAgain}>{tr(T.again)}</Button>
+            </div>
+          )}
           {finished && (
             <div className="jc-panel jc-pop pointer-events-auto flex w-full max-w-md flex-col gap-2 p-4" data-testid="practice-done">
               <div className="text-lg font-bold text-gold-300">✓ {tr(sc.title)}</div>
+              {stats && (
+                <p className="text-xs text-ink-300" data-testid="practice-stats">
+                  {tr(T.stats, { tries: stats.tries, misses: stats.misses })}
+                </p>
+              )}
               {!nextId && <p className="text-sm text-ivory">{tr(T.allDone)}</p>}
               <div className="flex flex-wrap gap-2">
                 {nextId ? (

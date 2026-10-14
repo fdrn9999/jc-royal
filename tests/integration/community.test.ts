@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Client, newUser, uniq } from '../support/client';
+import { Client, newUser, sharedAdmin, uniq } from '../support/client';
 import { isMyTurn, TableSocket } from '../support/ws';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 let admin: Client;
 
 beforeAll(async () => {
-  admin = new Client(ADMIN_ORIGIN);
-  expect((await admin.post('/api/admin/auth/login', { email: process.env.TEST_ADMIN_EMAIL, password: 'password123' })).status).toBe(200);
+  admin = sharedAdmin();
+  expect((await admin.get('/api/admin/auth/me')).status).toBe(200);
 });
 
 async function reauth() {

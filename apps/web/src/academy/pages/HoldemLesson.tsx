@@ -9,10 +9,9 @@ import { TableScene, useBoxSize, useTableLayout } from '../../game/TableScene';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
 import { describeHand, l, useTr } from '../content';
-import { actingOrder, BEST_FIVE_DEMO, BOARD_PLAYS, POSITION_INFO, positionNames, STAGES, TOUR, WALKTHROUGH } from '../data/holdem';
+import { actingOrder, BEST_FIVE_DEMO, BOARD_PLAYS, POSITION_INFO, POSITION_QUIZ, positionNames, STAGES, TOUR, WALKTHROUGH } from '../data/holdem';
 import { PracticeSession } from '../practice/runner';
 import { buildScenarios } from '../practice/scenarios';
-import type { ChoiceQuestion } from '../quiz';
 import { CardRow, LessonShell, QuizRunner, type LessonStep } from '../ui';
 
 function GoalStep() {
@@ -271,37 +270,6 @@ function PositionsStep() {
     </div>
   );
 }
-
-const pos = (n: number, street: 'preflop' | 'postflop') => positionNames(n)[actingOrder(n, street)[0]!]!;
-const POSITION_QUIZ: ChoiceQuestion[] = [
-  {
-    kind: 'choice',
-    id: 'p-6-pre',
-    prompt: l('6인 테이블, 프리플랍에서 가장 먼저 행동하는 자리는?', '6 players, preflop: who acts first?'),
-    options: ['BTN', 'SB', 'BB', 'UTG'].map((x) => ({ id: x, label: l(x, x) })),
-    answer: pos(6, 'preflop'),
-    why: l('프리플랍은 빅 블라인드 다음 자리부터 시작합니다.', 'Preflop action starts after the big blind.'),
-    explain: l('UTG(Under the Gun)가 가장 먼저, 빅 블라인드가 가장 나중입니다.', 'UTG acts first and the big blind last.'),
-  },
-  {
-    kind: 'choice',
-    id: 'p-6-post',
-    prompt: l('6인 테이블, 플랍 이후 가장 먼저 행동하는 자리는? (모두 남아 있음)', '6 players, after the flop (nobody folded): who acts first?'),
-    options: ['BTN', 'SB', 'UTG', 'CO'].map((x) => ({ id: x, label: l(x, x) })),
-    answer: pos(6, 'postflop'),
-    why: l('플랍 이후에는 버튼 바로 왼쪽부터 행동합니다.', 'After the flop, action starts just left of the button.'),
-    explain: l('SB가 먼저, 버튼이 가장 나중입니다. 그래서 버튼이 가장 유리합니다.', 'SB first and the button last — that is why the button is the best seat.'),
-  },
-  {
-    kind: 'choice',
-    id: 'p-hu-pre',
-    prompt: l('헤즈업(2인), 프리플랍에서 먼저 행동하는 사람은?', 'Heads-up preflop: who acts first?'),
-    options: ['BTN/SB', 'BB'].map((x) => ({ id: x, label: l(x, x) })),
-    answer: pos(2, 'preflop'),
-    why: l('헤즈업은 예외입니다. 버튼이 스몰 블라인드를 내고 프리플랍에 먼저 행동합니다.', 'Heads-up is the exception: the button posts the small blind and acts first preflop.'),
-    explain: l('플랍 이후에는 반대로 BB가 먼저 행동합니다.', 'After the flop it flips: the big blind acts first.'),
-  },
-];
 
 export function HoldemLesson() {
   const [quiz, setQuiz] = useState(false);

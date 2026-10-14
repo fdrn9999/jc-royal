@@ -7,12 +7,13 @@ import './index.css';
 import { AdminProvider, useAdmin } from './lib';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
-import { AuditPage, DashboardPage, HandDetailPage, HandsPage, LedgerPage, ReconcilePage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
+import { AcademyStatsPage, AuditPage, DashboardPage, HandDetailPage, HandsPage, LedgerPage, ReconcilePage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
 const NAV: [string, Key][] = [
   ['/', 'dashboard'],
   ['/users', 'users'],
   ['/tables', 'tables'],
+  ['/academy', 'academy'],
   ['/hands', 'hands'],
   ['/ledger', 'ledger'],
   ['/board', 'board'],
@@ -93,6 +94,7 @@ const router = createBrowserRouter([
       { path: '/ledger', element: <LedgerPage /> },
       { path: '/reconcile', element: <ReconcilePage /> },
       { path: '/audit', element: <AuditPage /> },
+      { path: '/academy', element: <AcademyStatsPage /> },
       { path: '/board', element: <BoardAdminPage /> },
       { path: '/messages', element: <MessagesAdminPage /> },
     ],

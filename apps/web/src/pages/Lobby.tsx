@@ -7,8 +7,8 @@ import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
-type Filter = 'all' | 'playing' | 'open' | 'empty' | 'hu' | 'six' | 'nine';
-const FILTERS: Filter[] = ['all', 'playing', 'open', 'empty', 'hu', 'six', 'nine'];
+type Filter = 'all' | 'beginner' | 'playing' | 'open' | 'empty' | 'hu' | 'six' | 'nine';
+const FILTERS: Filter[] = ['all', 'beginner', 'playing', 'open', 'empty', 'hu', 'six', 'nine'];
 
 function statusOf(t: LobbyTableDto): 'playing' | 'waiting' | 'empty' {
   if (t.playing) return 'playing';
@@ -46,6 +46,8 @@ export function LobbyPage() {
     return (tables ?? []).filter((tb) => {
       if (needle && !tb.name.toLowerCase().includes(needle) && !`${tb.smallBlind}/${tb.bigBlind}`.includes(needle)) return false;
       switch (filter) {
+        case 'beginner':
+          return tb.beginner;
         case 'playing':
           return tb.playing;
         case 'open':
@@ -134,6 +136,7 @@ export function LobbyPage() {
                       {st === 'playing' && <span className="size-1.5 rounded-full bg-success jc-pulse-gold" />}
                       {t(`lobby.status.${st}` as MsgKey)}
                     </Badge>
+                    {tb.beginner && <span data-testid="beginner-badge"><Badge tone="blue">🔰 {t('lobby.beginner')}</Badge></span>}
                     {tb.isPrivate && <Badge tone="red">🔒 {t('lobby.private')}</Badge>}
                     {!tb.allowSpectators && <Badge>{t('lobby.noSpectate')}</Badge>}
                     {tb.entryBlocked && <Badge tone="red">{t('lobby.blocked')}</Badge>}

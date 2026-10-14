@@ -46,6 +46,16 @@ export class Client {
   }
 }
 
+/** Admin client reusing the session global-setup opened (no extra login attempts). */
+export function sharedAdmin(): Client {
+  const c = new Client('http://localhost:5174');
+  for (const pair of JSON.parse(process.env.TEST_ADMIN_COOKIES ?? '[]') as string[]) {
+    const [k, ...v] = pair.split('=');
+    c.cookies.set(k!.trim(), v.join('='));
+  }
+  return c;
+}
+
 let seq = 0;
 export function uniq(prefix = 'u') {
   seq += 1;

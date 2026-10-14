@@ -39,6 +39,7 @@ export const TableInputSchema = z
     maxBuyIn: z.number().int().positive(),
     turnSeconds: z.number().int().min(10).max(120).default(20),
     allowSpectators: z.boolean().default(true),
+    beginner: z.boolean().default(false),
     isPrivate: z.boolean().default(false),
     joinCode: z.string().trim().min(4).max(32).optional(),
   })
@@ -57,6 +58,7 @@ export const TablePatchSchema = z.object({
   isPrivate: z.boolean().optional(),
   joinCode: z.string().trim().min(4).max(32).nullable().optional(),
   allowSpectators: z.boolean().optional(),
+  beginner: z.boolean().optional(),
   entryBlocked: z.boolean().optional(),
 });
 
@@ -90,6 +92,8 @@ export interface LobbyTableDto {
   maxBuyIn: number;
   isPrivate: boolean;
   allowSpectators: boolean;
+  /** Low-stakes table recommended for newcomers. */
+  beginner: boolean;
   entryBlocked: boolean;
   status: 'open' | 'closed';
   /** Live occupancy reported by the table room. */

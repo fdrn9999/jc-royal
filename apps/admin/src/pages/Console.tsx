@@ -195,7 +195,7 @@ export function UserDetailPage() {
 // ------------------------------------------------------------------ tables
 interface TableRow {
   id: string; name: string; maxSeats: number; smallBlind: number; bigBlind: number; minBuyIn: number; maxBuyIn: number; turnSeconds: number;
-  isPrivate: boolean; allowSpectators: boolean; entryBlocked: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
+  isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
 }
 
 export function TablesPage() {
@@ -203,7 +203,7 @@ export function TablesPage() {
   const { api } = useAdmin();
   const { data, reload } = useData<TableRow[]>('/api/admin/tables');
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true });
+  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false });
   const [msg, setMsg] = useState<string | null>(null);
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -254,6 +254,7 @@ export function TablesPage() {
           <Field label={`${t('buyin')} min`}>{(id) => <Input id={id} inputMode="numeric" value={f.minBuyIn} onChange={num('minBuyIn')} />}</Field>
           <Field label={`${t('buyin')} max`}>{(id) => <Input id={id} inputMode="numeric" value={f.maxBuyIn} onChange={num('maxBuyIn')} />}</Field>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.allowSpectators} onChange={(e) => setF({ ...f, allowSpectators: e.target.checked })} /> {t('spectators')}</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.beginner} onChange={(e) => setF({ ...f, beginner: e.target.checked })} data-testid="table-beginner" /> {t('beginnerTable')}</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.isPrivate} onChange={(e) => setF({ ...f, isPrivate: e.target.checked })} /> {t('private')}</label>
           {f.isPrivate && <div className="col-span-2"><Field label={t('joinCode')}>{(id) => <Input id={id} value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} />}</Field></div>}
           <div className="col-span-2 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Button><Button type="submit">{t('save')}</Button></div>
@@ -315,6 +316,7 @@ export function TableDetailPage() {
               <Button type="submit" disabled={tb.status === 'closed'}>{t('save')}</Button>
               <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { entryBlocked: !tb.entryBlocked } }))}>{t('entryBlocked')}: {tb.entryBlocked ? t('yes') : t('no')}</Button>
               <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { allowSpectators: !tb.allowSpectators } }))}>{t('spectators')}: {tb.allowSpectators ? t('yes') : t('no')}</Button>
+              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { beginner: !tb.beginner } }))}>{t('beginnerTable')}: {tb.beginner ? t('yes') : t('no')}</Button>
               <Button type="button" variant="danger" disabled={tb.status !== 'open'} onClick={() => setConfirmClose(true)} data-testid="close-table">{t('closeTable')}</Button>
             </div>
           </form>
@@ -479,6 +481,50 @@ export function AuditPage() {
             </tr>
           ))}
         </Table>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ academy (anonymous aggregates)
+export function AcademyStatsPage() {
+  const { t } = useT();
+  const { data } = useData<{ kind: 'lesson' | 'question' | 'scenario'; itemId: string; starts: number; completes: number; correct: number; wrong: number }[]>('/api/admin/academy/stats');
+  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
+  const funnel = (data ?? []).filter((r) => r.kind !== 'question' && r.starts > 0).sort((a, b) => b.starts - b.completes - (a.starts - a.completes));
+  const hard = (data ?? []).filter((r) => r.kind === 'question' && r.correct + r.wrong > 0).sort((a, b) => b.wrong / (b.correct + b.wrong) - a.wrong / (a.correct + a.wrong)).slice(0, 30);
+  return (
+    <div className="flex flex-col gap-4" data-testid="academy-stats">
+      <h1 className="text-xl font-extrabold">{t('academy')}</h1>
+      <p className="text-xs text-ink-400">{t('academyNote')}</p>
+      <Panel title={t('lessonsFunnel')}>
+        {funnel.length === 0 ? <Empty>—</Empty> : (
+          <Table head={['kind', 'id', t('starts'), t('completes'), t('dropRate')]}>
+            {funnel.map((r) => (
+              <tr key={`${r.kind}:${r.itemId}`}>
+                <td className="px-2 py-1.5 text-xs text-ink-400">{r.kind}</td>
+                <td className="px-2 py-1.5 font-mono text-xs">{r.itemId}</td>
+                <td className="px-2 py-1.5 font-mono">{r.starts}</td>
+                <td className="px-2 py-1.5 font-mono">{r.completes}</td>
+                <td className="px-2 py-1.5 font-mono">{pct(Math.max(0, r.starts - r.completes), r.starts)}</td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Panel>
+      <Panel title={t('questionsHard')}>
+        {hard.length === 0 ? <Empty>—</Empty> : (
+          <Table head={['id', t('correctN'), t('wrongN'), t('wrongRate')]}>
+            {hard.map((r) => (
+              <tr key={r.itemId}>
+                <td className="px-2 py-1.5 font-mono text-xs">{r.itemId}</td>
+                <td className="px-2 py-1.5 font-mono">{r.correct}</td>
+                <td className="px-2 py-1.5 font-mono">{r.wrong}</td>
+                <td className="px-2 py-1.5 font-mono">{pct(r.wrong, r.correct + r.wrong)}</td>
+              </tr>
+            ))}
+          </Table>
+        )}
       </Panel>
     </div>
   );

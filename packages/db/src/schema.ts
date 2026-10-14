@@ -87,6 +87,8 @@ export const tables = sqliteTable('tables', {
   isPrivate: integer('is_private', { mode: 'boolean' }).notNull().default(false),
   joinCodeHash: text('join_code_hash'),
   allowSpectators: integer('allow_spectators', { mode: 'boolean' }).notNull().default(true),
+  /** Shown in the lobby with an "입문 테이블" tag (low stakes for newcomers). */
+  beginner: integer('beginner', { mode: 'boolean' }).notNull().default(false),
   entryBlocked: integer('entry_blocked', { mode: 'boolean' }).notNull().default(false),
   status: text('status', { enum: ['open', 'closing', 'closed'] }).notNull().default('open'),
   /** Live occupancy mirrored by the table room (informational, for lobby/admin). */
@@ -263,4 +265,38 @@ export const messages = sqliteTable(
     createdAt: integer('created_at').notNull().default(now),
   },
   (t) => [index('messages_user_idx').on(t.userId, t.createdAt), index('messages_batch_idx').on(t.batchId)],
+);
+
+/** Academy learning progress (client-side model, versioned JSON). One row per user. */
+export const academyProgress = sqliteTable('academy_progress', {
+  userId: text('user_id').primaryKey().references(() => users.id),
+  data: text('data').notNull(),
+  version: integer('version').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** Cosmetic achievements. Never linked to chips or the ledger. */
+export const userBadges = sqliteTable(
+  'user_badges',
+  {
+    userId: text('user_id').notNull().references(() => users.id),
+    badge: text('badge').notNull(),
+    awardedAt: integer('awarded_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.badge] })],
+);
+
+/** Anonymous aggregate counters for Academy content (no user id is stored). */
+export const academyStats = sqliteTable(
+  'academy_stats',
+  {
+    kind: text('kind', { enum: ['lesson', 'question', 'scenario'] }).notNull(),
+    itemId: text('item_id').notNull(),
+    starts: integer('starts').notNull().default(0),
+    completes: integer('completes').notNull().default(0),
+    correct: integer('correct').notNull().default(0),
+    wrong: integer('wrong').notNull().default(0),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.kind, t.itemId] })],
 );

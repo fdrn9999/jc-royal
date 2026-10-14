@@ -18,6 +18,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'pick',
     id: 'c-heart',
+    topic: 'suits',
     prompt: l('하트(♥) 카드를 선택하세요.', 'Pick the Heart (♥) card.'),
     cards: c('As 7h Kc 9d'),
     isCorrect: (x) => suitOf(x) === 'h',
@@ -27,6 +28,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'pick',
     id: 'c-ace-spades',
+    topic: 'suits',
     prompt: l('스페이드 A(♠A)를 선택하세요.', 'Pick the Ace of Spades (♠A).'),
     cards: c('Ah As Ac Ks'),
     isCorrect: (x) => x === 'As',
@@ -39,6 +41,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'pick',
     id: 'c-k-vs-q',
+    topic: 'ranks',
     prompt: l('K와 Q 중 더 높은 카드를 선택하세요.', 'Pick the higher card: K or Q?'),
     cards: c('Qd Kc'),
     isCorrect: (x) => rankOf(x) === 13,
@@ -48,6 +51,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'pick',
     id: 'c-diamond',
+    topic: 'suits',
     prompt: l('네 장 중 다이아몬드(♦)를 선택하세요.', 'Of these four, pick the Diamond (♦).'),
     cards: c('5h 5d 5c 5s'),
     isCorrect: (x) => suitOf(x) === 'd',
@@ -57,6 +61,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'pick',
     id: 'c-highest',
+    topic: 'ranks',
     prompt: l('가장 높은 카드를 선택하세요.', 'Pick the highest card.'),
     cards: c('Jh Ts Ac 2d'),
     isCorrect: (x) => rankOf(x) === 14,
@@ -66,6 +71,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'choice',
     id: 'c-suits-equal',
+    topic: 'suits',
     prompt: l('♠9와 ♥9 중 어느 카드가 더 높을까요?', 'Which is higher: ♠9 or ♥9?'),
     cards: c('9s 9h'),
     options: [
@@ -80,6 +86,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'sort',
     id: 'c-sort-faces',
+    topic: 'ranks',
     prompt: l('A, K, Q, J를 높은 순서대로 정렬하세요.', 'Sort A, K, Q, J from highest to lowest.'),
     items: [c('Jd'), c('As'), c('Qc'), c('Kh')],
     strength: handStrength,
@@ -88,6 +95,7 @@ export const CARD_QUESTIONS: Question[] = [
   {
     kind: 'sort',
     id: 'c-sort-mixed',
+    topic: 'ranks',
     prompt: l('다섯 장을 높은 순서대로 정렬하세요.', 'Sort these five cards from highest to lowest.'),
     items: [c('9c'), c('2h'), c('Td'), c('Ks'), c('5s')],
     strength: handStrength,

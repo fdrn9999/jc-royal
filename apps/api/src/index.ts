@@ -2,6 +2,7 @@ import { createDb } from '@jc/db';
 import { Hono } from 'hono';
 import type { AppEnv } from './env';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
+import { academyRoutes } from './routes/academy';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { boardRoutes, myCommunityRoutes } from './routes/board';
@@ -25,6 +26,7 @@ app.route('/api/me', myCommunityRoutes);
 app.route('/api/board', boardRoutes);
 app.route('/api/messages', messageRoutes);
 app.route('/api/tables', tableRoutes);
+app.route('/api/academy', academyRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
 

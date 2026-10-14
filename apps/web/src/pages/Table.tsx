@@ -3,7 +3,9 @@ import type { ActionType, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { HandRankingChart } from '../academy/HandChart';
+import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal } from '../game/Panels';
@@ -98,6 +100,18 @@ export function TablePage() {
 
 
   const onAct = useCallback((type: ActionType, amount?: number) => sock.act(type, amount), [sock]);
+
+  const academy = useProgress(me?.id);
+  const tip = coachActive(academy, s?.you.seatIndex != null) && myTurn && s ? coachTip(s) : null;
+  // First-hands coach: count each real hand this player was dealt into while coaching is on.
+  const coachedHands = useRef(new Set<string>());
+  useEffect(() => {
+    if (!me || !hand || hand.stage !== 'settled' || coachedHands.current.has(hand.id)) return;
+    const mine = s?.seats.find((x) => x.seatIndex === s.you.seatIndex);
+    if (!mine?.holeCards?.length && mine?.state !== 'folded') return;
+    coachedHands.current.add(hand.id);
+    updateProgress(me.id, (p) => (coachActive(p, true) ? { ...p, coach: { ...p.coach, hands: p.coach.hands + 1 } } : p));
+  }, [me, hand, s]);
 
   async function sit(amount: number) {
     if (buySeat === null) return;
@@ -198,7 +212,8 @@ export function TablePage() {
       <div className="flex min-h-0 flex-1">
         {/* table area */}
         <div className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
-          <div ref={areaRef} className="relative mx-2 mb-[6.75rem] mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-24 sm:mt-6">
+          {/* Beginner aids and coaching stack above the action bar: reserve room so they never cover my seat. */}
+          <div ref={areaRef} className={cx('relative mx-2 mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-24 sm:mt-6', seated && (prefs.beginner || tip) ? 'mb-[12rem]' : 'mb-[6.75rem]')}>
             {s && (
               <TableScene
                 s={s}
@@ -221,6 +236,22 @@ export function TablePage() {
               <div className="flex flex-col items-center gap-1.5 sm:items-end">
                 <StageNote s={s} />
                 {seated && <CurrentHandPill s={s} />}
+              </div>
+            )}
+            {tip && (
+              <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-info/40 bg-ink-950/90 p-2.5 text-xs text-ivory backdrop-blur sm:w-[26rem]" role="status" data-testid="coach-tip">
+                <span className="mt-0.5 shrink-0 rounded-full bg-info/25 px-1.5 text-[10px] font-bold text-[#a9c8ee]">{t('coach.title')}</span>
+                <span className="min-w-0 flex-1">
+                  {tip.key === 'coach.call'
+                    ? t('coach.call', { amount: formatChips(tip.amount), pot: formatChips(tip.pot) })
+                    : tip.key === 'coach.strong'
+                      ? t('coach.strong', { hand: t(`hand.${tip.rankClass}` as MsgKey) })
+                      : t(tip.key)}
+                  <span className="mt-0.5 block text-[10px] text-ink-400">{t('coach.remaining', { n: COACH_HANDS - academy.coach.hands })}</span>
+                </span>
+                <button className="jc-tap shrink-0 rounded px-1.5 py-1 text-[10px] text-ink-300 hover:text-ivory" onClick={() => me && updateProgress(me.id, (p) => ({ ...p, coach: { ...p.coach, off: true } }))} data-testid="coach-off">
+                  {t('coach.off')}
+                </button>
               </div>
             )}
             {s && myTurn && (

@@ -7,10 +7,11 @@
 | 계층 | 명령 | 결과 | 로그 |
 |---|---|---|---|
 | 엔진 규칙·속성·평가기 | `pnpm --filter @jc/poker-engine test` | **45 / 45 통과** | `test-logs/engine.txt` |
-| 아카데미 단위(웹) | `pnpm --filter @jc/web test` | **28 / 28 통과** | `test-logs/web-unit.txt` |
-| 통합(실제 workerd) | `pnpm test:integration` | **42 / 42 통과** | `test-logs/integration.txt` |
-| E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e` | **12 / 12 통과** | `test-logs/e2e.txt` |
+| 아카데미 단위(웹) | `pnpm --filter @jc/web test` | **43 / 43 통과** | `test-logs/web-unit.txt` |
+| 통합(실제 workerd) | `pnpm test:integration` | **47 / 47 통과** | `test-logs/integration.txt` |
+| E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e` | **17 / 17 통과** | `test-logs/e2e.txt` |
 | 타입 검사 | `pnpm typecheck` | 오류 0 | — |
+| 번들 가드 | `pnpm check:bundle` | 엔진은 지연 청크에만, 진입 번들 547KB | `test-logs/bundle.txt` |
 
 > 이 PC에서는 Playwright 전용 Chromium 다운로드가 네트워크 오류(ECONNRESET)로 실패해, 설치된 Chrome을 `channel: 'chrome'`으로 사용했다. CI(ubuntu)에서는 Playwright Chromium을 쓴다.
 
@@ -143,3 +144,25 @@
 | 기존 멀티플레이 회귀 | 기존 E2E 6건 + 통합 42건 | ✅ |
 
 모바일 테스트는 Chrome 모바일 에뮬레이션(Pixel 7, 터치 활성)이다. iOS Safari·Android 실기기 검증은 하지 않았다.
+
+### 아카데미 후속 (2026-10-14)
+
+| 요구 | 테스트 | 결과 |
+|---|---|---|
+| 진도 서버 저장, 오래된 기기가 새 진도를 덮지 않음, 다른 계정 비공개 | `tests/integration/academy.test.ts` | ✅ |
+| 배지 1회 부여, 지갑·원장 불변 | 같은 파일 | ✅ |
+| 익명 통계(사용자 ID 없음), 관리자 전용 조회 | 같은 파일 | ✅ |
+| 입문 테이블 플래그(관리자 설정 → 로비) | 같은 파일 + `academy-followups.spec.ts` | ✅ |
+| v1 → v2 마이그레이션, 기기 간 병합, 재시작 우선 | `academy-followups.test.ts` | ✅ |
+| 개념별 오답 기록·상환, 약점 가중 복습, 시드 재현성 | 같은 파일 | ✅ |
+| 랜덤 비교 문제의 유형(킥커·스플릿·족보 차이)을 엔진이 확인 | 같은 파일 | ✅ |
+| 오답 해설의 결정 카드(페어 숫자·킥커 등) | 같은 파일 | ✅ |
+| 봇은 합법 액션만 선택, 자유 연습 1·2·5인 12핸드 연속 진행 | 같은 파일 | ✅ |
+| 핸드 기록 → 레슨 링크, 첫 실전 코칭 조건 | 같은 파일 | ✅ |
+| 다른 기기 로그인 시 진도·배지 복원 | `academy-followups.spec.ts` | ✅ |
+| 오답 해설 표시, 약점 복습·랜덤 퀴즈 | 같은 파일 | ✅ |
+| 자유 연습: 소켓 없음, 지갑 불변, 여러 핸드 | 같은 파일 | ✅ |
+| 실전 코칭 표시·끄기(레슨 미이수자에게는 미표시) | 같은 파일 | ✅ |
+| 모바일: 새 화면 가로 스크롤 없음, 자유 연습 액션바 화면 내 | `academy-mobile.spec.ts` | ✅ |
+
+CI 실패 원인 수정: `board.spec.ts`가 글쓰기 화면 전환 전에 목록의 검색창(`제목·본문 검색`)에 제목을 입력하던 타이밍 문제(CI 스냅샷: 제목 빈칸·본문 입력됨). 편집기 URL을 기다리고 라벨을 정확히 일치시켜 해결.

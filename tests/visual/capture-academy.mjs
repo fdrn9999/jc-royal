@@ -47,6 +47,21 @@ for (const [tag, vp, opts] of [
       if (await overflow(p)) report.push(`overflow ${tag} ${lesson} step ${s}`);
     }
   }
+  // Follow-ups: a wrong compare answer, review, progress, badges on My Page, free practice.
+  await p.goto(`${base}/academy/hands?step=3`);
+  await p.locator('[data-testid=quiz] [data-choice=a]').click();
+  await shot(p, `${tag}-compare-wrong`, true);
+  for (const [path, name] of [['/academy/review', 'review'], ['/academy/progress', 'progress'], ['/me', 'me']]) {
+    await p.goto(`${base}${path}`);
+    await shot(p, `${tag}-${name}`, true);
+    if (await overflow(p)) report.push(`overflow ${tag} ${name}`);
+  }
+  await p.goto(`${base}/academy/practice/free`);
+  await shot(p, `${tag}-free-setup`);
+  await p.getByTestId('free-start').click();
+  await p.waitForTimeout(2500);
+  await shot(p, `${tag}-free-table`);
+  if (await overflow(p)) report.push(`overflow ${tag} free`);
   for (const id of ['C', 'G']) {
     await p.goto(`${base}/academy/practice/${id}`);
     await p.waitForTimeout(1500);

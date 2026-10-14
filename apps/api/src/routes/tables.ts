@@ -22,6 +22,7 @@ export function toLobbyDto(t: TableRow): LobbyTableDto {
     maxBuyIn: t.maxBuyIn,
     isPrivate: t.isPrivate,
     allowSpectators: t.allowSpectators,
+    beginner: t.beginner,
     entryBlocked: t.entryBlocked,
     status: t.status === 'open' ? 'open' : 'closed',
     seated: t.liveSeated,

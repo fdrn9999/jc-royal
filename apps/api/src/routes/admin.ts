@@ -5,7 +5,7 @@
  * written to admin_audit_log.
  */
 import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
-import { ChipAdjustSchema, TableInputSchema, TablePatchSchema } from '@jc/types';
+import { ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
 import { and, desc, eq, inArray, isNull, like, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -190,6 +190,7 @@ const admin = new Hono<AppEnv>()
       isPrivate: body.isPrivate,
       joinCodeHash: body.isPrivate && body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null,
       allowSpectators: body.allowSpectators,
+      beginner: body.beginner,
       createdBy: c.var.user!.id,
     });
     await audit(c, 'table.create', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : undefined });
@@ -226,6 +227,7 @@ const admin = new Hono<AppEnv>()
         isPrivate,
         joinCodeHash: isPrivate ? joinCodeHash : null,
         allowSpectators: body.allowSpectators ?? t.allowSpectators,
+        beginner: body.beginner ?? t.beginner,
         entryBlocked: body.entryBlocked ?? t.entryBlocked,
         updatedAt: Date.now(),
       })
@@ -372,6 +374,12 @@ const admin = new Hono<AppEnv>()
     if (!r[0]) fail(404, 'not_found', 'open event not found');
     await audit(c, 'reconcile.resolve', { type: 'reconciliation', id }, body);
     return c.json({ ok: true });
+  })
+  // ---------------------------------------------------------------- academy (anonymous aggregates)
+  .get('/academy/stats', async (c) => {
+    const rows = await c.var.db.select().from(schema.academyStats);
+    const out: AcademyStatRow[] = rows.map(({ kind, itemId, starts, completes, correct, wrong }) => ({ kind, itemId, starts, completes, correct, wrong }));
+    return c.json(out);
   });
 
 export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes));

@@ -56,3 +56,18 @@ test('mobile practice: raise with presets by touch, hand chart as a bottom sheet
   await expect(p.getByTestId('practice-done')).toBeVisible({ timeout: 40_000 });
   await noOverflow(p);
 });
+
+test('mobile: review, free practice and progress pages fit the phone; free-play action bar stays on screen', async ({ browser }) => {
+  const { page: p } = await signUp(browser, { mobile: true });
+  for (const path of ['/academy/review', '/academy/review?mode=random', '/academy/progress', '/academy/practice', '/me']) {
+    await p.goto(path);
+    await p.waitForTimeout(300);
+    await noOverflow(p);
+  }
+  await p.goto('/academy/practice/free');
+  await p.getByTestId('free-start').tap();
+  await expect(p.getByTestId('action-bar')).toBeVisible({ timeout: 30_000 });
+  const bar = await p.getByTestId('action-bar').boundingBox();
+  expect(bar!.y + bar!.height).toBeLessThanOrEqual(844);
+  await noOverflow(p);
+});

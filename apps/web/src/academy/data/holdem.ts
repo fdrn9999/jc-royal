@@ -1,5 +1,6 @@
 import type { Card } from '@jc/types';
 import { l, type L } from '../content';
+import type { ChoiceQuestion } from '../quiz';
 
 const c = (s: string) => s.split(' ') as Card[];
 
@@ -102,3 +103,38 @@ export const TOUR: { target: string; name: L; body: L }[] = [
   { target: '[data-tour=timer]', name: l('턴 타이머', 'Turn timer'), body: l('차례인 사람의 아바타 주위 링이 줄어듭니다. 시간이 다 되면 체크 가능할 때 체크, 아니면 자동 폴드됩니다.', 'The ring around the acting player shrinks; at zero you check if free, otherwise fold.') },
   { target: '[data-testid=action-bar]', name: l('액션 버튼', 'Action buttons'), body: l('내 차례에만 나타납니다. 폴드·체크·콜·벳·레이즈·올인 중 가능한 것만 보입니다.', 'Appear only on your turn, showing just the legal choices.') },
 ];
+
+const pos = (n: number, street: 'preflop' | 'postflop') => positionNames(n)[actingOrder(n, street)[0]!]!;
+export const POSITION_QUIZ: ChoiceQuestion[] = [
+  {
+    kind: 'choice',
+    topic: 'positions',
+    id: 'p-6-pre',
+    prompt: l('6인 테이블, 프리플랍에서 가장 먼저 행동하는 자리는?', '6 players, preflop: who acts first?'),
+    options: ['BTN', 'SB', 'BB', 'UTG'].map((x) => ({ id: x, label: l(x, x) })),
+    answer: pos(6, 'preflop'),
+    why: l('프리플랍은 빅 블라인드 다음 자리부터 시작합니다.', 'Preflop action starts after the big blind.'),
+    explain: l('UTG(Under the Gun)가 가장 먼저, 빅 블라인드가 가장 나중입니다.', 'UTG acts first and the big blind last.'),
+  },
+  {
+    kind: 'choice',
+    topic: 'positions',
+    id: 'p-6-post',
+    prompt: l('6인 테이블, 플랍 이후 가장 먼저 행동하는 자리는? (모두 남아 있음)', '6 players, after the flop (nobody folded): who acts first?'),
+    options: ['BTN', 'SB', 'UTG', 'CO'].map((x) => ({ id: x, label: l(x, x) })),
+    answer: pos(6, 'postflop'),
+    why: l('플랍 이후에는 버튼 바로 왼쪽부터 행동합니다.', 'After the flop, action starts just left of the button.'),
+    explain: l('SB가 먼저, 버튼이 가장 나중입니다. 그래서 버튼이 가장 유리합니다.', 'SB first and the button last — that is why the button is the best seat.'),
+  },
+  {
+    kind: 'choice',
+    topic: 'positions',
+    id: 'p-hu-pre',
+    prompt: l('헤즈업(2인), 프리플랍에서 먼저 행동하는 사람은?', 'Heads-up preflop: who acts first?'),
+    options: ['BTN/SB', 'BB'].map((x) => ({ id: x, label: l(x, x) })),
+    answer: pos(2, 'preflop'),
+    why: l('헤즈업은 예외입니다. 버튼이 스몰 블라인드를 내고 프리플랍에 먼저 행동합니다.', 'Heads-up is the exception: the button posts the small blind and acts first preflop.'),
+    explain: l('플랍 이후에는 반대로 BB가 먼저 행동합니다.', 'After the flop it flips: the big blind acts first.'),
+  },
+];
+

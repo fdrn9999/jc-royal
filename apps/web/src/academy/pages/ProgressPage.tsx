@@ -5,7 +5,9 @@ import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
 import { l, useTr } from '../content';
 import { buildScenarios } from '../practice/scenarios';
-import { isDone, LESSON_IDS, percent, resetProgress, tutorialComplete, useProgress } from '../progress';
+import { isDone, LESSON_IDS, percent, resetProgress, tutorialComplete, useProgress, weakTopics } from '../progress';
+import { BadgeShelf } from '../Badges';
+import { TOPIC_INFO } from '../review';
 import { UI } from '../ui';
 import { LESSONS } from './AcademyPage';
 
@@ -42,12 +44,39 @@ export function ProgressPage() {
           );
         })}
       </section>
+      <section className="jc-panel p-3" data-testid="weak-summary">
+        <h2 className="mb-2 text-sm font-bold text-gold-300">{tr(l('취약 개념과 복습 추천', 'Weak spots and what to review'))}</h2>
+        {weakTopics(p).length === 0 ? (
+          <p className="text-sm text-ink-300">{tr(l('아직 틀린 개념이 없습니다.', 'No weak spots yet.'))}</p>
+        ) : (
+          <ul className="flex flex-col gap-1.5 text-sm">
+            {weakTopics(p).map(({ topic, count }) => (
+              <li key={topic} className="flex items-center justify-between gap-2">
+                <span className="text-ivory">
+                  {tr(TOPIC_INFO[topic].name)} <span className="font-mono text-xs text-[#f3c3c4]">×{count}</span>
+                </span>
+                <Link to={`${LESSONS[TOPIC_INFO[topic].lesson].to}?step=${TOPIC_INFO[topic].step}`} className="jc-tap rounded px-2 py-1.5 text-xs text-gold-300 hover:underline">
+                  {tr(LESSONS[TOPIC_INFO[topic].lesson].title)} →
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link to="/academy/review" className="mt-2 inline-block text-sm font-semibold text-gold-300 hover:underline">
+          {tr(l('복습·랜덤 퀴즈 하기', 'Open review & random quiz'))} →
+        </Link>
+      </section>
+      <section className="jc-panel p-3">
+        <h2 className="mb-2 text-sm font-bold text-gold-300">{tr(l('배지', 'Badges'))}</h2>
+        <BadgeShelf />
+      </section>
       <section className="jc-panel p-3">
         <h2 className="mb-2 text-sm font-bold text-gold-300">{tr(l('연습 시나리오', 'Practice scenarios'))}</h2>
         <div className="flex flex-wrap gap-2">
           {buildScenarios('').map((s) => (
             <Link key={s.id} to={`/academy/practice/${s.id}`} className={cx('jc-tap rounded-full border px-3 py-1.5 text-xs font-semibold', p.practice[s.id] ? 'border-gold-400 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300')}>
               {s.id}. {tr(s.title)}
+              {p.scenarioStats[s.id] && <span className="ml-1 font-mono text-[10px] text-ink-400">{p.scenarioStats[s.id]!.tries}/{p.scenarioStats[s.id]!.misses}</span>}
             </Link>
           ))}
         </div>

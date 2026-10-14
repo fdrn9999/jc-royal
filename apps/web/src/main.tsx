@@ -1,7 +1,8 @@
 import { Logo, Spinner } from '@jc/ui';
-import { lazy, StrictMode, Suspense, type ComponentType, type ReactNode } from 'react';
+import { lazy, StrictMode, Suspense, useEffect, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
+import { startAcademySync } from './academy/sync';
 import { AppShell } from './components/AppShell';
 import './index.css';
 import { AuthProvider, useAuth } from './lib/auth';
@@ -42,6 +43,13 @@ function Academy({ page }: { page: AcademyPageName }) {
   );
 }
 
+/** Keeps Academy progress in sync with the server while someone is signed in. */
+function AcademySync() {
+  const { me } = useAuth();
+  useEffect(() => (me ? startAcademySync(me.id) : undefined), [me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
   const loc = useLocation();
@@ -67,6 +75,7 @@ const router = createBrowserRouter([
   { path: '/register', element: <GuestOnly><RegisterPage /></GuestOnly> },
   { path: '/reset', element: <ResetPage /> },
   { path: '/table/:id', element: <RequireAuth><TablePage /></RequireAuth> },
+  { path: '/academy/practice/free', element: <RequireAuth><Academy page="FreePracticePage" /></RequireAuth> },
   { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },
   {
     element: (
@@ -92,6 +101,7 @@ const router = createBrowserRouter([
       { path: '/academy/actions', element: <Academy page="ActionsLesson" /> },
       { path: '/academy/practice', element: <Academy page="PracticeListPage" /> },
       { path: '/academy/progress', element: <Academy page="ProgressPage" /> },
+      { path: '/academy/review', element: <Academy page="ReviewPage" /> },
       { path: '*', element: <NotFound /> },
     ],
   },
@@ -101,6 +111,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <I18nProvider>
       <AuthProvider>
+        <AcademySync />
         <RouterProvider router={router} />
       </AuthProvider>
     </I18nProvider>

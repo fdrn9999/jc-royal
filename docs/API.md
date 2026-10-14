@@ -38,9 +38,20 @@
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/tables` | 로비(종료된 테이블 제외, 실시간 착석·진행·대기·관전 수) |
+| GET | `/api/tables` | 로비(종료된 테이블 제외, 실시간 착석·진행·대기·관전 수, `beginner` 입문 테이블 여부) |
 | GET | `/api/tables/:id` | 단일 테이블 |
 | GET(upgrade) | `/ws/tables/:id?code=` | WebSocket. 세션 쿠키와 Origin 필수. 비공개 테이블은 참가 코드가 있어야 착석 가능 → `docs/WEBSOCKET_PROTOCOL.md` |
+
+## 아카데미 `/api/academy`
+
+학습 진도·배지·익명 통계. 지갑·원장·핸드 기록에는 접근하지 않는다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/progress` | `{data, version, updatedAt, badges}`. 저장된 진도가 없으면 `data: null` |
+| PUT | `/progress` | `{version, updatedAt, data(≤32KB)}`. `updatedAt`이 더 새로울 때만 덮어씀(클라이언트가 로컬·서버 진도를 병합한 뒤 전송). 진도에서 계산한 배지를 1회만 부여(`INSERT OR IGNORE`). 분당 60회 |
+| GET | `/badges` | 내 배지 |
+| POST | `/events` | `{events: [{kind:'question', id, correct} \| {kind:'lesson'\|'scenario', id, phase:'start'\|'complete'}]}`(최대 50). 사용자 ID 없이 항목별 카운터만 증가. 분당 30회 |
 
 ## 게시판 `/api/board`
 
@@ -93,3 +104,5 @@
 | GET / POST | `/board/posts` · `/board/posts/:id` · `/board/notices` · PATCH `/board/notices/:id` | 게시판 관리와 공지 |
 | POST | `/board/posts/:id/status` · `/board/comments/:id/status` | `visible`/`hidden`/`deleted` |
 | POST / GET | `/messages` | `{userIds(1-500), category, title, body}` 발송과 발송 이력 |
+
+아카데미 지표(관리자): `GET /api/admin/academy/stats` → `[{kind, itemId, starts, completes, correct, wrong}]`(익명 집계). 테이블 생성·수정 본문에 `beginner`(입문 테이블) 추가.

@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router';
 import { useAuth } from '../../lib/auth';
 import { setPrefs, usePrefs } from '../../lib/prefs';
 import { l, useTr, type L } from '../content';
-import { isDone, LESSON_IDS, nextLesson, percent, SCENARIO_IDS, updateProgress, useProgress, type LessonId } from '../progress';
+import { isDone, LESSON_IDS, nextLesson, percent, SCENARIO_IDS, updateProgress, useProgress, weakTopics, type LessonId } from '../progress';
+import { BadgeShelf } from '../Badges';
 import { UI } from '../ui';
 
 export const LESSONS: Record<LessonId, { n: number; title: L; desc: L; to: string; icon: string }> = {
@@ -30,6 +31,8 @@ const T = {
   beginner: l('초보자 모드', 'Beginner mode'),
   beginnerDesc: l('게임 중 현재 내 패, 액션 도움말, 진행 단계 설명을 보여줍니다.', 'Shows your current hand, action help and street explanations at the table.'),
   details: l('상세 진행 현황', 'Detailed progress'),
+  review: l('복습·랜덤 퀴즈', 'Review & random quiz'),
+  badges: l('배지', 'Badges'),
   scenarios: l('연습 시나리오', 'Practice scenarios'),
 };
 
@@ -87,6 +90,10 @@ export function AcademyPage() {
             <Button size="lg" variant="outline" onClick={() => nav('/academy/hands?step=3')}>
               {tr(T.quiz)}
             </Button>
+            <Button size="lg" variant="outline" onClick={() => nav('/academy/review')} data-testid="academy-review">
+              {tr(T.review)}
+              {weakTopics(p).length > 0 && <span className="ml-1 rounded-full bg-danger px-1.5 text-[11px] text-white">{weakTopics(p).length}</span>}
+            </Button>
           </div>
         </div>
       </section>
@@ -135,6 +142,11 @@ export function AcademyPage() {
             );
           })}
         </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-bold tracking-[0.06em] text-gold-300">{tr(T.badges)}</h2>
+        <BadgeShelf />
       </section>
 
       <section className="jc-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">

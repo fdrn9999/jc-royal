@@ -11,6 +11,7 @@
     "test": "pnpm --filter @jc/poker-engine --filter @jc/web test",
     "test:integration": "vitest run --config tests/vitest.config.ts",
     "test:e2e": "playwright test -c tests/playwright.config.ts",
+    "check:bundle": "node tests/bundle-check.mjs",
     "build": "pnpm --filter @jc/web build && pnpm --filter @jc/admin build",
     "db:generate": "pnpm --filter @jc/db run generate",
     "db:migrate:local": "wrangler d1 migrations apply jc-royal-db --local --persist-to .wrangler/state -c apps/api/wrangler.jsonc",

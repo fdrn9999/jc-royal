@@ -27,6 +27,8 @@ jobs:
         run: pnpm test
       - name: Build web + admin
         run: pnpm --filter @jc/web build && pnpm --filter @jc/admin build
+      - name: Bundle guard (engine stays out of the entry chunk)
+        run: pnpm check:bundle
       - name: Integration tests (wrangler dev / workerd, local D1 + Durable Objects)
         run: pnpm test:integration
       - name: Install Playwright Chromium

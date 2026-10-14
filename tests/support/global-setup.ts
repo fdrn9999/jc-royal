@@ -21,6 +21,11 @@ export async function setup() {
   const boot = await fetch(`${worker.url}/api/admin/auth/bootstrap`, { method: 'POST', headers: { Origin: 'http://localhost:5174', 'Content-Type': 'application/json' }, body: JSON.stringify({ token: 'test-bootstrap-token-0123456789', email }) });
   if (boot.status !== 200) throw new Error(`bootstrap failed: ${boot.status} ${await boot.text()}`);
   process.env.TEST_ADMIN_EMAIL = email;
+  // One shared admin session for files that only need admin APIs: the per-account login limit
+  // (5 per 15 min) is reserved for admin.test.ts, which tests the login flow itself.
+  const login = await fetch(`${worker.url}/api/admin/auth/login`, { method: 'POST', headers: { Origin: 'http://localhost:5174', 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'password123' }) });
+  if (login.status !== 200) throw new Error(`admin login failed: ${login.status}`);
+  process.env.TEST_ADMIN_COOKIES = JSON.stringify(login.headers.getSetCookie().map((c) => c.split(';')[0]));
 }
 
 export async function teardown() {

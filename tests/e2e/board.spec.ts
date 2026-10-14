@@ -6,7 +6,9 @@ test('board: write, comment, edit own content; others cannot edit', async ({ bro
   const b = await signUp(browser);
   await a.page.goto('/board');
   await a.page.getByTestId('write-post').click();
-  await a.page.getByLabel(/제목|Title/).fill('E2E 첫 게시글');
+  // Wait for the editor: the list's search box ("제목·본문 검색") also matches a loose /제목/ label.
+  await expect(a.page).toHaveURL(/\/board\/write$/);
+  await a.page.getByLabel(/^(제목|Title)$/).fill('E2E 첫 게시글');
   await a.page.getByLabel(/내용|Text/).fill('<b>태그는 그대로 글자로 보여야 합니다</b>');
   await a.page.getByTestId('publish').click();
   await expect(a.page.getByTestId('post-title')).toHaveText('E2E 첫 게시글');
@@ -32,7 +34,8 @@ test('board: write, comment, edit own content; others cannot edit', async ({ bro
   await a.page.reload();
   await expect(a.page.getByTestId('comment').getByRole('button', { name: /수정|Edit/ })).toHaveCount(0);
   await a.page.getByRole('link', { name: /^수정$|^Edit$/ }).click();
-  await a.page.getByLabel(/제목|Title/).fill('E2E 수정된 제목');
+  await expect(a.page).toHaveURL(/\/edit$/);
+  await a.page.getByLabel(/^(제목|Title)$/).fill('E2E 수정된 제목');
   await a.page.getByTestId('publish').click();
   await expect(a.page.getByTestId('post-title')).toHaveText('E2E 수정된 제목');
 

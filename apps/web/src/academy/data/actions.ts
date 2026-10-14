@@ -53,6 +53,7 @@ export const ACTIONS: { type: ActionType; ko: string; en: string; what: L; when:
 export const ACTION_QUIZ: ChoiceQuestion[] = [
   {
     kind: 'choice',
+    topic: 'actions',
     id: 'a-free',
     prompt: l('아무도 베팅하지 않았습니다. 칩을 넣지 않고 차례를 넘기려면?', 'Nobody has bet. How do you pass without putting in chips?'),
     options: [
@@ -66,6 +67,7 @@ export const ACTION_QUIZ: ChoiceQuestion[] = [
   },
   {
     kind: 'choice',
+    topic: 'actions',
     id: 'a-match',
     prompt: l('상대가 50을 베팅했습니다. 같은 금액만 넣고 계속하려면?', 'An opponent bets 50. How do you continue for exactly that?'),
     options: [
@@ -79,6 +81,7 @@ export const ACTION_QUIZ: ChoiceQuestion[] = [
   },
   {
     kind: 'choice',
+    topic: 'actions',
     id: 'a-fold-chips',
     prompt: l('빅 블라인드 10을 낸 뒤 폴드했습니다. 그 10은?', 'You posted a 10 big blind and then folded. What happens to the 10?'),
     options: [

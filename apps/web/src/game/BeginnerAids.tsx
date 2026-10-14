@@ -18,10 +18,12 @@ export function CurrentHandPill({ s }: { s: TableView }) {
   const ev = currentHand(mine.holeCards, hand.board);
   if (!ev) return null;
   return (
-    <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-gold-500/30 bg-ink-950/85 px-3 py-1 text-xs backdrop-blur" title={t('table.currentHandNote')} data-testid="current-hand">
-      <span className="text-ink-300">{t('table.currentHand')}</span>
-      <span className="font-bold text-gold-300">{describeHand(ev, locale, t)}</span>
-      <span className="sr-only">{t('table.currentHandNote')}</span>
+    <div className="pointer-events-auto flex max-w-full flex-col items-center rounded-2xl border border-gold-500/30 bg-ink-950/85 px-3 py-1 text-xs backdrop-blur" title={t('table.currentHandNote')} data-testid="current-hand">
+      <span>
+        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{describeHand(ev, locale, t)}</span>
+      </span>
+      {/* A made hand is not a win: say so on screen, not only in a tooltip. */}
+      <span className="text-[10px] text-ink-400">{t('table.currentHandShort')}</span>
     </div>
   );
 }

@@ -7,13 +7,14 @@
 import { sound } from '@jc/audio';
 import type { Card } from '@jc/types';
 import { Button, cx, PlayingCard } from '@jc/ui';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { cardName, l, useTr, type L } from './content';
 import { completeLesson, recordAnswer, startLesson, updateProgress, type LessonId } from './progress';
-import { judgeChoice, judgeCompare, judgePick, judgeSort, type ChoiceQuestion, type CompareQuestion, type CompareResult, type PickQuestion, type Question, type SortQuestion } from './quiz';
+import { explainCompare, judgeChoice, judgeCompare, judgePick, judgeSort, type ChoiceQuestion, type CompareQuestion, type CompareResult, type PickQuestion, type Question, type SortQuestion } from './quiz';
+import { track } from './sync';
 
 export const UI = {
   academy: l('포커 아카데미', 'Poker Academy'),
@@ -68,6 +69,7 @@ export function LessonShell({ id, title, steps, next }: { id: LessonId; title: L
   const top = useRef<HTMLDivElement>(null);
 
   useEffect(() => sound.installAutoUnlock(), []);
+  useEffect(() => track({ kind: 'lesson', id, phase: 'start' }), [id]);
   useEffect(() => {
     if (me) updateProgress(me.id, (p) => startLesson(p, id, step, Date.now()));
   }, [me, id, step]);
@@ -80,6 +82,7 @@ export function LessonShell({ id, title, steps, next }: { id: LessonId; title: L
   const last = step === steps.length - 1;
   const finish = () => {
     if (me) updateProgress(me.id, (p) => completeLesson(p, id, Date.now()));
+    track({ kind: 'lesson', id, phase: 'complete' });
     sound.play('complete');
     setFinished(true);
   };
@@ -217,11 +220,17 @@ function Feedback({ state, explain, why, onNext, nextLabel }: { state: 'correct'
   );
 }
 
-function useAnswer(onCorrect: () => void) {
+/** Extra listener for every answer (the review quiz scores first attempts with it). */
+export const AnswerContext = createContext<((q: Question, ok: boolean) => void) | null>(null);
+
+function useAnswer(q: Question, onCorrect: () => void) {
   const { me } = useAuth();
   const haptic = useHaptic();
+  const listener = useContext(AnswerContext);
   return (ok: boolean) => {
-    if (me) updateProgress(me.id, (p) => recordAnswer(p, ok));
+    if (me) updateProgress(me.id, (p) => recordAnswer(p, ok, q.topic));
+    track({ kind: 'question', id: (q.statId ?? q.id).slice(0, 48), correct: ok });
+    listener?.(q, ok);
     sound.play(ok ? 'correct' : 'wrong');
     haptic(ok ? 12 : 30);
     if (ok) onCorrect();
@@ -233,7 +242,7 @@ function useAnswer(onCorrect: () => void) {
 function PickView({ q, onSolved }: { q: PickQuestion; onSolved: () => void }) {
   const tr = useTr();
   const [picked, setPicked] = useState<{ card: Card; ok: boolean } | null>(null);
-  const answer = useAnswer(onSolved);
+  const answer = useAnswer(q, onSolved);
   const solved = picked?.ok === true;
   return (
     <div className="flex flex-col gap-4">
@@ -260,7 +269,7 @@ function PickView({ q, onSolved }: { q: PickQuestion; onSolved: () => void }) {
 function ChoiceView({ q, onSolved }: { q: ChoiceQuestion; onSolved: () => void }) {
   const tr = useTr();
   const [picked, setPicked] = useState<{ id: string; ok: boolean } | null>(null);
-  const answer = useAnswer(onSolved);
+  const answer = useAnswer(q, onSolved);
   const solved = picked?.ok === true;
   return (
     <div className="flex flex-col gap-4">
@@ -299,7 +308,7 @@ function SortView({ q, onSolved }: { q: SortQuestion; onSolved: () => void }) {
   const [result, setResult] = useState<boolean | null>(null);
   const [drag, setDrag] = useState<{ from: number; x: number; y: number; dx: number; dy: number; moved: boolean } | null>(null);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
-  const answer = useAnswer(onSolved);
+  const answer = useAnswer(q, onSolved);
   const haptic = useHaptic();
   const single = q.items.every((it) => it.length === 1);
   const solved = result === true;
@@ -442,7 +451,7 @@ function CompareView({ q, onSolved }: { q: CompareQuestion; onSolved: () => void
   const { t } = useI18n();
   const [res, setRes] = useState<CompareResult | null>(null);
   const [picked, setPicked] = useState<{ id: string; ok: boolean } | null>(null);
-  const answer = useAnswer(onSolved);
+  const answer = useAnswer(q, onSolved);
   useEffect(() => {
     let live = true;
     void judgeCompare(q).then((r) => live && setRes(r));
@@ -451,6 +460,9 @@ function CompareView({ q, onSolved }: { q: CompareQuestion; onSolved: () => void
     };
   }, [q]);
   const solved = picked?.ok === true;
+  // After any answer, explain the verdict and mark only the cards that decided it.
+  const why = picked && res ? explainCompare(q, res.answer) : null;
+  const deciding = (c: Card) => !!why && (why.decide.a.includes(c) || why.decide.b.includes(c));
   const hand = (who: 'a' | 'b') => {
     const cards = who === 'a' ? q.a : q.b;
     const r = res?.[who];
@@ -460,10 +472,10 @@ function CompareView({ q, onSolved }: { q: CompareQuestion; onSolved: () => void
         <div className="text-xs font-bold text-gold-300">{tr(UI[who])}</div>
         <div className="flex gap-1">
           {cards.map((c) => (
-            <PlayingCard key={c} card={c} size="clamp(2.4rem,11vw,3.2rem)" highlight={solved && !!r?.bestFive.includes(c)} />
+            <PlayingCard key={c} card={c} size="clamp(2.4rem,11vw,3.2rem)" highlight={why ? deciding(c) || (!why.decide.a.length && !!r?.bestFive.includes(c)) : false} />
           ))}
         </div>
-        {solved && r && <div className="text-xs font-semibold text-ivory">{t(`hand.${r.label}` as MsgKey)}</div>}
+        {picked && r && <div className="text-xs font-semibold text-ivory">{t(`hand.${r.label}` as MsgKey)}</div>}
       </div>
     );
   };
@@ -473,7 +485,7 @@ function CompareView({ q, onSolved }: { q: CompareQuestion; onSolved: () => void
         <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">{tr(UI.board)}</div>
         <div className="flex gap-1">
           {q.board.map((c) => (
-            <PlayingCard key={c} card={c} size="clamp(2.4rem,11vw,3.2rem)" highlight={solved && !!(res?.a.bestFive.includes(c) || res?.b.bestFive.includes(c))} />
+            <PlayingCard key={c} card={c} size="clamp(2.4rem,11vw,3.2rem)" highlight={why ? deciding(c) || (!why.decide.a.length && !!(res?.a.bestFive.includes(c) || res?.b.bestFive.includes(c))) : false} />
           ))}
         </div>
       </div>
@@ -501,7 +513,8 @@ function CompareView({ q, onSolved }: { q: CompareQuestion; onSolved: () => void
           </button>
         ))}
       </div>
-      {picked && <Feedback state={picked.ok ? 'correct' : 'wrong'} explain={q.explain} why={picked.ok ? null : l('두 패의 족보를 먼저 확인하고, 같다면 숫자와 킥커를 비교해 보세요.', 'Name both hands first; if they match, compare ranks and kickers.')} />}
+      {picked && <Feedback state={picked.ok ? 'correct' : 'wrong'} explain={why?.text ?? q.explain} why={why?.text ?? null} />}
+      {picked && <p className="text-[11px] text-ink-400" data-testid="compare-why">{tr(l('밝게 표시된 카드가 승부를 가른 카드입니다.', 'Highlighted cards decided it.'))}</p>}
     </div>
   );
 }

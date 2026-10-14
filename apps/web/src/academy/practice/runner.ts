@@ -10,7 +10,7 @@ import type { CueEvent } from '../../game/useTableSocket';
 import type { Scenario } from './scenarios';
 
 export const HERO_ID = 'you';
-const botId = (seat: number) => `bot${seat}`;
+export const botId = (seat: number) => `bot${seat}`;
 
 export type HeroCheck = { ok: true } | { ok: false; reason: 'not-your-turn' | 'illegal' | 'off-script' };
 
@@ -131,39 +131,51 @@ export class PracticeSession {
   }
 
   view(): TableView {
-    const e = this.engine;
-    const info = e.seatInfo(HERO_ID);
     const sc = this.scenario;
-    const seats: SeatView[] = Array.from({ length: sc.size }, (_, i) => {
-      const s = sc.seats.find((x) => x.index === i);
-      if (!s) return { seatIndex: i, state: 'empty', stack: 0, streetBet: 0, connected: false, hasCards: false };
-      const hi = info.get(i);
-      const state: SeatView['state'] = hi?.inHand ? (hi.folded ? 'folded' : hi.allIn ? 'allin' : 'active') : 'waiting';
-      return {
-        seatIndex: i,
-        state,
-        userId: i === sc.hero ? HERO_ID : botId(i),
-        nickname: s.name,
-        stack: hi?.stack ?? s.stack,
-        streetBet: hi?.streetBet ?? 0,
-        connected: true,
-        lastAction: hi?.lastAction ?? null,
-        hasCards: !!hi?.inHand && !hi.folded,
-        holeCards: hi?.holeCards ?? null,
-      };
-    });
-    const hv = e.handView();
-    return {
-      version: hv.seq,
-      table: { id: `practice-${sc.id}`, name: 'Practice', maxSeats: sc.size, smallBlind: sc.blinds[0], bigBlind: sc.blinds[1], minBuyIn: 0, maxBuyIn: 0, turnSeconds: 600, allowSpectators: false, isPrivate: true },
-      status: e.isSettled ? 'waiting' : 'playing',
-      seats,
-      hand: { ...hv, number: 1, deadline: null },
-      spectatorCount: 0,
-      waitlist: [],
-      reservation: null,
-      nextHandAt: null,
-      you: { userId: HERO_ID, seatIndex: sc.hero, legal: this.heroLegal(), sittingOut: false, leaving: false, inWaitlist: false, canSit: false },
-    };
+    return projectView(this.engine, { id: `practice-${sc.id}`, size: sc.size, blinds: sc.blinds, seats: sc.seats, hero: sc.hero }, this.heroLegal());
   }
+}
+
+export interface TableShape {
+  id: string;
+  size: 2 | 6 | 9;
+  blinds: [number, number];
+  seats: { index: number; name: string; stack: number }[];
+  hero: number;
+}
+
+/** Projects an offline engine into the TableView the multiplayer server would send to the hero. */
+export function projectView(e: HandEngine, sh: TableShape, heroLegal: LegalOption[]): TableView {
+  const info = e.seatInfo(HERO_ID);
+  const seats: SeatView[] = Array.from({ length: sh.size }, (_, i) => {
+    const s = sh.seats.find((x) => x.index === i);
+    if (!s) return { seatIndex: i, state: 'empty', stack: 0, streetBet: 0, connected: false, hasCards: false };
+    const hi = info.get(i);
+    const state: SeatView['state'] = hi?.inHand ? (hi.folded ? 'folded' : hi.allIn ? 'allin' : 'active') : 'waiting';
+    return {
+      seatIndex: i,
+      state,
+      userId: i === sh.hero ? HERO_ID : botId(i),
+      nickname: s.name,
+      stack: hi?.stack ?? s.stack,
+      streetBet: hi?.streetBet ?? 0,
+      connected: true,
+      lastAction: hi?.lastAction ?? null,
+      hasCards: !!hi?.inHand && !hi.folded,
+      holeCards: hi?.holeCards ?? null,
+    };
+  });
+  const hv = e.handView();
+  return {
+    version: hv.seq,
+    table: { id: sh.id, name: 'Practice', maxSeats: sh.size, smallBlind: sh.blinds[0], bigBlind: sh.blinds[1], minBuyIn: 0, maxBuyIn: 0, turnSeconds: 600, allowSpectators: false, isPrivate: true },
+    status: e.isSettled ? 'waiting' : 'playing',
+    seats,
+    hand: { ...hv, number: 1, deadline: null },
+    spectatorCount: 0,
+    waitlist: [],
+    reservation: null,
+    nextHandAt: null,
+    you: { userId: HERO_ID, seatIndex: sh.hero, legal: heroLegal, sittingOut: false, leaving: false, inWaitlist: false, canSit: false },
+  };
 }
