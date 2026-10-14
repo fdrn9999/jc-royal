@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { signUp } from './helpers';
+import { expect } from '@playwright/test';
+import { signUp, test } from './helpers';
 
 test('board: write, comment, edit own content; others cannot edit', async ({ browser }) => {
   const a = await signUp(browser);

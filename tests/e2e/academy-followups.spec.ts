@@ -1,6 +1,6 @@
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, type Browser } from '@playwright/test';
 import { answerAll, CARD_ANSWERS } from './academy-helpers';
-import { balanceOf, checkOrCall, PASSWORD, signUp } from './helpers';
+import { balanceOf, checkOrCall, PASSWORD, signUp, test } from './helpers';
 
 async function loginOnNewDevice(browser: Browser, email: string) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
@@ -27,6 +27,44 @@ test('academy sync: progress and badges follow the account to another device', a
   await expect(other.locator('[data-badge=card-reader]')).toHaveAttribute('data-earned', '1');
   await other.goto('/me');
   await expect(other.getByTestId('badges').locator('[data-badge=first-step]')).toBeVisible();
+});
+
+test('academy badges: progress edited in the browser is kept but earns nothing; real study after a restart does', async ({ browser }) => {
+  const { page: p } = await signUp(browser);
+  await p.goto('/academy');
+  await expect(p.getByTestId('badges-note')).toContainText(/공식 수료증이 아니며|not certificates/);
+  const badgesNow = () => p.evaluate(async () => ((await (await fetch('/api/academy/badges')).json()) as { badge: string }[]).map((b) => b.badge).sort());
+
+  // Every lesson "finished" in 1970 on step 3, all scenarios, three review sets without a single answer.
+  const id = await p.evaluate(async () => ((await (await fetch('/api/auth/me')).json()) as { id: string }).id);
+  const done = (at: number) => ({ startedAt: at, completedAt: at, step: 3 });
+  const forged = {
+    v: 2,
+    updatedAt: Date.now(),
+    lessons: { cards: done(1), hands: done(2), holdem: done(3), actions: done(4), practice: done(5) },
+    practice: Object.fromEntries([...'ABCDEFGH'].map((s) => [s, 1])),
+    quiz: { correct: 0, wrong: 0 },
+    review: { sessions: 3, best: 8 },
+    onboarded: true,
+  };
+  await p.evaluate(([k, v]) => localStorage.setItem(k!, v!), [`jc.academy:${id}`, JSON.stringify(forged)]);
+  const pushed = p.waitForResponse((r) => r.url().endsWith('/api/academy/progress') && r.request().method() === 'PUT');
+  await p.reload();
+  expect((await (await pushed).json()).badges).toEqual([]);
+  const stored = await p.evaluate(async () => ((await (await fetch('/api/academy/progress')).json()) as { data: { lessons: { cards: { completedAt: number } } } }).data);
+  expect(stored.lessons.cards.completedAt).toBe(1); // synced as the account's own progress, just not rewarded
+  await expect(p.locator('[data-badge]')).toHaveCount(7);
+  await expect(p.locator('[data-badge][data-earned="1"]')).toHaveCount(0);
+  expect(await badgesNow()).toEqual([]);
+
+  await p.goto('/academy/progress');
+  await p.getByTestId('academy-reset').click();
+  await p.getByTestId('academy-reset-confirm').click();
+  await p.goto('/academy/cards?step=3');
+  await answerAll(p, CARD_ANSWERS);
+  await p.getByTestId('lesson-finish').click();
+  await expect(p.getByTestId('lesson-done')).toBeVisible();
+  await expect.poll(badgesNow, { timeout: 15_000 }).toEqual(['card-reader', 'first-step']);
 });
 
 test('compare quiz explains a wrong pick with the deciding cards; review page targets the weak topic', async ({ browser }) => {
@@ -67,7 +105,7 @@ test('free practice: rule-based bots, any legal action, several hands, still off
         const pass = bar.getByRole('button', { name: /^(체크|Check|콜|Call)/ });
         await ((await pass.count()) ? pass.first() : fold).click();
         // A big call asks for a second tap (risky-action guard); confirm it before the arm expires.
-        const again = bar.getByRole('button', { name: /^(한 번 더|Tap again)/ });
+        const again = bar.getByRole('button', { name: /^(한 번 더|Press again)/ });
         if (await again.first().isVisible().catch(() => false)) await again.first().click();
       }
       await expect(p.getByTestId('free-result')).toBeVisible({ timeout: 1500 });

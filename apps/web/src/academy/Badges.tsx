@@ -1,4 +1,4 @@
-/** Cosmetic Academy badges (from the server; awarded from progress, never chips). */
+/** Cosmetic Academy badges (from the server; awarded from progress, never chips; shown only to their owner). */
 import { BADGES, type BadgeId } from '@jc/types';
 import { cx } from '@jc/ui';
 import { l, useTr, type L } from './content';
@@ -14,28 +14,38 @@ export const BADGE_INFO: Record<BadgeId, { icon: string; name: L; how: L }> = {
   'sharp-eye': { icon: '◎', name: l('예리한 눈', 'Sharp eye'), how: l('복습·랜덤 퀴즈 3회 완료', 'Finish 3 review quizzes') },
 };
 
+const NOTE = l(
+  '배지는 내 학습 기록으로 받는 장식용 표시입니다. 공식 수료증이 아니며 나만 볼 수 있습니다.',
+  'Badges are decorations earned from your own study record. They are not certificates, and only you can see them.',
+);
+
 export function BadgeShelf({ showLocked = true }: { showLocked?: boolean }) {
   const tr = useTr();
   const earned = new Map(useBadges().map((b) => [b.badge, b.awardedAt]));
   const list = showLocked ? BADGES : BADGES.filter((b) => earned.has(b));
   if (list.length === 0) return null;
   return (
-    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="badges">
-      {list.map((b) => {
-        const on = earned.has(b);
-        const info = BADGE_INFO[b];
-        return (
-          <li key={b} className={cx('flex items-center gap-2 rounded-xl border p-2', on ? 'border-gold-400/60 bg-gold-500/10' : 'border-white/5 bg-ink-850/50 opacity-55')} data-badge={b} data-earned={on ? '1' : '0'}>
-            <span className={cx('grid size-9 shrink-0 place-items-center rounded-full text-lg', on ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-ink-400')} aria-hidden>
-              {info.icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-xs font-bold text-ivory">{tr(info.name)}</span>
-              <span className="block truncate text-[10px] text-ink-400">{tr(info.how)}</span>
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="flex flex-col gap-2">
+      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="badges">
+        {list.map((b) => {
+          const on = earned.has(b);
+          const info = BADGE_INFO[b];
+          return (
+            <li key={b} className={cx('flex items-center gap-2 rounded-xl border p-2', on ? 'border-gold-400/60 bg-gold-500/10' : 'border-white/5 bg-ink-850/50 opacity-55')} data-badge={b} data-earned={on ? '1' : '0'}>
+              <span className={cx('grid size-9 shrink-0 place-items-center rounded-full text-lg', on ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-ink-400')} aria-hidden>
+                {info.icon}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-bold text-ivory">{tr(info.name)}</span>
+                <span className="block truncate text-[10px] text-ink-400">{tr(info.how)}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[11px] leading-relaxed text-ink-400" data-testid="badges-note">
+        {tr(NOTE)}
+      </p>
+    </div>
   );
 }

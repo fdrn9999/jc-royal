@@ -5,7 +5,7 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, LEDGER_GUARD } from '@jc/db';
+import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
 
 export interface TableRow {
@@ -21,6 +21,9 @@ export interface TableRow {
   allowSpectators: boolean;
   entryBlocked: boolean;
   status: 'open' | 'closing' | 'closed';
+  roomType: 'official' | 'member';
+  /** The member who opened a member room (or the admin who opened an official table). */
+  createdBy: string | null;
 }
 
 export async function loadTable(d1: D1Database, tableId: string): Promise<TableRow | null> {
@@ -28,7 +31,8 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
     .prepare(
       `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
               min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
-              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, status
+              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, status,
+              room_type AS roomType, created_by AS createdBy
        FROM tables WHERE id = ?1`,
     )
     .bind(tableId)
@@ -47,6 +51,8 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
     allowSpectators: !!r.allowSpectators,
     entryBlocked: !!r.entryBlocked,
     status: r.status as TableRow['status'],
+    roomType: r.roomType === 'member' ? 'member' : 'official',
+    createdBy: r.createdBy == null ? null : String(r.createdBy),
   };
 }
 
@@ -91,6 +97,37 @@ export async function buyIn(
 export async function buyInCommitted(d1: D1Database, tableSessionId: string): Promise<boolean> {
   const r = await d1.prepare(`SELECT 1 AS ok FROM chip_ledger WHERE idempotency_key = ?1`).bind(`buyin:${tableSessionId}`).first();
   return !!r;
+}
+
+/**
+ * Moves chips from the wallet to an open table session (a top-up or an automatic rebuy). The ledger key makes a
+ * repeat a no-op ('duplicate'), so a retry after a crash never takes chips twice.
+ */
+export async function topUp(
+  d1: D1Database,
+  p: { userId: string; tableId: string; tableSessionId: string; amount: number; key: string; memo: string },
+): Promise<'applied' | 'duplicate' | 'insufficient'> {
+  const r = await applyLedger(
+    d1,
+    { userId: p.userId, type: 'top_up', amount: -p.amount, idempotencyKey: p.key, tableId: p.tableId, refId: p.tableSessionId, memo: p.memo },
+    (ledgerId) => [d1.prepare(`UPDATE table_sessions SET buy_in = buy_in + ?1 WHERE id = ?2 AND ${LEDGER_GUARD}`).bind(p.amount, p.tableSessionId, ledgerId)],
+  );
+  return r.status;
+}
+
+/**
+ * The chips a committed top-up took from the wallet, or null if this key was never committed. Used to settle one whose
+ * outcome is unknown after a crash or a failed call, and to recognise a request that was already counted.
+ */
+export async function committedTopUp(d1: D1Database, key: string): Promise<number | null> {
+  const r = await d1.prepare(`SELECT -amount AS amount FROM chip_ledger WHERE idempotency_key = ?1`).bind(key).first<{ amount: number }>();
+  return r ? r.amount : null;
+}
+
+/** The wallet balance, so a top-up queued for after the hand can be refused at once when the wallet is short. */
+export async function walletBalance(d1: D1Database, userId: string): Promise<number> {
+  const r = await d1.prepare(`SELECT balance FROM users WHERE id = ?1`).bind(userId).first<{ balance: number }>();
+  return r?.balance ?? 0;
 }
 
 /** Credits the remaining stack and closes the table session. Safe to repeat. */
@@ -166,6 +203,12 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
     d1.prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1`).bind(tableId),
   ];
   await d1.batch(stmts);
+  // Per-player statistics for this hand (and any rows still without them). The hand is recorded either way.
+  try {
+    await d1.prepare(HAND_STATS_SQL).run();
+  } catch (e) {
+    console.error('hand stats failed', tableId, rec.handId, e);
+  }
 }
 
 export interface LiveStats {

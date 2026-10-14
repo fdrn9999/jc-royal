@@ -250,8 +250,13 @@ describe('table management & game audit', () => {
   });
 
   it('records administrator actions in the audit log', async () => {
-    const audit = (await superAdmin.c.get('/api/admin/audit')).body as { action: string }[];
-    const actions = new Set(audit.map((a) => a.action));
+    // Newest first, 200 per page: member list and detail views are logged too, so read every page.
+    const actions = new Set<string>();
+    for (let offset = 0; ; offset += 200) {
+      const page = (await superAdmin.c.get(`/api/admin/audit?limit=200&offset=${offset}`)).body as { action: string }[];
+      for (const a of page) actions.add(a.action);
+      if (page.length < 200) break;
+    }
     for (const a of ['admin.bootstrap', 'admin.login', 'admin.reauth', 'user.chips', 'user.suspend', 'user.role', 'table.create', 'table.close', 'reconcile.run']) {
       expect(actions.has(a), a).toBe(true);
     }

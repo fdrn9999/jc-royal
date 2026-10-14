@@ -31,6 +31,9 @@
     "SIGNUP_GRANT": "10000"
   },
   "observability": { "enabled": true },
+  // Daily housekeeping (src/lib/housekeeping.ts) at 18:30 UTC = 03:30 KST. Inherited by env.production.
+  // Local dev never fires it on its own: GET /cdn-cgi/local/scheduled runs it once.
+  "triggers": { "crons": ["30 18 * * *"] },
   "env": {
     "production": {
       // Served at https://play.jcroyal.workers.dev (account workers.dev subdomain: jcroyal).

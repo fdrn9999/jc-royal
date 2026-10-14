@@ -21,11 +21,21 @@ function useAfterLogin() {
   };
 }
 
+/** The last "자동 로그인" choice on this device, so the box comes back as the member left it. */
+const REMEMBER_KEY = 'jc.remember';
+
 export function LoginPage() {
   const { t, err } = useI18n();
   const done = useAfterLogin();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(() => {
+    try {
+      return localStorage.getItem(REMEMBER_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   async function submit(e: FormEvent) {
@@ -33,7 +43,13 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      done(await api<MeDto>('/api/auth/login', { body: { email, password } }));
+      const me = await api<MeDto>('/api/auth/login', { body: { email, password, remember } });
+      try {
+        localStorage.setItem(REMEMBER_KEY, remember ? '1' : '0');
+      } catch {
+        /* the choice is only a convenience for next time */
+      }
+      done(me);
     } catch (x) {
       setError(err(x instanceof ApiError ? x.code : null));
     } finally {
@@ -45,6 +61,13 @@ export function LoginPage() {
       <form className="flex flex-col gap-4" onSubmit={submit}>
         <Field label={t('auth.email')}>{(id) => <Input id={id} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />}</Field>
         <Field label={t('auth.password')}>{(id) => <Input id={id} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />}</Field>
+        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-ink-100">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="size-5 shrink-0 accent-[var(--color-gold-500)]" data-testid="login-remember" />
+          <span>
+            {t('auth.remember')}
+            <span className="block text-xs text-ink-400">{t('auth.rememberHint')}</span>
+          </span>
+        </label>
         {error && <p role="alert" className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-[#f3b0b2]">{error}</p>}
         <Button type="submit" size="lg" loading={busy}>
           {t('auth.login')}

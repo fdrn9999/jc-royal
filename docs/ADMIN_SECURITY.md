@@ -47,11 +47,14 @@
 
 ```
 admin.bootstrap, admin.login, admin.login.failed, admin.reauth, admin.reauth.failed,
-user.suspend, user.unsuspend, user.role, user.chips, user.reset_link, user.export,
+user.list, user.view, user.suspend, user.unsuspend, user.role, user.chips, user.reset_link, user.export,
 table.create, table.update, table.close, hand.view_sensitive,
 reconcile.run, reconcile.resolve, board.notice.create/update,
-board.post.status, board.comment.status, message.send
+board.post.status, board.comment.status, message.send,
+report.view, report.resolved, report.dismissed
 ```
+
+조회도 남긴다. `user.list`(회원 목록·검색: 검색어, 필터, 건수), `user.view`(회원 상세: 생년월일·동의 기록 포함), `report.view`(신고 목록: 1:1 메시지 신고 ID 포함)는 화면을 열 때마다 1행씩 쌓인다. 1:1 대화를 읽는 관리자 API는 없고, 관리자가 보는 1:1 메시지는 신고 증거뿐이다. 보관 기간은 정하지 않았다(`docs/PRIVACY_OPERATIONS.md` 5·9절).
 
 ## 최초 관리자 생성(부트스트랩)
 

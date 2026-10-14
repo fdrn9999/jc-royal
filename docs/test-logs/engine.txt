@@ -1,13 +1,7 @@
+> pnpm --filter @jc/poker-engine test   (실행: pnpm test, 2026-10-15)
 
-> @jc/poker-engine@0.0.0 test C:\Users\ckato\OneDrive\문서\jc-royal\packages\poker-engine
-> vitest run
-
-
- RUN  v4.1.11 C:/Users/ckato/OneDrive/문서/jc-royal/packages/poker-engine
-
-
+ RUN  v4.1.11 <repo>/packages/poker-engine
  Test Files  4 passed (4)
-      Tests  45 passed (45)
-   Start at  17:50:49
-   Duration  4.61s (transform 393ms, setup 0ms, import 892ms, tests 4.51s, environment 0ms)
-
+      Tests  46 passed (46)
+   Start at  07:49:23
+   Duration  6.07s (transform 427ms, setup 0ms, import 1.34s, tests 5.93s, environment 1ms)

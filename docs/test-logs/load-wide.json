@@ -1,0 +1,175 @@
+{
+  "environment": "local wrangler dev (workerd) on the developer machine, one process for every table; not the Cloudflare edge",
+  "when": "2026-10-14T18:36:51.582Z",
+  "config": {
+    "tables": 30,
+    "players": 6,
+    "spectators": 4,
+    "hands": 5,
+    "raiseChance": 0.15
+  },
+  "sockets": 300,
+  "durationMs": {
+    "total": 90176,
+    "connectAll": 5628,
+    "play": 51711
+  },
+  "hands": {
+    "recordedInD1": 150,
+    "perTableInD1": [
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5
+    ],
+    "seenByClients": [
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5
+    ],
+    "perSecond": 2.9
+  },
+  "actions": {
+    "total": 5833,
+    "raises": 886,
+    "perHand": 38.9
+  },
+  "latencyMs": {
+    "signup": {
+      "n": 300,
+      "p50": 550,
+      "p95": 1777,
+      "p99": 3616,
+      "max": 3899
+    },
+    "wsConnect": {
+      "n": 300,
+      "p50": 851,
+      "p95": 1340,
+      "p99": 1346,
+      "max": 1348
+    },
+    "sit": {
+      "n": 180,
+      "p50": 392,
+      "p95": 494,
+      "p99": 494,
+      "max": 494
+    },
+    "actionRoundTrip": {
+      "n": 5833,
+      "p50": 120,
+      "p95": 235,
+      "p99": 302,
+      "max": 472
+    },
+    "fanoutSlowestSocket": {
+      "n": 5833,
+      "p50": 120,
+      "p95": 235,
+      "p99": 302,
+      "max": 473
+    },
+    "leave": {
+      "n": 180,
+      "p50": 189,
+      "p95": 382,
+      "p99": 405,
+      "max": 413
+    },
+    "lobbyList": {
+      "n": 47,
+      "p50": 166,
+      "p95": 634,
+      "p99": 854,
+      "max": 854
+    }
+  },
+  "messages": {
+    "clientToServer": 6193,
+    "serverToClient": 66340,
+    "serverToClientPerHand": 442,
+    "serverToClientBytes": 146215124,
+    "missedFanout": 0
+  },
+  "d1RowsAdded": {
+    "hands": 150,
+    "hand_players": 900,
+    "chip_ledger": 360,
+    "table_sessions": 180,
+    "rate_limits": 300,
+    "sessions": 0,
+    "admin_audit_log": 1,
+    "reconciliation_events": 0
+  },
+  "d1RowsAddedPerHand": {
+    "hands": 1,
+    "hand_players": 6
+  },
+  "problems": {
+    "clientErrors": [],
+    "serverErrorMessages": 0,
+    "unexpectedCloses": 0,
+    "lobbyFailures": 0
+  },
+  "conservation": {
+    "playerWallets": 1800000,
+    "expected": 1800000,
+    "spectatorsUntouched": true,
+    "reconcileMismatches": 0,
+    "openTableSessions": 0
+  }
+}

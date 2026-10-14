@@ -3,7 +3,7 @@
  * statistics. Nothing here touches wallets, the chip ledger or game history.
  */
 import { schema } from '@jc/db';
-import { AcademyEventsSchema, AcademyProgressPutSchema, badgesFor, BADGES, type AcademyProgressDto, type BadgeDto, type BadgeId } from '@jc/types';
+import { AcademyEventsSchema, AcademyProgressPutSchema, BADGES, plausibleBadges, type AcademyProgressDto, type BadgeDto, type BadgeId } from '@jc/types';
 import { eq } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
@@ -34,11 +34,14 @@ export const academyRoutes = new Hono<AppEnv>()
   })
   /**
    * Stores the client's merged progress. Last write wins by `updatedAt`
-   * (the client merges server + local before pushing). Badges derived from the
-   * payload are awarded once (INSERT OR IGNORE): idempotent and chip-free.
+   * (the client merges server + local before pushing). Badges are awarded only
+   * for claims that pass `plausibleBadges` (server clock, account age, lesson
+   * steps, recorded answers), once each (INSERT OR IGNORE): idempotent,
+   * chip-free and never taken back.
    */
   .put('/progress', async (c) => {
-    const uid = c.var.user!.id;
+    const user = c.var.user!;
+    const uid = user.id;
     await rateLimit(c, `academy-put:${uid}`, 60, 60_000);
     const body = await parseBody(c, AcademyProgressPutSchema);
     const data = JSON.stringify(body.data);
@@ -49,15 +52,18 @@ export const academyRoutes = new Hono<AppEnv>()
     )
       .bind(uid, data, body.version, body.updatedAt)
       .run();
-    const earned = badgesFor(body.data);
+    const now = Date.now();
+    const earned = plausibleBadges(body.data, { now, since: user.createdAt });
     if (earned.length) {
-      const now = Date.now();
       await c.env.DB.batch(earned.map((b) => c.env.DB.prepare('INSERT OR IGNORE INTO user_badges (user_id, badge, awarded_at) VALUES (?1, ?2, ?3)').bind(uid, b, now)));
     }
     return c.json({ ok: true, badges: await badgesOf(c, uid) });
   })
   .get('/badges', async (c) => c.json(await badgesOf(c, c.var.user!.id)))
-  /** Anonymous counters: the user id is only used for rate limiting, never stored. */
+  /**
+   * Anonymous counters: academy_stats never holds a user id. The id appears only in this request's rate-limit key,
+   * a rate_limits row that the daily housekeeping deletes once its window is long over.
+   */
   .post('/events', async (c) => {
     await rateLimit(c, `academy-events:${c.var.user!.id}`, 30, 60_000);
     const { events } = await parseBody(c, AcademyEventsSchema);

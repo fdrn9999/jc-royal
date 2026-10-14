@@ -17,19 +17,19 @@ describe('server restart recovery', () => {
     await worker?.stop();
   });
 
+  async function user(n: string, base: string) {
+    const c = new Client(WEB_ORIGIN, base);
+    const r = await c.post('/api/auth/register', await signupBody(c, { email: `${n}-${Date.now()}@restart.dev`, nickname: `${n}${Date.now() % 100000}` }));
+    expect(r.status).toBe(201);
+    return c;
+  }
+
   it('resumes an in-progress hand after a hard process kill', async () => {
     await prepareState(state);
     worker = await startWorker(port, state);
     const base = worker.url;
-
-    async function user(n: string) {
-      const c = new Client(WEB_ORIGIN, base);
-      const r = await c.post('/api/auth/register', await signupBody(c, { email: `${n}-${Date.now()}@restart.dev`, nickname: `${n}${Date.now() % 100000}` }));
-      expect(r.status).toBe(201);
-      return c;
-    }
-    const ca = await user('ra');
-    const cb = await user('rb');
+    const ca = await user('ra', base);
+    const cb = await user('rb', base);
     let a = await TableSocket.open(ca, 'it-restart-0', { base });
     let b = await TableSocket.open(cb, 'it-restart-0', { base });
     expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 600 })).toMatchObject({ t: 'ack' });
@@ -80,4 +80,65 @@ describe('server restart recovery', () => {
     a.close();
     b.close();
   }, 240_000);
+
+  it('a top-up queued before a crash is applied once after the restart, and another restart does not repeat it', async () => {
+    if (!worker) {
+      await prepareState(state);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const ca = await user('ta', base);
+    const cb = await user('tb', base);
+    const restart = async () => {
+      await worker!.stop();
+      worker = await startWorker(port, state);
+      return [await TableSocket.open(ca, 'it-restart-1', { base }), await TableSocket.open(cb, 'it-restart-1', { base })] as const;
+    };
+    const topUps = async () => ((await ca.get('/api/me/ledger?limit=100')).body as { type: string; amount: number }[]).filter((l) => l.type === 'top_up');
+    const wallet = async (c: Client) => (await c.get('/api/auth/me')).body.balance as number;
+
+    let a = await TableSocket.open(ca, 'it-restart-1', { base });
+    let b = await TableSocket.open(cb, 'it-restart-1', { base });
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 100 })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 100 })).toMatchObject({ t: 'ack' });
+    await a.waitState((s) => s.status === 'playing' && !!s.hand && s.hand.stage !== 'settled', 15_000, 'hand start');
+    expect(await a.request({ t: 'topUp', amount: 300 })).toMatchObject({ t: 'ack' });
+    await a.waitState((s) => s.you.topUpQueued === 300);
+    const handId = a.state!.hand!.id;
+    a.close();
+    b.close();
+
+    // The queued top-up survives the crash; nothing has been taken from the wallet yet.
+    [a, b] = await restart();
+    expect(a.state!.hand!.id).toBe(handId);
+    expect(a.state!.you.topUpQueued).toBe(300);
+    expect(await wallet(ca)).toBe(9900);
+    expect(await topUps()).toEqual([]);
+
+    for (let guard = 0; guard < 200; guard++) {
+      if (a.state!.hand?.id !== handId || a.state!.hand.stage === 'settled') break;
+      const actor = [a, b].find((x) => x.state && isMyTurn(x.state));
+      if (!actor) {
+        await new Promise((res) => setTimeout(res, 100));
+        continue;
+      }
+      await actor.act(actor.state!.you.legal.some((o) => o.type === 'check') ? 'check' : 'call');
+    }
+    await a.wait((m) => m.t === 'notice' && m.code === 'topup_applied' && m.amount === 300, 15_000);
+    expect(await topUps()).toEqual([expect.objectContaining({ amount: -300 })]);
+    expect(await wallet(ca)).toBe(9600);
+    a.close();
+    b.close();
+
+    // A second restart does not take the chips again.
+    [a, b] = await restart();
+    expect(a.state!.you.topUpQueued).toBeNull();
+    expect(await topUps()).toHaveLength(1);
+    for (const x of [a, b]) expect(await x.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+    for (const x of [a, b]) await x.waitState((s) => s.you.seatIndex === null, 30_000, 'stood up');
+    expect(await topUps()).toHaveLength(1);
+    expect((await wallet(ca)) + (await wallet(cb))).toBe(20000);
+    a.close();
+    b.close();
+  }, 300_000);
 });

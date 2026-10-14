@@ -1,9 +1,11 @@
-import { REPORT_REASONS, type FriendRequestResultDto, type FriendsDto, type PublicUserDto, type ReportReason, type ReportTarget } from '@jc/types';
+import { REPORT_REASONS, type FriendRequestResultDto, type PublicUserDto, type RelationDto, type RelationKind, type ReportReason, type ReportTarget } from '@jc/types';
 import { Button, cx, Modal, Spinner } from '@jc/ui';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api, ApiError } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { blockUser, setMuted, unblockUser, useMuted } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
 
 export function Avatar({ user, size = 'size-10' }: { user: Pick<PublicUserDto, 'nickname' | 'avatarUrl'>; size?: string }) {
@@ -86,6 +88,7 @@ export function ReportModal({ subject, onClose }: { subject: ReportSubject | nul
           />
           <p className="text-xs text-ink-400">
             {subject?.type === 'player' && <span className="block">{t('report.playerHint')}</span>}
+            {subject?.type === 'dm' && <span className="block">{t('report.dmHint')}</span>}
             {t('report.warning')}
           </p>
           {error && <p className="text-sm text-danger" role="alert">{error}</p>}
@@ -99,36 +102,67 @@ export function ReportModal({ subject, onClose }: { subject: ReportSubject | nul
   );
 }
 
-type Relation = 'friend' | 'outgoing' | 'incoming' | 'none';
+/** Confirms a block and spells out what it does; shared by the player card and the 1:1 chat. */
+export function BlockConfirm({ name, busy, onConfirm, onCancel }: { name: string; busy: boolean; onConfirm: () => void; onCancel: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm" data-testid="block-confirm">
+      <p className="font-semibold text-ivory">{t('block.confirmTitle', { name })}</p>
+      <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-xs text-ink-200">
+        <li>{t('block.effect1')}</li>
+        <li>{t('block.effect2')}</li>
+        <li>{t('block.effect3')}</li>
+      </ul>
+      <p className="mt-1.5 text-xs text-ink-400">{t('block.notice')}</p>
+      <div className="mt-3 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button variant="danger" loading={busy} onClick={onConfirm} data-testid="block-confirm-yes">{t('block.action')}</Button>
+      </div>
+    </div>
+  );
+}
 
-/** A player's name card: friend request / accept / message, and optionally a report button. */
-export function PlayerCard({ user, onClose, onReport, newTab }: { user: PublicUserDto | null; onClose: () => void; onReport?: () => void; newTab?: boolean }) {
+/**
+ * A player's name card: friend request / accept / message, block, and optionally a report button and (at a table)
+ * a device-local mute for that player's table chat.
+ */
+export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user: PublicUserDto | null; onClose: () => void; onReport?: () => void; newTab?: boolean; chatMute?: boolean }) {
   const { t, err } = useI18n();
-  const [rel, setRel] = useState<Relation | null>(null);
+  const { me } = useAuth();
+  const [rel, setRel] = useState<RelationKind | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const muted = useMuted(me?.id);
   useEffect(() => {
     setRel(null);
     setNote(null);
+    setConfirmBlock(false);
     if (!user) return;
     let live = true;
-    void api<FriendsDto>('/api/friends')
-      .then((f) => {
-        if (!live) return;
-        const has = (l: { id: string }[]) => l.some((x) => x.id === user.id);
-        setRel(has(f.friends) ? 'friend' : has(f.outgoing) ? 'outgoing' : has(f.incoming) ? 'incoming' : 'none');
-      })
+    void api<RelationDto>(`/api/friends/${user.id}/relation`)
+      .then((r) => live && setRel(r.relation))
       .catch(() => live && setRel('none'));
     return () => {
       live = false;
     };
   }, [user]);
 
-  async function befriend() {
-    if (!user) return;
+  async function run(fn: () => Promise<void>) {
     setBusy(true);
     setNote(null);
     try {
+      await fn();
+      void refreshUnread();
+    } catch (x) {
+      setNote(err(x instanceof ApiError ? x.code : null));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const befriend = () =>
+    run(async () => {
+      if (!user) return;
       if (rel === 'incoming') {
         await api(`/api/friends/${user.id}/accept`, { body: {} });
         setRel('friend');
@@ -138,13 +172,24 @@ export function PlayerCard({ user, onClose, onReport, newTab }: { user: PublicUs
         setRel(r.status === 'accepted' ? 'friend' : 'outgoing');
         setNote(t(r.status === 'accepted' ? 'friends.nowFriends' : 'friends.sent', { name: user.nickname }));
       }
-      void refreshUnread();
-    } catch (x) {
-      setNote(err(x instanceof ApiError ? x.code : null));
-    } finally {
-      setBusy(false);
-    }
-  }
+    });
+  const block = () =>
+    run(async () => {
+      if (!user) return;
+      await blockUser(user.id);
+      setRel('blocked');
+      setConfirmBlock(false);
+      setNote(t('block.done', { name: user.nickname }));
+    });
+  const unblock = () =>
+    run(async () => {
+      if (!user) return;
+      await unblockUser(user.id);
+      setRel('none');
+      setNote(t('block.undone', { name: user.nickname }));
+    });
+  const self = !!user && user.id === me?.id;
+  const isMuted = !!user && muted.has(user.id);
   return (
     <Modal open={!!user} onClose={onClose} title={user?.nickname ?? ''}>
       {user && (
@@ -154,17 +199,21 @@ export function PlayerCard({ user, onClose, onReport, newTab }: { user: PublicUs
             <div className="min-w-0">
               <div className="truncate text-lg font-bold text-ivory">{user.nickname}</div>
               {rel === 'friend' && <div className="text-xs font-semibold text-[#9fd8b6]">{t('friends.isFriend')}</div>}
+              {rel === 'blocked' && <div className="text-xs font-semibold text-[#f0a0a2]" data-testid="player-blocked">{t('block.isBlocked')}</div>}
             </div>
           </div>
           {note && <p className="text-sm text-gold-300" role="status">{note}</p>}
+          {confirmBlock && <BlockConfirm name={user.nickname} busy={busy} onConfirm={block} onCancel={() => setConfirmBlock(false)} />}
           <div className="flex flex-wrap justify-end gap-2">
             {onReport && (
               <Button variant="ghost" className="mr-auto text-[#f0a0a2]" onClick={onReport} data-testid="player-report">
                 {t('report.action')}
               </Button>
             )}
-            {rel === null ? (
+            {self ? null : rel === null ? (
               <Spinner className="size-5 self-center text-gold-400" />
+            ) : rel === 'blocked' ? (
+              <Button variant="outline" onClick={unblock} loading={busy} data-testid="player-unblock">{t('block.unblock')}</Button>
             ) : rel === 'friend' ? (
               <Link to={`/friends/${user.id}`} onClick={onClose} target={newTab ? '_blank' : undefined} rel={newTab ? 'noopener' : undefined} className="inline-flex h-10 items-center rounded-lg bg-gold-500 px-4 text-sm font-semibold text-ink-950" data-testid="player-chat">
                 {t('friends.chat')}
@@ -177,6 +226,23 @@ export function PlayerCard({ user, onClose, onReport, newTab }: { user: PublicUs
               </Button>
             )}
           </div>
+          {!self && me && (chatMute || (rel !== null && rel !== 'blocked' && !confirmBlock)) && (
+            <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
+              <div className="flex flex-wrap gap-2">
+                {chatMute && (
+                  <Button size="sm" variant="subtle" aria-pressed={isMuted} onClick={() => setMuted(me.id, user.id, !isMuted)} data-testid="player-mute">
+                    {isMuted ? t('mute.off') : t('mute.on')}
+                  </Button>
+                )}
+                {rel !== null && rel !== 'blocked' && !confirmBlock && (
+                  <Button size="sm" variant="ghost" className="ml-auto text-[#f0a0a2]" onClick={() => setConfirmBlock(true)} data-testid="player-block">
+                    {t('block.action')}
+                  </Button>
+                )}
+              </div>
+              {chatMute && <p className="text-xs text-ink-400">{t('mute.hint')}</p>}
+            </div>
+          )}
         </div>
       )}
     </Modal>

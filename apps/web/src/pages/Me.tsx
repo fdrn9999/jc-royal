@@ -7,7 +7,8 @@ import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
-import { SettingsModal } from '../game/Panels';
+import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
+import { ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -53,7 +54,6 @@ export function MePage() {
   const [deleting, setDeleting] = useState(false);
   const [delPw, setDelPw] = useState('');
   const [delErr, setDelErr] = useState<string | null>(null);
-  const [settings, setSettings] = useState(false);
 
   if (!me) return null;
 
@@ -116,12 +116,20 @@ export function MePage() {
 
       <Panel title={t('me.stats')}>
         {st ? (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3" data-testid="stats">
             <Stat label={t('me.handsPlayed')} value={formatChips(st.handsPlayed)} />
             <Stat label={t('me.handsWon')} value={formatChips(st.handsWon)} sub={`${t('me.winRate')} ${st.winRate}%`} />
-            <Stat label={t('me.totalWon')} value={formatChips(st.totalWon)} sub={`${t('me.biggest')} ${formatChips(st.biggestPot)}`} />
+            <Stat label={t('me.totalWon')} value={formatChips(st.totalWon)} sub={t('me.totalWonHint')} />
             <Stat label={t('me.net')} value={<span className={st.netChips >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}>{signed(st.netChips)}</span>} />
-            <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-4">
+            <Stat label={t('me.largestPot')} value={formatChips(st.largestPot)} sub={t('me.largestPotHint')} />
+            <Stat label={t('me.avgPot')} value={st.avgPot === null ? '—' : formatChips(st.avgPot)} sub={t('me.avgPotHint')} />
+            <Stat label={t('me.biggestWin')} value={formatChips(st.biggestWin)} sub={t('me.biggestWinHint')} />
+            <RatioStat label="VPIP" ratio={st.vpip} hint={t('me.vpipHint')} testid="stats-vpip" />
+            <RatioStat label="PFR" ratio={st.pfr} hint={t('me.pfrHint')} testid="stats-pfr" />
+            <RatioStat label={t('me.raiseShare')} ratio={st.raiseShare} hint={t('me.raiseShareHint')} testid="stats-raise-share" />
+            <RatioStat label={t('me.wtsd')} ratio={st.wtsd} hint={t('me.wtsdHint')} testid="stats-wtsd" />
+            <RatioStat label={t('me.wsd')} ratio={st.wsd} hint={t('me.wsdHint')} testid="stats-wsd" />
+            <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{t('me.bestHand')}</div>
               {st.bestHand ? (
                 <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -136,6 +144,15 @@ export function MePage() {
                 <div className="mt-1 text-sm text-ink-400">{t('me.none')}</div>
               )}
             </div>
+            <div className="col-span-2 md:col-span-3">
+              <PositionTable positions={st.positions} />
+            </div>
+            <div className="col-span-2 md:col-span-3">
+              <StatsTrend />
+            </div>
+            <div className="col-span-2 md:col-span-3">
+              <StatDefinitions />
+            </div>
           </div>
         ) : (
           <Empty>{t('common.loading')}</Empty>
@@ -146,7 +163,7 @@ export function MePage() {
         {badgeCount > 0 ? <BadgeShelf showLocked={false} /> : <p className="text-sm text-ink-400">{t('me.noBadges')}</p>}
       </Panel>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('me.recent')}>
           {hands.data && hands.data.length === 0 && <Empty>{t('me.none')}</Empty>}
           <ul className="divide-y divide-white/5">
@@ -192,7 +209,7 @@ export function MePage() {
         </Panel>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className="text-xs text-gold-300 hover:underline">{t('board.write')}</Link>}>
           {myPosts.data && myPosts.data.length === 0 && <Empty>{t('me.none')}</Empty>}
           <ul className="divide-y divide-white/5" data-testid="my-posts">
@@ -219,8 +236,8 @@ export function MePage() {
         </Panel>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title={t('me.profile')} actions={<Button size="sm" variant="subtle" onClick={() => setSettings(true)}>{t('settings.title')}</Button>}>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Panel title={t('me.profile')}>
           <form className="flex flex-col gap-4" onSubmit={saveProfile}>
             <Field label={t('auth.nickname')} hint={t('auth.nicknameHint')}>
               {(id) => <Input id={id} value={nickname} maxLength={16} onChange={(e) => setNickname(e.target.value.trim())} />}
@@ -264,9 +281,22 @@ export function MePage() {
             ))}
           </ul>
           <div className="jc-divider my-5" />
-          <Button variant="danger" size="sm" onClick={() => setDeleting(true)}>
-            {t('me.delete')}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await logout();
+                nav('/login', { replace: true });
+              }}
+              data-testid="me-logout"
+            >
+              {t('nav.logout')}
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setDeleting(true)}>
+              {t('me.delete')}
+            </Button>
+          </div>
         </Panel>
       </div>
 
@@ -285,19 +315,19 @@ export function MePage() {
         <Input type="password" value={delPw} onChange={(e) => setDelPw(e.target.value)} autoComplete="current-password" />
         {delErr && <p className="mt-2 text-sm text-danger">{delErr}</p>}
       </Modal>
-      <SettingsModal open={settings} onClose={() => setSettings(false)} />
     </div>
   );
 }
 
 interface HandDetail {
   id: string;
+  tableId: string;
   handNumber: number;
   board: string[];
   potTotal: number;
   endedAt: number;
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
-  players: { seatIndex: number; nickname: string; isYou: boolean; holeCards: string[] | null; stackStart: number; net: number; won: number; rankClass: string | null }[];
+  players: { userId: string; seatIndex: number; nickname: string; isYou: boolean; holeCards: string[] | null; stackStart: number; net: number; won: number; rankClass: string | null }[];
 }
 
 export function HandDetailPage() {
@@ -305,6 +335,7 @@ export function HandDetailPage() {
   const { t, locale } = useI18n();
   const { data, error } = useLoad<HandDetail>(`/api/me/hands/${encodeURIComponent(id)}`);
   const tr = useTr();
+  const [reporting, setReporting] = useState<ReportSubject | null>(null);
   if (error) return <Empty>{t('notFound')}</Empty>;
   if (!data) return <Empty>{t('common.loading')}</Empty>;
   const name = (seat: number) => data.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
@@ -337,7 +368,7 @@ export function HandDetailPage() {
           </ul>
         </Panel>
       )}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('lobby.players')}>
           <ul className="divide-y divide-white/5">
             {data.players.map((p) => (
@@ -347,9 +378,20 @@ export function HandDetailPage() {
                 <span className={`min-w-0 flex-1 truncate text-sm ${p.isYou ? 'font-semibold text-gold-300' : ''}`}>{p.nickname}</span>
                 {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
                 <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{signed(p.net)}</span>
+                {!p.isYou && (
+                  <button
+                    type="button"
+                    className="jc-tap -my-1 min-h-9 rounded-md px-2 text-xs font-semibold text-[#f0a0a2] hover:bg-danger/10"
+                    onClick={() => setReporting({ type: 'player', id: p.userId, tableId: data.tableId, label: p.nickname })}
+                    data-testid="hand-report"
+                  >
+                    {t('report.action')}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+          <p className="mt-2 text-xs text-ink-400">{t('report.afterHint')}</p>
         </Panel>
         <Panel title={t('replay.actions')}>
           <ol className="flex flex-col gap-1 text-sm">
@@ -364,6 +406,7 @@ export function HandDetailPage() {
           </ol>
         </Panel>
       </div>
+      <ReportModal subject={reporting} onClose={() => setReporting(null)} />
     </div>
   );
 }

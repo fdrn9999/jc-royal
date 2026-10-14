@@ -16,10 +16,15 @@ const author = {
   nickname: schema.users.nickname,
   avatarUrl: schema.users.avatarUrl,
   role: schema.users.role,
+  status: schema.users.status,
 };
 
-type AuthorRow = { id: string; nickname: string; avatarUrl: string | null; role: string };
-const toAuthor = (a: AuthorRow): AuthorDto => ({ id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: a.role !== 'user' });
+type AuthorRow = { id: string; nickname: string; avatarUrl: string | null; role: string; status: string };
+/** Posts and comments outlive a deleted account; its tombstone nickname is not shown, only "withdrawn member". */
+const toAuthor = (a: AuthorRow): AuthorDto =>
+  a.status === 'deleted'
+    ? { id: a.id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true }
+    : { id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: a.role !== 'user' };
 
 export async function listItems(c: Context<AppEnv>, where: ReturnType<typeof and>, limit: number, offset: number): Promise<PostListItemDto[]> {
   const rows = await c.var.db
@@ -75,7 +80,7 @@ export async function postDetail(c: Context<AppEnv>, id: string, viewerId: strin
   // Hand reviews are rendered from the AUTHOR's perspective, whoever is reading.
   const hands = await handReviews(c.var.db, attached.map((h) => h.handId), r.p.authorId);
   const all = await c.var.db
-    .select({ c: schema.comments, a: author, replyTo: replyTarget.nickname })
+    .select({ c: schema.comments, a: author, replyTo: sql<string | null>`CASE WHEN ${replyTarget.status} = 'deleted' THEN NULL ELSE ${replyTarget.nickname} END` })
     .from(schema.comments)
     .innerJoin(schema.users, eq(schema.users.id, schema.comments.authorId))
     .leftJoin(replyTarget, eq(replyTarget.id, schema.comments.replyToUserId))

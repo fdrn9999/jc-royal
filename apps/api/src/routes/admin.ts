@@ -20,18 +20,7 @@ import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
-import { INTERNAL_HEADER } from './tables';
-
-async function roomCall(c: Context<AppEnv>, tableId: string, action: 'status' | 'reload' | 'close'): Promise<Record<string, unknown> | null> {
-  try {
-    const stub = c.env.TABLES.get(c.env.TABLES.idFromName(tableId));
-    const res = await stub.fetch(`https://room/internal/${tableId}/${action}`, { method: 'POST', headers: { [INTERNAL_HEADER]: c.env.INTERNAL_SECRET } });
-    if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
+import { roomCall } from '../lib/room';
 
 const page = (c: Context<AppEnv>) => ({
   limit: Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200),
@@ -95,6 +84,8 @@ const admin = new Hono<AppEnv>()
       .orderBy(desc(schema.users.createdAt))
       .limit(limit)
       .offset(offset);
+    // The list shows email addresses, so every look is recorded (search terms and how many members it showed).
+    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, offset, count: rows.length });
     return c.json(rows);
   })
   /** Member data export for the selected members. The notice members accept at signup covers this use. */
@@ -143,6 +134,8 @@ const admin = new Hono<AppEnv>()
       c.env.DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
     ]);
     const ledgerSum = await c.env.DB.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM chip_ledger WHERE user_id = ?1`).bind(id).first<{ s: number }>();
+    // Full profile incl. birth date and consent record.
+    await audit(c, 'user.view', { type: 'user', id });
     const { passwordHash: _ph, ...safe } = u;
     return c.json({ user: safe, ledger, openSeats: seats, hands: hands ?? { n: 0, net: 0 }, ledgerConsistent: (ledgerSum?.s ?? 0) === u.balance });
   })
@@ -235,8 +228,12 @@ const admin = new Hono<AppEnv>()
   })
   // ---------------------------------------------------------------- tables
   .get('/tables', async (c) => {
-    const rows = await c.var.db.select().from(schema.tables).orderBy(desc(schema.tables.createdAt));
-    return c.json(rows.map(({ joinCodeHash, ...t }) => ({ ...t, hasJoinCode: !!joinCodeHash })));
+    const rows = await c.var.db
+      .select({ t: schema.tables, host: schema.users.nickname })
+      .from(schema.tables)
+      .leftJoin(schema.users, eq(schema.users.id, schema.tables.createdBy))
+      .orderBy(desc(schema.tables.createdAt));
+    return c.json(rows.map(({ t: { joinCodeHash, ...t }, host }) => ({ ...t, hasJoinCode: !!joinCodeHash, hostNickname: t.roomType === 'member' ? host : null })));
   })
   .post('/tables', async (c) => {
     const body = await parseBody(c, TableInputSchema);

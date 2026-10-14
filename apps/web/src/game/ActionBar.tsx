@@ -3,22 +3,24 @@
  * raise panel with slider + presets / all-in). Only server-provided legal
  * options are shown; amounts are validated again by the server.
  *
- * Mobile mis-tap protection: taps in the first moment after the bar appears
- * are ignored, and risky actions (fold while check is free, calls of half the
- * stack or more, all-in) need a second tap unless disabled in settings.
+ * Mis-tap protection, the same for mouse, touch and the F/C/R keys: presses in
+ * the first moment after the bar appears are ignored, and risky actions (fold
+ * while check is free, putting half the stack or more in, all-in) need a second
+ * press of the same action at the same amount unless disabled in settings.
+ * Held-down keys, modified keys, and keys typed into fields, the chat or a
+ * modal are not shortcuts.
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
 import { cx, formatChips } from '@jc/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
+import { armSig, commitAction, decideTap, isRisky, shortcutFor, type ArmKey, type Armed } from './actionSafety';
 
 /** Ignore taps this long after the bar (re)appears: a finger may already be on the screen. */
 const APPEAR_GUARD_MS = 350;
 /** A first tap on a risky action stays armed this long. */
 const ARM_MS = 2_500;
-
-type ArmKey = 'fold' | 'call' | 'allin' | 'commit';
 
 function haptic(ms: number) {
   try {
@@ -42,10 +44,13 @@ export function ActionBar({ state, onAct, busy }: { state: TableView; onAct: (ty
   const window_ = bet ?? raise;
   const [amount, setAmount] = useState(window_?.min ?? 0);
   const [open, setOpen] = useState(false);
-  const [armed, setArmed] = useState<ArmKey | null>(null);
+  const [armed, setArmed] = useState<Armed | null>(null);
   const readyAt = useRef(Date.now() + APPEAR_GUARD_MS);
   const bb = Math.max(1, state.table.bigBlind);
-  const myStack = state.seats.find((x) => x.seatIndex === state.you.seatIndex)?.stack ?? 0;
+  const mine = state.seats.find((x) => x.seatIndex === state.you.seatIndex);
+  const myStack = mine?.stack ?? 0;
+  const streetBet = mine?.streetBet ?? 0;
+  const seq = state.hand?.seq;
 
   useEffect(() => {
     setAmount(window_?.min ?? 0);
@@ -54,17 +59,22 @@ export function ActionBar({ state, onAct, busy }: { state: TableView; onAct: (ty
     readyAt.current = Date.now() + APPEAR_GUARD_MS;
   }, [state.hand?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A changed amount cancels an armed commit, even if it is moved back to the armed amount.
+  useEffect(() => setArmed((a) => (a?.key === 'commit' ? null : a)), [amount]);
+
   useEffect(() => {
     if (!armed) return;
-    const h = setTimeout(() => setArmed(null), ARM_MS);
+    const h = setTimeout(() => setArmed(null), Math.max(0, armed.until - Date.now()));
     return () => clearTimeout(h);
   }, [armed]);
 
-  /** Runs `run` unless the tap came too early, or the action is risky and not yet armed. */
-  const tap = (key: ArmKey, risky: boolean, run: () => void) => {
-    if (busy || Date.now() < readyAt.current) return;
-    if (risky && prefs.confirmRisky && armed !== key) {
-      setArmed(key);
+  /** Runs `run` unless the press came too early or while an action is in flight, or is risky and not yet armed for `sig`. */
+  const tap = (key: ArmKey, risky: boolean, sig: string, run: () => void) => {
+    const now = Date.now();
+    const decision = decideTap({ key, sig, risky, confirmRisky: prefs.confirmRisky, armed, busy, now, readyAt: readyAt.current });
+    if (decision === 'ignore') return;
+    if (decision === 'arm') {
+      setArmed({ key, sig, until: now + ARM_MS });
       haptic(8);
       return;
     }
@@ -89,26 +99,39 @@ export function ActionBar({ state, onAct, busy }: { state: TableView; onAct: (ty
     ];
   }, [window_, state.hand, state.seats, call, t]);
 
-  // Keyboard: F fold, C check/call, R raise panel.
+  const bigCall = isRisky('call', legal, myStack);
+  const commit = commitAction(legal, amount);
+  const foldSig = armSig(seq, undefined);
+  const callSig = armSig(seq, call?.amount);
+  const allinSig = armSig(seq, allin?.amount);
+  const commitSig = armSig(seq, amount);
+  const doFold = () => tap('fold', !!check, foldSig, () => onAct('fold'));
+  const doCheck = () => tap('call', false, callSig, () => onAct('check'));
+  const doCall = () => tap('call', bigCall, callSig, () => onAct('call'));
+  const doCommit = () => commit && tap('commit', isRisky('commit', legal, myStack, streetBet, commit.amount), commitSig, () => onAct(commit.type, commit.amount));
+
+  // Keyboard: F fold, C check/call, R raise panel. Same confirmation as a tap.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (busy || (e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
-      const k = e.key.toLowerCase();
-      if (k === 'f' && fold) tap('fold', !!check, () => onAct('fold'));
-      else if (k === 'c' && (check || call)) onAct(check ? 'check' : 'call');
-      else if (k === 'r' && window_) setOpen((o) => !o);
+      const s = shortcutFor(e, !!document.querySelector('[aria-modal="true"]'));
+      if (s === 'fold' && fold) doFold();
+      else if (s === 'checkCall' && check) doCheck();
+      else if (s === 'checkCall' && call) doCall();
+      else if (s === 'raisePanel' && window_) setOpen((o) => !o);
+      else return;
+      e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
   if (legal.length === 0) return null;
-  const isAllInAmount = !!allin && amount === allin.amount;
-  const bigCall = !!call && call.amount * 2 >= myStack;
+  const isAllInAmount = commit?.type === 'allin';
   const btn =
     'jc-tap flex h-12 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12 sm:min-w-[7.5rem] sm:flex-none';
   const armedCls = 'ring-2 ring-ivory ring-offset-2 ring-offset-ink-950 animate-pulse';
-  const label = (key: ArmKey, text: string) => (armed === key ? t('action.tapAgain', { type: text }) : text);
+  const isArmed = (key: ArmKey, sig: string) => armed?.key === key && armed.sig === sig;
+  const label = (key: ArmKey, sig: string, text: string) => (isArmed(key, sig) ? t('action.tapAgain', { type: text }) : text);
   const commitType = isAllInAmount ? t('action.allin') : bet ? t('action.bet') : t('action.raise');
   const stepBtn = 'jc-tap grid size-11 shrink-0 place-items-center rounded-lg border border-white/10 bg-ink-850 text-lg font-bold text-ivory active:bg-ink-700 disabled:opacity-40';
 
@@ -157,39 +180,40 @@ export function ActionBar({ state, onAct, busy }: { state: TableView; onAct: (ty
             ))}
           </div>
           <button
-            disabled={busy || amount < window_.min || amount > window_.max}
-            onClick={() => tap('commit', isAllInAmount, () => onAct(isAllInAmount ? 'allin' : bet ? 'bet' : 'raise', amount))}
-            className={cx(btn, 'w-full flex-none! sm:w-full', armed === 'commit' && armedCls)}
+            disabled={busy || !commit}
+            onClick={doCommit}
+            className={cx(btn, 'w-full flex-none! sm:w-full', isArmed('commit', commitSig) && armedCls)}
             style={{ background: 'linear-gradient(180deg,#e6c56b,#b48e22)', color: '#0a0b0d' }}
+            data-testid="action-commit"
           >
-            {label('commit', t('action.confirm', { type: commitType, amount: formatChips(amount) }))}
+            {label('commit', commitSig, t('action.confirm', { type: commitType, amount: formatChips(amount) }))}
           </button>
         </div>
       )}
       <div className="flex gap-2 rounded-2xl border border-gold-500/15 bg-ink-950/85 p-2 backdrop-blur-md">
         {fold && (
-          <button disabled={busy} onClick={() => tap('fold', !!check, () => onAct('fold'))} className={cx(btn, armed === 'fold' && armedCls)} style={{ background: 'linear-gradient(180deg,#c4474a,#962a2d)' }}>
-            {label('fold', t('action.fold'))}
+          <button disabled={busy} onClick={doFold} className={cx(btn, isArmed('fold', foldSig) && armedCls)} style={{ background: 'linear-gradient(180deg,#c4474a,#962a2d)' }} aria-keyshortcuts="F">
+            {label('fold', foldSig, t('action.fold'))}
           </button>
         )}
         {check && (
-          <button disabled={busy} onClick={() => tap('call', false, () => onAct('check'))} className={btn} style={{ background: 'linear-gradient(180deg,#3d4452,#2a2f39)' }}>
+          <button disabled={busy} onClick={doCheck} className={btn} style={{ background: 'linear-gradient(180deg,#3d4452,#2a2f39)' }} aria-keyshortcuts="C">
             {t('action.check')}
           </button>
         )}
         {call && (
-          <button disabled={busy} onClick={() => tap('call', bigCall, () => onAct('call'))} className={cx(btn, armed === 'call' && armedCls)} style={{ background: 'linear-gradient(180deg,#2f8f59,#1f6b41)' }}>
-            {label('call', t('action.call'))} <span className="font-mono">{formatChips(call.amount, true)}</span>
+          <button disabled={busy} onClick={doCall} className={cx(btn, isArmed('call', callSig) && armedCls)} style={{ background: 'linear-gradient(180deg,#2f8f59,#1f6b41)' }} aria-keyshortcuts="C">
+            {label('call', callSig, t('action.call'))} <span className="font-mono">{formatChips(call.amount, true)}</span>
           </button>
         )}
         {window_ && (
-          <button disabled={busy} onClick={() => setOpen((o) => !o)} className={btn} style={{ background: 'linear-gradient(180deg,#e6c56b,#b48e22)', color: '#0a0b0d' }} aria-expanded={open}>
+          <button disabled={busy} onClick={() => setOpen((o) => !o)} className={btn} style={{ background: 'linear-gradient(180deg,#e6c56b,#b48e22)', color: '#0a0b0d' }} aria-expanded={open} aria-keyshortcuts="R">
             {bet ? t('action.bet') : t('action.raise')}
           </button>
         )}
         {allin && !window_ && (
-          <button disabled={busy} onClick={() => tap('allin', true, () => onAct('allin'))} className={cx(btn, armed === 'allin' && armedCls)} style={{ background: 'linear-gradient(180deg,#e08227,#a8570f)' }}>
-            {label('allin', t('action.allin'))} <span className="font-mono">{formatChips(allin.amount, true)}</span>
+          <button disabled={busy} onClick={() => tap('allin', true, allinSig, () => onAct('allin'))} className={cx(btn, isArmed('allin', allinSig) && armedCls)} style={{ background: 'linear-gradient(180deg,#e08227,#a8570f)' }}>
+            {label('allin', allinSig, t('action.allin'))} <span className="font-mono">{formatChips(allin.amount, true)}</span>
           </button>
         )}
       </div>

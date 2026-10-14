@@ -390,6 +390,7 @@ function ResetLinkResult({ reset }: { reset: ResetLink }) {
 interface TableRow {
   id: string; name: string; maxSeats: number; smallBlind: number; bigBlind: number; minBuyIn: number; maxBuyIn: number; turnSeconds: number;
   isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
+  roomType: 'official' | 'member'; hostNickname: string | null;
 }
 
 export function TablesPage() {
@@ -422,7 +423,10 @@ export function TablesPage() {
         <Table head={[t('name'), t('status'), t('maxSeats'), t('blinds'), t('buyin'), 'live', 'hands', '']}>
           {data?.map((tb) => (
             <tr key={tb.id}>
-              <td className="px-2 py-2 font-semibold">{tb.name} {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}</td>
+              <td className="px-2 py-2 font-semibold">
+                {tb.name} {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}
+                {tb.roomType === 'member' && <Badge tone="blue" className="ml-1">{t('memberRoom')} · {tb.hostNickname ?? '—'}</Badge>}
+              </td>
               <td className="px-2 py-2"><Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>{tb.entryBlocked && <Badge tone="red" className="ml-1">{t('entryBlocked')}</Badge>}</td>
               <td className="px-2 py-2">{tb.maxSeats}</td>
               <td className="px-2 py-2 font-mono">{tb.smallBlind}/{tb.bigBlind}</td>

@@ -1,4 +1,19 @@
-import { expect, type Browser, type Page } from '@playwright/test';
+import { test as base, expect, type Browser, type Locator, type Page } from '@playwright/test';
+
+/**
+ * Closes the contexts a test opened with browser.newContext() (signUp, admin) when it ends. The worker keeps one
+ * browser for the whole run, so contexts left open kept polling and holding sockets, and about twenty tests in
+ * Chrome failed page loads with net::ERR_INSUFFICIENT_RESOURCES.
+ */
+export const test = base.extend<{ closeContexts: void }>({
+  closeContexts: [
+    async ({ browser }, use) => {
+      const before = new Set(browser.contexts());      await use();
+      await Promise.all(browser.contexts().filter((c) => !before.has(c)).map((c) => c.close()));
+    },
+    { auto: true },
+  ],
+});
 
 /** Meets the password policy (letter, digit, symbol, 8+). */
 export const PASSWORD = 'Password123!';
@@ -7,6 +22,15 @@ let n = 0;
 export function uid(prefix: string) {
   n += 1;
   return `${prefix}${Date.now().toString(36).slice(-5)}${n}`;
+}
+
+/**
+ * Whether the page is wider than the phone. A mobile browser widens its layout to fit wide content (and
+ * window.innerWidth grows with it), so this compares with the device width the context was opened with.
+ */
+export async function widerThanDevice(page: Page) {
+  const width = page.viewportSize()!.width;
+  return page.evaluate((w) => document.documentElement.scrollWidth > w + 1, width);
 }
 
 /** Signs up through the real UI and lands on the lobby. */
@@ -49,6 +73,37 @@ export async function checkOrCall(page: Page): Promise<boolean> {
   else return false;
   await page.waitForTimeout(250);
   return true;
+}
+
+/** Plays one hand check/call to showdown, then both players stand up before the next hand and get their chips back. */
+export async function playOneHand(a: Page, b: Page) {
+  await expect(async () => {
+    (await checkOrCall(a)) || (await checkOrCall(b));
+    await expect(a.getByText(/승리|Winner/).first()).toBeVisible({ timeout: 500 });
+  }).toPass({ timeout: 60_000 });
+  const before = await Promise.all([a, b].map((p) => balanceOf(p)));
+  for (const p of [a, b]) await p.getByTestId('leave').click();
+  for (const [i, p] of [a, b].entries()) await expect.poll(() => balanceOf(p), { timeout: 45_000 }).toBeGreaterThan(before[i]!);
+}
+
+/** Moves a range input the way a drag does (React only sees an input event from the native value setter). */
+export async function setRange(range: Locator, value: number) {
+  await range.evaluate((el, v) => {
+    const input = el as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, String(v));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
+}
+
+/** Opens the table's buy-in dialog and sits down with the given amount. */
+export async function sitWith(page: Page, tableId: string, buyIn: number) {
+  await page.goto(`/table/${tableId}?sit=1`);
+  const confirm = page.getByTestId('buyin-confirm');
+  await expect(confirm).toBeVisible();
+  await setRange(page.getByRole('dialog').locator('input[type="range"]'), buyIn);
+  await expect(confirm).toContainText(buyIn.toLocaleString('en-US'));
+  await confirm.click();
+  await expect(confirm).toHaveCount(0);
 }
 
 /** Wallet balance as reported by the server for this page's session. */

@@ -24,6 +24,10 @@ export const users = sqliteTable(
     /** Privacy notice version accepted at signup and when. Null for accounts created before consent was recorded. */
     privacyConsentVersion: text('privacy_consent_version'),
     privacyConsentAt: integer('privacy_consent_at'),
+    /** Who may send this member friend requests. */
+    friendRequests: text('friend_requests', { enum: ['everyone', 'nobody'] }).notNull().default('everyone'),
+    /** Whether unread 1:1 messages count toward the header badge. */
+    dmNotifications: integer('dm_notifications', { mode: 'boolean' }).notNull().default(true),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -48,6 +52,8 @@ export const sessions = sqliteTable(
     expiresAt: integer('expires_at').notNull(),
     ip: text('ip'),
     userAgent: text('user_agent'),
+    /** "자동 로그인": a 30-day cookie and session. Off: the cookie ends with the browser, the session after a day idle. */
+    remember: integer('remember', { mode: 'boolean' }).notNull().default(true),
   },
   (t) => [uniqueIndex('sessions_token_uq').on(t.tokenHash), index('sessions_user_idx').on(t.userId)],
 );
@@ -82,7 +88,7 @@ export const chipLedger = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id),
     type: text('type', {
-      enum: ['signup_grant', 'buy_in', 'cash_out', 'admin_adjust', 'reconcile'],
+      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'],
     }).notNull(),
     /** Signed delta applied to users.balance. */
     amount: integer('amount').notNull(),
@@ -98,35 +104,44 @@ export const chipLedger = sqliteTable(
   (t) => [uniqueIndex('ledger_idem_uq').on(t.idempotencyKey), index('ledger_user_idx').on(t.userId, t.createdAt)],
 );
 
-export const tables = sqliteTable('tables', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  maxSeats: integer('max_seats').notNull(),
-  smallBlind: integer('small_blind').notNull(),
-  bigBlind: integer('big_blind').notNull(),
-  minBuyIn: integer('min_buy_in').notNull(),
-  maxBuyIn: integer('max_buy_in').notNull(),
-  turnSeconds: integer('turn_seconds').notNull().default(20),
-  isPrivate: integer('is_private', { mode: 'boolean' }).notNull().default(false),
-  joinCodeHash: text('join_code_hash'),
-  allowSpectators: integer('allow_spectators', { mode: 'boolean' }).notNull().default(true),
-  /** Shown in the lobby with an "입문 테이블" tag (low stakes for newcomers). */
-  beginner: integer('beginner', { mode: 'boolean' }).notNull().default(false),
-  entryBlocked: integer('entry_blocked', { mode: 'boolean' }).notNull().default(false),
-  status: text('status', { enum: ['open', 'closing', 'closed'] }).notNull().default('open'),
-  /** Live occupancy mirrored by the table room (informational, for lobby/admin). */
-  liveSeated: integer('live_seated').notNull().default(0),
-  livePlaying: integer('live_playing', { mode: 'boolean' }).notNull().default(false),
-  liveWaitlist: integer('live_waitlist').notNull().default(0),
-  liveSpectators: integer('live_spectators').notNull().default(0),
-  liveConnections: integer('live_connections').notNull().default(0),
-  handsPlayed: integer('hands_played').notNull().default(0),
-  lastIssue: text('last_issue'),
-  liveUpdatedAt: integer('live_updated_at'),
-  createdBy: text('created_by').references(() => users.id),
-  createdAt: integer('created_at').notNull().default(now),
-  updatedAt: integer('updated_at').notNull().default(now),
-});
+export const tables = sqliteTable(
+  'tables',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    maxSeats: integer('max_seats').notNull(),
+    smallBlind: integer('small_blind').notNull(),
+    bigBlind: integer('big_blind').notNull(),
+    minBuyIn: integer('min_buy_in').notNull(),
+    maxBuyIn: integer('max_buy_in').notNull(),
+    turnSeconds: integer('turn_seconds').notNull().default(20),
+    isPrivate: integer('is_private', { mode: 'boolean' }).notNull().default(false),
+    joinCodeHash: text('join_code_hash'),
+    allowSpectators: integer('allow_spectators', { mode: 'boolean' }).notNull().default(true),
+    /** Shown in the lobby with an "입문 테이블" tag (low stakes for newcomers). */
+    beginner: integer('beginner', { mode: 'boolean' }).notNull().default(false),
+    entryBlocked: integer('entry_blocked', { mode: 'boolean' }).notNull().default(false),
+    status: text('status', { enum: ['open', 'closing', 'closed'] }).notNull().default('open'),
+    /** Live occupancy mirrored by the table room (informational, for lobby/admin). */
+    liveSeated: integer('live_seated').notNull().default(0),
+    livePlaying: integer('live_playing', { mode: 'boolean' }).notNull().default(false),
+    liveWaitlist: integer('live_waitlist').notNull().default(0),
+    liveSpectators: integer('live_spectators').notNull().default(0),
+    liveConnections: integer('live_connections').notNull().default(0),
+    handsPlayed: integer('hands_played').notNull().default(0),
+    lastIssue: text('last_issue'),
+    liveUpdatedAt: integer('live_updated_at'),
+    createdBy: text('created_by').references(() => users.id),
+    /**
+     * 'official' tables are opened by admins. A 'member' room is opened by a member (createdBy, the host), who can
+     * rename it, change spectating and the join code, and close it; never touch chips, cards or results.
+     */
+    roomType: text('room_type', { enum: ['official', 'member'] }).notNull().default('official'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('tables_status_idx').on(t.status), index('tables_creator_idx').on(t.createdBy, t.status)],
+);
 
 /** One row per buy-in → cash-out cycle of a user at a table. */
 export const tableSessions = sqliteTable(
@@ -182,8 +197,21 @@ export const handPlayers = sqliteTable(
     bestFive: text('best_five'),
     wentToShowdown: integer('went_to_showdown', { mode: 'boolean' }).notNull(),
     endedAt: integer('ended_at').notNull(),
+    // Statistics derived from the hand's public action log by HAND_STATS_SQL (see handStats.ts). NULL until it ran;
+    // vpip/pfr/saw_flop/position stay NULL when the log can't be read.
+    position: text('position'),
+    vpip: integer('vpip', { mode: 'boolean' }),
+    pfr: integer('pfr', { mode: 'boolean' }),
+    sawFlop: integer('saw_flop', { mode: 'boolean' }),
+    /** Chips won from the pot, without the player's own uncalled chips handed back. */
+    potWon: integer('pot_won'),
   },
-  (t) => [primaryKey({ columns: [t.handId, t.userId] }), index('hp_user_idx').on(t.userId, t.endedAt)],
+  (t) => [
+    primaryKey({ columns: [t.handId, t.userId] }),
+    index('hp_user_idx').on(t.userId, t.endedAt),
+    // Rows HAND_STATS_SQL still has to fill.
+    index('hp_stats_todo_idx').on(t.handId).where(sql`pot_won IS NULL`),
+  ],
 );
 
 export const adminAuditLog = sqliteTable(
@@ -343,6 +371,20 @@ export const friendships = sqliteTable(
   (t) => [primaryKey({ columns: [t.userA, t.userB] }), index('friendships_b_idx').on(t.userB)],
 );
 
+/**
+ * A member's personal block list. Blocking removes the friendship or pending requests between the two and stops
+ * new requests and 1:1 messages both ways. It is private to the blocker and is not an admin sanction.
+ */
+export const userBlocks = sqliteTable(
+  'user_blocks',
+  {
+    blockerId: text('blocker_id').notNull().references(() => users.id),
+    blockedId: text('blocked_id').notNull().references(() => users.id),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] }), index('user_blocks_blocked_idx').on(t.blockedId)],
+);
+
 /** 1:1 messages between friends. pair_key is the two user ids sorted and joined with ':'. */
 export const directMessages = sqliteTable(
   'direct_messages',
@@ -351,21 +393,35 @@ export const directMessages = sqliteTable(
     pairKey: text('pair_key').notNull(),
     senderId: text('sender_id').notNull().references(() => users.id),
     recipientId: text('recipient_id').notNull().references(() => users.id),
+    /** For an invite, the table's name when it was sent. */
     body: text('body').notNull(),
+    /** 'invite' asks the friend to play at tableId. */
+    kind: text('kind', { enum: ['text', 'invite'] }).notNull().default('text'),
+    tableId: text('table_id').references(() => tables.id),
     readAt: integer('read_at'),
     createdAt: integer('created_at').notNull().default(now),
+    /**
+     * Position in the conversation (1, 2, 3, …), given out in the statement that saves the message, so it follows the
+     * order messages were saved even where createdAt (the worker's clock) ties or runs backwards. Clients page and
+     * poll by it.
+     */
+    seq: integer('seq').notNull().default(0),
   },
-  (t) => [index('dm_pair_idx').on(t.pairKey, t.createdAt), index('dm_unread_idx').on(t.recipientId, t.readAt)],
+  (t) => [
+    index('dm_pair_idx').on(t.pairKey, t.createdAt),
+    uniqueIndex('dm_pair_seq_uq').on(t.pairKey, t.seq),
+    index('dm_unread_idx').on(t.recipientId, t.readAt),
+  ],
 );
 
-/** Reports of board content or of a player at a table, reviewed by admins. */
+/** Reports of board content, of a player at a table, or of a 1:1 message, reviewed by admins. */
 export const reports = sqliteTable(
   'reports',
   {
     id: text('id').primaryKey(),
     reporterId: text('reporter_id').notNull().references(() => users.id),
-    targetType: text('target_type', { enum: ['post', 'comment', 'player'] }).notNull(),
-    /** Post or comment id; the user id for player reports. */
+    targetType: text('target_type', { enum: ['post', 'comment', 'player', 'dm'] }).notNull(),
+    /** Post, comment or 1:1 message id; the user id for player reports. */
     targetId: text('target_id').notNull(),
     /** Author of the content, or the reported player. */
     targetUserId: text('target_user_id').notNull().references(() => users.id),

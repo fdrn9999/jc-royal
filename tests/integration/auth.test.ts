@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASE, BIRTH_DATE, Client, newUser, PASSWORD, signupBody, uniq, verifyEmail } from '../support/client';
+import { BASE, BIRTH_DATE, Client, newUser, PASSWORD, signupBody, uniq, verifyEmail, WEB_ORIGIN } from '../support/client';
 
 describe('auth & sessions', () => {
   it('registers with a Korean nickname, grants signup chips once, and records it in the ledger', async () => {
@@ -37,6 +37,35 @@ describe('auth & sessions', () => {
     expect(sc).toMatch(/jc_sid=/);
     expect(sc).toMatch(/HttpOnly/i);
     expect(sc).toMatch(/SameSite=Lax/i);
+  });
+
+  it('자동 로그인: a 30-day cookie only when asked, otherwise one that ends with the browser; app loads renew it', async () => {
+    const { email } = await newUser();
+    const login = async (extra: Record<string, unknown>) => {
+      const res = await fetch(BASE() + '/api/auth/login', {
+        method: 'POST',
+        headers: { Origin: WEB_ORIGIN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: PASSWORD, ...extra }),
+      });
+      expect(res.status).toBe(200);
+      return res.headers.getSetCookie().find((s) => s.startsWith('jc_sid='))!;
+    };
+    const me = (cookie: string) => fetch(BASE() + '/api/auth/me', { headers: { Origin: WEB_ORIGIN, Cookie: cookie.split(';')[0]! } });
+
+    const plain = await login({});
+    expect(plain).toMatch(/HttpOnly/i);
+    expect(plain).not.toMatch(/Max-Age|Expires/i);
+    expect(await login({ remember: false })).not.toMatch(/Max-Age|Expires/i);
+    const kept = await login({ remember: true });
+    expect(kept).toMatch(/Max-Age=2592000/);
+
+    const renewed = await me(kept);
+    expect(renewed.status).toBe(200);
+    expect(renewed.headers.getSetCookie().join('\n')).toMatch(/jc_sid=[^;]+;.*Max-Age=2592000/);
+    const browserOnly = await me(plain);
+    expect(browserOnly.status).toBe(200);
+    expect(browserOnly.headers.getSetCookie().filter((s) => s.startsWith('jc_sid='))).toHaveLength(0);
+    expect((await new Client().post('/api/auth/login', { email, password: PASSWORD, remember: 'yes' })).status).toBe(400);
   });
 
   it('blocks state-changing requests without an allowed Origin (CSRF)', async () => {

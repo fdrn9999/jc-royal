@@ -25,6 +25,8 @@ export interface Env {
   MAIL_FROM?: string;
   /** Multiplier for IP-keyed rate limits (tests only; defaults to 1). */
   RATE_LIMIT_IP_SCALE?: string;
+  /** Local tests only: members' empty rooms close after this many ms instead of MEMBER_IDLE_CLOSE_MS. */
+  MEMBER_IDLE_CLOSE_MS?: string;
 }
 
 export interface AuthUser {
@@ -44,6 +46,7 @@ export interface AuthSession {
   kind: 'user' | 'admin';
   reauthAt: number | null;
   createdAt: number;
+  remember: boolean;
 }
 
 export type AppEnv = {

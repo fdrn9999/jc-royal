@@ -18,6 +18,8 @@ export interface TestTable {
   isPrivate?: boolean;
   joinCode?: string;
   allowSpectators?: boolean;
+  beginner?: boolean;
+  entryBlocked?: boolean;
 }
 
 /** Tables seeded for integration tests (admin API arrives in Phase 7). */
@@ -31,7 +33,26 @@ export const TABLES: TestTable[] = [
   { id: 'it-private', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'royal-777' },
   { id: 'it-nospec', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, allowSpectators: false },
   { id: 'it-report-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-report-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-invite-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-invite-1', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  { id: 'it-invite-priv', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'invite-42' },
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-restart-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  { id: 'it-stats-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  // Quick play: each group has a big blind no other table uses, so a filter on it sees only that group.
+  { id: 'it-qp-a-beg', maxSeats: 6, sb: 13, bb: 26, min: 260, max: 2600, beginner: true },
+  { id: 'it-qp-a-reg', maxSeats: 6, sb: 13, bb: 26, min: 260, max: 2600 },
+  { id: 'it-qp-b-hu', maxSeats: 2, sb: 17, bb: 34, min: 340, max: 3400 },
+  { id: 'it-qp-b-six', maxSeats: 6, sb: 17, bb: 34, min: 340, max: 3400 },
+  { id: 'it-qp-c-priv', maxSeats: 6, sb: 21, bb: 42, min: 420, max: 4200, isPrivate: true, joinCode: 'qp-secret' },
+  { id: 'it-qp-c-blocked', maxSeats: 6, sb: 21, bb: 42, min: 420, max: 4200, entryBlocked: true },
+  { id: 'it-qp-d-full', maxSeats: 2, sb: 29, bb: 58, min: 580, max: 5800 },
+  { id: 'it-qp-e-rich', maxSeats: 6, sb: 33, bb: 66, min: 20000, max: 40000 },
+  { id: 'it-qp-f-a', maxSeats: 6, sb: 41, bb: 82, min: 820, max: 8200 },
+  { id: 'it-qp-f-b', maxSeats: 6, sb: 41, bb: 82, min: 820, max: 8200 },
+  // Top-ups: heads-up tables, plus tables with a huge minimum where one player sits alone to empty a wallet.
+  ...Array.from({ length: 6 }, (_, i) => ({ id: `it-topup-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000 })),
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-topup-drain-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 9000, max: 9900 })),
 ];
 
 async function sha256b64url(s: string) {
@@ -39,15 +60,15 @@ async function sha256b64url(s: string) {
   return Buffer.from(d).toString('base64url');
 }
 
-export async function prepareState(state: string) {
+export async function prepareState(state: string, tables: TestTable[] = TABLES) {
   rmSync(state, { recursive: true, force: true });
   const mig = spawnSync(process.execPath, [wrangler, 'd1', 'migrations', 'apply', 'jc-royal-db', '--local', '--persist-to', state, '-c', 'apps/api/wrangler.jsonc'], { cwd: root, encoding: 'utf8' });
   if (mig.status !== 0) throw new Error(`migration failed: ${mig.stderr || mig.stdout}`);
   const rows: string[] = [];
-  for (const t of TABLES) {
+  for (const t of tables) {
     const code = t.joinCode ? `'${await sha256b64url(`${t.id}:${t.joinCode}`)}'` : 'NULL';
     rows.push(
-      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators) VALUES ('${t.id}', '${t.id}', ${t.maxSeats}, ${t.sb}, ${t.bb}, ${t.min}, ${t.max}, ${t.turnSeconds ?? 20}, ${t.isPrivate ? 1 : 0}, ${code}, ${t.allowSpectators === false ? 0 : 1});`,
+      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators, beginner, entry_blocked) VALUES ('${t.id}', '${t.id}', ${t.maxSeats}, ${t.sb}, ${t.bb}, ${t.min}, ${t.max}, ${t.turnSeconds ?? 20}, ${t.isPrivate ? 1 : 0}, ${code}, ${t.allowSpectators === false ? 0 : 1}, ${t.beginner ? 1 : 0}, ${t.entryBlocked ? 1 : 0});`,
     );
   }
   const file = resolve(state, '..', `seed-${Date.now()}.sql`);
@@ -100,6 +121,8 @@ export async function startWorker(port: number, state: string): Promise<RunningW
       '--var', 'PBKDF2_ITERATIONS:1000',
       '--var', 'RATE_LIMIT_IP_SCALE:1000',
       '--var', 'ADMIN_BOOTSTRAP_TOKEN:test-bootstrap-token-0123456789',
+      // Members' rooms with nobody seated close after 8 s here (10 min in production).
+      '--var', 'MEMBER_IDLE_CLOSE_MS:8000',
     ],
     { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
   );

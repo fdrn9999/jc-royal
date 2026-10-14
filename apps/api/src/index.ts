@@ -1,6 +1,7 @@
 import { createDb } from '@jc/db';
 import { Hono } from 'hono';
-import type { AppEnv } from './env';
+import type { AppEnv, Env } from './env';
+import { housekeeping } from './lib/housekeeping';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
 import { academyRoutes } from './routes/academy';
 import { adminRoutes } from './routes/admin';
@@ -9,7 +10,8 @@ import { boardRoutes, myCommunityRoutes } from './routes/board';
 import { meRoutes } from './routes/me';
 import { messageRoutes } from './routes/messages';
 import { reportRoutes } from './routes/reports';
-import { dmRoutes, friendRoutes } from './routes/social';
+import { roomRoutes } from './routes/rooms';
+import { blockRoutes, dmRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 
 const app = new Hono<AppEnv>();
@@ -29,8 +31,10 @@ app.route('/api/board', boardRoutes);
 app.route('/api/messages', messageRoutes);
 app.route('/api/friends', friendRoutes);
 app.route('/api/dm', dmRoutes);
+app.route('/api/blocks', blockRoutes);
 app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
+app.route('/api/rooms', roomRoutes);
 app.route('/api/academy', academyRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
@@ -50,4 +54,10 @@ app.onError((err, c) => {
   return c.json({ error: { code: 'internal', message: 'internal error' } }, 500);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  /** Cron trigger (wrangler.jsonc `triggers`): deletes expired short-lived rows. Awaited, so a failure shows as a failed run. */
+  async scheduled(_event, env) {
+    console.log('housekeeping', JSON.stringify(await housekeeping(env.DB)));
+  },
+} satisfies ExportedHandler<Env>;

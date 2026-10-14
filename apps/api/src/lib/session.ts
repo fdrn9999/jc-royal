@@ -10,6 +10,8 @@ export const ADMIN_COOKIE = 'jc_asid';
 
 const DAY = 24 * 60 * 60 * 1000;
 export const USER_SESSION_TTL = 30 * DAY;
+/** Without "자동 로그인": the server forgets a session idle this long (the cookie itself ends with the browser). */
+export const BROWSER_SESSION_TTL = DAY;
 /** Admin sessions: short idle timeout and hard absolute cap. */
 export const ADMIN_IDLE_TTL = 30 * 60 * 1000;
 export const ADMIN_ABSOLUTE_TTL = 8 * 60 * 60 * 1000;
@@ -24,10 +26,26 @@ function isSecure(c: Context<AppEnv>) {
   return new URL(c.req.url).protocol === 'https:';
 }
 
-export async function createSession(c: Context<AppEnv>, userId: string, kind: 'user' | 'admin') {
+function userTtl(remember: boolean) {
+  return remember ? USER_SESSION_TTL : BROWSER_SESSION_TTL;
+}
+
+function setSessionCookie(c: Context<AppEnv>, kind: 'user' | 'admin', token: string, remember: boolean) {
+  // A user cookie without "자동 로그인" has no Max-Age, so the browser drops it when it closes.
+  const maxAgeMs = kind === 'admin' ? ADMIN_ABSOLUTE_TTL : remember ? USER_SESSION_TTL : null;
+  setCookie(c, cookieName(kind), token, {
+    httpOnly: true,
+    secure: isSecure(c),
+    sameSite: kind === 'admin' ? 'Strict' : 'Lax',
+    path: '/',
+    ...(maxAgeMs === null ? {} : { maxAge: Math.floor(maxAgeMs / 1000) }),
+  });
+}
+
+export async function createSession(c: Context<AppEnv>, userId: string, kind: 'user' | 'admin', remember = true) {
   const token = randomToken();
   const now = Date.now();
-  const expiresAt = now + (kind === 'admin' ? ADMIN_IDLE_TTL : USER_SESSION_TTL);
+  const expiresAt = now + (kind === 'admin' ? ADMIN_IDLE_TTL : userTtl(remember));
   const id = crypto.randomUUID();
   await c.var.db.insert(schema.sessions).values({
     id,
@@ -39,15 +57,16 @@ export async function createSession(c: Context<AppEnv>, userId: string, kind: 'u
     expiresAt,
     ip: c.req.header('cf-connecting-ip') ?? null,
     userAgent: c.req.header('user-agent')?.slice(0, 300) ?? null,
+    remember: kind === 'user' && remember,
   });
-  setCookie(c, cookieName(kind), token, {
-    httpOnly: true,
-    secure: isSecure(c),
-    sameSite: kind === 'admin' ? 'Strict' : 'Lax',
-    path: '/',
-    maxAge: Math.floor((kind === 'admin' ? ADMIN_ABSOLUTE_TTL : USER_SESSION_TTL) / 1000),
-  });
+  setSessionCookie(c, kind, token, remember);
   return id;
+}
+
+/** Re-issues a "자동 로그인" cookie so it lasts as long as the sliding session behind it (called when the app loads). */
+export function renewUserCookie(c: Context<AppEnv>) {
+  const token = getCookie(c, USER_COOKIE);
+  if (token && c.var.session?.kind === 'user' && c.var.session.remember) setSessionCookie(c, 'user', token, true);
 }
 
 export interface ResolvedSession {
@@ -78,13 +97,13 @@ export async function resolveSession(c: Context<AppEnv>, kind: 'user' | 'admin')
   }
   // Slide expiry at most once a minute to limit writes.
   if (now - row.s.lastSeenAt > 60_000) {
-    const ttl = kind === 'admin' ? ADMIN_IDLE_TTL : USER_SESSION_TTL;
+    const ttl = kind === 'admin' ? ADMIN_IDLE_TTL : userTtl(row.s.remember);
     c.executionCtx.waitUntil(
       c.var.db.update(schema.sessions).set({ lastSeenAt: now, expiresAt: now + ttl }).where(eq(schema.sessions.id, row.s.id)).then(() => undefined),
     );
   }
   return {
-    session: { id: row.s.id, kind: row.s.kind, reauthAt: row.s.reauthAt, createdAt: row.s.createdAt },
+    session: { id: row.s.id, kind: row.s.kind, reauthAt: row.s.reauthAt, createdAt: row.s.createdAt, remember: row.s.remember },
     user: {
       id: row.u.id,
       email: row.u.email,

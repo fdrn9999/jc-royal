@@ -27,7 +27,7 @@ import { fail, parseBody } from '../lib/http';
 import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { clientIp, rateLimit } from '../lib/rate-limit';
-import { createSession, destroySession } from '../lib/session';
+import { createSession, destroySession, renewUserCookie } from '../lib/session';
 
 export function toMe(u: AuthUser): MeDto {
   return {
@@ -203,7 +203,7 @@ export const authRoutes = new Hono<AppEnv>()
     const ok = await verifyPassword(body.password, u?.passwordHash ?? DUMMY_HASH);
     if (!u || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
     if (u.status === 'suspended') fail(403, 'suspended', u.suspendedReason ?? 'account suspended');
-    await createSession(c, u.id, 'user');
+    await createSession(c, u.id, 'user', body.remember);
     return c.json(toMe(u));
   })
   .post('/logout', async (c) => {
@@ -251,7 +251,10 @@ export const authRoutes = new Hono<AppEnv>()
     return c.json({ ok: true });
   })
   // ----- authenticated -----
-  .get('/me', requireUser, async (c) => c.json(toMe(c.var.user!)))
+  .get('/me', requireUser, async (c) => {
+    renewUserCookie(c);
+    return c.json(toMe(c.var.user!));
+  })
   .patch('/me', requireUser, async (c) => {
     const body = await parseBody(c, UpdateProfileSchema);
     const me = c.var.user!;
@@ -325,8 +328,18 @@ export const authRoutes = new Hono<AppEnv>()
         .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
-      // Friends and pending requests go with the account.
+      // Friends, pending requests and blocks (made by or against the account) go with it.
       db.delete(schema.friendships).where(or(eq(schema.friendships.userA, me.id), eq(schema.friendships.userB, me.id))),
+      db.delete(schema.userBlocks).where(or(eq(schema.userBlocks.blockerId, me.id), eq(schema.userBlocks.blockedId, me.id))),
+      // 1:1 conversations both ways: the other member can no longer open them, so nothing is kept for anyone. A report
+      // already filed keeps its own copy of the reported messages (reports.context) for review.
+      db.delete(schema.directMessages).where(or(eq(schema.directMessages.senderId, me.id), eq(schema.directMessages.recipientId, me.id))),
+      db.delete(schema.messages).where(eq(schema.messages.userId, me.id)),
+      db.delete(schema.academyProgress).where(eq(schema.academyProgress.userId, me.id)),
+      db.delete(schema.userBadges).where(eq(schema.userBadges.userId, me.id)),
+      db.delete(schema.passwordResets).where(eq(schema.passwordResets.userId, me.id)),
+      // Kept, under the pseudonymous id only: chip ledger, hands and seats (integrity), posts and comments (shown as
+      // a withdrawn member), and reports. See docs/PRIVACY_OPERATIONS.md.
     ]);
     await destroySession(c, 'user');
     return c.json({ ok: true });

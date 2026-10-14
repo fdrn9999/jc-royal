@@ -73,8 +73,20 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
               </section>
             ))}
             <p className="mt-3 text-ink-400">{notice.effective}</p>
+            <a href="/privacy" target="_blank" rel="noopener" className="mt-1 inline-block font-semibold text-gold-300 underline-offset-2 hover:underline" data-testid="consent-policy-link">
+              {t('consent.fullPolicy')}
+            </a>
           </div>
         )}
+        <p className="pt-1 text-xs text-ink-400">
+          <a href="/terms" target="_blank" rel="noopener" className="underline underline-offset-2 hover:text-gold-300" data-testid="consent-terms-link">
+            {t('consent.termsLink')}
+          </a>
+          {' · '}
+          <a href="/privacy" target="_blank" rel="noopener" className="underline underline-offset-2 hover:text-gold-300">
+            {t('legal.privacy')}
+          </a>
+        </p>
       </div>
     </fieldset>
   );

@@ -11,7 +11,7 @@ interface AdminPost {
   title: string;
   isNotice: boolean;
   status: 'visible' | 'hidden' | 'deleted';
-  author: { nickname: string; isAdmin: boolean };
+  author: { id: string; nickname: string; isAdmin: boolean; withdrawn?: true };
   commentCount: number;
   viewCount: number;
   handCount: number;
@@ -61,7 +61,7 @@ export function BoardAdminPage() {
               <li key={p.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm">
                 {p.isNotice && <Badge tone="gold">📌</Badge>}
                 <span className={`min-w-0 flex-1 truncate ${p.isNotice ? 'font-extrabold text-gold-300' : ''}`}>{p.title}</span>
-                <span className="text-xs text-ink-400">{p.author.nickname} · {formatDate(p.createdAt, locale)} · 💬{p.commentCount} · ♠{p.handCount}</span>
+                <span className="text-xs text-ink-400">{p.author.withdrawn ? `${t('withdrawnAuthor')} (${p.author.id.slice(0, 8)})` : p.author.nickname} ·{formatDate(p.createdAt, locale)} · 💬{p.commentCount} · ♠{p.handCount}</span>
                 <Badge tone={p.status === 'visible' ? 'green' : 'red'}>{p.status}</Badge>
                 {p.isNotice && <Button size="sm" variant="subtle" onClick={() => openNotice(p.id)}>{t('edit')}</Button>}
                 {p.status !== 'visible' ? (

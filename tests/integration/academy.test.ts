@@ -35,22 +35,77 @@ describe('academy progress sync', () => {
   });
 });
 
+const ALL_BADGES = ['academy-graduate', 'card-reader', 'first-step', 'hand-expert', 'practice-graduate', 'rule-keeper', 'sharp-eye'];
+const DAY = 24 * 60 * 60_000;
+const badgeIds = (body: { badges: { badge: string }[] }) => body.badges.map((x) => x.badge).sort();
+/** Progress shaped like the real app's after finishing everything at `t`: every lesson up to its last step, all 8 scenarios, 3 review sets of 8 solved questions. */
+function studied(t: number) {
+  const last = { cards: 3, hands: 4, holdem: 4, actions: 3, practice: 0 };
+  const lessons = Object.fromEntries(Object.entries(last).map(([id, step], i) => [id, { startedAt: t + i * 1000, completedAt: t + i * 1000 + 500, step }]));
+  const practice = Object.fromEntries([...'ABCDEFGH'].map((s, i) => [s, t + 4000 + i]));
+  return { v: 2, updatedAt: t + 5000, lessons, practice, quiz: { correct: 30, wrong: 4 }, review: { sessions: 3, best: 8 } };
+}
+
 describe('badges (cosmetic, chip-free)', () => {
   it('are awarded once from progress and never touch the wallet or ledger', async () => {
     const a = await newUser();
     const before = (await a.client.get('/api/auth/me')).body.balance;
     const ledger = (await a.client.get('/api/me/ledger')).body.length;
-    const data = {
-      v: 2,
-      lessons: { cards: done(1), hands: done(2), holdem: done(3), actions: done(4), practice: done(5) },
-      practice: { A: 1, B: 1, C: 1, D: 1, E: 1, F: 1, G: 1, H: 1 },
-      review: { sessions: 3 },
-    };
+    const data = studied(Date.now());
     const r1 = await put(a.client, { version: 2, updatedAt: 10, data });
-    const ids = r1.body.badges.map((x: { badge: string }) => x.badge).sort();
-    expect(ids).toEqual(['academy-graduate', 'card-reader', 'first-step', 'hand-expert', 'practice-graduate', 'rule-keeper', 'sharp-eye']);
+    expect(badgeIds(r1.body)).toEqual(ALL_BADGES);
     const r2 = await put(a.client, { version: 2, updatedAt: 11, data });
     expect(r2.body.badges).toEqual(r1.body.badges); // idempotent: same rows, same timestamps
+    expect((await a.client.get('/api/auth/me')).body.balance).toBe(before);
+    expect((await a.client.get('/api/me/ledger')).body.length).toBe(ledger);
+  });
+
+  it('forged or impossible progress is still stored but earns nothing', async () => {
+    const now = Date.now();
+    const forged: Record<string, unknown>[] = [
+      // The pre-check fixture: 1970 timestamps, finished on step 3 of 5, review sets without a single answer.
+      { v: 2, lessons: { cards: done(1), hands: done(2), holdem: done(3), actions: done(4), practice: done(5) }, practice: { A: 1, B: 1, C: 1, D: 1, E: 1, F: 1, G: 1, H: 1 }, review: { sessions: 3 } },
+      // Dated three days ahead of the server's clock, review claimed without answers.
+      { ...studied(now + 3 * DAY), quiz: { correct: 0, wrong: 0 } },
+      // Before the account existed.
+      { ...studied(now - 3 * DAY), quiz: { correct: 2, wrong: 0 } },
+      // Wrong types: string / fractional times, finished on the first step, counters as strings.
+      {
+        v: 2,
+        lessons: { cards: { startedAt: String(now), completedAt: String(now), step: 3 }, hands: { startedAt: now, completedAt: now + 0.5, step: 4 }, holdem: { startedAt: now, completedAt: now, step: 0 }, actions: { completedAt: now, step: 3 } },
+        practice: { A: String(now) },
+        quiz: { correct: '99', wrong: 0 },
+        review: { sessions: 3 },
+      },
+    ];
+    for (const data of forged) {
+      const a = await newUser();
+      const r = await put(a.client, { version: 2, updatedAt: now, data });
+      expect(r.status).toBe(200);
+      expect(r.body.badges).toEqual([]);
+      const got = (await a.client.get('/api/academy/progress')).body;
+      expect(got.data).toEqual(data); // progress sync is unaffected; only badges are withheld
+      expect(got.badges).toEqual([]);
+    }
+  });
+
+  it('concurrent syncs award each badge once with a stable time, and a later reset keeps them', async () => {
+    const a = await newUser();
+    const before = (await a.client.get('/api/auth/me')).body.balance;
+    const ledger = (await a.client.get('/api/me/ledger')).body.length;
+    const t = Date.now();
+    const rs = await Promise.all([0, 1, 2, 3, 4].map((i) => put(a.client, { version: 2, updatedAt: t + i, data: studied(t) })));
+    for (const r of rs) expect(r.status).toBe(200);
+    const first = (await a.client.get('/api/academy/badges')).body as { badge: string; awardedAt: number }[];
+    expect(first.map((b) => b.badge).sort()).toEqual(ALL_BADGES); // one row per badge
+    expect((await put(a.client, { version: 2, updatedAt: t + 10, data: studied(t) })).body.badges).toEqual(first);
+
+    // Restarting the academy replaces the progress but never takes a badge back.
+    const reset = { v: 2, updatedAt: t + 20, resetAt: t + 20, lessons: {}, practice: {}, quiz: { correct: 0, wrong: 0 }, review: { sessions: 0, best: 0 } };
+    expect((await put(a.client, { version: 2, updatedAt: t + 20, data: reset })).body.badges).toEqual(first);
+    const got = (await a.client.get('/api/academy/progress')).body;
+    expect(got.data).toEqual(reset);
+    expect(got.badges).toEqual(first);
     expect((await a.client.get('/api/auth/me')).body.balance).toBe(before);
     expect((await a.client.get('/api/me/ledger')).body.length).toBe(ledger);
   });

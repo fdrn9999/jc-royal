@@ -168,7 +168,7 @@ export function projectView(e: HandEngine, sh: TableShape, heroLegal: LegalOptio
   const hv = e.handView();
   return {
     version: hv.seq,
-    table: { id: sh.id, name: 'Practice', maxSeats: sh.size, smallBlind: sh.blinds[0], bigBlind: sh.blinds[1], minBuyIn: 0, maxBuyIn: 0, turnSeconds: 600, allowSpectators: false, isPrivate: true },
+    table: { id: sh.id, name: 'Practice', maxSeats: sh.size, smallBlind: sh.blinds[0], bigBlind: sh.blinds[1], minBuyIn: 0, maxBuyIn: 0, turnSeconds: 600, allowSpectators: false, isPrivate: true, roomType: 'official', hostId: null },
     status: e.isSettled ? 'waiting' : 'playing',
     seats,
     hand: { ...hv, number: 1, deadline: null },
@@ -176,6 +176,6 @@ export function projectView(e: HandEngine, sh: TableShape, heroLegal: LegalOptio
     waitlist: [],
     reservation: null,
     nextHandAt: null,
-    you: { userId: HERO_ID, seatIndex: sh.hero, legal: heroLegal, sittingOut: false, leaving: false, inWaitlist: false, canSit: false },
+    you: { userId: HERO_ID, seatIndex: sh.hero, legal: heroLegal, sittingOut: false, leaving: false, inWaitlist: false, canSit: false, topUpQueued: null, autoRebuy: null },
   };
 }

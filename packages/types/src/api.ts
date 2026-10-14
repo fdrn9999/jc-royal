@@ -18,7 +18,7 @@ export const NicknameSchema = z.string().trim().regex(NICKNAME_RE);
 
 export const LocaleSchema = z.enum(['ko', 'en']);
 /** Version of the signup privacy notice. Bump it when the notice text changes; each signup stores the version it accepted. */
-export const PRIVACY_NOTICE_VERSION = '2026-10-14';
+export const PRIVACY_NOTICE_VERSION = '2026-10-15';
 
 /** Youngest age (full years) allowed to sign up; matches the "14 or older" agreement. */
 export const MIN_SIGNUP_AGE = 14;
@@ -67,7 +67,7 @@ export interface EmailVerificationSentDto {
   /** Outside production only, so the flow works without a mail provider. */
   devCode?: string;
 }
-export const LoginSchema = z.object({ email: EmailSchema, password: z.string().min(1).max(128) });
+export const LoginSchema = z.object({ email: EmailSchema, password: z.string().min(1).max(128), remember: z.boolean().default(false) });
 export const UpdateProfileSchema = z.object({
   nickname: NicknameSchema.optional(),
   avatarUrl: z
@@ -104,6 +104,41 @@ export const TableInputSchema = z
   .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private tables need a join code', path: ['joinCode'] });
 export type TableInput = z.infer<typeof TableInputSchema>;
 
+/** Blinds a member can choose for their own room (small blind is half the big blind). */
+export const ROOM_BIG_BLINDS = [10, 20, 50, 100, 200] as const;
+/** Rooms a member can have open at once. */
+export const MAX_ACTIVE_ROOMS = 2;
+/** A member room with nobody seated for this long closes itself. */
+export const MEMBER_IDLE_CLOSE_MS = 10 * 60_000;
+
+const RoomCodeSchema = z.string().trim().min(4).max(32);
+
+/** A member's own room. Buy-in limits are in big blinds' worth of chips, within 10–200 BB. */
+export const RoomCreateSchema = z
+  .object({
+    name: z.string().trim().min(2).max(30),
+    maxSeats: z.union(SUPPORTED_MAX_SEATS.map((n) => z.literal(n)) as [z.ZodLiteral<2>, z.ZodLiteral<6>, z.ZodLiteral<9>]),
+    bigBlind: z.union(ROOM_BIG_BLINDS.map((n) => z.literal(n)) as unknown as [z.ZodLiteral<10>, z.ZodLiteral<20>, ...z.ZodLiteral<number>[]]),
+    minBuyIn: z.number().int().positive(),
+    maxBuyIn: z.number().int().positive(),
+    allowSpectators: z.boolean().default(true),
+    isPrivate: z.boolean().default(false),
+    joinCode: RoomCodeSchema.optional(),
+  })
+  .refine((t) => t.minBuyIn >= t.bigBlind * 10, { message: 'minBuyIn must be >= 10 BB', path: ['minBuyIn'] })
+  .refine((t) => t.maxBuyIn <= t.bigBlind * 200, { message: 'maxBuyIn must be <= 200 BB', path: ['maxBuyIn'] })
+  .refine((t) => t.maxBuyIn >= t.minBuyIn, { message: 'maxBuyIn must be >= minBuyIn', path: ['maxBuyIn'] })
+  .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private rooms need a join code', path: ['joinCode'] });
+export type RoomCreate = z.infer<typeof RoomCreateSchema>;
+
+/** What the host can change. Stakes, seats, chips, cards and results are not theirs to change. */
+export const RoomPatchSchema = z.object({
+  name: z.string().trim().min(2).max(30).optional(),
+  allowSpectators: z.boolean().optional(),
+  isPrivate: z.boolean().optional(),
+  joinCode: RoomCodeSchema.nullable().optional(),
+});
+
 export const TablePatchSchema = z.object({
   name: z.string().trim().min(2).max(40).optional(),
   smallBlind: z.number().int().min(1).optional(),
@@ -116,6 +151,17 @@ export const TablePatchSchema = z.object({
   beginner: z.boolean().optional(),
   entryBlocked: z.boolean().optional(),
 });
+
+/** Hands played below which quick play counts a player as a newcomer and prefers beginner tables. */
+export const NEWCOMER_HANDS = 50;
+
+/** Quick play: optional table size and big blind (exact matches), and tables to skip after a failed try. */
+export const QuickPlaySchema = z.object({
+  maxSeats: z.union(SUPPORTED_MAX_SEATS.map((n) => z.literal(n)) as [z.ZodLiteral<2>, z.ZodLiteral<6>, z.ZodLiteral<9>]).optional(),
+  bigBlind: z.number().int().min(2).max(2_000_000).optional(),
+  exclude: z.array(z.string().min(1).max(64)).max(20).default([]),
+});
+export type QuickPlayInput = z.input<typeof QuickPlaySchema>;
 
 export const ChipAdjustSchema = z.object({
   amount: z.number().int().refine((n) => n !== 0, 'amount must be non-zero').refine((n) => Math.abs(n) <= 100_000_000),
@@ -137,9 +183,14 @@ export interface MeDto {
   createdAt: number;
 }
 
+export type RoomType = 'official' | 'member';
+
 export interface LobbyTableDto {
   id: string;
   name: string;
+  roomType: RoomType;
+  /** The member who opened a member room. */
+  host: { id: string; nickname: string } | null;
   maxSeats: number;
   smallBlind: number;
   bigBlind: number;
@@ -158,6 +209,16 @@ export interface LobbyTableDto {
   spectators: number;
 }
 
+/**
+ * The table quick play picked: the table room confirmed a free seat for this player at that moment. Nothing is held
+ * or paid yet; the buy-in still goes through the normal seat request. Failures are `no_table` (nothing matches the
+ * filters), `insufficient_balance` (details.minBuyIn: the cheapest minimum among matches) or `tables_full`.
+ */
+export interface QuickPlayDto {
+  table: LobbyTableDto;
+  seatIndex: number;
+}
+
 export interface LedgerEntryDto {
   id: string;
   type: string;
@@ -168,14 +229,67 @@ export interface LedgerEntryDto {
   createdAt: number;
 }
 
+/** `n` of `of` hands; `of` is 0 while there is nothing to measure. */
+export interface StatRatio {
+  n: number;
+  of: number;
+}
+
+/** Table positions, earliest to act preflop first. Heads-up the button posts the small blind and counts as BTN. */
+export const POSITIONS = ['EP', 'MP', 'CO', 'BTN', 'SB', 'BB'] as const;
+export type Position = (typeof POSITIONS)[number];
+
+export interface PositionStatsDto {
+  position: Position;
+  hands: number;
+  /** Hands at this position entered preflop by choice / raised preflop. */
+  vpip: number;
+  pfr: number;
+  net: number;
+}
+
+/**
+ * The user's own play statistics, from the hands they were dealt into (watching doesn't count). Figures that need the
+ * per-hand statistics columns only count hands whose columns are filled (see packages/db/src/handStats.ts).
+ */
 export interface StatsDto {
   handsPlayed: number;
+  /** Hands where the user won part of a pot: split pots count, getting only uncalled chips back doesn't. */
   handsWon: number;
+  /** handsWon over the hands measured, in percent with one decimal. */
   winRate: number;
+  /** Chips won from pots, without uncalled chips handed back. */
   totalWon: number;
   netChips: number;
-  biggestPot: number;
+  /** Largest pot among hands the user put chips into; uncalled chips handed back are not part of it. */
+  largestPot: number;
+  /** Average of those pots, rounded; null before any. */
+  avgPot: number | null;
+  /** Largest profit in one hand (net, i.e. after subtracting the user's own chips); 0 if never ahead. */
+  biggestWin: number;
   bestHand: { rankClass: string; cards: string[] } | null;
+  /** Put chips in preflop by choice (blinds don't count), over hands dealt. */
+  vpip: StatRatio;
+  /** Raised preflop (an all-in above the highest bet counts), over hands dealt. */
+  pfr: StatRatio;
+  /** Of the hands entered preflop by choice, the ones raised. */
+  raiseShare: StatRatio;
+  /** Went to showdown, over hands that saw the flop. */
+  wtsd: StatRatio;
+  /** Won part of a pot at showdown, over showdowns. */
+  wsd: StatRatio;
+  /** Every position, in POSITIONS order, zeros included. */
+  positions: PositionStatsDto[];
+}
+
+export const TREND_DAYS = [7, 30, 90] as const;
+
+export interface StatsTrendDto {
+  days: (typeof TREND_DAYS)[number];
+  /** Minutes east of UTC the days were cut at. */
+  tz: number;
+  /** Days with hands, oldest first ('YYYY-MM-DD' in that time zone); days without hands are left out. */
+  points: { day: string; hands: number; net: number }[];
 }
 
 export interface HandSummaryDto {

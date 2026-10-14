@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { answerAll, CARD_ANSWERS, playScenario, sortBySwaps } from './academy-helpers';
-import { balanceOf, checkOrCall, signUp } from './helpers';
+import { balanceOf, checkOrCall, signUp, test } from './helpers';
 
 // Engine-decided answers for Lesson 2's compare quiz, in question order (see data/handQuiz.ts).
 const COMPARE = ['b', 'b', 'b', 'a', 'a', 'a', 'b', 'a', 'split', 'split', 'a'];

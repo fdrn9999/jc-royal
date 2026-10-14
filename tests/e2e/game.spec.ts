@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { balanceOf, checkOrCall, signUp } from './helpers';
+import { expect } from '@playwright/test';
+import { balanceOf, checkOrCall, signUp, test } from './helpers';
 
 test('two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund', async ({ browser }) => {
   const a = await signUp(browser);
@@ -60,4 +60,12 @@ test('two browsers: join, buy in, play a hand to showdown, refresh, stand up wit
     expect(await balanceOf(a.page)).toBeGreaterThan(walletBefore);
   }).toPass({ timeout: 45_000 });
   expect(before).toBeGreaterThan(0);
+
+  // My page: the showdown A played is a pot of at least both big blinds, shown apart from the single-hand profit.
+  await a.page.goto('/me');
+  const statValue = async (label: RegExp) => Number(((await a.page.getByText(label).locator('xpath=..').locator('.font-mono').textContent()) ?? '').replace(/[^\d]/g, ''));
+  await expect(a.page.getByText(/^(참여한 최대 팟|Largest pot played)$/)).toBeVisible();
+  expect(await statValue(/^(참여한 최대 팟|Largest pot played)$/)).toBeGreaterThanOrEqual(20);
+  await expect(a.page.getByText(/^(한 핸드 최대 획득|Biggest single-hand win)$/)).toBeVisible();
+  await a.page.screenshot({ path: 'test-results/me-stats-desktop.png', fullPage: true });
 });
