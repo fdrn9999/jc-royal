@@ -78,6 +78,69 @@
       "when": 1792013421414,
       "tag": "0010_hand_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792037703418,
+      "tag": "0011_hand_shown",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792045310805,
+      "tag": "0012_ops_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792050681874,
+      "tag": "0013_tables_hands_paused",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792055347918,
+      "tag": "0014_users_admin_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792058884236,
+      "tag": "0015_reconcile_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1792063209179,
+      "tag": "0016_service_notices_maintenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792068600039,
+      "tag": "0017_report_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792072938744,
+      "tag": "0018_admin_audit_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792080038471,
+      "tag": "0019_daily_stats",
+      "breakpoints": true
     }
   ]
 }

@@ -164,6 +164,144 @@ describe('blinds, positions and betting rules', () => {
   });
 });
 
+describe('showdown muck', () => {
+  const shown = (h: HandEngine, muck: string[]) => h.handView(new Set(muck)).result!.showdown.map((s) => s.seatIndex).sort();
+
+  it('a loser asking to muck keeps the cards face down for others, in the record too; the owner still sees them', async () => {
+    // Heads-up, button p0: p1 is dealt first and wins with aces.
+    const h = start([1000, 1000], { deck: stackedDeck([c('Ac Ad'), c('2c 7d')], c('Kh 9s 5d 4c 3h')) });
+    await checkDown(h);
+    expect(shown(h, [])).toEqual([0, 1]);
+    expect(shown(h, ['p0'])).toEqual([1]);
+    const muck = new Set(['p0']);
+    expect(h.seatInfo('p1', muck).get(0)!.holeCards).toBeNull();
+    expect(h.seatInfo(null, muck).get(0)!.holeCards).toBeNull();
+    expect(h.seatInfo('p0', muck).get(0)!.holeCards).toEqual(c('2c 7d'));
+    expect(h.seatInfo('p0', muck).get(1)!.holeCards).toEqual(c('Ac Ad'));
+    const rec = h.record(5_000, muck);
+    const p0 = rec.players.find((p) => p.playerId === 'p0')!;
+    expect(p0).toMatchObject({ wentToShowdown: true, shown: false, holeCards: c('2c 7d') });
+    expect(p0.rankClass).not.toBeNull();
+    expect(rec.players.find((p) => p.playerId === 'p1')).toMatchObject({ wentToShowdown: true, shown: true });
+    expect(h.record(5_000).players.every((p) => p.shown)).toBe(true);
+    expect(h.totalChips()).toBe(2000);
+  });
+
+  it('a winning hand and a split pot are always shown', async () => {
+    const h = start([1000, 1000], { deck: stackedDeck([c('Ac Ad'), c('2c 7d')], c('Kh 9s 5d 4c 3h')) });
+    await checkDown(h);
+    expect(shown(h, ['p1'])).toEqual([0, 1]);
+    const split = start([1000, 1000], { deck: stackedDeck([c('2c 3d'), c('4c 5d')], c('As Ks Qs Js Ts')) });
+    await checkDown(split);
+    expect(shown(split, ['p0', 'p1'])).toEqual([0, 1]);
+    expect(split.record(5_000, new Set(['p0', 'p1'])).players.every((p) => p.shown)).toBe(true);
+  });
+
+  it('all-in: when the betting ended on an all-in every hand is shown, muck or not', async () => {
+    // p0 (button, small blind) moves all in for 500 and p1 calls with chips left; p1 loses.
+    const h = start([500, 1000], { deck: stackedDeck([c('2c 7d'), c('Ac Ad')], c('Kh 9s 5d 4c 3h')) });
+    await must(h, 'p0', 'allin');
+    await must(h, 'p1', 'call');
+    await checkDown(h);
+    expect(h.isSettled).toBe(true);
+    expect(shown(h, ['p1'])).toEqual([0, 1]);
+    expect(h.record(5_000, new Set(['p1'])).players.every((p) => p.shown)).toBe(true);
+    expect(h.totalChips()).toBe(1500);
+  });
+
+  it('all-in with a side pot played on: the all-in hand is shown, a losing covered hand may muck', async () => {
+    // Button p0, deal order p1, p2, p0. p0 is all in preflop for 100; p1 and p2 check it down. p1 wins both pots.
+    const h = start([100, 1000, 1000], { button: 0, deck: stackedDeck([c('Ac Ad'), c('Kc Kd'), c('2c 3d')], c('Qh 9s 7d 4c 2h')) });
+    await must(h, 'p0', 'allin');
+    await must(h, 'p1', 'call');
+    await must(h, 'p2', 'call');
+    await checkDown(h);
+    expect(shown(h, [])).toEqual([0, 1, 2]);
+    expect(shown(h, ['p0', 'p2'])).toEqual([0, 1]);
+    const rec = h.record(5_000, new Set(['p0', 'p2']));
+    expect(Object.fromEntries(rec.players.map((p) => [p.playerId, p.shown]))).toEqual({ p0: true, p1: true, p2: false });
+    expect(h.totalChips()).toBe(2100);
+  });
+
+  it('a blind posted all in counts as all in', async () => {
+    const h = start([1000, 1000, 6], { button: 0, deck: stackedDeck([c('Kc Kd'), c('2c 7d'), c('Ac Ad')], c('As 9h 5s 4c Jd')) });
+    await must(h, 'p0', 'call');
+    await must(h, 'p1', 'call');
+    await checkDown(h);
+    // Deal order p1, p2, p0: p0's aces win. p2 (6 chips, all in on the big blind) loses and is shown; p0 and p1
+    // played on, so the losing p1 may muck.
+    expect(shown(h, ['p1', 'p2'])).toEqual([0, 2]);
+  });
+
+  it('folded hands and hands won without a showdown are never shown', async () => {
+    const h = start([1000, 1000, 1000], { button: 0 });
+    await must(h, 'p0', 'raise', 40);
+    await must(h, 'p1', 'fold');
+    await must(h, 'p2', 'fold');
+    expect(h.record(5_000).players.some((p) => p.shown)).toBe(false);
+  });
+});
+
+describe('pot breakdown in the hand record (replays)', () => {
+  it('main and side pot: who could win each and who was paid', async () => {
+    // p0 is all in for 100; p1 raises to 300 and p2 calls; on the flop p1 bets 100 and p2 calls. p1's aces win both.
+    const h = start([100, 1000, 1000], { button: 0, deck: stackedDeck([c('Ac Ad'), c('Kc Kd'), c('Qc Qd')], c('2h 9s 7d 4c 3h')) });
+    await must(h, 'p0', 'allin');
+    await must(h, 'p1', 'raise', 300);
+    await must(h, 'p2', 'call');
+    await must(h, 'p1', 'bet', 100);
+    await must(h, 'p2', 'call');
+    await checkDown(h);
+    const rec = h.record(5_000);
+    expect(rec.buttonSeat).toBe(0);
+    expect(rec.pots).toEqual([
+      { amount: 300, eligibleSeats: [0, 1, 2], winners: [{ seatIndex: 1, amount: 300 }], uncalled: false },
+      { amount: 600, eligibleSeats: [1, 2], winners: [{ seatIndex: 1, amount: 600 }], uncalled: false },
+    ]);
+  });
+
+  it('the all-in hand wins the main pot, the side pot goes to the last bettor, an uncalled bet is handed back', async () => {
+    // As above, but p2 folds to the flop bet: p0's aces win the main pot against p1.
+    const h = start([100, 1000, 1000], { button: 0, deck: stackedDeck([c('Kc Kd'), c('2c 3d'), c('Ac Ad')], c('2h 9s 7d 4c 3h')) });
+    await must(h, 'p0', 'allin');
+    await must(h, 'p1', 'raise', 300);
+    await must(h, 'p2', 'call');
+    await must(h, 'p1', 'bet', 100);
+    await must(h, 'p2', 'fold');
+    expect(h.isSettled).toBe(true);
+    const rec = h.record(5_000);
+    expect(rec.pots).toEqual([
+      { amount: 300, eligibleSeats: [0, 1], winners: [{ seatIndex: 0, amount: 300 }], uncalled: false },
+      { amount: 400, eligibleSeats: [1], winners: [{ seatIndex: 1, amount: 400 }], uncalled: false },
+      { amount: 100, eligibleSeats: [1], winners: [{ seatIndex: 1, amount: 100 }], uncalled: true },
+    ]);
+    expect(rec.players.map((p) => p.won)).toEqual([300, 500, 0]);
+  });
+
+  it('a covering all-in: the excess over the call comes back as an uncalled bet', async () => {
+    // Heads-up, button p0: p1 is dealt first (2c 7d), p0 holds the aces.
+    const h = start([1000, 500], { deck: stackedDeck([c('2c 7d'), c('Ac Ad')], c('Kh 9s 5d 4c 3h')) });
+    await must(h, 'p0', 'allin');
+    await must(h, 'p1', 'allin');
+    await checkDown(h);
+    expect(h.record(5_000).pots).toEqual([
+      { amount: 1000, eligibleSeats: [0, 1], winners: [{ seatIndex: 0, amount: 1000 }], uncalled: false },
+      { amount: 500, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 500 }], uncalled: true },
+    ]);
+  });
+
+  it('everyone folds: one pot to the last player; a split pot pays each winner', async () => {
+    const h = start([1000, 1000, 1000], { button: 0 });
+    await must(h, 'p0', 'raise', 40);
+    await must(h, 'p1', 'fold');
+    await must(h, 'p2', 'fold');
+    expect(h.record(5_000).pots).toEqual([{ amount: 55, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 55 }], uncalled: false }]);
+    const split = start([1000, 1000], { deck: stackedDeck([c('2c 3d'), c('4c 5d')], c('As Ks Qs Js Ts')) });
+    await checkDown(split);
+    expect(split.record(5_000).pots).toEqual([{ amount: 20, eligibleSeats: [0, 1], winners: [{ seatIndex: 0, amount: 10 }, { seatIndex: 1, amount: 10 }], uncalled: false }]);
+  });
+});
+
 describe('server-side guards', () => {
   it('rejects out-of-turn actions, illegal amounts and duplicate intent ids', async () => {
     const h = start([1000, 1000, 1000]);

@@ -413,6 +413,13 @@ export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onCl
             {t('settings.confirmRisky')}
             <input type="checkbox" checked={prefs.confirmRisky} onChange={(e) => setPrefs({ confirmRisky: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" />
           </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.autoMuck')}
+              <span className="text-xs text-ink-300">{t('settings.autoMuckHint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.autoMuck} onChange={(e) => setPrefs({ autoMuck: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-automuck" />
+          </label>
         </section>
         <div className="jc-divider" />
         <Field label={t('settings.language')}>

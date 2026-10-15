@@ -55,5 +55,7 @@ export type AppEnv = {
     db: Db;
     user?: AuthUser;
     session?: AuthSession;
+    /** An admin_audit_log row was written for this request (lib/audit.ts). */
+    audited?: boolean;
   };
 };

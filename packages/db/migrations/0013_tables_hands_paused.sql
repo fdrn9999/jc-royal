@@ -1,0 +1,1 @@
+ALTER TABLE `tables` ADD `hands_paused` integer DEFAULT false NOT NULL;

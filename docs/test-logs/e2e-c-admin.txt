@@ -1,0 +1,46 @@
+[WebServer] (node:45676) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:22264) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:25164) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:36928) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] [plugin builtin:vite-reporter] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[WebServer] ▲ [WARNING] Scheduled Workers are not automatically triggered during local development.
+[WebServer] 
+[WebServer]   To manually trigger a scheduled event, run:
+[WebServer]     curl "http://127.0.0.1:8798/cdn-cgi/local/scheduled"
+[WebServer]   For more details, see https://developers.cloudflare.com/workers/configuration/cron-triggers/#test-cron-triggers-locally
+[WebServer] 
+[WebServer] 
+[WebServer] (node:36840) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 15 tests using 1 worker
+
+(node:39520) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [desktop] › tests\e2e\admin.spec.ts:7:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified (9.5s)
+  ✓   2 [desktop] › tests\e2e\analytics.spec.ts:5:1 › operations stats: empty until a day is rolled up, then totals, trends and a table by day, week and month in Korean and English (8.1s)
+  ✓   3 [desktop] › tests\e2e\console-ux.spec.ts:5:1 › a slow answer for an earlier filter does not replace the list for the filter now chosen (7.3s)
+  ✓   4 [desktop] › tests\e2e\console-ux.spec.ts:38:1 › ledger, hands and tables: filters in the URL, page by page, and each ledger look in the audit log (12.7s)
+  ✓   5 [desktop] › tests\e2e\console-ux.spec.ts:124:1 › a post is deleted and a message sent only after a confirmation that says what will happen (7.5s)
+  ✓   6 [desktop] › tests\e2e\console-ux.spec.ts:161:1 › a list that cannot load says so with a retry, and the console says when the network or the server is away (4.3s)
+  ✓   7 [desktop] › tests\e2e\economy.spec.ts:29:1 › chip economy: the page shows where chips are, and a wallet mismatch is reverted only after its evidence and a confirmed before → after (9.1s)
+  ✓   8 [desktop] › tests\e2e\emergency.spec.ts:20:1 › emergency controls: an admin ends a seated member’s connections, the page stops reconnecting, and pausing new hands shows at the table (18.5s)
+  ✓   9 [desktop] › tests\e2e\members.spec.ts:29:1 › member management: list filters, sign-in time, activity, notes without personal data, and sanctions with before → after and a reason (15.4s)
+  ✓  10 [desktop] › tests\e2e\reports.spec.ts:32:1 › report workflow: severity, assignment, internal notes, a suspension given from the report, outcome messages, and reference statistics (13.0s)
+  ✓  11 [desktop] › tests\e2e\security.spec.ts:52:1 › permissions and audit: a plain admin is refused super-admin work and sees only their own log; a super admin searches, filters and pages every entry, refusals included (13.2s)
+  ✓  12 [desktop] › tests\e2e\security.spec.ts:154:1 › previews and sessions: suspending and closing a table show what will happen first; ending a session or changing a role signs that console out on its next request (18.1s)
+  ✓  13 [desktop] › tests\e2e\service.spec.ts:28:1 › service notices and maintenance: an admin posts a bilingual notice and plans maintenance; members and visitors see them in their language; maintenance under way pauses seating and sign-in until it ends (22.8s)
+(node:11112) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  14 [mobile] › tests\e2e\analytics-mobile.spec.ts:5:1 › operations stats on a phone: the page fits the screen, the wide table scrolls inside its panel, and the period buttons work by touch (8.3s)
+  ✓  15 [mobile] › tests\e2e\console-ux-mobile.spec.ts:15:1 › on a phone: a member’s ledger, a report decided through its confirmation, and a post deleted after one, without sideways scrolling (9.6s)
+
+  15 passed (3.5m)

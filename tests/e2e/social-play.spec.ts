@@ -76,6 +76,7 @@ test('play together: invite from the friends list; the card opens the table, say
   await c.page.getByTestId('join-code').fill('secret-77');
   await c.page.getByTestId('join-code-go').click();
   await expect(c.page).toHaveURL(/\/table\/e2e-secret/);
+  expect(c.page.url()).not.toContain('secret-77');
   await c.page.getByTestId('buyin-confirm').click();
   await expect(seatOf(c.page, c.nickname)).toBeVisible();
 

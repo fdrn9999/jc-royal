@@ -156,9 +156,14 @@ const stored = (db: DatabaseSync, handId: string) =>
   );
 
 describe('hand statistics (HAND_STATS_SQL, migration 0010)', () => {
-  it('migration 0010 backfills with the very statement the game worker runs', () => {
+  it('migration 0010 backfilled with the statement the game worker runs, except that the worker starts from the hands still to do', () => {
     const file = files.find((f) => f.startsWith('0010_'))!;
-    expect(readFileSync(new URL(file, dir), 'utf8')).toContain(`${HAND_STATS_SQL};`);
+    // Applied migrations are not edited. The worker's copy differs only in where the two lookups start.
+    const migrated = HAND_STATS_SQL.replace('FROM todo CROSS JOIN hands h ON h.id = todo.hand_id', 'FROM hands h JOIN todo ON todo.hand_id = h.id')
+      .replace('FROM todo CROSS JOIN hand_players p ON p.hand_id = todo.hand_id', 'FROM hand_players p JOIN todo ON todo.hand_id = p.hand_id')
+      .replace(' AND hand_players.hand_id IN (SELECT hand_id FROM todo)', '');
+    expect(migrated).not.toBe(HAND_STATS_SQL);
+    expect(readFileSync(new URL(file, dir), 'utf8')).toContain(`${migrated};`);
   });
 
   it('positions, VPIP, PFR, saw-flop and pot won match the engine for random hands, before and after the migration', async () => {
@@ -194,6 +199,9 @@ describe('hand statistics (HAND_STATS_SQL, migration 0010)', () => {
     expect(Number(db.prepare(HAND_STATS_SQL).run().changes)).toBe(0);
     // The partial index keeps that check cheap.
     expect(JSON.stringify(db.prepare(`EXPLAIN QUERY PLAN SELECT DISTINCT hand_id FROM hand_players WHERE pot_won IS NULL`).all())).toContain('hp_stats_todo_idx');
+    // And the statement reads only the hands still to do: no pass over every recorded hand or player row (it runs after every hand).
+    const plan = (db.prepare(`EXPLAIN QUERY PLAN ${HAND_STATS_SQL}`).all() as { detail: string }[]).map((r) => r.detail);
+    expect(plan.filter((d) => /^SCAN (hand_players|p|h|hands)\b/.test(d) && !d.includes('hp_stats_todo_idx'))).toEqual([]);
 
     // The random hands covered what the rules single out.
     const all = [...before, ...after].flatMap((h) => [...h.expected.values()]);

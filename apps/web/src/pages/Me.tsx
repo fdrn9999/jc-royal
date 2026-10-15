@@ -1,4 +1,4 @@
-import { handLabelKey, NICKNAME_RE, passwordOk, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
+import { handLabelKey, NICKNAME_RE, passwordOk, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -9,6 +9,7 @@ import { useBadges } from '../academy/sync';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
 import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
 import { ReportModal, type ReportSubject } from '../components/Social';
+import { HandReplay } from '../game/HandReplay';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -319,21 +320,10 @@ export function MePage() {
   );
 }
 
-interface HandDetail {
-  id: string;
-  tableId: string;
-  handNumber: number;
-  board: string[];
-  potTotal: number;
-  endedAt: number;
-  actions: { seatIndex: number; stage: string; type: string; amount: number }[];
-  players: { userId: string; seatIndex: number; nickname: string; isYou: boolean; holeCards: string[] | null; stackStart: number; net: number; won: number; rankClass: string | null }[];
-}
-
 export function HandDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useI18n();
-  const { data, error } = useLoad<HandDetail>(`/api/me/hands/${encodeURIComponent(id)}`);
+  const { data, error } = useLoad<HandDetailDto>(`/api/me/hands/${encodeURIComponent(id)}`);
   const tr = useTr();
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
   if (error) return <Empty>{t('notFound')}</Empty>;
@@ -347,9 +337,15 @@ export function HandDetailPage() {
         <h1 className="text-xl font-extrabold tracking-[0.04em] jc-gold-text">{t('replay.title', { n: data.handNumber })}</h1>
         <Link to="/me" className="text-sm text-gold-300 hover:underline">← {t('nav.me')}</Link>
       </div>
-      <Panel title={t('replay.board')} actions={<span className="font-mono text-sm text-gold-300">{t('table.pot')} {formatChips(data.potTotal)}</span>}>
-        <div className="flex gap-1.5">{data.board.length ? data.board.map((c) => <PlayingCard key={c} card={c as Card} size="2.8rem" />) : <span className="text-sm text-ink-400">—</span>}</div>
-        <div className="mt-2 text-xs text-ink-400">{formatDate(data.endedAt, locale)}</div>
+      <Panel
+        title={t('replay.player')}
+        actions={
+          <span className="text-xs text-ink-400">
+            {data.tableName} · {formatDate(data.endedAt, locale)}
+          </span>
+        }
+      >
+        <HandReplay hand={data} heroSeat={data.players.find((p) => p.isYou)?.seatIndex ?? null} />
       </Panel>
       {links.length > 0 && (
         <Panel title={t('replay.lessons')}>

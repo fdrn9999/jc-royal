@@ -109,29 +109,29 @@ describe('member management', () => {
     const login = await new Client().post('/api/auth/login', { email: u.email, password: PASSWORD });
     expect(login.status).toBe(403);
     expect(login.body.error.code).toBe('suspended');
-    expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/unsuspend`, {})).status).toBe(200);
+    expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/unsuspend`, { reason: 'appeal accepted' })).status).toBe(200);
     expect((await new Client().post('/api/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
   });
 
   it('only super admins change roles; demotion ends existing admin sessions immediately', async () => {
     const u = await newUser();
     await reauth(superAdmin.c);
-    expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin' })).status).toBe(200);
+    expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin', reason: 'staffing change' })).status).toBe(200);
     const { c: adminC, r } = await adminClient(u.email);
     expect(r.status).toBe(200);
     expect((await adminC.get('/api/admin/dashboard')).status).toBe(200);
     // a plain admin cannot change roles
     await reauth(adminC);
-    expect((await adminC.post(`/api/admin/users/${superAdmin.id}/role`, { role: 'user' })).status).toBe(403);
+    expect((await adminC.post(`/api/admin/users/${superAdmin.id}/role`, { role: 'user', reason: 'staffing change' })).status).toBe(403);
     // demote
-    expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'user' })).status).toBe(200);
+    expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'user', reason: 'staffing change' })).status).toBe(200);
     expect((await adminC.get('/api/admin/dashboard')).status).toBe(401);
   });
 
   it('plain admins cannot act on administrators (reset link, chips, unsuspend)', async () => {
     const [a, other, member] = [await newUser(), await newUser(), await newUser()];
     await reauth(superAdmin.c);
-    for (const u of [a, other]) expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin' })).status).toBe(200);
+    for (const u of [a, other]) expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin', reason: 'staffing change' })).status).toBe(200);
     const { c: adminC, r } = await adminClient(a.email);
     expect(r.status).toBe(200);
     await reauth(adminC);
@@ -146,8 +146,8 @@ describe('member management', () => {
     expect((await adminC.post(`/api/admin/users/${member.me.id}/chips`, grant('member grant'))).status).toBe(200);
     // a suspension of an administrator can only be lifted by a super admin
     expect((await superAdmin.c.post(`/api/admin/users/${other.me.id}/suspend`, { reason: 'under review' })).status).toBe(200);
-    expect((await adminC.post(`/api/admin/users/${other.me.id}/unsuspend`, {})).status).toBe(403);
-    expect((await superAdmin.c.post(`/api/admin/users/${other.me.id}/unsuspend`, {})).status).toBe(200);
+    expect((await adminC.post(`/api/admin/users/${other.me.id}/unsuspend`, { reason: 'appeal accepted' })).status).toBe(403);
+    expect((await superAdmin.c.post(`/api/admin/users/${other.me.id}/unsuspend`, { reason: 'appeal accepted' })).status).toBe(200);
   });
 
   it('issues a one-time password reset link for a member', async () => {
@@ -276,13 +276,21 @@ describe('member data: account language, profile fields, CSV export', () => {
     expect(detail.privacyConsentAt).toEqual(expect.any(Number));
   });
 
-  it('exports selected members only after re-confirmation, escapes formulas and records the export', async () => {
-    const [staff, a, b] = [await newUser(), await newUser(), await newUser(undefined, { locale: 'en' })];
+  it('exports selected members (super admins, after re-confirmation), escapes formulas and records the export', async () => {
+    const [staff, boss, a, b] = [await newUser(), await newUser(), await newUser(), await newUser(undefined, { locale: 'en' })];
     await reauth(superAdmin.c);
-    expect((await superAdmin.c.post(`/api/admin/users/${staff.me.id}/role`, { role: 'admin' })).status).toBe(200);
+    expect((await superAdmin.c.post(`/api/admin/users/${staff.me.id}/role`, { role: 'admin', reason: 'staffing change' })).status).toBe(200);
+    // A second super admin, signed in fresh (sign-ins are rate limited per account).
+    expect((await superAdmin.c.post(`/api/admin/users/${boss.me.id}/role`, { role: 'super_admin', reason: 'staffing change' })).status).toBe(200);
     expect((await superAdmin.c.post(`/api/admin/users/${b.me.id}/suspend`, { reason: '=HYPERLINK("http://x")' })).status).toBe(200);
-    const { c: adminC, r } = await adminClient(staff.email);
+    // A plain administrator cannot export member data, even after re-confirming.
+    const { c: staffC, r } = await adminClient(staff.email);
     expect(r.status).toBe(200);
+    await reauth(staffC);
+    const refused = await staffC.post('/api/admin/users/export', { userIds: [a.me.id] });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.message).toBe('super admin only');
+    const { c: adminC } = await adminClient(boss.email);
     const cold = await adminC.post('/api/admin/users/export', { userIds: [a.me.id] });
     expect(cold.status).toBe(401);
     expect(cold.body.error.code).toBe('reauth_required');
@@ -301,8 +309,9 @@ describe('member data: account language, profile fields, CSV export', () => {
     expect(rowB).toContain(',1990-01-01,');
     expect(rowB.endsWith(`,"'=HYPERLINK(""http://x"")"`)).toBe(true);
     const audit = (await superAdmin.c.get('/api/admin/audit?limit=200')).body as { action: string; actorId: string; detail: { count: number; userIds: string[] } }[];
-    const entry = audit.find((e) => e.action === 'user.export' && e.actorId === staff.me.id);
+    const entry = audit.find((e) => e.action === 'user.export' && e.actorId === boss.me.id);
     expect(entry?.detail.count).toBe(2);
+    expect(audit.some((e) => e.action === 'user.export.failed' && e.actorId === staff.me.id)).toBe(true);
     expect(entry?.detail.userIds.sort()).toEqual([a.me.id, b.me.id].sort());
   });
 
@@ -311,7 +320,7 @@ describe('member data: account language, profile fields, CSV export', () => {
     await reauth(superAdmin.c);
     expect((await superAdmin.c.post(`/api/admin/users/${en.me.id}/chips`, { amount: 300, memo: 'event', idempotencyKey: uniq('adj') })).status).toBe(200);
     expect((await superAdmin.c.post(`/api/admin/users/${en.me.id}/suspend`, { reason: 'spam' })).status).toBe(200);
-    expect((await superAdmin.c.post(`/api/admin/users/${en.me.id}/unsuspend`, {})).status).toBe(200);
+    expect((await superAdmin.c.post(`/api/admin/users/${en.me.id}/unsuspend`, { reason: 'appeal accepted' })).status).toBe(200);
     const link = await superAdmin.c.post(`/api/admin/users/${en.me.id}/reset-link`, {});
     expect(link.status).toBe(200);
     expect(link.body).toMatchObject({ expiresInMinutes: 30, locale: 'en', mailed: false, message: { subject: '[JC ROYAL] Reset your password' } });

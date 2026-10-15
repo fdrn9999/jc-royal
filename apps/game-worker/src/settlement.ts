@@ -5,7 +5,7 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD } from '@jc/db';
+import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD, opsUpserts, type OpsCount } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
 
 export interface TableRow {
@@ -20,24 +20,58 @@ export interface TableRow {
   isPrivate: boolean;
   allowSpectators: boolean;
   entryBlocked: boolean;
+  /** Emergency control: no new hand starts until an admin resumes the table. */
+  handsPaused: boolean;
   status: 'open' | 'closing' | 'closed';
   roomType: 'official' | 'member';
   /** The member who opened a member room (or the admin who opened an official table). */
   createdBy: string | null;
+  /** Hash of a private table's current join code. Never sent to clients. */
+  joinCodeHash: string | null;
 }
 
-export async function loadTable(d1: D1Database, tableId: string): Promise<TableRow | null> {
-  const r = await d1
+/** The next maintenance window that has not finished (the current one while it runs): see maintenance_windows. */
+export interface Maintenance {
+  startsAt: number;
+  endsAt: number;
+}
+
+function maintenanceQuery(d1: D1Database, now: number) {
+  return d1
     .prepare(
-      `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
-              min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
-              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, status,
-              room_type AS roomType, created_by AS createdBy
-       FROM tables WHERE id = ?1`,
+      `SELECT starts_at AS startsAt, ends_at AS endsAt FROM maintenance_windows
+       WHERE ended_at IS NULL AND cancelled_at IS NULL AND ends_at > ?1 ORDER BY starts_at LIMIT 1`,
     )
-    .bind(tableId)
-    .first<Record<string, unknown>>();
-  if (!r) return null;
+    .bind(now);
+}
+
+function toMaintenance(r: { startsAt: unknown; endsAt: unknown } | undefined): Maintenance | null {
+  return r ? { startsAt: Number(r.startsAt), endsAt: Number(r.endsAt) } : null;
+}
+
+export async function loadMaintenance(d1: D1Database, now = Date.now()): Promise<Maintenance | null> {
+  return toMaintenance((await maintenanceQuery(d1, now).first<Maintenance>()) ?? undefined);
+}
+
+/** The table's settings and the maintenance window, in one D1 call. */
+export async function loadTable(d1: D1Database, tableId: string, now = Date.now()): Promise<{ table: TableRow | null; maintenance: Maintenance | null }> {
+  const [t, m] = await d1.batch([
+    d1
+      .prepare(
+        `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
+                min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
+                is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
+                room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash
+         FROM tables WHERE id = ?1`,
+      )
+      .bind(tableId),
+    maintenanceQuery(d1, now),
+  ]);
+  const r = t?.results[0] as Record<string, unknown> | undefined;
+  return { table: r ? toTableRow(r) : null, maintenance: toMaintenance(m?.results[0] as Maintenance | undefined) };
+}
+
+function toTableRow(r: Record<string, unknown>): TableRow {
   return {
     id: String(r.id),
     name: String(r.name),
@@ -50,13 +84,21 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
     isPrivate: !!r.isPrivate,
     allowSpectators: !!r.allowSpectators,
     entryBlocked: !!r.entryBlocked,
+    handsPaused: !!r.handsPaused,
     status: r.status as TableRow['status'],
     roomType: r.roomType === 'member' ? 'member' : 'official',
     createdBy: r.createdBy == null ? null : String(r.createdBy),
+    joinCodeHash: r.joinCodeHash == null ? null : String(r.joinCodeHash),
   };
 }
 
-export type BuyInResult = { ok: true; balanceAfter: number } | { ok: false; code: 'insufficient_balance' | 'already_seated' };
+export type BuyInResult = { ok: true; balanceAfter: number } | { ok: false; code: 'insufficient_balance' | 'already_seated' | 'suspended' };
+
+/** Whether the account may still bring chips to a table; asked only after the ledger refused a buy-in or top-up. */
+async function accountActive(d1: D1Database, userId: string): Promise<boolean> {
+  const r = await d1.prepare(`SELECT status FROM users WHERE id = ?1`).bind(userId).first<{ status: string }>();
+  return r?.status === 'active';
+}
 
 /** Debits the wallet and opens a table session atomically. */
 export async function buyIn(
@@ -74,6 +116,7 @@ export async function buyIn(
         tableId: p.tableId,
         refId: p.tableSessionId,
         memo: `seat ${p.seatIndex + 1}`,
+        activeOnly: true,
       },
       (ledgerId) => [
         d1
@@ -84,7 +127,7 @@ export async function buyIn(
           .bind(p.tableSessionId, p.tableId, p.userId, p.seatIndex, p.amount, ledgerId),
       ],
     );
-    if (r.status === 'insufficient') return { ok: false, code: 'insufficient_balance' };
+    if (r.status === 'insufficient') return { ok: false, code: (await accountActive(d1, p.userId)) ? 'insufficient_balance' : 'suspended' };
     return { ok: true, balanceAfter: r.balanceAfter };
   } catch (e) {
     // Unique (table_id, user_id) WHERE status='seated' — the batch rolled back entirely.
@@ -101,17 +144,18 @@ export async function buyInCommitted(d1: D1Database, tableSessionId: string): Pr
 
 /**
  * Moves chips from the wallet to an open table session (a top-up or an automatic rebuy). The ledger key makes a
- * repeat a no-op ('duplicate'), so a retry after a crash never takes chips twice.
+ * repeat a no-op ('duplicate'), so a retry after a crash never takes chips twice. A suspended account gets 'suspended'.
  */
 export async function topUp(
   d1: D1Database,
   p: { userId: string; tableId: string; tableSessionId: string; amount: number; key: string; memo: string },
-): Promise<'applied' | 'duplicate' | 'insufficient'> {
+): Promise<'applied' | 'duplicate' | 'insufficient' | 'suspended'> {
   const r = await applyLedger(
     d1,
-    { userId: p.userId, type: 'top_up', amount: -p.amount, idempotencyKey: p.key, tableId: p.tableId, refId: p.tableSessionId, memo: p.memo },
+    { userId: p.userId, type: 'top_up', amount: -p.amount, idempotencyKey: p.key, tableId: p.tableId, refId: p.tableSessionId, memo: p.memo, activeOnly: true },
     (ledgerId) => [d1.prepare(`UPDATE table_sessions SET buy_in = buy_in + ?1 WHERE id = ?2 AND ${LEDGER_GUARD}`).bind(p.amount, p.tableSessionId, ledgerId)],
   );
+  if (r.status === 'insufficient' && !(await accountActive(d1, p.userId))) return 'suspended';
   return r.status;
 }
 
@@ -165,13 +209,22 @@ async function gzipBase64(text: string): Promise<string> {
 }
 
 /**
- * Persists a finished hand. The public action list is stored in clear; the full
- * engine log (hole cards, deck order) is gzip-compressed for audits of finished
- * hands only.
+ * Persists a finished hand. The public action list, button seat and pot payouts
+ * (for replays) are stored in clear; the full engine log (hole cards, deck order)
+ * is gzip-compressed for audits of finished hands only. Records queued before the
+ * button and pots existed have neither.
+ *
+ * The same batch reads the maintenance window back, so a dealing room that was never told of one (the admin's
+ * fan-out did not reach it, and its occupancy did not change) learns of it before its next hand.
  */
-export async function recordHand(d1: D1Database, tableId: string, handNumber: number, rec: HandRecord, engineLog: unknown): Promise<void> {
-  const eventLog = JSON.stringify({ actions: rec.actions, engine: await gzipBase64(JSON.stringify(engineLog)) });
+export async function recordHand(d1: D1Database, tableId: string, handNumber: number, rec: HandRecord, engineLog: unknown): Promise<Maintenance | null> {
+  const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
   const stmts: D1PreparedStatement[] = [
+    maintenanceQuery(d1, Date.now()),
+    // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
+    d1
+      .prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM hands WHERE id = ?2)`)
+      .bind(tableId, rec.handId),
     d1
       .prepare(
         `INSERT OR IGNORE INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log)
@@ -181,8 +234,8 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
     ...rec.players.map((p) =>
       d1
         .prepare(
-          `INSERT OR IGNORE INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, rank_class, rank_value, best_five, went_to_showdown, ended_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
+          `INSERT OR IGNORE INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, rank_class, rank_value, best_five, went_to_showdown, ended_at, shown)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
         )
         .bind(
           rec.handId,
@@ -198,17 +251,19 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
           p.bestFive ? JSON.stringify(p.bestFive) : null,
           p.wentToShowdown ? 1 : 0,
           rec.endedAt,
+          // A record kept from before muck existed has no flag: NULL reads as went_to_showdown, which it was.
+          p.shown === undefined ? null : p.shown ? 1 : 0,
         ),
     ),
-    d1.prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1`).bind(tableId),
   ];
-  await d1.batch(stmts);
+  const results = await d1.batch(stmts);
   // Per-player statistics for this hand (and any rows still without them). The hand is recorded either way.
   try {
     await d1.prepare(HAND_STATS_SQL).run();
   } catch (e) {
     console.error('hand stats failed', tableId, rec.handId, e);
   }
+  return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
 }
 
 export interface LiveStats {
@@ -219,15 +274,23 @@ export interface LiveStats {
   connections: number;
 }
 
-export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveStats, issue?: string | null): Promise<void> {
-  await d1
-    .prepare(
-      `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
-              live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue)
-       WHERE id = ?1`,
-    )
-    .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue ?? null)
-    .run();
+/**
+ * Writes the room's live occupancy, its latest problem (if any) and its pending operations counters in one D1 batch,
+ * which also reads the maintenance window back (so a room learns of one without a D1 call of its own).
+ */
+export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveStats, issue: string | null = null, ops: OpsCount[] = [], now = Date.now()): Promise<Maintenance | null> {
+  const results = await d1.batch([
+    maintenanceQuery(d1, now),
+    d1
+      .prepare(
+        `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
+                live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue)
+         WHERE id = ?1`,
+      )
+      .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue),
+    ...opsUpserts(d1, ops),
+  ]);
+  return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
 }
 
 export async function markTableClosed(d1: D1Database, tableId: string): Promise<void> {

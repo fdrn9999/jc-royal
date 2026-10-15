@@ -34,9 +34,15 @@ test('rooms: a member opens a private room from the lobby, is marked as host, re
   await expect(card).toContainText('🔒');
   await guest.page.screenshot({ path: 'test-results/room-lobby.png' });
 
-  // With the code the guest may sit; they see who the host is but get no host controls.
-  await guest.page.goto(`/table/${id}?code=pals-2026&sit=1`);
+  // The shared link carries no code: the guest enters it on the table, then may sit. They see who the host is but get
+  // no host controls.
+  await guest.page.goto(`/table/${id}?sit=1`);
+  await expect(guest.page.getByText(/참가 코드가 필요합니다|Join code required/)).toBeVisible();
+  await guest.page.getByTestId('enter-code').click();
+  await guest.page.getByTestId('join-code').fill('pals-2026');
+  await guest.page.getByTestId('join-code-go').click();
   await expect(guest.page.getByTestId('buyin-confirm')).toBeVisible();
+  expect(guest.page.url()).not.toContain('pals-2026');
   await guest.page.getByRole('dialog').getByRole('button', { name: /^(취소|Cancel)$/ }).click();
   await expect(guest.page.getByTestId('seat-0').getByTestId('host-mark')).toBeVisible();
   await expect(guest.page.getByTestId('room-manage')).toHaveCount(0);

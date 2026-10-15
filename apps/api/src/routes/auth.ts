@@ -27,6 +27,7 @@ import { fail, parseBody } from '../lib/http';
 import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
 
 export function toMe(u: AuthUser): MeDto {
@@ -152,6 +153,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post('/register', async (c) => {
     await rateLimit(c, `register:${clientIp(c)}`, 10, HOUR, { perIp: true });
     const body = await parseBody(c, RegisterSchema);
+    await refuseSignInInMaintenance(c);
     if (ageOn(body.birthDate, isoDate()) < MIN_SIGNUP_AGE) fail(400, 'underage', `members must be ${MIN_SIGNUP_AGE} or older`);
     const db = c.var.db;
     const ev = schema.emailVerifications;
@@ -203,6 +205,8 @@ export const authRoutes = new Hono<AppEnv>()
     const ok = await verifyPassword(body.password, u?.passwordHash ?? DUMMY_HASH);
     if (!u || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
     if (u.status === 'suspended') fail(403, 'suspended', u.suspendedReason ?? 'account suspended');
+    // After the password check, so the refusal tells nothing to someone who does not know it.
+    await refuseSignInInMaintenance(c, u.role);
     await createSession(c, u.id, 'user', body.remember);
     return c.json(toMe(u));
   })
@@ -325,7 +329,7 @@ export const authRoutes = new Hono<AppEnv>()
     await db.batch([
       db
         .update(schema.users)
-        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, updatedAt: Date.now() })
+        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, lastLoginAt: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
       // Friends, pending requests and blocks (made by or against the account) go with it.
@@ -338,6 +342,10 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.academyProgress).where(eq(schema.academyProgress.userId, me.id)),
       db.delete(schema.userBadges).where(eq(schema.userBadges.userId, me.id)),
       db.delete(schema.passwordResets).where(eq(schema.passwordResets.userId, me.id)),
+      // Administrators' internal notes about the member (sanction reasons stay in the audit log).
+      db.delete(schema.adminNotes).where(eq(schema.adminNotes.userId, me.id)),
+      // Days the member was active (operations statistics; the day totals already counted stay).
+      db.delete(schema.activeDays).where(eq(schema.activeDays.userId, me.id)),
       // Kept, under the pseudonymous id only: chip ledger, hands and seats (integrity), posts and comments (shown as
       // a withdrawn member), and reports. See docs/PRIVACY_OPERATIONS.md.
     ]);

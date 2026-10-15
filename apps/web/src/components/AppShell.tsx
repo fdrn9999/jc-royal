@@ -5,6 +5,7 @@ import { SettingsModal } from '../game/Panels';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useUnread } from '../lib/unread';
+import { ServiceBanner } from './ServiceBanner';
 
 /** Links to /privacy and /terms (public pages), shown in page footers. */
 export function LegalLinks({ className = '' }: { className?: string }) {
@@ -118,6 +119,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
+      <ServiceBanner />
       <main className="mx-auto max-w-7xl px-4 pb-6 pt-6">{children}</main>
       <footer className="mx-auto max-w-7xl px-4 pb-24 sm:pb-8">
         <LegalLinks />
@@ -154,6 +156,9 @@ export function AuthLayout({ children, title }: { children: ReactNode; title: st
         <LangToggle />
       </div>
       <div className="w-full max-w-sm animate-rise">
+        <div className="mb-6 overflow-hidden rounded-xl empty:hidden">
+          <ServiceBanner boardLinks={false} />
+        </div>
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <Logo size={112} />
           <div className="font-display text-2xl font-bold tracking-[0.3em] jc-gold-text">JC ROYAL</div>

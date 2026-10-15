@@ -13,5 +13,11 @@ export default defineConfig({
       '/ws': { target: api.replace(/^http/, 'ws'), ws: true },
     },
   },
-  build: { target: 'es2022', sourcemap: false, chunkSizeWarningLimit: 700 },
+  build: {
+    target: 'es2022',
+    sourcemap: false,
+    chunkSizeWarningLimit: 700,
+    // Sound files are fetched; the CSP's connect-src 'self' would block them as inlined data: URLs.
+    assetsInlineLimit: (file) => (file.endsWith('.mp3') ? false : undefined),
+  },
 });

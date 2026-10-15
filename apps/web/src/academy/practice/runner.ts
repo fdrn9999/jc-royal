@@ -176,6 +176,6 @@ export function projectView(e: HandEngine, sh: TableShape, heroLegal: LegalOptio
     waitlist: [],
     reservation: null,
     nextHandAt: null,
-    you: { userId: HERO_ID, seatIndex: sh.hero, legal: heroLegal, sittingOut: false, leaving: false, inWaitlist: false, canSit: false, topUpQueued: null, autoRebuy: null },
+    you: { userId: HERO_ID, seatIndex: sh.hero, legal: heroLegal, sittingOut: false, leaving: false, inWaitlist: false, canSit: false, needsCode: false, topUpQueued: null, autoRebuy: null },
   };
 }

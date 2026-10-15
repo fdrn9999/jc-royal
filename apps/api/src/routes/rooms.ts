@@ -13,7 +13,8 @@ import { requireUser } from '../lib/auth';
 import { sha256 } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
-import { roomCall } from '../lib/room';
+import { roomCallEnv, roomCallOrFail } from '../lib/room';
+import { refuseNewGamesInMaintenance } from '../lib/service';
 
 const TURN_SECONDS = 20;
 
@@ -30,6 +31,7 @@ export const roomRoutes = new Hono<AppEnv>()
   .post('/', async (c) => {
     const body = await parseBody(c, RoomCreateSchema);
     const me = c.var.user!.id;
+    await refuseNewGamesInMaintenance(c);
     await rateLimit(c, `room-create:${me}`, 5, 60 * 60_000);
     const id = crypto.randomUUID().slice(0, 12);
     const now = Date.now();
@@ -44,8 +46,12 @@ export const roomRoutes = new Hono<AppEnv>()
       .bind(id, body.name, body.maxSeats, body.bigBlind / 2, body.bigBlind, body.minBuyIn, body.maxBuyIn, TURN_SECONDS, body.isPrivate ? 1 : 0, joinCodeHash, body.allowSpectators ? 1 : 0, me, now, MAX_ACTIVE_ROOMS)
       .run();
     if (!r.meta.changes) fail(409, 'room_limit', `at most ${MAX_ACTIVE_ROOMS} open rooms per member`);
-    // Wake the room so its empty-room timer runs even if nobody comes.
-    await roomCall(c, id, 'reload');
+    // Wake the room so its empty-room timer runs even if nobody comes. A room that cannot be woken would stay listed
+    // and count toward the limit with no timer to close it, so the new (still empty) row is closed and the member retries.
+    if (!(await roomCallEnv(c.env, id, 'reload')) && !(await roomCallEnv(c.env, id, 'reload'))) {
+      await c.env.DB.prepare(`UPDATE tables SET status = 'closed', updated_at = ?2 WHERE id = ?1 AND status = 'open'`).bind(id, Date.now()).run();
+      fail(503, 'room_unavailable', 'the room could not be opened; try again');
+    }
     return c.json({ id }, 201);
   })
   .patch('/:id', async (c) => {
@@ -59,14 +65,17 @@ export const roomRoutes = new Hono<AppEnv>()
       .update(schema.tables)
       .set({ name: body.name ?? t.name, isPrivate, joinCodeHash: isPrivate ? joinCodeHash : null, allowSpectators: body.allowSpectators ?? t.allowSpectators, updatedAt: Date.now() })
       .where(eq(schema.tables.id, t.id));
-    // Seated players keep their seats; a new join code applies to people arriving from now on.
-    await roomCall(c, t.id, 'reload');
+    // Seated players keep their seats; a new join code applies to people arriving from now on. The change is saved
+    // either way; if the room does not confirm it, the host is told to send it again.
+    await roomCallOrFail(c, t.id, 'reload', { saved: true });
     return c.json({ ok: true });
   })
   .post('/:id/close', async (c) => {
     const t = await hostedRoom(c, c.req.param('id'));
     // As for an admin close: no new hands, the current hand finishes, everyone is cashed out, then it closes.
     await c.var.db.update(schema.tables).set({ status: 'closing', entryBlocked: true, updatedAt: Date.now() }).where(eq(schema.tables.id, t.id));
-    const live = await roomCall(c, t.id, 'close');
-    return c.json({ ok: true, closed: live?.closed === true });
+    // The room must take the close on; if it cannot be reached now the table stays 'closing' (no one can join) and
+    // the host retries. The room also finishes a close it finds in D1 when it next loads.
+    const live = await roomCallOrFail(c, t.id, 'close');
+    return c.json({ ok: true, closed: live.closed === true });
   });

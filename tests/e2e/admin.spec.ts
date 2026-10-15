@@ -18,6 +18,11 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
+  // The live part refreshes itself while watched; errors and connections come from the server's counters.
+  await expect(page.getByTestId('live-state')).toContainText('30초마다 자동 갱신');
+  await expect(page.getByTestId('live-meta')).toContainText('읽은 행');
+  await expect(page.getByTestId('ops-stats')).toContainText('최근 5분 오류');
+  await expect(page.getByTestId('totals')).toBeVisible();
 
   // Create a table → visible in the player lobby.
   await page.getByRole('link', { name: /^테이블$|^Tables$/ }).click();
@@ -34,18 +39,24 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await member.page.reload();
   await expect(member.page.getByText('E2E 로열 라운지')).toBeVisible();
 
-  // Chip grant requires the admin password again.
+  // Chip grant: the balance before and after is shown first, then the admin password is asked again.
   await page.getByRole('link', { name: /^회원$|^Users$/ }).click();
   await page.getByPlaceholder(/검색|Search/).fill(member.nickname);
   await page.getByPlaceholder(/검색|Search/).press('Enter');
   await page.getByRole('link', { name: /상세|Details/ }).first().click();
   await page.getByLabel(/금액|Amount/).fill('777');
-  await page.getByLabel(/메모|Memo/).fill('E2E 이벤트');
-  await page.getByRole('button', { name: /^확인$|^Confirm$/ }).first().click();
+  // The chip memo, not the internal-note box further down.
+  await page.getByLabel(/^메모$|^Memo$/).fill('E2E 이벤트');
+  await page.getByTestId('chip-submit').click();
+  await expect(page.getByTestId('confirm-change')).toContainText('10,000 → 10,777');
+  await expect(page.getByTestId('change-preview')).toContainText('+777');
+  await page.getByTestId('confirm-end').click();
   await expect(page.getByTestId('reauth-confirm')).toBeVisible();
   await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByTestId('reauth-confirm').click();
-  await expect(page.getByText('+777')).toBeVisible();
+  await expect(page.getByRole('cell', { name: '+777' })).toBeVisible();
+  // The member's history lists the adjustment with its memo.
+  await expect(page.getByTestId('history')).toContainText('+777 · E2E 이벤트');
   // The member's already-open tab picks up the new balance on return, without a reload.
   await member.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await expect(member.page.getByTestId('balance')).toContainText('10,777');
@@ -102,11 +113,15 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await item.getByTestId('report-hide').check();
   await item.getByLabel(/처리 내용|Resolution note/).fill('광고 글 숨김');
   await item.getByTestId('report-resolve').click();
+  // The decision waits in a confirmation that shows what it will do (the server's preview).
+  await expect(page.getByTestId('report-preview')).toContainText(/열린 신고 1건|close with it: 1/);
+  await expect(page.getByTestId('report-preview')).toContainText(/신고된 글·댓글을 숨깁니다|The reported post or comment is hidden/);
+  await page.getByTestId('report-confirm').click();
   await expect(page.getByRole('status').filter({ hasText: /1건|1 report/ })).toBeVisible();
   await expect(item).toHaveCount(0);
   await page.getByTestId('report-status').selectOption('resolved');
   await expect(item).toContainText('광고 글 숨김');
-  await expect(item).toContainText('hidden');
+  await expect(item).toContainText('숨김');
   await member.page.goto(`/board/${postId}`);
   await expect(member.page.getByTestId('post-title')).toHaveCount(0);
   // Member detail links to the reports about that member.

@@ -63,6 +63,7 @@ function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, nam
 }
 const loadMe = () => import('./pages/Me');
 const loadBoard = () => import('./pages/Board');
+const loadMaintenance = () => import('./pages/Maintenance');
 
 /** Keeps Academy progress in sync with the server while someone is signed in. */
 function AcademySync() {
@@ -98,6 +99,8 @@ const router = createBrowserRouter([
   // Public: sign-up links here before anyone has an account.
   { path: '/privacy', element: <Legal kind="privacy" /> },
   { path: '/terms', element: <Legal kind="terms" /> },
+  // Public as well: sign-in may be paused while it runs.
+  { path: '/maintenance', element: onDemand(loadMaintenance, 'MaintenancePage') },
   { path: '/table/:id', element: <RequireAuth><TableRoute /></RequireAuth> },
   { path: '/academy/practice/free', element: <RequireAuth><Academy page="FreePracticePage" /></RequireAuth> },
   { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },

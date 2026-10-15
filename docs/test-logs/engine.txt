@@ -1,7 +1,13 @@
-> pnpm --filter @jc/poker-engine test   (실행: pnpm test, 2026-10-15)
+
+> @jc/poker-engine@0.0.0 test <repo>\packages\poker-engine
+> vitest run
+
 
  RUN  v4.1.11 <repo>/packages/poker-engine
+
+
  Test Files  4 passed (4)
-      Tests  46 passed (46)
-   Start at  07:49:23
-   Duration  6.07s (transform 427ms, setup 0ms, import 1.34s, tests 5.93s, environment 1ms)
+      Tests  56 passed (56)
+   Start at  07:27:32
+   Duration  6.32s (transform 395ms, setup 0ms, import 1.28s, tests 6.21s, environment 1ms)
+

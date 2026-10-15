@@ -1,8 +1,8 @@
 /**
  * Fills the statistics columns of hand_players from each hand's public action log (hands.event_log.actions, written
  * by the game worker) for every hand that still has rows where pot_won IS NULL. It is idempotent: the game worker
- * runs it after recording a hand (which also picks up rows written by an older worker), and migration 0010 runs the
- * same statement once for the hands recorded before it. Actions are matched to players by seat index.
+ * runs it after recording a hand (which also picks up rows written by an older worker), and migration 0010 ran the
+ * same statement (see below) once for the hands recorded before it. Actions are matched to players by seat index.
  *
  * - position: by seat order from the small blind among the players dealt in. Heads-up the button posts the small
  *   blind and is BTN. Otherwise SB, BB, then the seats before CO (the second to last) and BTN (the last): the first
@@ -14,13 +14,19 @@
  * - pot_won: won, minus the uncalled chips handed back to the player who put in the most (that player's amount above
  *   the second largest).
  * vpip, pfr, saw_flop and position stay NULL when the log can't be read; pot_won is always set.
+ *
+ * It runs after every hand, so it reads only the hands still to do: `todo CROSS JOIN hands` and `todo CROSS JOIN
+ * hand_players` make SQLite start from todo (CROSS JOIN fixes the join order) and look hands and players up by id, and
+ * the UPDATE is narrowed to todo's hands. Without these, a run could pass over every recorded hand and player row
+ * (measured on local D1 for one pending 4-player hand: 1,035 rows read with 200 player rows and 8,235 with 2,000,
+ * against 255 for either now). Migration 0010 has the older text; the result is the same.
  */
 export const HAND_STATS_SQL = `WITH todo AS (
   SELECT DISTINCT hand_id FROM hand_players WHERE pot_won IS NULL
 ), logs AS (
   SELECT h.id AS hand_id, h.board,
          CASE WHEN json_valid(h.event_log) THEN CASE WHEN json_type(h.event_log, '$.actions') = 'array' THEN h.event_log END END AS log
-  FROM hands h JOIN todo ON todo.hand_id = h.id
+  FROM todo CROSS JOIN hands h ON h.id = todo.hand_id
 ), acts AS (
   SELECT l.hand_id, a.key AS k, json_extract(a.value, '$.seatIndex') AS seat, json_extract(a.value, '$.type') AS type,
          json_extract(a.value, '$.amount') AS amount
@@ -42,7 +48,7 @@ export const HAND_STATS_SQL = `WITH todo AS (
 ), hp AS (
   SELECT p.hand_id, p.user_id, p.seat_index AS seat, p.won, p.won - p.net AS put, l.log IS NOT NULL AS ok, l.board,
          f.vpip, f.pfr, f.folded, MAX(CASE WHEN f.sb THEN p.seat_index END) OVER (PARTITION BY p.hand_id) AS sb_seat
-  FROM hand_players p JOIN todo ON todo.hand_id = p.hand_id
+  FROM todo CROSS JOIN hand_players p ON p.hand_id = todo.hand_id
   LEFT JOIN logs l ON l.hand_id = p.hand_id
   LEFT JOIN flags f ON f.hand_id = p.hand_id AND f.seat = p.seat_index
 ), ranked AS (
@@ -69,4 +75,4 @@ export const HAND_STATS_SQL = `WITH todo AS (
   FROM ranked
 )
 UPDATE hand_players SET position = src.position, vpip = src.vpip, pfr = src.pfr, saw_flop = src.saw_flop, pot_won = src.pot_won
-FROM src WHERE hand_players.hand_id = src.hand_id AND hand_players.user_id = src.user_id`;
+FROM src WHERE hand_players.hand_id = src.hand_id AND hand_players.user_id = src.user_id AND hand_players.hand_id IN (SELECT hand_id FROM todo)`;

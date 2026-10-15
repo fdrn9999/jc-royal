@@ -155,3 +155,41 @@ test('lobby: polls only while visible, never overlaps, and refreshes on coming b
   await page.waitForTimeout(300);
   expect(gets.n).toBe(base + 1);
 });
+
+test('lobby: slows to every 30 seconds after a minute without input, and the next input refreshes at once', async ({ browser }) => {
+  const { page: first } = await signUp(browser);
+  const page = await first.context().newPage();
+  const gets = lobbyGets(page);
+  const done = { n: 0 };
+  page.on('response', (r) => {
+    if (isList(r)) done.n += 1;
+  });
+  await page.clock.install();
+  await page.goto('/');
+  await expect(page.getByTestId('lobby-table').first()).toBeVisible();
+  await page.clock.pauseAt(Date.now() + 2_000);
+  await expect.poll(() => done.n).toBe(gets.n);
+  // Five seconds at a time, letting each request finish (a poll that comes due while one is out is skipped).
+  const step = async () => {
+    const before = gets.n;
+    await page.clock.runFor(5_000);
+    await page.waitForTimeout(150);
+    await expect.poll(() => done.n).toBe(gets.n);
+    return gets.n - before;
+  };
+  const made: number[] = [];
+  for (let i = 1; i <= 25; i++) if (await step()) made.push(i * 5);
+  // Every 5 s for the first minute, then every 30 s: at 85 s and 115 s.
+  expect(made).toEqual([5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 85, 115]);
+
+  // Someone moves the mouse: the list is refreshed at once, and every 5 s again from then on.
+  const answered = page.waitForResponse(isList);
+  const before = gets.n;
+  await page.mouse.move(200, 200);
+  await page.mouse.move(220, 240);
+  await answered;
+  expect(gets.n).toBe(before + 1);
+  let next = 0;
+  for (let i = 0; i < 4; i++) next += await step();
+  expect(next).toBeGreaterThanOrEqual(3);
+});

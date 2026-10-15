@@ -22,6 +22,12 @@ export interface LedgerOp {
   refId?: string | null;
   actorId?: string | null;
   memo?: string | null;
+  /**
+   * Only for an active account: a suspended (or deleted) member's buy-in or top-up is refused like a short wallet, in
+   * the same statement, so a room that has not heard of the suspension yet still cannot take their chips. Never set on
+   * a cash-out: chips on the table always go back to the wallet.
+   */
+  activeOnly?: boolean;
 }
 
 export type LedgerResult =
@@ -39,7 +45,7 @@ export async function applyLedger(d1: D1Database, op: LedgerOp, extra?: GuardedS
     .prepare(
       `INSERT INTO chip_ledger (id, user_id, type, amount, balance_after, table_id, ref_id, idempotency_key, actor_id, memo)
        SELECT ?1, id, ?2, ?3, balance + ?3, ?4, ?5, ?6, ?7, ?8 FROM users
-       WHERE id = ?9 AND balance + ?3 >= 0
+       WHERE id = ?9 AND balance + ?3 >= 0${op.activeOnly ? ` AND status = 'active'` : ''}
        ON CONFLICT(idempotency_key) DO NOTHING`,
     )
     .bind(ledgerId, op.type, op.amount, op.tableId ?? null, op.refId ?? null, op.idempotencyKey, op.actorId ?? null, op.memo ?? null, op.userId);

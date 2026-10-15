@@ -118,8 +118,8 @@ export function Panel({ className, children, title, actions }: { className?: str
   );
 }
 
-/** Accessible modal: Escape closes, focus moves into the dialog and back. */
-export function Modal({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+/** Accessible modal: Escape closes, focus moves into the dialog and back. `closeLabel` names the ✕ button in the page's language. */
+export function Modal({ open, onClose, title, children, footer, wide, closeLabel = 'close' }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; closeLabel?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   // Callers pass inline onClose functions; reading it through a ref keeps the
   // focus effect from re-running (and stealing focus) on every parent render.
@@ -146,7 +146,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: { open: 
       <div ref={ref} className={cx('jc-panel relative w-full animate-rise rounded-b-none sm:rounded-b-[var(--radius-card)] max-h-[92dvh] overflow-auto', wide ? 'sm:max-w-2xl' : 'sm:max-w-md')}>
         <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
           <h3 className="text-base font-bold tracking-[0.04em] text-gold-300">{title}</h3>
-          <button onClick={onClose} className="rounded p-1 text-ink-300 hover:text-ivory" aria-label="close">
+          <button onClick={onClose} className="rounded p-1 text-ink-300 hover:text-ivory" aria-label={closeLabel}>
             ✕
           </button>
         </div>

@@ -2,6 +2,9 @@ import { createDb } from '@jc/db';
 import { Hono } from 'hono';
 import type { AppEnv, Env } from './env';
 import { housekeeping } from './lib/housekeeping';
+import { countOps } from './lib/ops';
+import { sweepRooms } from './lib/room';
+import { rollup } from './lib/stats';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
 import { academyRoutes } from './routes/academy';
 import { adminRoutes } from './routes/admin';
@@ -11,6 +14,7 @@ import { meRoutes } from './routes/me';
 import { messageRoutes } from './routes/messages';
 import { reportRoutes } from './routes/reports';
 import { roomRoutes } from './routes/rooms';
+import { serviceRoutes } from './routes/service';
 import { blockRoutes, dmRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 
@@ -36,6 +40,7 @@ app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
 app.route('/api/rooms', roomRoutes);
 app.route('/api/academy', academyRoutes);
+app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
 
@@ -48,16 +53,33 @@ app.notFound(async (c) => {
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {
+    // A table that did not answer, mail that could not be sent: server-side failures the admin dashboard counts.
+    // (Refusals during planned maintenance are not failures.)
+    if (err.status >= 500 && err.code !== 'maintenance') countOps(c, 'api_error');
     return c.json({ error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) } }, err.status);
   }
   console.error('unhandled', err instanceof Error ? err.message : String(err));
+  countOps(c, 'api_error');
   return c.json({ error: { code: 'internal', message: 'internal error' } }, 500);
 });
 
 export default {
   fetch: app.fetch,
-  /** Cron trigger (wrangler.jsonc `triggers`): deletes expired short-lived rows. Awaited, so a failure shows as a failed run. */
+  /**
+   * Cron trigger (wrangler.jsonc `triggers`): rolls up the day that ended into the operations statistics (before the
+   * housekeeping deletes old activity markers), deletes expired short-lived rows, then wakes rooms whose close or idle
+   * close stalled. Awaited, so a failure shows as a failed run; a failed rollup does not stop the clean-up.
+   */
   async scheduled(_event, env) {
+    let failed: unknown = null;
+    try {
+      console.log('stats rollup', JSON.stringify(await rollup(env.DB, { maxChunks: 12 })));
+    } catch (e) {
+      failed = e;
+      console.error('stats rollup failed', e instanceof Error ? e.message : String(e));
+    }
     console.log('housekeeping', JSON.stringify(await housekeeping(env.DB)));
+    console.log('room sweep', JSON.stringify(await sweepRooms(env)));
+    if (failed) throw failed;
   },
 } satisfies ExportedHandler<Env>;

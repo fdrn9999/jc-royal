@@ -1,9 +1,10 @@
 import { schema } from '@jc/db';
-import { HAND_RANK_CLASSES, POSITIONS, TREND_DAYS, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
+import { HAND_RANK_CLASSES, POSITIONS, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
+import { replayLog, replayPlayer } from '../lib/community';
 import { fail } from '../lib/http';
 
 function pageParams(q: (k: string) => string | undefined) {
@@ -164,39 +165,41 @@ export const meRoutes = new Hono<AppEnv>()
   })
   /**
    * Replay of a finished hand the user played in. Hole cards of other players
-   * are only included when they were shown down.
+   * are only included when they were face up at showdown (not folded, not mucked).
    */
   .get('/hands/:id', async (c) => {
     const handId = c.req.param('id');
     const uid = c.var.user!.id;
     const mine = await c.var.db.query.handPlayers.findFirst({ where: and(eq(schema.handPlayers.handId, handId), eq(schema.handPlayers.userId, uid)) });
     if (!mine) fail(404, 'not_found', 'hand not found');
-    const hand = await c.var.db.query.hands.findFirst({ where: eq(schema.hands.id, handId) });
-    if (!hand) fail(404, 'not_found', 'hand not found');
+    const [row] = await c.var.db
+      .select({ h: schema.hands, t: { name: schema.tables.name, sb: schema.tables.smallBlind, bb: schema.tables.bigBlind, maxSeats: schema.tables.maxSeats } })
+      .from(schema.hands)
+      .innerJoin(schema.tables, eq(schema.tables.id, schema.hands.tableId))
+      .where(eq(schema.hands.id, handId))
+      .limit(1);
+    if (!row) fail(404, 'not_found', 'hand not found');
+    const { h: hand, t } = row;
     const players = await c.var.db
       .select({ hp: schema.handPlayers, nickname: schema.users.nickname })
       .from(schema.handPlayers)
       .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
       .where(eq(schema.handPlayers.handId, handId));
-    const log = JSON.parse(hand.eventLog) as { actions: unknown[] };
-    return c.json({
+    const out: HandDetailDto = {
       id: hand.id,
       tableId: hand.tableId,
+      tableName: t.name,
       handNumber: hand.handNumber,
       board: JSON.parse(hand.board) as string[],
       potTotal: hand.potTotal,
       endedAt: hand.endedAt,
-      actions: log.actions,
-      players: players.map(({ hp, nickname }) => ({
-        userId: hp.userId,
-        seatIndex: hp.seatIndex,
-        nickname,
-        isYou: hp.userId === uid,
-        holeCards: hp.userId === uid || hp.wentToShowdown ? (JSON.parse(hp.holeCards) as string[]) : null,
-        stackStart: hp.stackStart,
-        net: hp.net,
-        won: hp.won,
-        rankClass: hp.wentToShowdown ? hp.rankClass : null,
-      })),
-    });
+      smallBlind: t.sb,
+      bigBlind: t.bb,
+      maxSeats: t.maxSeats,
+      ...replayLog(hand.eventLog),
+      players: players
+        .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
+        .map(({ hp, nickname }) => ({ ...replayPlayer(hp, nickname, uid), userId: hp.userId, isYou: hp.userId === uid })),
+    };
+    return c.json(out);
   });

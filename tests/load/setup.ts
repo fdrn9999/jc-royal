@@ -15,6 +15,9 @@ export async function setup() {
   const state = resolve(root, 'tests/.state/load');
   const tables: TestTable[] = Array.from({ length: cfg.tables }, (_, i) => ({ id: `load-${i}`, maxSeats: 6, sb: 5, bb: 10, min: 100, max: 2000 }));
   await prepareState(state, tables);
+  // wrangler dev records every invocation in a local trace store (on by default). Under this load it stalled the
+  // whole local runtime for up to a second at a time (docs/LOAD_TEST.md), so it is off unless asked for.
+  process.env.X_LOCAL_OBSERVABILITY ??= 'false';
   worker = await startWorker(Number(process.env.LOAD_PORT ?? 8796), state);
   process.env.TEST_BASE_URL = worker.url;
   process.env.LOAD_STATE = state;

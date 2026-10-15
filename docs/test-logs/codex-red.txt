@@ -1,0 +1,304 @@
+===== red_it (수정 전 코드) =====
+
+ RUN  v4.1.11 <repo>
+
+(node:35136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > suspend the same member: one change and one notice, the socket ends once and the seat is paid out once 21276ms
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > suspending a member who is already suspended, or whose account was withdrawn, changes nothing 8413ms
+ × tests/integration/admin-concurrency.test.ts > two administrators at once > a suspension that committed but never reached the tables is finished by asking again: the seat is left, the socket ends 2845ms
+   → expected undefined to match object { sockets: 1, unreached: [], …(1) }
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > close the same table during a hand: the hand plays out, each seat is paid once, the table closes once 19769ms
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > one suspends a member while the other closes their table mid-hand: both seats are paid once 15529ms
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > close the same empty table a moment apart: it stays closed, never set back to closing 2289ms
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > two super admins revert the same mismatch: one correction, one refusal, one notice 8678ms
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > send the same chip grant (one idempotency key): applied once, the other told it was a repeat 8446ms
+ ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > plan maintenance at once: one window; stop it at once: stopped once 10420ms
+(node:22648) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ tests/integration/service.test.ts > service notices > shown between their times in both languages, on the board and in every inbox when asked; ended and deleted ones drop out 8427ms
+ × tests/integration/service.test.ts > service notices > a new urgent notice is never crowded out by older ones; when the list is cut, the page is told when to ask again 371ms
+   → expected '182541b2-a065-4262-b88f-3fc56d8df87e' to be '32d2ebba-0499-4be6-8b72-10b8d6ef73e6' // Object.is equality
+ ✓ tests/integration/service.test.ts > maintenance > changes need a fresh password check; one window at a time, at most 48 hours, planned at most 90 days ahead; a planned one blocks nothing 9014ms
+ ✓ tests/integration/service.test.ts > maintenance > under way: the running hand plays out, nobody new sits or queues, members cannot sign in (staff can); the table close and pause still work; play resumes when it ends 33640ms
+ × tests/integration/service.test.ts > maintenance > a planned window begins and ends on its own: the table shows it, finishes the hand, deals nothing during it and again after 25212ms
+   → d1 execute failed (attempt 1): {
+  "error": {
+    "text": "fetch failed"
+  }
+}
+ × tests/integration/service.test.ts > maintenance > a table the start was never sent to learns of it when it records its hand, and deals no more until it ends 19515ms
+   → timeout waiting for maintenance learned; last hand: {"id":"it-mt-4:2:52a36baf","number":2,"seq":0,"stage":"preflop","buttonSeat":1,"sbSeat":1,"bbSeat":0,"board":[],"pots":[{"id":"main","amount":15,"eligibleSeats":[0,1]}],"potTotal":15,"actorSeat":1,"deadline":1792098890636,"result":null}
+(node:2268) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ tests/integration/admin-permissions.test.ts > permission table > refuses super-admin-only actions to plain administrators and records each attempt as failed 3458ms
+ ✓ tests/integration/admin-permissions.test.ts > permission table > every admin route refuses the wrong caller: no session, a member session, the player site, a plain admin on super-admin routes, and no fresh password 5372ms
+ ✓ tests/integration/admin-permissions.test.ts > permission table > records failed changes and refusals, but not a missing password confirmation or a read that found nothing 7383ms
+ × tests/integration/admin-permissions.test.ts > permission table > blocking entry through the settings route asks for the password like the table control does; other settings do not 1579ms
+   → {"ok":true,"appliesFrom":"now"}: expected 200 to be 401 // Object.is equality
+ ✓ tests/integration/admin-permissions.test.ts > role and status changes apply on the next request > a member whose role was taken away in the database is refused and recorded; demotion and suspension end the session 7536ms
+ ✓ tests/integration/admin-permissions.test.ts > console sessions > lists and ends your own sessions; only a super admin sees and ends other administrators’ sessions 6035ms
+ ✓ tests/integration/admin-permissions.test.ts > audit log search > filters by actor, action family, outcome, target, time and text, pages by cursor and counts the first page 1909ms
+ ✓ tests/integration/admin-permissions.test.ts > audit log search > shows a plain administrator only their own entries 1754ms
+ ✓ tests/integration/admin-permissions.test.ts > previews write nothing > chip adjustment: balance before and after, the duplicate key, and refusals without a refused-adjustment row 2961ms
+ ✓ tests/integration/admin-permissions.test.ts > previews write nothing > suspension, disconnection and table closing: the effect is listed, nothing changes 1778ms
+ ✓ tests/integration/admin-permissions.test.ts > previews write nothing > a preview is shown before the password is asked again; the change itself still asks, and the role is checked for both 1639ms
+ ✓ tests/integration/social.test.ts > friends > request by nickname → accept; decline, cancel and unfriend remove the link 766ms
+ ✓ tests/integration/social.test.ts > friends > deleting an account removes its friendships, pending requests and unread-message badge 478ms
+ ✓ tests/integration/social.test.ts > 1:1 messages > friends only; unread counts, read receipts, polling with ?after and paging with ?before 1946ms
+stdout | tests/integration/social.test.ts > 1:1 message sync by seq > a burst from both sides while one of them polls: every message once, in seq order, nothing missed
+dm burst: of 23 neighbouring pairs, 20 share a millisecond and 0 run backwards in clock time
+
+ ✓ tests/integration/social.test.ts > 1:1 message sync by seq > a burst from both sides while one of them polls: every message once, in seq order, nothing missed 871ms
+ ✓ tests/integration/social.test.ts > 1:1 message sync by seq > afterSeq and beforeSeq page across the 50-message boundary with no gap or repeat 1625ms
+ ✓ tests/integration/social.test.ts > 1:1 message sync by seq > reading up to a seq leaves a later message unread; the sender sees how far, even in a poll with nothing new 519ms
+ ✓ tests/integration/social.test.ts > blocking and receive settings > a block ends the friendship, stops requests and messages both ways, and unblocking restores nothing 716ms
+ ✓ tests/integration/social.test.ts > blocking and receive settings > a block drops pending requests, and a request racing a block never gets through 1294ms
+ ✓ tests/integration/social.test.ts > blocking and receive settings > receive settings: nobody can send requests; message notifications can be turned off; blocked senders never count 587ms
+ ✓ tests/integration/social.test.ts > table invites > friends only, open tables only; the card carries no join code, and the table still checks seats and codes 1137ms
+ ✓ tests/integration/social.test.ts > reports > posts and comments: one open report per member, evidence snapshot, admin resolves and hides 661ms
+ ✓ tests/integration/social.test.ts > reports > players: only someone at the same table; the server attaches their recent table chat 480ms
+ ✓ tests/integration/social.test.ts > reports > 1:1 messages: only someone in the conversation can report one, and the text is the server copy 905ms
+ ✓ tests/integration/social.test.ts > reports > players: after leaving, a report is checked against seat history and carries no hidden cards 3220ms
+ ✓ tests/integration/social.test.ts > reports > admins handling the same report at once: exactly one decision, one decision row, the others audited as refused 416ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/admin-concurrency.test.ts > two administrators at once > a suspension that committed but never reached the tables is finished by asking again: the seat is left, the socket ends
+AssertionError: expected undefined to match object { sockets: 1, unreached: [], …(1) }
+
+- Expected:
+{
+  "seats": [
+    {
+      "seat": "left",
+      "tableId": "it-conc-3",
+    },
+  ],
+  "sockets": 1,
+  "unreached": [],
+}
+
++ Received:
+undefined
+
+ ❯ tests/integration/admin-concurrency.test.ts:161:44
+    159|     expect(again.status, JSON.stringify(again.body)).toBe(409);
+    160|     expect(again.body.error.code).toBe('already_suspended');
+    161|     expect(again.body.error.details?.kick).toMatchObject({ sockets: 1,…
+       |                                            ^
+    162|     expect(await w.waitClose()).toBe(4004);
+    163|     // The seat went back to the wallet once; the account and its noti…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  tests/integration/admin-permissions.test.ts > permission table > blocking entry through the settings route asks for the password like the table control does; other settings do not
+AssertionError: {"ok":true,"appliesFrom":"now"}: expected 200 to be 401 // Object.is equality
+
+- Expected
++ Received
+
+- 401
++ 200
+
+ ❯ tests/integration/admin-permissions.test.ts:156:58
+    154|     const blocked = async () => (await d1<{ b: number }>(`SELECT entry…
+    155|     const refused = await staff.c.patch(`/api/admin/tables/${table}`, …
+    156|     expect(refused.status, JSON.stringify(refused.body)).toBe(401);
+       |                                                          ^
+    157|     expect(refused.body.error.code).toBe('reauth_required');
+    158|     expect(await blocked()).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  tests/integration/service.test.ts > service notices > a new urgent notice is never crowded out by older ones; when the list is cut, the page is told when to ask again
+AssertionError: expected '182541b2-a065-4262-b88f-3fc56d8df87e' to be '32d2ebba-0499-4be6-8b72-10b8d6ef73e6' // Object.is equality
+
+Expected: "32d2ebba-0499-4be6-8b72-10b8d6ef73e6"
+Received: "182541b2-a065-4262-b88f-3fc56d8df87e"
+
+ ❯ tests/integration/service.test.ts:156:20
+    154|     expect(ids).toHaveLength(20);
+    155|     // Urgent first; then the newest general ones, so the one cut is t…
+    156|     expect(ids[0]).toBe(urgent.id);
+       |                    ^
+    157|     expect(ids.slice(1, 4)).toEqual([old[19], old[18], old[17]]);
+    158|     expect(ids).not.toContain(old[0]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  tests/integration/service.test.ts > maintenance > a planned window begins and ends on its own: the table shows it, finishes the hand, deals nothing during it and again after
+Error: d1 execute failed (attempt 1): {
+  "error": {
+    "text": "fetch failed"
+  }
+}
+ ❯ d1 tests/support/d1.ts:32:64
+     30|       const { stdout, stderr, message } = e as Error & { stdout?: stri…
+     31|       const why = (stdout || stderr || message).trim().slice(0, 2000);
+     32|       if (!why.includes('SQLITE_BUSY') || attempt >= 10) throw new Err…
+       |                                                                ^
+     33|       await new Promise((r) => setTimeout(r, 100 * attempt + Math.rand…
+     34|     }
+ ❯ ledgerMatches tests/integration/service.test.ts:58:16
+ ❯ tests/integration/service.test.ts:379:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  tests/integration/service.test.ts > maintenance > a table the start was never sent to learns of it when it records its hand, and deals no more until it ends
+Error: timeout waiting for maintenance learned; last hand: {"id":"it-mt-4:2:52a36baf","number":2,"seq":0,"stage":"preflop","buttonSeat":1,"sbSeat":1,"bbSeat":0,"board":[],"pots":[{"id":"main","amount":15,"eligibleSeats":[0,1]}],"potTotal":15,"actorSeat":1,"deadline":1792098890636,"result":null}
+ ❯ Timeout._onTimeout tests/support/ws.ts:97:18
+     95|         if (i >= 0) {
+     96|           this.waiters.splice(i, 1);
+     97|           reject(new Error(`timeout waiting for ${label}; last hand: $…
+       |                  ^
+     98|         }
+     99|       }, ms);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  3 failed | 1 passed (4)
+      Tests  5 failed | 36 passed (41)
+   Start at  06:10:28
+   Duration  270.96s (transform 134ms, setup 0ms, import 263ms, tests 251.37s, environment 0ms)
+
+
+===== red_rs (수정 전 코드) =====
+
+ RUN  v4.1.11 <repo>
+
+(node:9532) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ↓ tests/integration/restart.test.ts > server restart recovery > resumes an in-progress hand after a hard process kill
+ ↓ tests/integration/restart.test.ts > server restart recovery > a top-up queued before a crash is applied once after the restart, and another restart does not repeat it
+ ↓ tests/integration/restart.test.ts > server restart recovery > a close the room never heard about is finished when the room next loads, or by the daily sweep, paying each player once
+ ↓ tests/integration/restart.test.ts > server restart recovery > cash-outs and the hand record D1 refuses while a room closes are retried by the room until they land, once
+ ↓ tests/integration/restart.test.ts > server restart recovery > a hand that ends while D1 is down, then a crash before any retry: after the restart it is recorded once and the leaver paid once
+ ↓ tests/integration/restart.test.ts > server restart recovery > a member room only D1 knows about (its opening call never reached it) is woken by the daily sweep and closes itself
+ ↓ tests/integration/restart.test.ts > server restart recovery > an administrator closes a table mid-hand and the server dies before the hand ends: after the restart the hand finishes, each seat is paid once, the table closes once
+ ↓ tests/integration/restart.test.ts > server restart recovery > a table paused mid-hand keeps every stack across a restart, deals nothing while paused, and the next hand when resumed
+ × tests/integration/restart.test.ts > server restart recovery > a player who leaves while the buy-in outcome is still unknown is paid back once the ledger shows it landed, not kept seated 34411ms
+   → expected { seatIndex: +0, …(13) } to be null
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/restart.test.ts > server restart recovery > a player who leaves while the buy-in outcome is still unknown is paid back once the ledger shows it landed, not kept seated
+AssertionError: expected { seatIndex: +0, …(13) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "buyIn": 500,
+  "connected": true,
+  "inHand": false,
+  "leaveAfterHand": false,
+  "nickname": "ua34399",
+  "phase": "seated",
+  "seatIndex": 0,
+  "sitOutSince": null,
+  "sittingOut": false,
+  "stack": 500,
+  "tableSessionId": "f48d6744-e8c9-47d8-b6d5-615c8a72182c",
+  "timeouts": 0,
+  "topUp": null,
+  "userId": "209e4543-7c11-4f42-9677-56b7925103d4",
+}
+
+ ❯ tests/integration/restart.test.ts:572:21
+    570|     // kept with a player who left it.
+    571|     const settled = await until(seatOf, (s) => !s || s.phase === 'seat…
+    572|     expect(settled).toBeNull();
+       |                     ^
+    573|     await until(() => seatsAt(id), (s) => s.length === 1 && s[0]!.stat…
+    574|     expect((await cashOuts(ca)).map((l) => l.amount)).toEqual([500]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  06:15:01
+   Duration  50.68s (transform 54ms, setup 0ms, import 85ms, tests 35.12s, environment 0ms)
+
+
+===== red_e2e (수정 전 코드) =====
+[WebServer] (node:15704) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:10764) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:43872) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:37976) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] [plugin builtin:vite-reporter] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[WebServer] ▲ [WARNING] Scheduled Workers are not automatically triggered during local development.
+[WebServer] 
+[WebServer]   To manually trigger a scheduled event, run:
+[WebServer]     curl "http://127.0.0.1:8798/cdn-cgi/local/scheduled"
+[WebServer]   For more details, see https://developers.cloudflare.com/workers/configuration/cron-triggers/#test-cron-triggers-locally
+[WebServer] 
+[WebServer] 
+[WebServer] (node:21064) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:19988) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  1 [desktop] › tests\e2e\service.spec.ts:210:1 › a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent (22.4s)
+
+
+  1) [desktop] › tests\e2e\service.spec.ts:210:1 › a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('notice-f017bf73-6330-42d8-babb-8db7488f5925')
+    Expected substring: "E2E 일반 공지"
+    Timeout: 15000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" getByTestId('notice-f017bf73-6330-42d8-babb-8db7488f5925') with timeout 15000ms
+      - waiting for getByTestId('notice-f017bf73-6330-42d8-babb-8db7488f5925')
+
+
+      245 |     await call('PATCH', `/${id}`, { kind: 'urgent' });
+      246 |     await home();
+    > 247 |     await expect(row).toContainText('E2E 일반 공지');
+          |                       ^
+      248 |     await expect(row.getByRole('button', { name: '닫기' })).toHaveCount(0);
+      249 |   } finally {
+      250 |     await call('DELETE', `/${id}`);
+        at <repo>\tests\e2e\service.spec.ts:247:23
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\service-a-dismissed-genera-30656-strator-raises-it-to-urgent-desktop\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\service-a-dismissed-genera-30656-strator-raises-it-to-urgent-desktop\test-failed-3.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #3: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\service-a-dismissed-genera-30656-strator-raises-it-to-urgent-desktop\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\service-a-dismissed-genera-30656-strator-raises-it-to-urgent-desktop\error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\service-a-dismissed-genera-30656-strator-raises-it-to-urgent-desktop\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\service-a-dismissed-genera-30656-strator-raises-it-to-urgent-desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [desktop] › tests\e2e\service.spec.ts:210:1 › a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent 

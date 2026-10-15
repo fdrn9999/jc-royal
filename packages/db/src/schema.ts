@@ -28,12 +28,16 @@ export const users = sqliteTable(
     friendRequests: text('friend_requests', { enum: ['everyone', 'nobody'] }).notNull().default('everyone'),
     /** Whether unread 1:1 messages count toward the header badge. */
     dmNotifications: integer('dm_notifications', { mode: 'boolean' }).notNull().default(true),
+    /** Last member sign-in (signup or login), kept after the session itself ends. Null before it was recorded. */
+    lastLoginAt: integer('last_login_at'),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
   (t) => [
     uniqueIndex('users_email_uq').on(t.email),
     uniqueIndex('users_nickname_uq').on(sql`lower(${t.nickname})`),
+    // Administrators only (the people a report can be assigned to), without reading every member.
+    index('users_staff_idx').on(t.role, t.status).where(sql`role != 'user'`),
   ],
 );
 
@@ -121,6 +125,8 @@ export const tables = sqliteTable(
     /** Shown in the lobby with an "입문 테이블" tag (low stakes for newcomers). */
     beginner: integer('beginner', { mode: 'boolean' }).notNull().default(false),
     entryBlocked: integer('entry_blocked', { mode: 'boolean' }).notNull().default(false),
+    /** Emergency control: no new hand starts (the one running finishes normally) until an admin resumes the table. */
+    handsPaused: integer('hands_paused', { mode: 'boolean' }).notNull().default(false),
     status: text('status', { enum: ['open', 'closing', 'closed'] }).notNull().default('open'),
     /** Live occupancy mirrored by the table room (informational, for lobby/admin). */
     liveSeated: integer('live_seated').notNull().default(0),
@@ -161,6 +167,8 @@ export const tableSessions = sqliteTable(
     // A user can only hold one open seat per table at a time.
     uniqueIndex('tsess_open_user_uq').on(t.tableId, t.userId).where(sql`status = 'seated'`),
     index('tsess_user_idx').on(t.userId),
+    // Seats closed in a period, for the daily statistics (only closed seats, which have a closing time).
+    index('tsess_closed_idx').on(t.closedAt).where(sql`closed_at IS NOT NULL`),
   ],
 );
 
@@ -205,6 +213,11 @@ export const handPlayers = sqliteTable(
     sawFlop: integer('saw_flop', { mode: 'boolean' }),
     /** Chips won from the pot, without the player's own uncalled chips handed back. */
     potWon: integer('pot_won'),
+    /**
+     * The hole cards were face up for the table at showdown; false for a mucked losing hand. NULL on rows recorded
+     * before the column existed, which read as `went_to_showdown` (nobody could muck then).
+     */
+    shown: integer('shown', { mode: 'boolean' }),
   },
   (t) => [
     primaryKey({ columns: [t.handId, t.userId] }),
@@ -225,8 +238,35 @@ export const adminAuditLog = sqliteTable(
     detail: text('detail'),
     ip: text('ip'),
     createdAt: integer('created_at').notNull().default(now),
+    /** 'failed': an attempt the API refused or that broke off (the action names it, e.g. `user.suspend.failed`). */
+    outcome: text('outcome', { enum: ['ok', 'failed'] }).notNull().default('ok'),
   },
-  (t) => [index('audit_created_idx').on(t.createdAt)],
+  (t) => [
+    index('audit_created_idx').on(t.createdAt),
+    // A member's (or table's) action history on its detail page.
+    index('audit_target_idx').on(t.targetType, t.targetId, t.createdAt),
+    // The audit log page: one administrator's actions, one kind of action, failed attempts.
+    index('audit_actor_idx').on(t.actorId, t.createdAt),
+    index('audit_action_idx').on(t.action, t.createdAt),
+    index('audit_failed_idx').on(t.createdAt).where(sql`outcome = 'failed'`),
+  ],
+);
+
+/**
+ * Internal notes administrators leave on a member for handover (why a sanction was given, what to watch). Never shown
+ * to the member. Not a place for personal data: the API refuses e-mail addresses and phone or ID numbers. Deleted with
+ * the account, and by their author or a super admin (the audit log keeps who deleted which note, not its text).
+ */
+export const adminNotes = sqliteTable(
+  'admin_notes',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id),
+    authorId: text('author_id').notNull(),
+    body: text('body').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('admin_notes_user_idx').on(t.userId, t.createdAt)],
 );
 
 export const reconciliationEvents = sqliteTable('reconciliation_events', {
@@ -238,6 +278,12 @@ export const reconciliationEvents = sqliteTable('reconciliation_events', {
   detail: text('detail'),
   resolvedBy: text('resolved_by'),
   resolvedAt: integer('resolved_at'),
+  /**
+   * How it was resolved: 'note' acknowledged with a note only (the mismatch stays, and is not reopened while the
+   * difference is the same), 'record' the difference written to the ledger as it is, 'revert' the wallet put back to
+   * the ledger. NULL on events resolved before the column existed, which were notes.
+   */
+  resolution: text('resolution', { enum: ['note', 'record', 'revert'] }),
   createdAt: integer('created_at').notNull().default(now),
 });
 
@@ -434,11 +480,135 @@ export const reports = sqliteTable(
     handledAt: integer('handled_at'),
     note: text('note'),
     createdAt: integer('created_at').notNull().default(now),
+    /** Staff rating while working the report; null = not rated yet. */
+    severity: text('severity', { enum: ['low', 'medium', 'high', 'critical'] }),
+    /** The administrator working on it, and since when. */
+    assigneeId: text('assignee_id'),
+    assignedAt: integer('assigned_at'),
+    /** Set when closed: whether the reporter and the reported member were sent the outcome (null on older reports). */
+    noticeReporter: integer('notice_reporter', { mode: 'boolean' }),
+    noticeTarget: integer('notice_target', { mode: 'boolean' }),
   },
   (t) => [
     index('reports_status_idx').on(t.status, t.createdAt),
     index('reports_target_user_idx').on(t.targetUserId, t.createdAt),
+    // What a member has reported, on their admin detail page.
+    index('reports_reporter_idx').on(t.reporterId, t.createdAt),
     // One open report per reporter and target; a new one is possible after review.
     uniqueIndex('reports_open_uq').on(t.reporterId, t.targetType, t.targetId).where(sql`status = 'open'`),
+    // "Mine" and "unassigned" in the queue.
+    index('reports_assignee_idx').on(t.assigneeId, t.status),
+    // Statistics by period.
+    index('reports_created_idx').on(t.createdAt),
   ],
+);
+
+/**
+ * What happened to a report, in order: notes administrators leave while working it, and every change of severity,
+ * assignee and status, and a sanction given from it. Kept with the report (reports survive account deletion,
+ * pseudonymous). Notes are not a place for personal data: the API refuses e-mail addresses and phone or ID numbers.
+ */
+export const reportEvents = sqliteTable(
+  'report_events',
+  {
+    id: text('id').primaryKey(),
+    reportId: text('report_id').notNull().references(() => reports.id),
+    actorId: text('actor_id').notNull(),
+    kind: text('kind', { enum: ['note', 'severity', 'assign', 'status', 'sanction'] }).notNull(),
+    /** Before and after: a severity, an administrator id, a status, or the sanction's audit action. */
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    /** The note, the decision note, or the sanction's reason. */
+    body: text('body'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('report_events_report_idx').on(t.reportId, t.createdAt)],
+);
+
+// ------------------------------------------------------------------ operations
+
+/**
+ * Per-minute counters of rare events for the admin dashboard (see ops.ts): `bucket` is the minute (epoch ms) and
+ * every room and request adds to the same row. Kept for OPS_RETENTION_MS by the daily housekeeping.
+ */
+export const opsMetrics = sqliteTable(
+  'ops_metrics',
+  {
+    bucket: integer('bucket').notNull(),
+    metric: text('metric').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.bucket, t.metric] })],
+);
+
+/**
+ * Days on which a member used the service (see stats.ts): the day and the member, nothing else. Kept for
+ * ACTIVE_DAYS_RETENTION days by the daily housekeeping; deleted with the account.
+ */
+export const activeDays = sqliteTable(
+  'active_days',
+  {
+    day: integer('day').notNull(),
+    userId: text('user_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.userId] })],
+);
+
+/** Daily operations statistics, one number per day and metric (see stats.ts). Day 0 holds markers. */
+export const dailyStats = sqliteTable(
+  'daily_stats',
+  {
+    day: integer('day').notNull(),
+    metric: text('metric').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.metric] })],
+);
+
+/**
+ * Service-wide notices shown as a banner on every page between starts_at and ends_at (open-ended when null), in the
+ * reader's language. A notice can also be pinned on the board (post_id). Deleting is soft so the audit trail stays readable.
+ */
+export const serviceNotices = sqliteTable(
+  'service_notices',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: ['general', 'urgent', 'maintenance'] }).notNull(),
+    titleKo: text('title_ko').notNull(),
+    titleEn: text('title_en').notNull(),
+    bodyKo: text('body_ko'),
+    bodyEn: text('body_en'),
+    startsAt: integer('starts_at').notNull(),
+    endsAt: integer('ends_at'),
+    postId: text('post_id'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+    deletedAt: integer('deleted_at'),
+  },
+  (t) => [index('service_notices_live_idx').on(t.deletedAt, t.startsAt)],
+);
+
+/**
+ * Scheduled maintenance. Between starts_at and ends_at no new seat is taken and no new hand is dealt anywhere (a hand
+ * already running plays out); with block_login, players other than staff cannot sign in or sign up. It never touches
+ * a table's own pause / entry block / close flags, so those stay as they were when it ends. ended_at is a manual early
+ * end, cancelled_at a cancel before it began. At most one window is unfinished at a time.
+ */
+export const maintenanceWindows = sqliteTable(
+  'maintenance_windows',
+  {
+    id: text('id').primaryKey(),
+    startsAt: integer('starts_at').notNull(),
+    endsAt: integer('ends_at').notNull(),
+    blockLogin: integer('block_login', { mode: 'boolean' }).notNull().default(false),
+    messageKo: text('message_ko'),
+    messageEn: text('message_en'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+    endedAt: integer('ended_at'),
+    cancelledAt: integer('cancelled_at'),
+  },
+  (t) => [index('maintenance_windows_ends_idx').on(t.endsAt)],
 );

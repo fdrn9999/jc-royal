@@ -6,6 +6,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { fail } from '../lib/http';
+import { SERVICE_REV_SQL } from '../lib/service';
 
 const sender = alias(schema.users, 'sender');
 
@@ -36,11 +37,12 @@ export const messageRoutes = new Hono<AppEnv>()
                   AND (SELECT dm_notifications FROM users WHERE id = ?1)
                   AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.blocker_id = ?1 AND b.blocked_id = d.sender_id)) AS dmUnread,
               (SELECT COUNT(*) FROM friendships f JOIN users u ON u.id = f.requester_id
-                WHERE (f.user_a = ?1 OR f.user_b = ?1) AND f.status = 'pending' AND f.requester_id != ?1 AND u.status != 'deleted') AS friendRequests`,
+                WHERE (f.user_a = ?1 OR f.user_b = ?1) AND f.status = 'pending' AND f.requester_id != ?1 AND u.status != 'deleted') AS friendRequests,
+              ${SERVICE_REV_SQL} AS serviceRev`,
     )
       .bind(c.var.user!.id)
       .first<UnreadCountsDto>();
-    return c.json({ unread: r?.unread ?? 0, dmUnread: r?.dmUnread ?? 0, friendRequests: r?.friendRequests ?? 0 } satisfies UnreadCountsDto);
+    return c.json({ unread: r?.unread ?? 0, dmUnread: r?.dmUnread ?? 0, friendRequests: r?.friendRequests ?? 0, serviceRev: r?.serviceRev ?? 0 } satisfies UnreadCountsDto);
   })
   .post('/read-all', async (c) => {
     await c.var.db.update(schema.messages).set({ readAt: Date.now() }).where(and(eq(schema.messages.userId, c.var.user!.id), isNull(schema.messages.readAt)));

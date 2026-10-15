@@ -39,6 +39,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-invite-priv', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'invite-42' },
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-restart-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-stats-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  // Delivery: commands whose answer a closed connection lost, sent again on the next one.
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-link-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Quick play: each group has a big blind no other table uses, so a filter on it sees only that group.
   { id: 'it-qp-a-beg', maxSeats: 6, sb: 13, bb: 26, min: 260, max: 2600, beginner: true },
   { id: 'it-qp-a-reg', maxSeats: 6, sb: 13, bb: 26, min: 260, max: 2600 },
@@ -53,6 +55,27 @@ export const TABLES: TestTable[] = [
   // Top-ups: heads-up tables, plus tables with a huge minimum where one player sits alone to empty a wallet.
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-topup-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000 })),
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-topup-drain-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 9000, max: 9900 })),
+  // Pre-actions: three players, so one can choose while another is to act. Long turns keep the clock out of it.
+  ...Array.from({ length: 6 }, (_, i) => ({ id: `it-pre-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Showdown muck: heads-up, so a checked-down hand has one covered loser.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-muck-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Operations dashboard: connection counters and a room failure.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-ops-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Emergency controls: forced disconnects (a suspended player's open socket) and paused tables.
+  ...Array.from({ length: 6 }, (_, i) => ({ id: `it-emg-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Member management: a hand played so the member page has a recent table and activity to show.
+  { id: 'it-member-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Chip economy: a session the room does not hold (reconciliation, stale sessions) and a cash-out that fails.
+  ...Array.from({ length: 3 }, (_, i) => ({ id: `it-econ-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Service maintenance: tables that stop dealing and seating while it runs, and one with a waitlist.
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `it-mt-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  { id: 'it-mt-wl', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Two administrators doing the same thing at once (a suspension, a close) while a hand runs.
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-conc-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Leaving mid-hand: three players, long turns so only the players (and the room's fold for a leaver) act.
+  { id: 'it-leave-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Administrator permissions: a table whose settings a plain administrator changes.
+  { id: 'it-perm-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {

@@ -8,6 +8,13 @@ export type HandStage = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown' | 'se
 
 export type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'allin';
 
+/**
+ * What a player chose to do on their next turn of the current street while waiting for others. The room carries it
+ * out only while it still fits: `check` only as a check (a bet in the meantime cancels it), `checkFold` checks or else
+ * folds, `fold` folds a bet but never a free check. Calls, raises and all-ins are never chosen in advance.
+ */
+export type PreActionKind = 'check' | 'checkFold' | 'fold';
+
 /** Legal option for the viewer, already normalised for the UI. */
 export type LegalOption =
   | { type: 'fold' }
@@ -95,6 +102,14 @@ export interface TableView {
   reservation: { nickname: string; until: number } | null;
   /** Epoch ms when the next hand is scheduled, if any. */
   nextHandAt: number | null;
+  /** An admin paused the table: the hand running finishes, no new one starts until it is resumed (absent from older rooms). */
+  paused?: boolean;
+  /**
+   * Service maintenance known to the room: from startsAt to endsAt no one new sits down and no new hand is dealt (a
+   * hand already running plays out). `active` by the room's clock (a new view is sent when it starts and ends). Null
+   * when none is planned; absent from older rooms.
+   */
+  maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
   you: {
     userId: string;
     seatIndex: number | null;
@@ -104,10 +119,16 @@ export interface TableView {
     leaving: boolean;
     inWaitlist: boolean;
     canSit: boolean;
+    /** A private table this connection has no valid join code for: sitting and the waitlist need one first. */
+    needsCode: boolean;
     /** A top-up waiting for the current hand to end; nothing is taken from the wallet until then. */
     topUpQueued: number | null;
     /** Automatic rebuy for this seat (off unless the player turned it on): chips per rebuy, total limit, used so far. */
     autoRebuy: { amount: number; cap: number; spent: number } | null;
+    /** The viewer's own pre-action for this street (nobody else is ever shown it). Absent from older rooms. */
+    preAction?: PreActionKind | null;
+    /** The seated viewer's auto-muck setting as the room holds it; null when not seated. Absent from older rooms. */
+    autoMuck?: boolean | null;
   };
 }
 

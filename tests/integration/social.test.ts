@@ -9,6 +9,13 @@ beforeAll(async () => {
   expect((await admin.get('/api/admin/auth/me')).status).toBe(200);
 });
 
+/** Blocking entry is an emergency control: the password is confirmed first (re-confirmation is rate limited per account). */
+async function reauth() {
+  const until = (await admin.get('/api/admin/auth/me')).body?.reauthValidUntil;
+  if (until && until - Date.now() > 60_000) return;
+  expect((await admin.post('/api/admin/auth/reauth', { password: PASSWORD })).status).toBe(200);
+}
+
 const counts = async (c: Client) => (await c.get('/api/messages/unread-count')).body as { unread: number; dmUnread: number; friendRequests: number };
 const ids = (list: { id: string }[]) => list.map((x) => x.id);
 type User = Awaited<ReturnType<typeof newUser>>;
@@ -377,6 +384,7 @@ describe('table invites', () => {
     expect((await invite(a, c, 'it-invite-0')).body.error.code).toBe('not_friends');
     expect((await invite(a, b, 'no-such-table')).body.error.code).toBe('table_unavailable');
     expect((await a.client.post(`/api/friends/${b.me.id}/invite`, {})).status).toBe(400);
+    await reauth();
     expect((await admin.patch('/api/admin/tables/it-invite-1', { entryBlocked: true })).status).toBe(200);
     expect((await invite(a, b, 'it-invite-1')).body.error.code).toBe('table_unavailable');
 
@@ -397,8 +405,8 @@ describe('table invites', () => {
     expect(priv.status).toBe(201);
     expect(JSON.stringify(priv.body)).not.toMatch(/invite-42|joinCode|code/i);
     const noCode = await TableSocket.open(b.client, 'it-invite-priv');
-    expect(noCode.state!.you.canSit).toBe(false);
-    expect(await noCode.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'forbidden' });
+    expect(noCode.state!.you).toMatchObject({ canSit: false, needsCode: true });
+    expect(await noCode.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'join_code_required' });
     noCode.close();
     const withCode = await TableSocket.open(b.client, 'it-invite-priv', { code: 'invite-42' });
     expect(withCode.state!.you.canSit).toBe(true);
@@ -431,6 +439,7 @@ describe('table invites', () => {
     expect((await b.client.req('PUT', `/api/blocks/${a.me.id}`)).status).toBe(200);
     expect((await invite(a, b, 'it-invite-0')).body.error.code).toBe('not_friends');
     expect((await invite(b, a, 'it-invite-0')).body.error.code).toBe('not_friends');
+    await reauth();
     expect((await admin.patch('/api/admin/tables/it-invite-1', { entryBlocked: false })).status).toBe(200);
   });
 });
@@ -573,7 +582,7 @@ describe('reports', () => {
     expect((await a.client.post('/api/reports', dm(hello.id))).status).toBe(201);
     // Earlier reports on the same member show up as history.
     const second = (await admin.get(`/api/admin/reports?userId=${b.me.id}`)).body.items.find((r: { targetId: string }) => r.targetId === hello.id);
-    expect(second.priorReports).toEqual({ total: 1, resolved: 0 });
+    expect(second.priorReports).toEqual({ total: 1, resolved: 0, reporters: 1 });
     expect(second.context.earlier).toEqual([]);
 
     // Messages leave with a deleted account, and can no longer be reported.
@@ -643,7 +652,7 @@ describe('reports', () => {
     wc.close();
   });
 
-  it('admins handling the same report at once: exactly one decision and one audit row', async () => {
+  it('admins handling the same report at once: exactly one decision, one decision row, the others audited as refused', async () => {
     const author = await newUser();
     const r1 = await newUser();
     const r2 = await newUser();
@@ -664,8 +673,14 @@ describe('reports', () => {
     expect(new Set(closed.map((r) => `${r.status}|${r.note}`)).size).toBe(1);
     const won = closed[0]!;
     expect(won.contentStatus).toBe(won.status === 'resolved' ? 'hidden' : 'visible');
-    const audits = ((await admin.get('/api/admin/audit?limit=50')).body as { action: string; targetId: string; detail: unknown }[]).filter((x) => x.targetId === rep.id);
-    expect(audits).toHaveLength(1);
-    expect(JSON.stringify(audits[0]!.detail)).toContain('"closed":2');
+    const audits = ((await admin.get('/api/admin/audit?limit=50')).body as { action: string; outcome: string; targetId: string; detail: unknown }[]).filter((x) => x.targetId === rep.id);
+    const decided = audits.filter((x) => x.outcome === 'ok');
+    expect(decided).toHaveLength(1);
+    expect(JSON.stringify(decided[0]!.detail)).toContain('"closed":2');
+    // The two losers are kept as refused attempts (409), not as decisions.
+    const refused = audits.filter((x) => x.outcome === 'failed');
+    expect(refused.map((x) => x.action)).toEqual(['report.resolve.failed', 'report.resolve.failed']);
+    expect(refused.every((x) => JSON.stringify(x.detail).includes('"code":"report_closed"'))).toBe(true);
+    expect(audits).toHaveLength(3);
   });
 });
