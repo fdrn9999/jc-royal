@@ -9,12 +9,11 @@ import { CreateRoomModal } from '../components/Rooms';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { entryOf, latest, setFavourite, useTablePrefs, type Latest } from '../lib/lobby';
+import { entryOf, latest, lobbyPoller, POLL_MS, setFavourite, useTablePrefs, type Latest } from '../lib/lobby';
 
 type Filter = 'all' | 'fav' | 'recent' | 'beginner' | 'playing' | 'open' | 'empty';
 const FILTERS: Filter[] = ['all', 'fav', 'recent', 'beginner', 'playing', 'open', 'empty'];
-/** How often a visible lobby refreshes the list. A hidden one does not. */
-const POLL_MS = 5_000;
+const INPUT_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const;
 
 function statusOf(t: LobbyTableDto): 'playing' | 'waiting' | 'empty' {
   if (t.playing) return 'playing';
@@ -22,8 +21,9 @@ function statusOf(t: LobbyTableDto): 'playing' | 'waiting' | 'empty' {
 }
 
 /**
- * The table list: refreshed every POLL_MS while the page is visible, and at once when it becomes visible again, the
- * window gets focus back or the connection returns. Requests never overlap and an outdated answer is never applied.
+ * The table list: refreshed every POLL_MS while the page is visible and in use (every IDLE_POLL_MS when nobody has
+ * touched it for a minute), and at once when it becomes visible again, the window gets focus back, the connection
+ * returns or someone uses an idle lobby. Requests never overlap and an outdated answer is never applied.
  */
 function useLobbyTables() {
   const [tables, setTables] = useState<LobbyTableDto[] | null>(null);
@@ -40,20 +40,19 @@ function useLobbyTables() {
     );
     feed.current = f;
     f.run();
-    const poll = () => {
-      // Coming back fires visibility and focus together: one request is enough.
-      if (document.visibilityState === 'visible' && Date.now() - f.startedAt >= 1_000) f.run();
-    };
-    const h = setInterval(poll, POLL_MS);
-    document.addEventListener('visibilitychange', poll);
-    window.addEventListener('focus', poll);
-    window.addEventListener('online', poll);
+    const p = lobbyPoller(f, () => document.visibilityState === 'visible');
+    const h = setInterval(p.tick, POLL_MS);
+    document.addEventListener('visibilitychange', p.wake);
+    window.addEventListener('focus', p.wake);
+    window.addEventListener('online', p.wake);
+    for (const e of INPUT_EVENTS) window.addEventListener(e, p.input, { passive: true });
     return () => {
       f.stop();
       clearInterval(h);
-      document.removeEventListener('visibilitychange', poll);
-      window.removeEventListener('focus', poll);
-      window.removeEventListener('online', poll);
+      document.removeEventListener('visibilitychange', p.wake);
+      window.removeEventListener('focus', p.wake);
+      window.removeEventListener('online', p.wake);
+      for (const e of INPUT_EVENTS) window.removeEventListener(e, p.input);
     };
   }, []);
   // The refresh button replaces a request already out rather than waiting for it.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entryOf, FAV_MAX, latest, parsePrefs, RECENT_MAX, withFav, withVisit } from '../src/lib/lobby';
+import { entryOf, FAV_MAX, IDLE_AFTER_MS, IDLE_POLL_MS, latest, lobbyPoller, parsePrefs, POLL_MS, RECENT_MAX, withFav, withVisit } from '../src/lib/lobby';
 
 /** A request whose answer the test decides; it rejects like fetch when aborted. */
 function deferred<T>() {
@@ -75,6 +75,72 @@ describe('latest', () => {
     f.run();
     t = 2_000;
     expect(f.startedAt).toBe(1_000);
+  });
+});
+
+/**
+ * Lobby list requests over `ms` on a fake clock, one second at a time: the page's first request, a tick every POLL_MS,
+ * input at the given times and wakes (visibility, focus) at the given times. Requests are answered at once.
+ */
+function lobbyRequests(ms: number, o: { input?: (t: number) => boolean; wake?: (t: number) => boolean; visible?: (t: number) => boolean } = {}) {
+  let t = 0;
+  let started = 0;
+  const runs: number[] = [];
+  const f = {
+    run: () => {
+      runs.push(t);
+      started = t;
+      return true;
+    },
+    get startedAt() {
+      return started;
+    },
+  };
+  const p = lobbyPoller(f, () => o.visible?.(t) ?? true, () => t);
+  f.run();
+  for (t = 1_000; t <= ms; t += 1_000) {
+    if (t % POLL_MS === 0) p.tick();
+    if (o.wake?.(t)) p.wake();
+    if (o.input?.(t)) p.input();
+  }
+  return runs;
+}
+const HOUR = 3_600_000;
+
+describe('lobby polling', () => {
+  it('a lobby left open with nobody at it asks for the list 130 times an hour instead of 721', () => {
+    const runs = lobbyRequests(HOUR);
+    // Before: the first request and one every 5 s, used or not.
+    const before = 1 + HOUR / POLL_MS;
+    expect(before).toBe(721);
+    expect(runs).toHaveLength(130);
+    // Every 5 s for the first minute, then every 30 s.
+    expect(runs.slice(0, 13)).toEqual([0, 5_000, 10_000, 15_000, 20_000, 25_000, 30_000, 35_000, 40_000, 45_000, 50_000, 55_000, 85_000]);
+    expect(runs.slice(13).every((r, i) => r - runs[12 + i]! === IDLE_POLL_MS)).toBe(true);
+  });
+
+  it('a lobby someone is using refreshes every 5 s, as before', () => {
+    expect(lobbyRequests(HOUR, { input: (t) => t % 10_000 === 0 })).toHaveLength(721);
+    expect(lobbyRequests(HOUR, { input: (t) => t % 50_000 === 0 })).toHaveLength(721);
+  });
+
+  it('the first input after a quiet spell brings the list up to date at once, then every 5 s again', () => {
+    const at = 10 * 60_000 + 7_000;
+    const runs = lobbyRequests(at + 20_000, { input: (t) => t === at });
+    const last = runs.filter((r) => r < at).at(-1)!;
+    expect(at - last).toBeGreaterThan(POLL_MS);
+    // The next tick (3 s later) is too soon after it; the ones after that are 5 s apart.
+    expect(runs.filter((r) => r >= at)).toEqual([at, at + 8_000, at + 13_000, at + 18_000]);
+  });
+
+  it('coming back to the page refreshes at once and counts as use; a hidden page asks for nothing', () => {
+    const back = 20 * 60_000 + 2_000;
+    const runs = lobbyRequests(back + IDLE_AFTER_MS, { visible: (t) => t >= back, wake: (t) => t === back });
+    expect(runs[0]).toBe(0); // the page's first request
+    expect(runs.slice(1)[0]).toBe(back);
+    expect(runs.slice(1).every((r) => r >= back)).toBe(true);
+    // In use again: every 5 s for the next minute.
+    expect(runs.filter((r) => r > back && r < back + IDLE_AFTER_MS - POLL_MS).every((r, i, a) => i === 0 || r - a[i - 1]! === POLL_MS)).toBe(true);
   });
 });
 

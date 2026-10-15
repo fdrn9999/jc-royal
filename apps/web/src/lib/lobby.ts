@@ -69,6 +69,39 @@ export function latest<T>(load: (signal: AbortSignal) => Promise<T>, onData: (da
   };
 }
 
+/** A visible lobby refreshes the list every POLL_MS while it is used, and every IDLE_POLL_MS once nobody has touched it for IDLE_AFTER_MS. */
+export const POLL_MS = 5_000;
+export const IDLE_POLL_MS = 30_000;
+export const IDLE_AFTER_MS = 60_000;
+
+/**
+ * When the lobby asks for the list again. A hidden page never does. `tick` runs every POLL_MS; `input` on the user's
+ * pointer, keys or wheel; `wake` when the page becomes visible, gets focus or the connection returns. A lobby left open
+ * with nobody at it slows down, and the first input afterwards brings the list up to date at once.
+ */
+export function lobbyPoller(f: Pick<Latest, 'run' | 'startedAt'>, visible: () => boolean, now = Date.now) {
+  let lastInput = now();
+  return {
+    tick() {
+      const t = now();
+      const every = t - lastInput >= IDLE_AFTER_MS ? IDLE_POLL_MS : POLL_MS;
+      // Timers fire a little early or late; a second's slack keeps the tick from skipping every other turn.
+      if (visible() && t - f.startedAt >= every - 1_000) f.run();
+    },
+    input() {
+      const t = now();
+      lastInput = t;
+      if (visible() && t - f.startedAt >= POLL_MS) f.run();
+    },
+    wake() {
+      const t = now();
+      lastInput = t;
+      // Coming back fires visibility and focus together: one request is enough.
+      if (visible() && t - f.startedAt >= 1_000) f.run();
+    },
+  };
+}
+
 export interface TablePrefs {
   /** Favourite table ids, newest first. */
   fav: string[];

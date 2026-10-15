@@ -1005,9 +1005,10 @@ export class TableRoom extends DurableObject<Env> {
       await this.save({ [key]: entry });
       this.unrecorded.add(key);
     }
-    await this.retryUnrecorded();
-    // Results stay visible until the next hand starts.
+    // Results stay visible until the next hand starts. They go out before the D1 write: the result is already saved
+    // here, nothing shown depends on D1 having it, and commands sent on seeing it wait in `run` until settle is done.
     this.broadcast(cues);
+    await this.retryUnrecorded();
     // Top-ups that waited for this hand and automatic rebuys happen before busted players stand up.
     const notices = await this.applyTopUps(h.handId);
     const left: TableCue[] = [];

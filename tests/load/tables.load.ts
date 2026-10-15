@@ -27,6 +27,9 @@ afterAll(() => {
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const origin = performance.now();
+/** The same moment as wall-clock time, to line the timings up with machine counters sampled outside the test. */
+const originEpochMs = Date.now();
 
 /** Reads the local D1 directly (like an operator console); asynchronous so the HTTP keep-alive stays healthy. */
 async function d1<T = Record<string, number>>(sql: string): Promise<T[]> {
@@ -97,9 +100,13 @@ const m = {
   connectMs: [] as number[],
   sitMs: [] as number[],
   actionMs: [] as number[],
+  /** Every action: when it was sent (ms since the test started), how long its result took, and whether it ended the hand. */
+  actionLog: [] as { at: number; ms: number; tableId: string; endedHand: boolean }[],
   fanoutMs: [] as number[],
   leaveMs: [] as number[],
   lobbyMs: [] as number[],
+  /** Every lobby list request: when it was sent (ms since the test started) and how long it took. */
+  lobbyLog: [] as { at: number; ms: number }[],
   lobbyFailures: 0,
   sent: 0,
   actions: 0,
@@ -149,6 +156,7 @@ async function playTable(tableId: string, players: Seat[], watchers: TableSocket
     const t0 = performance.now();
     const { result, seq, handId } = await p.ws.act(type, amount);
     m.actionMs.push(performance.now() - t0);
+    m.actionLog.push({ at: t0 - origin, ms: performance.now() - t0, tableId, endedHand: result.t === 'state' && result.state.hand?.stage === 'settled' });
     m.sent++;
     m.actions++;
     if (result.t === 'error') {
@@ -232,8 +240,10 @@ it(`${cfg.tables} tables × ${cfg.players} players + ${cfg.spectators} spectator
       const t0 = performance.now();
       try {
         const r = await lobby.get('/api/tables');
-        if (r.status === 200) m.lobbyMs.push(performance.now() - t0);
-        else m.lobbyFailures++;
+        if (r.status === 200) {
+          m.lobbyMs.push(performance.now() - t0);
+          m.lobbyLog.push({ at: t0 - origin, ms: performance.now() - t0 });
+        } else m.lobbyFailures++;
       } catch {
         m.lobbyFailures++;
       }
@@ -304,6 +314,9 @@ it(`${cfg.tables} tables × ${cfg.players} players + ${cfg.spectators} spectator
       wsConnect: stats(m.connectMs),
       sit: stats(m.sitMs),
       actionRoundTrip: stats(m.actionMs),
+      // The action that ends a hand waits for the hand to be settled and its result saved in the room before it is sent.
+      actionRoundTripEndingHand: stats(m.actionLog.filter((x) => x.endedHand).map((x) => x.ms)),
+      actionRoundTripWithinHand: stats(m.actionLog.filter((x) => !x.endedHand).map((x) => x.ms)),
       fanoutSlowestSocket: stats(m.fanoutMs),
       leave: stats(m.leaveMs),
       lobbyList: stats(m.lobbyMs),
@@ -332,6 +345,10 @@ it(`${cfg.tables} tables × ${cfg.players} players + ${cfg.spectators} spectator
     },
   };
   writeFileSync(resolve(root, 'tests/.state/load-report.json'), JSON.stringify(report, null, 2));
+  // Every action with its time, for finding when slow ones happened (all tables at once, or one table's hand ends).
+  writeFileSync(resolve(root, 'tests/.state/load-actions.json'), JSON.stringify(m.actionLog.map((x) => ({ ...x, at: Math.round(x.at), ms: Math.round(x.ms) }))));
+  // The lobby requests (served by the API worker) on the same clock, and when that clock started in wall-clock time.
+  writeFileSync(resolve(root, 'tests/.state/load-timeline.json'), JSON.stringify({ originEpochMs, lobby: m.lobbyLog.map((x) => ({ at: Math.round(x.at), ms: Math.round(x.ms) })) }));
   console.log(`[load] report (tests/.state/load-report.json)\n${JSON.stringify(report, null, 2)}`);
 
   expect(m.errors).toEqual([]);
