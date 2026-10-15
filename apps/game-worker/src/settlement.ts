@@ -20,6 +20,8 @@ export interface TableRow {
   isPrivate: boolean;
   allowSpectators: boolean;
   entryBlocked: boolean;
+  /** Emergency control: no new hand starts until an admin resumes the table. */
+  handsPaused: boolean;
   status: 'open' | 'closing' | 'closed';
   roomType: 'official' | 'member';
   /** The member who opened a member room (or the admin who opened an official table). */
@@ -33,7 +35,7 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
     .prepare(
       `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
               min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
-              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, status,
+              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
               room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash
        FROM tables WHERE id = ?1`,
     )
@@ -52,6 +54,7 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
     isPrivate: !!r.isPrivate,
     allowSpectators: !!r.allowSpectators,
     entryBlocked: !!r.entryBlocked,
+    handsPaused: !!r.handsPaused,
     status: r.status as TableRow['status'],
     roomType: r.roomType === 'member' ? 'member' : 'official',
     createdBy: r.createdBy == null ? null : String(r.createdBy),
@@ -59,7 +62,13 @@ export async function loadTable(d1: D1Database, tableId: string): Promise<TableR
   };
 }
 
-export type BuyInResult = { ok: true; balanceAfter: number } | { ok: false; code: 'insufficient_balance' | 'already_seated' };
+export type BuyInResult = { ok: true; balanceAfter: number } | { ok: false; code: 'insufficient_balance' | 'already_seated' | 'suspended' };
+
+/** Whether the account may still bring chips to a table; asked only after the ledger refused a buy-in or top-up. */
+async function accountActive(d1: D1Database, userId: string): Promise<boolean> {
+  const r = await d1.prepare(`SELECT status FROM users WHERE id = ?1`).bind(userId).first<{ status: string }>();
+  return r?.status === 'active';
+}
 
 /** Debits the wallet and opens a table session atomically. */
 export async function buyIn(
@@ -77,6 +86,7 @@ export async function buyIn(
         tableId: p.tableId,
         refId: p.tableSessionId,
         memo: `seat ${p.seatIndex + 1}`,
+        activeOnly: true,
       },
       (ledgerId) => [
         d1
@@ -87,7 +97,7 @@ export async function buyIn(
           .bind(p.tableSessionId, p.tableId, p.userId, p.seatIndex, p.amount, ledgerId),
       ],
     );
-    if (r.status === 'insufficient') return { ok: false, code: 'insufficient_balance' };
+    if (r.status === 'insufficient') return { ok: false, code: (await accountActive(d1, p.userId)) ? 'insufficient_balance' : 'suspended' };
     return { ok: true, balanceAfter: r.balanceAfter };
   } catch (e) {
     // Unique (table_id, user_id) WHERE status='seated' — the batch rolled back entirely.
@@ -104,17 +114,18 @@ export async function buyInCommitted(d1: D1Database, tableSessionId: string): Pr
 
 /**
  * Moves chips from the wallet to an open table session (a top-up or an automatic rebuy). The ledger key makes a
- * repeat a no-op ('duplicate'), so a retry after a crash never takes chips twice.
+ * repeat a no-op ('duplicate'), so a retry after a crash never takes chips twice. A suspended account gets 'suspended'.
  */
 export async function topUp(
   d1: D1Database,
   p: { userId: string; tableId: string; tableSessionId: string; amount: number; key: string; memo: string },
-): Promise<'applied' | 'duplicate' | 'insufficient'> {
+): Promise<'applied' | 'duplicate' | 'insufficient' | 'suspended'> {
   const r = await applyLedger(
     d1,
-    { userId: p.userId, type: 'top_up', amount: -p.amount, idempotencyKey: p.key, tableId: p.tableId, refId: p.tableSessionId, memo: p.memo },
+    { userId: p.userId, type: 'top_up', amount: -p.amount, idempotencyKey: p.key, tableId: p.tableId, refId: p.tableSessionId, memo: p.memo, activeOnly: true },
     (ledgerId) => [d1.prepare(`UPDATE table_sessions SET buy_in = buy_in + ?1 WHERE id = ?2 AND ${LEDGER_GUARD}`).bind(p.amount, p.tableSessionId, ledgerId)],
   );
+  if (r.status === 'insufficient' && !(await accountActive(d1, p.userId))) return 'suspended';
   return r.status;
 }
 

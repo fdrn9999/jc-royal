@@ -3,7 +3,23 @@ import { academyItemName, ageOn, isoDate, type AcademyItemKind } from '@jc/types
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useT } from '../i18n';
-import { academyKindLabel, actionLabel, auditActionLabel, handRankLabel, ledgerTypeLabel, memoLabel, roleLabel, scopeLabel, stageLabel, targetTypeLabel, userStatusLabel } from '../labels';
+import {
+  academyKindLabel,
+  actionLabel,
+  auditActionLabel,
+  handRankLabel,
+  ledgerTypeLabel,
+  memoLabel,
+  roleLabel,
+  scopeLabel,
+  seatOutcomeLabel,
+  seatPhaseLabel,
+  stageLabel,
+  tableIssueLabel,
+  targetTypeLabel,
+  topUpStateLabel,
+  userStatusLabel,
+} from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
@@ -66,7 +82,7 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
 }
 
 // ------------------------------------------------------------------ users
-interface UserRow { id: string; email: string; nickname: string; locale: Locale; role: string; status: string; balance: number; createdAt: number }
+interface UserRow { id: string; email: string; nickname: string; locale: Locale; role: string; status: string; balance: number; createdAt: number; online?: boolean }
 
 const EXPORT_MAX = 1000;
 const checkbox = 'size-4 cursor-pointer accent-gold-500';
@@ -77,10 +93,11 @@ export function UsersPage() {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [lang, setLang] = useState<'' | Locale>('');
+  const [onlineOnly, setOnlineOnly] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const { data, error } = useData<UserRow[]>(`/api/admin/users?q=${encodeURIComponent(query)}${lang ? `&locale=${lang}` : ''}&limit=200`);
+  const { data, error } = useData<UserRow[]>(`/api/admin/users?q=${encodeURIComponent(query)}${lang ? `&locale=${lang}` : ''}${onlineOnly ? '&online=1' : ''}&limit=200`);
   const shown = data ?? [];
   const shownSelected = shown.filter((u) => selected.has(u.id)).length;
   const allShown = shown.length > 0 && shownSelected === shown.length;
@@ -123,6 +140,10 @@ export function UsersPage() {
           <option value="ko">{t('langKo')}</option>
           <option value="en">{t('langEn')}</option>
         </select>
+        <label className="flex h-11 items-center gap-2 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm" title={t('onlineBasis')}>
+          <input type="checkbox" className={checkbox} checked={onlineOnly} onChange={(e) => setOnlineOnly(e.target.checked)} data-testid="online-filter" />
+          {t('onlineOnly')}
+        </label>
         <Button type="submit" variant="subtle">{t('searchBtn')}</Button>
       </form>
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-ink-900/60 px-3 py-2" data-testid="export-bar">
@@ -163,7 +184,10 @@ export function UsersPage() {
               <td className="px-2 py-2 text-ink-300">{u.email}</td>
               <td className="px-2 py-2"><LangBadge locale={u.locale} /></td>
               <td className="px-2 py-2"><Badge tone={u.role === 'user' ? 'neutral' : 'gold'}>{roleLabel(t, u.role)}</Badge></td>
-              <td className="px-2 py-2"><Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge></td>
+              <td className="px-2 py-2">
+                <Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge>
+                {u.online && <Badge tone="blue" className="ml-1">{t('online')}</Badge>}
+              </td>
               <td className="px-2 py-2 font-mono">{formatChips(u.balance)}</td>
               <td className="px-2 py-2 text-xs text-ink-400">{formatDate(u.createdAt, locale)}</td>
               <td className="px-2 py-2"><Link to={`/users/${u.id}`} className="text-gold-300">{t('detail')}</Link></td>
@@ -188,6 +212,30 @@ interface UserDetail {
   openSeats: { id: string; tableId: string; seatIndex: number; buyIn: number }[];
   hands: { n: number; net: number };
   ledgerConsistent: boolean;
+  /** Valid sign-in sessions, most recent first (no tokens or addresses). Absent from older APIs. */
+  sessions?: { kind: 'user' | 'admin'; createdAt: number; lastSeenAt: number; expiresAt: number }[];
+  online?: boolean;
+}
+
+/** What ending a member's table connections did (the api's kickEverywhere). */
+interface KickReport { tables: number; reached: number; unreached: string[]; truncated: boolean; sockets: number; seats: { tableId: string; seat: string }[] }
+
+function KickResult({ r }: { r: { kick: KickReport; sessions?: number } }) {
+  const { t } = useT();
+  const k = r.kick;
+  return (
+    <section className="flex flex-col gap-1.5 rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-ink-100" data-testid="kick-result" aria-live="polite">
+      {r.sessions !== undefined && <p>{t('kickSessions', { n: r.sessions })}</p>}
+      <p>{t('kickResult', { sockets: k.sockets, reached: k.reached, tables: k.tables })}</p>
+      {k.seats.map((s) => (
+        <p key={s.tableId}>
+          <Link to={`/tables/${s.tableId}`} className="text-gold-300 hover:underline">{t('seatOutcome', { table: s.tableId, outcome: seatOutcomeLabel(t, s.seat) })}</Link>
+        </p>
+      ))}
+      {k.unreached.length > 0 && <p className="break-all text-danger" role="alert">{t('kickUnreached', { n: k.unreached.length, ids: k.unreached.join(', ') })}</p>}
+      {k.truncated && <p className="text-ink-300">{t('kickTruncated')}</p>}
+    </section>
+  );
 }
 
 interface ResetLink {
@@ -210,9 +258,14 @@ export function UserDetailPage() {
   const [memo, setMemo] = useState('');
   const [reason, setReason] = useState('');
   const [reset, setReset] = useState<ResetLink | null>(null);
+  const [confirm, setConfirm] = useState<null | 'suspend' | 'disconnect'>(null);
+  const [dReason, setDReason] = useState('');
+  const [removeSeat, setRemoveSeat] = useState(false);
+  const [kick, setKick] = useState<{ kick: KickReport; sessions?: number } | null>(null);
   const run = async (fn: () => Promise<unknown>) => {
     setMsg(null);
     setReset(null);
+    setKick(null);
     try {
       await fn();
       setMsg(t('saved'));
@@ -230,19 +283,33 @@ export function UserDetailPage() {
       if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errText(e, t));
     }
   };
+  // Suspending and ending connections reach the member's tables: confirmed first, then the result says what each table did.
+  const endConnections = (kind: 'suspend' | 'disconnect') => {
+    setConfirm(null);
+    void run(async () => {
+      setKick(
+        kind === 'suspend'
+          ? await api<{ kick: KickReport }>(`/api/admin/users/${id}/suspend`, { body: { reason } })
+          : await api<{ kick: KickReport; sessions: number }>(`/api/admin/users/${id}/disconnect`, { body: { reason: dReason, removeFromTable: removeSeat } }),
+      );
+    });
+  };
   if (error) return <Empty>{error}</Empty>;
   if (!data) return <Empty>{t('loading')}</Empty>;
   const u = data.user;
+  const canModerate = me?.user.id !== u.id && (u.role === 'user' || me?.user.role === 'super_admin');
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-extrabold">{u.nickname}</h1>
         <Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge>
+        {data.online && <Badge tone="blue">{t('online')}</Badge>}
         <Badge tone="gold">{roleLabel(t, u.role)}</Badge>
         {!data.ledgerConsistent && <Badge tone="red">{t('ledgerMismatch')}</Badge>}
         <Link to={`/reports?status=all&userId=${u.id}`} className="ml-auto text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
       </div>
       {msg && <p className="break-all rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-gold-300" role="status">{msg}</p>}
+      {kick && <KickResult r={kick} />}
       {reset && <ResetLinkResult reset={reset} />}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label={t('balance')} value={formatChips(u.balance)} />
@@ -281,9 +348,9 @@ export function UserDetailPage() {
         <Panel title={t('status')}>
           <div className="flex flex-col gap-3">
             {u.status === 'active' && me?.user.id !== u.id ? (
-              <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); void run(() => api(`/api/admin/users/${id}/suspend`, { body: { reason } })); }}>
-                <Input placeholder={t('reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
-                <Button type="submit" variant="danger" disabled={reason.trim().length < 2}>{t('suspend')}</Button>
+              <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); setConfirm('suspend'); }}>
+                <Input placeholder={t('reason')} aria-label={t('reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
+                <Button type="submit" variant="danger" disabled={reason.trim().length < 2} data-testid="suspend">{t('suspend')}</Button>
               </form>
             ) : u.status === 'suspended' ? (
               <Button variant="outline" onClick={() => run(() => api(`/api/admin/users/${id}/unsuspend`, { body: {} }))}>{t('unsuspend')} ({u.suspendedReason})</Button>
@@ -300,6 +367,59 @@ export function UserDetailPage() {
           </div>
         </Panel>
       </div>
+      <Panel title={t('connectionsTitle')}>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-2 text-sm" data-testid="user-sessions">
+            {(data.sessions ?? []).length === 0 ? (
+              <p className="text-ink-400">{t('noSessions')}</p>
+            ) : (
+              <ul className="divide-y divide-white/5">
+                {data.sessions!.map((s, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+                    <Badge tone={s.kind === 'admin' ? 'gold' : 'neutral'}>{s.kind === 'admin' ? t('sessionKindAdmin') : t('sessionKindUser')}</Badge>
+                    <span className="text-xs text-ink-300">{t('lastSeen')} {formatDate(s.lastSeenAt, locale)}</span>
+                    <span className="text-xs text-ink-400">{t('expiresAt')} {formatDate(s.expiresAt, locale)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {data.openSeats.length > 0 && (
+              <ul className="flex flex-wrap gap-2">
+                {data.openSeats.map((s) => (
+                  <li key={s.id}>
+                    <Link to={`/tables/${s.tableId}`} className="text-xs text-gold-300 hover:underline">#{s.seatIndex + 1} · {s.tableId} · {t('seatBuyIn', { n: formatChips(s.buyIn) })}</Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-ink-400">{t('onlineBasis')}</p>
+          </div>
+          {canModerate && (
+            <form className="flex min-w-0 flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); setConfirm('disconnect'); }} data-testid="disconnect-form">
+              <p className="text-xs text-ink-300">{t('disconnectHint')}</p>
+              <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={dReason} onChange={(e) => setDReason(e.target.value)} />}</Field>
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" className={`${checkbox} mt-0.5 shrink-0`} checked={removeSeat} onChange={(e) => setRemoveSeat(e.target.checked)} data-testid="remove-from-table" />
+                <span>{t('removeFromTable')}</span>
+              </label>
+              <p className="text-xs text-ink-400">{t('seatPolicy')}</p>
+              <Button type="submit" variant="danger" disabled={dReason.trim().length < 2} data-testid="disconnect">{t('disconnect')}</Button>
+            </form>
+          )}
+        </div>
+      </Panel>
+      <Modal
+        open={confirm !== null}
+        onClose={() => setConfirm(null)}
+        title={confirm === 'suspend' ? t('suspend') : t('disconnect')}
+        footer={<><Button variant="ghost" onClick={() => setConfirm(null)}>{t('cancel')}</Button><Button variant="danger" onClick={() => confirm && endConnections(confirm)} data-testid="confirm-end">{t('confirm')}</Button></>}
+      >
+        <div className="flex flex-col gap-2 text-sm">
+          <p>{confirm === 'suspend' ? t('suspendConfirm', { name: u.nickname }) : t('disconnectConfirm', { name: u.nickname })}</p>
+          <p className="break-all text-ink-300">{t('reason')}: {confirm === 'suspend' ? reason : dReason}</p>
+          {(confirm === 'suspend' || removeSeat) && <p className="text-xs text-ink-400">{t('seatPolicy')}</p>}
+        </div>
+      </Modal>
       <Panel title={t('ledger')}>
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (
@@ -346,7 +466,7 @@ function ResetLinkResult({ reset }: { reset: ResetLink }) {
 // ------------------------------------------------------------------ tables
 interface TableRow {
   id: string; name: string; maxSeats: number; smallBlind: number; bigBlind: number; minBuyIn: number; maxBuyIn: number; turnSeconds: number;
-  isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
+  isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; handsPaused?: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
   roomType: 'official' | 'member'; hostNickname: string | null;
 }
 
@@ -384,7 +504,7 @@ export function TablesPage() {
                 {tb.name} {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}
                 {tb.roomType === 'member' && <Badge tone="blue" className="ml-1">{t('memberRoom')} · {tb.hostNickname ?? '—'}</Badge>}
               </td>
-              <td className="px-2 py-2"><Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>{tb.entryBlocked && <Badge tone="red" className="ml-1">{t('entryBlocked')}</Badge>}</td>
+              <td className="px-2 py-2"><Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>{tb.entryBlocked && <Badge tone="red" className="ml-1">{t('entryBlocked')}</Badge>}{tb.handsPaused && <Badge tone="red" className="ml-1">{t('pausedBadge')}</Badge>}</td>
               <td className="px-2 py-2">{tb.maxSeats}</td>
               <td className="px-2 py-2 font-mono">{tb.smallBlind}/{tb.bigBlind}</td>
               <td className="px-2 py-2 font-mono">{formatChips(tb.minBuyIn, true)}–{formatChips(tb.maxBuyIn, true)}</td>
@@ -419,13 +539,51 @@ export function TablesPage() {
   );
 }
 
+interface LiveSeat {
+  seatIndex: number;
+  nickname: string;
+  stack: number;
+  connected: boolean;
+  sittingOut: boolean;
+  phase?: string;
+  leaveAfterHand?: boolean;
+  timeouts?: number;
+  topUp?: { state: string; amount: number; auto: boolean } | null;
+}
+/** The room's admin status (never cards). Fields after `chipsOnTable` are absent from rooms older than B2. */
+interface LiveStatus {
+  seats?: (LiveSeat | null)[];
+  handNumber?: number;
+  handInProgress?: boolean;
+  stage?: string | null;
+  connections?: number;
+  chipsOnTable?: number;
+  paused?: boolean;
+  hand?: { id: string; stage: string; actorSeat: number | null; deadline: number | null; stalled: boolean } | null;
+  nextHandAt?: number | null;
+  alarmAt?: number | null;
+  unrecordedHands?: number;
+  version?: number;
+  at?: number;
+}
+interface Diagnosis {
+  issues: string[];
+  sessionsOnlyInD1: { id: string; userId: string; seatIndex: number; buyIn: number; nickname: string | null }[];
+  seatsOnlyInRoom: { userId: string; nickname: string; phase: string; tableSessionId: string }[];
+}
+type TableControl = 'pause' | 'resume' | 'block' | 'unblock';
+const CONTROL_HINT: Record<TableControl, 'pauseHint' | 'resumeHint' | 'blockHint' | 'unblockHint'> = { pause: 'pauseHint', resume: 'resumeHint', block: 'blockHint', unblock: 'unblockHint' };
+const CONTROL_LABEL: Record<TableControl, 'pauseHands' | 'resumeHands' | 'entryBlocked' | 'unblockEntry'> = { pause: 'pauseHands', resume: 'resumeHands', block: 'entryBlocked', unblock: 'unblockEntry' };
+
 export function TableDetailPage() {
   const { id = '' } = useParams();
-  const { t } = useT();
+  const { t, locale } = useT();
   const { api } = useAdmin();
-  const { data, reload } = useData<{ table: TableRow; live: Record<string, unknown> | null }>(`/api/admin/tables/${id}`);
+  const { data, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null }>(`/api/admin/tables/${id}`);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [control, setControl] = useState<TableControl | null>(null);
+  const [cReason, setCReason] = useState('');
   const [edit, setEdit] = useState<{ smallBlind?: number; bigBlind?: number; minBuyIn?: number; maxBuyIn?: number }>({});
   const act = async (fn: () => Promise<unknown>) => {
     try {
@@ -436,14 +594,32 @@ export function TableDetailPage() {
       setMsg(errText(e, t));
     }
   };
+  const runControl = async (action: TableControl) => {
+    setControl(null);
+    setMsg(null);
+    try {
+      const r = await api<{ paused: boolean; handInProgress: boolean }>(`/api/admin/tables/${id}/control`, { body: { action, reason: cReason } });
+      setMsg(action === 'pause' && r.handInProgress ? `${t('saved')} ${t('pausedAfterHand')}` : t('saved'));
+      setCReason('');
+      await reload();
+    } catch (e) {
+      setMsg(errText(e, t));
+      await reload();
+    }
+  };
   if (!data) return <Empty>{t('loading')}</Empty>;
   const tb = data.table;
-  const live = data.live as { seats?: ({ seatIndex: number; nickname: string; stack: number; connected: boolean; sittingOut: boolean } | null)[]; handNumber?: number; handInProgress?: boolean; stage?: string | null; connections?: number; chipsOnTable?: number } | null;
+  const live = data.live;
+  const diag = data.diagnosis;
+  const time = (ms: number | null | undefined) => (ms ? formatDate(ms, locale) : t('none'));
+  const controllable = tb.status === 'open';
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-extrabold">{tb.name}</h1>
         <Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>
+        {tb.handsPaused && <Badge tone="red">{t('pausedBadge')}</Badge>}
+        {tb.entryBlocked && <Badge tone="red">{t('entryBlockedShort')}</Badge>}
         {tb.lastIssue && <Badge tone="red">{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></Badge>}
       </div>
       {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
@@ -454,13 +630,91 @@ export function TableDetailPage() {
               <div>{t('liveLine', { n: live.handNumber ?? 0, state: live.handInProgress ? stageLabel(t, live.stage) : t('idleState'), ws: live.connections ?? 0, chips: formatChips(live.chipsOnTable ?? 0) })}</div>
               <ul className="divide-y divide-white/5">
                 {live.seats?.map((s, i) => s && (
-                  <li key={i} className="flex justify-between py-1.5"><span>#{s.seatIndex + 1} {s.nickname} {!s.connected && <Badge>{t('offline')}</Badge>} {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}</span><span className="font-mono">{formatChips(s.stack)}</span></li>
+                  <li key={i} className="flex justify-between gap-2 py-1.5">
+                    <span className="flex min-w-0 flex-wrap items-center gap-1">
+                      #{s.seatIndex + 1} {s.nickname}
+                      {!s.connected && <Badge>{t('offline')}</Badge>}
+                      {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}
+                      {s.phase && s.phase !== 'seated' && <Badge tone="gold">{seatPhaseLabel(t, s.phase)}</Badge>}
+                      {s.leaveAfterHand && <Badge>{t('leaveAfterHand')}</Badge>}
+                      {!!s.timeouts && <Badge>{t('timeoutsN', { n: s.timeouts })}</Badge>}
+                      {s.topUp && <Badge tone="blue">{t('topUpN', { amount: formatChips(s.topUp.amount), state: topUpStateLabel(t, s.topUp.state) })}</Badge>}
+                    </span>
+                    <span className="shrink-0 font-mono">{formatChips(s.stack)}</span>
+                  </li>
                 ))}
               </ul>
               <p className="text-xs text-ink-400">{t('holeCardsHidden')}</p>
             </div>
           )}
         </Panel>
+        <Panel title={t('emergencyTitle')}>
+          <div className="flex flex-col gap-3" data-testid="emergency">
+            <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={cReason} onChange={(e) => setCReason(e.target.value)} disabled={!controllable} data-testid="control-reason" />}</Field>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button variant={tb.handsPaused ? 'gold' : 'outline'} disabled={!controllable || cReason.trim().length < 2} onClick={() => setControl(tb.handsPaused ? 'resume' : 'pause')} data-testid="toggle-pause">
+                {tb.handsPaused ? t('resumeHands') : t('pauseHands')}
+              </Button>
+              <Button variant="outline" disabled={!controllable || cReason.trim().length < 2} onClick={() => setControl(tb.entryBlocked ? 'unblock' : 'block')} data-testid="toggle-block">
+                {tb.entryBlocked ? t('unblockEntry') : t('entryBlocked')}
+              </Button>
+            </div>
+            <ul className="list-disc space-y-1 pl-4 text-xs text-ink-400">
+              <li>{t('pauseHint')}</li>
+              <li>{t('blockHint')}</li>
+              <li>{t('closeHint')}</li>
+            </ul>
+            <Button variant="danger" disabled={tb.status !== 'open'} onClick={() => setConfirmClose(true)} data-testid="close-table">{t('closeTable')}</Button>
+          </div>
+        </Panel>
+      </div>
+      {live && (
+        <Panel title={t('diagnosisTitle')}>
+          <div className="flex flex-col gap-3 text-sm" data-testid="diagnosis">
+            {diag && diag.issues.length > 0 ? (
+              <ul className="flex flex-col gap-1">
+                {diag.issues.map((x) => (
+                  <li key={x} className="flex items-start gap-2 text-danger"><span aria-hidden>●</span><span>{tableIssueLabel(t, x)}</span></li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-success">{t('noDiagIssues')}</p>
+            )}
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="sm:col-span-2 lg:col-span-4">
+                <dt className="sr-only">{t('colHand')}</dt>
+                <dd>{live.hand ? t('diagHand', { stage: stageLabel(t, live.hand.stage), seat: live.hand.actorSeat === null ? '—' : live.hand.actorSeat + 1, deadline: time(live.hand.deadline) }) : t('idleState')}</dd>
+              </div>
+              <div><dt className="text-xs text-ink-400">{t('diagNextHand')}</dt><dd>{time(live.nextHandAt)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('diagAlarm')}</dt><dd>{time(live.alarmAt)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('diagUnrecorded')}</dt><dd className="font-mono">{live.unrecordedHands ?? 0}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('diagVersion')}</dt><dd className="font-mono">{live.version ?? '—'}</dd></div>
+            </dl>
+            {diag && diag.sessionsOnlyInD1.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-ink-300">{t('onlyInD1')}</h3>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {diag.sessionsOnlyInD1.map((s) => (
+                    <li key={s.id}><Link to={`/users/${s.userId}`} className="text-gold-300 hover:underline">#{s.seatIndex + 1} {s.nickname ?? s.userId}</Link> <span className="font-mono text-xs text-ink-400">{t('seatBuyIn', { n: formatChips(s.buyIn) })} · {s.id}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {diag && diag.seatsOnlyInRoom.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-ink-300">{t('onlyInRoom')}</h3>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {diag.seatsOnlyInRoom.map((s) => (
+                    <li key={s.tableSessionId}><Link to={`/users/${s.userId}`} className="text-gold-300 hover:underline">{s.nickname}</Link> <span className="font-mono text-xs text-ink-400">{s.tableSessionId}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <p className="text-xs text-ink-400">{t('diagBasis', { time: time(live.at) })} {t('diagCompare')}</p>
+          </div>
+        </Panel>
+      )}
+      <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('blinds')}>
           <form className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: edit })); }}>
             {(['smallBlind', 'bigBlind', 'minBuyIn', 'maxBuyIn'] as const).map((k) => (
@@ -469,10 +723,8 @@ export function TableDetailPage() {
             <p className="col-span-2 text-xs text-ink-400">{t('appliesNextHand')}</p>
             <div className="col-span-2 flex flex-wrap gap-2">
               <Button type="submit" disabled={tb.status === 'closed'}>{t('save')}</Button>
-              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { entryBlocked: !tb.entryBlocked } }))}>{t('entryBlocked')}: {tb.entryBlocked ? t('yes') : t('no')}</Button>
               <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { allowSpectators: !tb.allowSpectators } }))}>{t('spectators')}: {tb.allowSpectators ? t('yes') : t('no')}</Button>
               <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { beginner: !tb.beginner } }))}>{t('beginnerTable')}: {tb.beginner ? t('yes') : t('no')}</Button>
-              <Button type="button" variant="danger" disabled={tb.status !== 'open'} onClick={() => setConfirmClose(true)} data-testid="close-table">{t('closeTable')}</Button>
             </div>
           </form>
         </Panel>
@@ -480,6 +732,17 @@ export function TableDetailPage() {
       <Link to={`/hands?tableId=${id}`} className="text-sm text-gold-300">{t('hands')} →</Link>
       <Modal open={confirmClose} onClose={() => setConfirmClose(false)} title={t('closeTable')} footer={<><Button variant="ghost" onClick={() => setConfirmClose(false)}>{t('cancel')}</Button><Button variant="danger" onClick={() => { setConfirmClose(false); void act(() => api(`/api/admin/tables/${id}/close`, { body: {} })); }}>{t('confirm')}</Button></>}>
         <p className="text-sm">{t('closeConfirm')}</p>
+      </Modal>
+      <Modal
+        open={control !== null}
+        onClose={() => setControl(null)}
+        title={control ? t(CONTROL_LABEL[control]) : ''}
+        footer={<><Button variant="ghost" onClick={() => setControl(null)}>{t('cancel')}</Button><Button variant="danger" onClick={() => control && void runControl(control)} data-testid="confirm-control">{t('confirm')}</Button></>}
+      >
+        <div className="flex flex-col gap-2 text-sm">
+          {control && <p>{t(CONTROL_HINT[control])}</p>}
+          <p className="break-all text-ink-300">{t('reason')}: {cReason}</p>
+        </div>
       </Modal>
     </div>
   );

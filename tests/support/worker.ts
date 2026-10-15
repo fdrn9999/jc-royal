@@ -61,6 +61,8 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-muck-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Operations dashboard: connection counters and a room failure.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-ops-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Emergency controls: forced disconnects (a suspended player's open socket) and paused tables.
+  ...Array.from({ length: 6 }, (_, i) => ({ id: `it-emg-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
 ];
 
 async function sha256b64url(s: string) {

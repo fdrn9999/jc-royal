@@ -71,7 +71,9 @@ export const auditActionLabel = labeler({
   'table.close': 'auditTableClose',
   'table.create': 'auditTableCreate',
   'table.update': 'auditTableUpdate',
+  'table.control': 'auditTableControl',
   'user.chips': 'auditUserChips',
+  'user.disconnect': 'auditUserDisconnect',
   'user.export': 'auditUserExport',
   'user.list': 'auditUserList',
   'user.reset_link': 'auditUserResetLink',
@@ -80,6 +82,26 @@ export const auditActionLabel = labeler({
   'user.unsuspend': 'auditUserUnsuspend',
   'user.view': 'auditUserView',
 });
+/** What became of a member's seat when an admin ended their connections (the room's `kick`). */
+export const seatOutcomeLabel = labeler({ left: 'seatLeft', after_hand: 'seatAfterHand', kept: 'seatKept', retrying: 'seatRetrying' });
+/** Problems the table room and the D1 comparison report on the admin table page. */
+export const tableIssueLabel = labeler({
+  stalled_hand: 'issueStalledHand',
+  turn_overdue: 'issueTurnOverdue',
+  next_hand_overdue: 'issueNextHandOverdue',
+  no_hand_scheduled: 'issueNoHandScheduled',
+  pending_seat: 'issuePendingSeat',
+  cashing_seat: 'issueCashingSeat',
+  topup_debiting: 'issueTopupDebiting',
+  unrecorded_hands: 'issueUnrecordedHands',
+  close_unfinished: 'issueCloseUnfinished',
+  no_retry_alarm: 'issueNoRetryAlarm',
+  settings_not_applied: 'issueSettingsNotApplied',
+  session_without_seat: 'issueSessionWithoutSeat',
+  seat_without_session: 'issueSeatWithoutSession',
+});
+export const seatPhaseLabel = labeler({ pending: 'phasePending', cashing: 'phaseCashing' });
+export const topUpStateLabel = labeler({ queued: 'topUpQueued', debiting: 'topUpDebiting' });
 export const targetTypeLabel = labeler({
   batch: 'targetBatch',
   comment: 'targetComment',

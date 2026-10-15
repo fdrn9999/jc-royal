@@ -253,15 +253,19 @@ export function TablePage() {
   const banner =
     sock.status === 'locked'
       ? t('table.locked')
-      : sock.status === 'replaced'
-        ? t('table.replaced')
-        : sock.status === 'closed'
-          ? t('table.closed')
-          : sock.status === 'reconnecting'
-            ? t('table.reconnecting')
-            : sock.status === 'connecting' || !s
-              ? t('table.connecting')
-              : null;
+      : sock.status === 'kicked'
+        ? t('table.kicked')
+        : sock.status === 'replaced'
+          ? t('table.replaced')
+          : sock.status === 'closed'
+            ? t('table.closed')
+            : sock.status === 'reconnecting'
+              ? t('table.reconnecting')
+              : sock.status === 'connecting' || !s
+                ? t('table.connecting')
+                : s.paused && s.status !== 'closing' && s.status !== 'closed'
+                  ? t('table.paused')
+                  : null;
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
@@ -336,6 +340,11 @@ export function TablePage() {
             <button className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" onClick={() => setCodeOpen(true)} data-testid="enter-code">
               {t('table.enterCode')}
             </button>
+          )}
+          {sock.status === 'kicked' && (
+            <Link to="/" className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" data-testid="kicked-lobby">
+              {t('nav.lobby')}
+            </Link>
           )}
         </div>
       )}

@@ -34,6 +34,7 @@ const BY_MESSAGE: Record<string, Key> = {
   'origin not allowed': 'errOrigin',
   'admin origin required': 'errOrigin',
   'cannot suspend yourself': 'errSelfSuspend',
+  'cannot disconnect yourself': 'errSelfDisconnect',
   'cannot change your own role': 'errSelfRole',
   'use the change-password flow for your own account': 'errSelfReset',
   'invalid blind / buy-in combination': 'errBlinds',

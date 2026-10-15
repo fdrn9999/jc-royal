@@ -53,6 +53,8 @@ export interface RoomIdentity {
    * hash, so a later code change takes the right away from connections that are already open.
    */
   codeHash: string | null;
+  /** When the session was verified: the room turns away a handshake checked before an admin disconnected this member. */
+  authAt: number;
 }
 
 /** Tables with the nickname of the member who opened them. */
@@ -161,6 +163,7 @@ export const tableSocket: Handler<AppEnv> = async (c) => {
   if (origin && origin !== new URL(c.req.url).origin && !allowed.includes(origin)) fail(403, 'forbidden', 'origin not allowed');
   const resolved = await resolveSession(c, 'user');
   if (!resolved) fail(401, 'unauthorized', 'login required');
+  const authAt = Date.now();
   await rateLimit(c, `ws:${resolved.user.id}:${clientIp(c)}`, 60, 60 * 1000);
   const tableId = c.req.param('id')!;
   const t = await c.var.db.query.tables.findFirst({ where: and(eq(schema.tables.id, tableId), ne(schema.tables.status, 'closed')) });
@@ -175,6 +178,7 @@ export const tableSocket: Handler<AppEnv> = async (c) => {
     avatarUrl: resolved.user.avatarUrl,
     role: resolved.user.role,
     codeHash: ticket ? t.joinCodeHash : null,
+    authAt,
   };
   const headers = new Headers(c.req.raw.headers);
   headers.set(INTERNAL_HEADER, c.env.INTERNAL_SECRET);

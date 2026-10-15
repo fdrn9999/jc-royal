@@ -121,6 +121,8 @@ export const tables = sqliteTable(
     /** Shown in the lobby with an "입문 테이블" tag (low stakes for newcomers). */
     beginner: integer('beginner', { mode: 'boolean' }).notNull().default(false),
     entryBlocked: integer('entry_blocked', { mode: 'boolean' }).notNull().default(false),
+    /** Emergency control: no new hand starts (the one running finishes normally) until an admin resumes the table. */
+    handsPaused: integer('hands_paused', { mode: 'boolean' }).notNull().default(false),
     status: text('status', { enum: ['open', 'closing', 'closed'] }).notNull().default('open'),
     /** Live occupancy mirrored by the table room (informational, for lobby/admin). */
     liveSeated: integer('live_seated').notNull().default(0),

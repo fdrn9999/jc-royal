@@ -6,7 +6,7 @@
  */
 import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
 import { ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
-import { and, desc, eq, inArray, isNull, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, like, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -21,7 +21,41 @@ import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { liveOps } from '../lib/ops';
-import { roomCall } from '../lib/room';
+import { kickEverywhere, roomCall } from '../lib/room';
+
+/** "Online": a member session used within this long (the dashboard counts the same way). */
+const ONLINE_MS = 5 * 60_000;
+
+const ReasonSchema = z.string().trim().min(2).max(200);
+
+/** Emergency table controls: `pause` lets the running hand finish and deals no new one until `resume`. */
+const TableControlSchema = z.object({ action: z.enum(['pause', 'resume', 'block', 'unblock']), reason: ReasonSchema });
+
+type LiveSeat = { userId: string; nickname: string; phase: string; tableSessionId: string } | null;
+
+/**
+ * What the room reports, held against D1: settings the room has not taken on, and seats the two disagree about. A seat
+ * whose buy-in is still being confirmed has no session row yet, so it is left out. The two reads are not one snapshot:
+ * a player sitting down or leaving in between can show here once; a mismatch that stays is worth a look. Nothing is
+ * changed here, in the wallet or anywhere else.
+ */
+async function diagnose(d1: D1Database, t: typeof schema.tables.$inferSelect, live: Record<string, unknown>) {
+  const issues = Array.isArray(live.issues) ? live.issues.filter((x): x is string => typeof x === 'string') : [];
+  const known = live.known as { status?: string; entryBlocked?: boolean; handsPaused?: boolean } | undefined;
+  if (known && (known.status !== t.status || known.entryBlocked !== t.entryBlocked || known.handsPaused !== t.handsPaused)) issues.push('settings_not_applied');
+  const { results: open } = await d1
+    .prepare(`SELECT s.id, s.user_id AS userId, s.seat_index AS seatIndex, s.buy_in AS buyIn, s.created_at AS createdAt, u.nickname FROM table_sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.table_id = ?1 AND s.status = 'seated'`)
+    .bind(t.id)
+    .all<{ id: string; userId: string; seatIndex: number; buyIn: number; createdAt: number; nickname: string | null }>();
+  const seats = (Array.isArray(live.seats) ? (live.seats as LiveSeat[]) : []).filter((s): s is NonNullable<LiveSeat> => !!s);
+  const inRoom = new Set(seats.map((s) => s.tableSessionId));
+  const inD1 = new Set(open.map((s) => s.id));
+  const sessionsOnlyInD1 = open.filter((s) => !inRoom.has(s.id));
+  const seatsOnlyInRoom = seats.filter((s) => s.phase !== 'pending' && !inD1.has(s.tableSessionId)).map((s) => ({ userId: s.userId, nickname: s.nickname, phase: s.phase, tableSessionId: s.tableSessionId }));
+  if (sessionsOnlyInD1.length) issues.push('session_without_seat');
+  if (seatsOnlyInRoom.length) issues.push('seat_without_session');
+  return { issues, sessionsOnlyInD1, seatsOnlyInRoom };
+}
 
 const page = (c: Context<AppEnv>) => ({
   limit: Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200),
@@ -70,10 +104,15 @@ const admin = new Hono<AppEnv>()
     const q = (c.req.query('q') ?? '').trim();
     const status = c.req.query('status');
     const locale = c.req.query('locale');
+    const onlineOnly = c.req.query('online') === '1';
+    // The outer column is written out: in a select without joins drizzle drops the table name from columns in a
+    // selected expression, and a bare "id" inside this subquery would mean sessions.id.
+    const online = sql<number>`EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = "users"."id" AND s.kind = 'user' AND s.last_seen_at > ${Date.now() - ONLINE_MS})`;
     const where = and(
       q ? or(like(schema.users.email, `%${q}%`), like(schema.users.nickname, `%${q}%`), eq(schema.users.id, q)) : undefined,
       status === 'active' || status === 'suspended' || status === 'deleted' ? eq(schema.users.status, status) : undefined,
       locale === 'ko' || locale === 'en' ? eq(schema.users.locale, locale) : undefined,
+      onlineOnly ? online : undefined,
     );
     const rows = await c.var.db
       .select({
@@ -85,6 +124,7 @@ const admin = new Hono<AppEnv>()
         status: schema.users.status,
         balance: schema.users.balance,
         createdAt: schema.users.createdAt,
+        online,
       })
       .from(schema.users)
       .where(where)
@@ -92,8 +132,8 @@ const admin = new Hono<AppEnv>()
       .limit(limit)
       .offset(offset);
     // The list shows email addresses, so every look is recorded (search terms and how many members it showed).
-    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, offset, count: rows.length });
-    return c.json(rows);
+    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, online: onlineOnly, offset, count: rows.length });
+    return c.json(rows.map((r) => ({ ...r, online: !!r.online })));
   })
   /** Member data export for the selected members. The notice members accept at signup covers this use. */
   .post('/users/export', requireRecentReauth, async (c) => {
@@ -135,16 +175,25 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!u) fail(404, 'not_found', 'user not found');
-    const [ledger, seats, hands] = await Promise.all([
+    const S = schema.sessions;
+    const [ledger, seats, hands, sessions] = await Promise.all([
       c.var.db.select().from(schema.chipLedger).where(eq(schema.chipLedger.userId, id)).orderBy(desc(schema.chipLedger.createdAt)).limit(50),
       c.var.db.select().from(schema.tableSessions).where(and(eq(schema.tableSessions.userId, id), eq(schema.tableSessions.status, 'seated'))),
       c.env.DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
+      // Sign-ins only: no token, address or browser string.
+      c.var.db
+        .select({ kind: S.kind, createdAt: S.createdAt, lastSeenAt: S.lastSeenAt, expiresAt: S.expiresAt })
+        .from(S)
+        .where(and(eq(S.userId, id), gt(S.expiresAt, Date.now())))
+        .orderBy(desc(S.lastSeenAt))
+        .limit(20),
     ]);
     const ledgerSum = await c.env.DB.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM chip_ledger WHERE user_id = ?1`).bind(id).first<{ s: number }>();
     // Full profile incl. birth date and consent record.
     await audit(c, 'user.view', { type: 'user', id });
     const { passwordHash: _ph, ...safe } = u;
-    return c.json({ user: safe, ledger, openSeats: seats, hands: hands ?? { n: 0, net: 0 }, ledgerConsistent: (ledgerSum?.s ?? 0) === u.balance });
+    const online = sessions.some((s) => s.kind === 'user' && s.lastSeenAt > Date.now() - ONLINE_MS);
+    return c.json({ user: safe, ledger, openSeats: seats, hands: hands ?? { n: 0, net: 0 }, ledgerConsistent: (ledgerSum?.s ?? 0) === u.balance, sessions, online });
   })
   .post('/users/:id/suspend', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
@@ -157,9 +206,28 @@ const admin = new Hono<AppEnv>()
       c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: body.reason, updatedAt: Date.now() }).where(eq(schema.users.id, id)),
       c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
     ]);
+    // Deleting the sessions does not reach table connections already open: each room ends them and the member leaves
+    // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
+    const kick = await kickEverywhere(c.env, id, 'suspended', true);
     await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).suspended(body.reason), senderId: c.var.user!.id });
-    await audit(c, 'user.suspend', { type: 'user', id }, body);
-    return c.json({ ok: true });
+    await audit(c, 'user.suspend', { type: 'user', id }, { ...body, kick });
+    return c.json({ ok: true, kick });
+  })
+  /**
+   * Ends a member's sign-ins and table connections without suspending them (they can sign in again). With
+   * `removeFromTable` they also leave their seats and waitlists the way a suspension does.
+   */
+  .post('/users/:id/disconnect', requireRecentReauth, async (c) => {
+    const id = c.req.param('id');
+    const body = await parseBody(c, z.object({ reason: ReasonSchema, removeFromTable: z.boolean().default(false) }));
+    if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot disconnect yourself');
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true } });
+    if (!target) fail(404, 'not_found', 'user not found');
+    if (target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can disconnect administrators');
+    const ended = await c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)).returning({ kind: schema.sessions.kind });
+    const kick = await kickEverywhere(c.env, id, 'disconnected', body.removeFromTable);
+    await audit(c, 'user.disconnect', { type: 'user', id }, { ...body, sessions: ended.length, kick });
+    return c.json({ ok: true, sessions: ended.length, kick });
   })
   .post('/users/:id/unsuspend', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
@@ -270,7 +338,26 @@ const admin = new Hono<AppEnv>()
     const live = t.status === 'closed' ? null : await roomCall(c, id, 'status');
     const { joinCodeHash, ...rest } = t;
     // The live status never includes hole cards or deck information.
-    return c.json({ table: { ...rest, hasJoinCode: !!joinCodeHash }, live });
+    return c.json({ table: { ...rest, hasJoinCode: !!joinCodeHash }, live, diagnosis: live ? await diagnose(c.env.DB, t, live) : null });
+  })
+  /**
+   * Emergency controls, each confirmed by the room before the admin is told it took effect: `pause` deals no new hand
+   * (the running one finishes normally), `block` takes no new players (seated players stay). To close the table and pay
+   * everyone out, use /close.
+   */
+  .post('/tables/:id/control', requireRecentReauth, async (c) => {
+    const id = c.req.param('id');
+    const body = await parseBody(c, TableControlSchema);
+    const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
+    if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
+    const set =
+      body.action === 'pause' || body.action === 'resume' ? { handsPaused: body.action === 'pause' } : { entryBlocked: body.action === 'block' };
+    await c.var.db.update(schema.tables).set({ ...set, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
+    const live = (await roomCall(c, id, 'reload')) ?? (await roomCall(c, id, 'reload'));
+    await audit(c, 'table.control', { type: 'table', id }, { ...body, roomConfirmed: !!live, handInProgress: live?.handInProgress ?? null });
+    // The row is saved either way: a room that did not answer takes it on when it next loads, and sending it again is safe.
+    if (!live) fail(503, 'room_unavailable', 'saved, but the table did not confirm; try again', { saved: true });
+    return c.json({ ok: true, paused: !!live.paused, handInProgress: !!live.handInProgress });
   })
   .patch('/tables/:id', async (c) => {
     const id = c.req.param('id');

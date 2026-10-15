@@ -13,6 +13,10 @@
 - **검증**: 모든 클라이언트 메시지는 zod `ClientMessageSchema`로 검증하고, 실패하면 `bad_request`를 보냅니다.
 - **속도 제한**: 소켓당 토큰 버킷(용량 20, 초당 10)이고, 채팅은 1초에 1회입니다.
 - **중복 접속**: 사용자당 연결 1개만 유지합니다. 새 탭이 연결되면 기존 연결에 `replaced`를 보내고 4001로 닫습니다. 4003으로 거절되는 연결은 다른 탭을 밀어내지 않습니다.
+- **관리자의 연결 종료(4004)**: 관리자가 회원을 정지하거나 강제 연결 종료하면 룸은 그 회원의 연결마다 `reqId` 없는 `error suspended` 또는 `error disconnected`를 보내고 **4004**로 닫습니다. 클라이언트는 4004에서 재연결하지 않고, 남은 요청을 실패로 끝내며, 마지막 화면을 지우고 안내만 보입니다.
+  - 룸은 종료 시각을 60초 동안 기억하고, api가 그 시각(시계 차이 2초 허용) 이전에 인증한 핸드셰이크를 같은 방식으로 거절합니다(api가 세션을 지우기 전에 인증된 연결이 늦게 도착하는 경우). 그래서 종료 직후 2초 안에 다시 로그인한 연결은 4004로 거절될 수 있고, 그 뒤에는 정상 연결됩니다. 정지된 계정은 로그인 자체가 막힙니다.
+  - 정지된 회원이 아직 열린 소켓으로 보낸 착석·충전은 지갑(`users.status = 'active'` 조건)이 거절해 `suspended`로 끝나고 칩은 움직이지 않습니다. 핸드가 끝난 뒤 적용될 충전도 같은 조건으로 차감하지 않고 버립니다.
+- **새 핸드 중단**: 관리자가 새 핸드를 멈추면(`tables.hands_paused`) 진행 중 핸드는 정상 종료하고, 그 뒤로 핸드를 시작하지 않습니다. `state.paused: true`, `nextHandAt: null`. 착석·일어서기·채팅은 그대로 됩니다.
 
 ## 클라이언트 → 서버
 
@@ -54,7 +58,7 @@
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
 - **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다.
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
-- **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`.
+- **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음).
 
 ### TableCue (연출 전용, 권한 없음)
 
@@ -98,10 +102,12 @@
 - `sync`를 뺀 모든 명령에 id(`reqId`, 액션은 `intentId`)를 붙여 답을 받을 때까지 보관합니다.
 - **답이 늦을 때**: 보낸 지 5초가 지나도 답이 없으면 `ping`으로 연결이 살아 있는지 확인합니다. 20초 안에 답이 없으면 요청은 `internal`(no answer)로 실패하고 `sync`로 상태를 다시 받습니다. 같은 `reqId`로 다시 시도해도 안전합니다.
 - **연결이 끊겼을 때**: 일시적인 끊김(4001·4002·4003이 아닌 종료)이면 보관한 명령을 다음 연결에서 **같은 id로** 다시 보냅니다. 룸은 각 명령을 한 번만 적용합니다. 다시 보낸 명령이 `stale_version`·`conflict`·`duplicate`·`not_your_turn`으로 거절되면 첫 사본이 이미 처리됐거나 차례가 지난 것이므로 오류를 띄우지 않습니다. 새 `state`에서 차례가 넘어간 액션은 보관 목록에서 지웁니다.
-- 다른 탭이 연결을 가져가거나(4001) 인증이 끝나거나(4002) 참가 코드가 필요하면(4003) 보관한 요청은 모두 실패로 끝냅니다. 탭을 닫거나 테이블을 떠날 때도 같습니다.
+- 다른 탭이 연결을 가져가거나(4001) 인증이 끝나거나(4002) 참가 코드가 필요하거나(4003) 관리자가 연결을 끝내면(4004) 보관한 요청은 모두 실패로 끝냅니다. 탭을 닫거나 테이블을 떠날 때도 같습니다.
 - **하트비트**: 서버 메시지는 무엇이든 살아 있다는 신호입니다. 25초 동안 아무 메시지도 없을 때만 `ping`을 보내고, 그 뒤 10초 안에 아무것도 오지 않으면 브라우저의 종료 감지를 기다리지 않고 바로 재연결합니다. 핸드가 진행 중이면 `state`가 몇 초마다 오므로 `ping`을 보내지 않습니다. 탭이 다시 보이면 `sync`를 보내고 같은 방식으로 답을 기다립니다.
 - **배포 순서**: game-worker를 먼저, 웹을 나중에 배포합니다. 이전 서버는 새 명령(`sitOut` 등)에 `ack`를 보내지 않으므로, 새 웹이 먼저 나가면 그 명령들은 20초 뒤 조용히 만료되고 `sync`로 화면을 맞춥니다(동작에는 영향 없음).
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, internal`
+
+`suspended`·`disconnected`가 `reqId` 없이 오면 관리자가 연결을 끝낸 것이고 4004 종료가 뒤따릅니다. `reqId`가 붙은 `suspended`는 정지된 계정의 착석·충전을 지갑이 거절한 것입니다.

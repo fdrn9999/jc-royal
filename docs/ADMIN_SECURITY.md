@@ -19,12 +19,14 @@
 다음 작업은 최근 5분 안에 비밀번호를 다시 입력해야 한다(`POST /api/admin/auth/reauth`). 콘솔이 자동으로 비밀번호 창을 띄운다.
 
 - 회원 정지·해제, 권한 변경(슈퍼관리자만)
+- 회원 강제 연결 종료(로그인 세션 삭제와 테이블 연결 종료, `user.disconnect` 감사 기록에 사유·결과)
 - 가상 칩 지급·차감(멱등 키, 음수 잔액 불가)
 - 비밀번호 재설정 링크 발급(자기 계정은 불가, 비밀번호 변경 사용)
 - 회원 정보 CSV 내보내기(`user.export` 감사 기록)
 
-대상이 관리자(ADMIN·SUPER_ADMIN)일 때 정지·해제, 칩 조정, 재설정 링크 발급은 슈퍼관리자만 할 수 있다. 재설정 링크는 계정을 넘겨받을 수 있는 토큰이기 때문이다.
+대상이 관리자(ADMIN·SUPER_ADMIN)일 때 정지·해제, 강제 연결 종료, 칩 조정, 재설정 링크 발급은 슈퍼관리자만 할 수 있다. 재설정 링크는 계정을 넘겨받을 수 있는 토큰이기 때문이다.
 - 테이블 종료(진행 중 핸드가 끝난 뒤 전원 환급)
+- 테이블 긴급 제어: 새 핸드 중단·재개, 신규 입장 차단·해제(사유 필수, `table.control` 감사 기록에 사유와 룸 반영 여부)
 - 종료된 핸드의 전체 카드 열람(`hand.view_sensitive` 감사 기록)
 - 정합성 이벤트 해결 처리
 
@@ -32,6 +34,7 @@
 
 - 진행 중인 핸드의 홀카드, 덱, 시드는 관리자 실시간 상태에도 포함하지 않는다. 테스트로 검증했다.
 - 모든 카드 정보는 핸드가 끝나 D1에 기록된 뒤에만, 위 재확인을 거쳐 열람할 수 있다.
+- 테이블 상태 진단(`GET /api/admin/tables/:id`의 `diagnosis`)는 카드 없이 좌석·스택·단계·차례·마감·대기 중 충전 같은 운영 정보와 D1 기록 비교만 담는다. 긴급 조치는 카드나 결과를 바꾸지 않고, 퇴장도 엔진의 폴드와 정상 정산을 쓴다.
 
 ## 회원 정보 내보내기
 
@@ -47,8 +50,8 @@
 
 ```
 admin.bootstrap, admin.login, admin.login.failed, admin.reauth, admin.reauth.failed,
-user.list, user.view, user.suspend, user.unsuspend, user.role, user.chips, user.reset_link, user.export,
-table.create, table.update, table.close, hand.view_sensitive,
+user.list, user.view, user.suspend, user.unsuspend, user.disconnect, user.role, user.chips, user.reset_link, user.export,
+table.create, table.update, table.control, table.close, hand.view_sensitive,
 reconcile.run, reconcile.resolve, board.notice.create/update,
 board.post.status, board.comment.status, message.send,
 report.view, report.resolved, report.dismissed

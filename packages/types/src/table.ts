@@ -102,6 +102,8 @@ export interface TableView {
   reservation: { nickname: string; until: number } | null;
   /** Epoch ms when the next hand is scheduled, if any. */
   nextHandAt: number | null;
+  /** An admin paused the table: the hand running finishes, no new one starts until it is resumed (absent from older rooms). */
+  paused?: boolean;
   you: {
     userId: string;
     seatIndex: number | null;

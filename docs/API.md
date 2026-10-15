@@ -175,15 +175,19 @@
 |---|---|---|
 | GET | `/dashboard` | 누적 현황: 회원 수, 접속자, 테이블·진행 게임, WS 연결, 핸드 수, 서버 상태, 문제 상황. 전체 핸드 수를 세므로 대시보드는 열 때와 수동 새로고침 때만 부른다 |
 | GET | `/ops/live` | 실시간 운영 지표(D1 batch 1회, 쿼리 8개). `tables.{official,member}`(테이블 수·종료 중·입장 차단·사람 있는 테이블·진행 중 핸드·착석·대기·관전·WS 연결: 각 룸이 바뀔 때 기록한 마지막 값), `top`(연결·착석이 많은 테이블 12개와 종료 중 테이블, `liveUpdatedAt`·`lastIssue`), `onlineUsers`(5분 안에 API를 쓴 회원 세션 수), `ops`(`ops_metrics`: 5분 × 12칸 `trend`, `last5m`, `lastHour`의 `ws_retry`·`ws_drop`·`room_error`·`api_error`), `reports`(열린 신고 수·가장 오래된 시각·사유별), `warnings`(미해결 정합성 이상, 15분 넘게 종료 중인 테이블, 닫힌 테이블에 남은 착석), `rowsRead`(이 호출이 읽은 D1 행 수), `server.{d1LatencyMs,at}` |
-| GET | `/users?q&status&locale&limit(≤200)` · `/users/:id` | 검색(계정 언어 `locale` 포함·필터)과 상세(언어, 생년월일, 이메일 인증 시각, 개인정보 동의 버전·시각, 원장, 착석, 원장 정합성). 조회마다 감사 로그 `user.list`·`user.view` |
+| GET | `/users?q&status&locale&online=1&limit(≤200)` · `/users/:id` | 검색(계정 언어 `locale` 포함·필터, `online=1`이면 접속 중만)과 상세(언어, 생년월일, 이메일 인증 시각, 개인정보 동의 버전·시각, 원장, 착석, 원장 정합성, 만료 전 로그인 세션 `sessions[{kind,createdAt,lastSeenAt,expiresAt}]`(토큰·IP·브라우저 없음), `online`). 목록 항목마다 `online`. 접속 중 = 최근 5분 안에 API를 쓴 회원 세션(테이블 소켓만 쓰는 회원은 빠질 수 있음). 조회마다 감사 로그 `user.list`·`user.view` |
 | POST | `/users/export` 🔒 | `{userIds(1-1000)}` → `{filename, count, csv}`. 열: id, email, nickname, language, role, status, balance, joined_at_utc, birth_date, email_verified_at_utc, privacy_notice_version, privacy_agreed_at_utc, suspended_reason. `=`·`+`·`-`·`@`로 시작하는 칸은 `'`를 붙여 수식 실행 방지. 감사 로그 `user.export`(대상 ID, 건수) |
-| POST | `/users/:id/suspend` 🔒 · `/unsuspend` 🔒 | 정지·해제(세션 폐기, 회원 계정 언어로 제재 쪽지 자동 발송) |
+| POST | `/users/:id/suspend` 🔒 · `/unsuspend` 🔒 | 정지 `{reason(2–200자)}` → `{ok, kick}`: 세션 폐기, 열린 테이블 연결 종료와 자리 정리(아래 `kick`), 회원 계정 언어로 제재 쪽지 자동 발송. 해제는 상태만 되돌림 |
+| POST | `/users/:id/disconnect` 🔒 | 강제 연결 종료(정지 아님) `{reason(2–200자), removeFromTable?(기본 false)}` → `{ok, sessions, kick}`. 회원의 로그인 세션을 모두 지우고 열린 테이블 연결을 닫음(다시 로그인 가능). `removeFromTable`이면 자리·대기 명단에서도 빠짐. 자기 계정 400 `cannot disconnect yourself`, 관리자 대상은 슈퍼관리자만(403). 감사 로그 `user.disconnect`(사유, 세션 수, `kick`) |
 | POST | `/users/:id/role` 🔒 | 슈퍼관리자만. 대상의 관리자 세션 즉시 폐기 |
 | POST | `/users/:id/chips` 🔒 | `{amount(±), memo, idempotencyKey}` — 음수 잔액 불가, 회원 계정 언어로 쪽지 자동 발송 |
 | POST | `/users/:id/reset-link` 🔒 | 30분 1회용 링크 → `{path, url, expiresInMinutes, locale, mailed, message:{subject,text}}`. 회원 계정 언어의 안내문을 만들고, 메일이 설정돼 있으면 발송(`mailed`). 자기 계정 400, 관리자 대상은 슈퍼관리자만(403) |
 | GET / POST | `/tables` | 목록과 생성(2·6·9석, 최소 바이인 ≥ 10BB) |
-| GET / PATCH | `/tables/:id` | 실시간 상태(홀카드 없음), 수정(블라인드는 다음 핸드부터) |
+| GET / PATCH | `/tables/:id` | `{table, live, diagnosis}`. `live`는 룸의 실시간 상태(홀카드·덱 없음): 좌석별 단계(`pending`·`cashing`)·핸드 후 퇴장·시간 초과 수·대기 중 충전, `paused`, 진행 중 핸드(번호·단계·차례·마감), 다음 핸드 시각, 다음 알람, 기록 대기 핸드, 상태 버전. `diagnosis`는 `{issues[], sessionsOnlyInD1[], seatsOnlyInRoom[]}`: 룸이 보고한 문제(멈춘 핸드, 지난 마감, 늦은 다음 핸드, 착석 처리 중 좌석, 기록 대기 등)와 D1 `table_sessions`·테이블 설정 비교(`session_without_seat`, `seat_without_session`, `settings_not_applied`). 진단은 아무것도 바꾸지 않는다. 수정(블라인드는 다음 핸드부터) |
+| POST | `/tables/:id/control` 🔒 | 긴급 제어 `{action:'pause'\|'resume'\|'block'\|'unblock', reason(2–200자)}` → `{ok, paused, handInProgress}`. `pause`는 진행 중 핸드를 정상 종료한 뒤 새 핸드를 시작하지 않음(`tables.hands_paused`), `block`은 새 착석·대기 등록만 막음(앉은 플레이어는 유지). D1에 저장한 뒤 룸에 반영을 확인하고, 룸이 답하지 않으면 503 `room_unavailable`(저장은 됨, 다시 보내도 안전). 감사 로그 `table.control`(사유, `roomConfirmed`, `handInProgress`) |
 | POST | `/tables/:id/close` 🔒 | 진행 중 핸드가 끝나면 전원 환급 후 종료 |
+
+`kick`(정지·강제 연결 종료 응답): `{tables, reached, unreached[], truncated, sockets, seats[{tableId, seat}]}`. 회원이 앉은 테이블 전부와 연결이 있는 열린 테이블(연결 많은 순, 최대 60곳)의 룸에 물어 그 회원의 소켓을 `error suspended|disconnected` 후 4004로 닫는다. `seat`: `left`(바로 정산), `after_hand`(진행 중 핸드에서 차례에 폴드, 핸드 정산 뒤 정산), `kept`(자리 유지), `retrying`(정산 재시도 중). 답하지 않은 룸은 `unreached`로 알린다(재시도하지 않음). 카드·결과를 바꾸는 조치는 없다.
 | GET | `/hands?tableId&userId` | 종료된 핸드 목록 |
 | GET | `/hands/:id` 🔒 | 종료 핸드 전체(모든 홀카드, gzip 엔진 로그), 열람은 감사 로그에 기록 |
 | GET | `/ledger?userId&type` · `/audit` | 원장과 관리 이력 |

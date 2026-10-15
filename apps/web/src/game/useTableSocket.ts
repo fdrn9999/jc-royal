@@ -4,7 +4,7 @@ import { Heartbeat, Outbox, type Outgoing } from './link';
 import { preActionSpot } from './preAction';
 
 /** `locked`: a private table that needs the join code first (the room closed the socket with 4003). */
-export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'closed' | 'unauthorized' | 'locked';
+export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'closed' | 'unauthorized' | 'locked' | 'kicked';
 
 export interface CueEvent {
   id: number;
@@ -179,6 +179,15 @@ export function useTableSocket(tableId: string): TableSocketApi {
           case 'error': {
             sentFor.current = null;
             setActing(false);
+            if (!m.reqId && (m.code === 'suspended' || m.code === 'disconnected')) {
+              // An admin ended this connection (the close, 4004, follows): the page says so instead of a toast, and
+              // the last view goes (it showed my turn and its buttons, which the room no longer takes).
+              stop.current = true;
+              stateRef.current = null;
+              setState(null);
+              setStatus('kicked');
+              return;
+            }
             const o = m.reqId ? box.take(m.reqId) : undefined;
             if (o?.h.reject) o.h.reject(new RequestError(m.code, m.message));
             else if (!(o && o.sends > 1 && RESENT_OK.has(m.code)) && m.code !== 'join_code_required') {
@@ -214,6 +223,15 @@ export function useTableSocket(tableId: string): TableSocketApi {
           setState(null);
           setChat([]);
           setStatus('locked');
+          return;
+        }
+        if (code === 4004) {
+          // Ended by an admin: no retry. Signing in again is checked anew (a suspended account cannot).
+          failAll();
+          stop.current = true;
+          stateRef.current = null;
+          setState(null);
+          setStatus('kicked');
           return;
         }
         if (stop.current || code === 4001 || code === 4002) {

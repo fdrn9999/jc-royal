@@ -29,7 +29,7 @@
 | `admin_audit_log` | 운영자 ID, 조치, 대상, 상세, **운영자 IP** | 5절 |
 | `ops_metrics` | 없음. 1분 단위 시각, 지표 이름(`ws_retry`·`ws_drop`·`room_error`·`api_error`), 횟수만 | 관리자 대시보드의 오류·연결 추이. 회원 ID·IP·테이블 ID를 넣지 않는다 |
 | `tables.last_issue` | 없음. 테이블 룸의 최근 오류(시각, 작업 이름, 오류 메시지 300자) | 관리자 대시보드·테이블 상세에 표시 |
-| 게임 서버(Durable Object 저장소) | 테이블 채팅 최근 50줄(작성자 ID·닉네임·본문), 좌석·핸드 진행 상태 | 닫힌 뒤 24시간에 채팅 삭제 |
+| 게임 서버(Durable Object 저장소) | 테이블 채팅 최근 50줄(작성자 ID·닉네임·본문), 좌석·핸드 진행 상태, 관리자가 연결을 끝낸 회원 ID와 시각(60초 동안 재연결 검사에 쓰고, 그 방의 다음 연결 종료 때 지난 항목을 지움) | 닫힌 뒤 24시간에 채팅 삭제 |
 | 브라우저 `localStorage` | `jc.locale`, `jc.prefs`(화면·게임 표시 설정), 자동 로그인 선택, `jc.mute:<id>`(채팅 음소거), `jc.academy:<id>`(아카데미 진도) | 아카데미 진도만 서버와 동기화 |
 | Cloudflare Workers 로그 | `observability.enabled`. 요청 메타데이터와 `console.log` 출력 | 보관 기간은 Cloudflare 요금제가 정한다 |
 

@@ -93,6 +93,10 @@ export type ErrorCode =
   | 'spectators_disabled'
   /** A private table this connection has no valid join code for (the socket closes with 4003 if it may not watch). */
   | 'join_code_required'
+  /** The account is suspended: no buy-in or top-up, and an admin's disconnect closes the socket (4004). */
+  | 'suspended'
+  /** An admin ended this connection (close 4004); the client does not reconnect on its own. */
+  | 'disconnected'
   | 'internal';
 
 /**

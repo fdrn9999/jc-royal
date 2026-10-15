@@ -58,11 +58,15 @@ interface Identity {
   role: string;
   /** Join code hash of the ticket this connection brought (verified by the api), or null. */
   codeHash: string | null;
+  /** When the api verified the session this connection opened with (absent from older api builds). */
+  authAt?: number;
 }
 
 interface Attachment extends Identity {
   connId: string;
   connectedAt: number;
+  /** An admin ended this connection: it is closing, and anything it still sends is ignored. */
+  kicked?: boolean;
 }
 
 interface SeatState {
@@ -134,6 +138,11 @@ interface RoomState {
    * waitlist entries made with another code are dropped. Undefined until a room first loads under this build.
    */
   accessHash?: string | null;
+  /**
+   * Members an admin disconnected here, with when (pruned after KICK_WINDOW_MS). A connection whose session the api
+   * checked before that moment is refused: a handshake already on its way when the admin acted does not get back in.
+   */
+  kicks?: Record<string, number>;
 }
 
 const BETWEEN_HANDS_MS = 4_000;
@@ -151,6 +160,12 @@ const UNRECORDED_PREFIX = 'unrecorded:';
  * go out at most this often, so a failing D1 is not called on every error.
  */
 const OPS_FLUSH_MS = 10_000;
+/** How long a disconnect turns away handshakes the api authorised before it (far longer than any handshake takes). */
+const KICK_WINDOW_MS = 60_000;
+/** Clock difference allowed between the api and the room when comparing a handshake's `authAt` with a disconnect. */
+const KICK_SKEW_MS = 2_000;
+/** A turn this far past its deadline, or a next hand this late, means the room's timer did not run. */
+const OVERDUE_MS = 5_000;
 
 /** A finished hand kept in room storage until its D1 record is written. */
 interface UnrecordedHand {
@@ -474,7 +489,7 @@ export class TableRoom extends DurableObject<Env> {
         await this.ensureLoaded(tableId);
         switch (action) {
           case 'status':
-            return Response.json(this.adminStatus());
+            return Response.json(await this.adminStatus());
           case 'reload': {
             // `wrangler dev --var` reaches only the api worker, so local tests pass their timeout along here.
             const idleMs = Number(request.headers.get('x-jc-idle-close-ms'));
@@ -492,12 +507,17 @@ export class TableRoom extends DurableObject<Env> {
               await this.enforceAccess();
             }
             this.broadcast();
-            await this.schedule();
-            return Response.json({ ok: true, appliesFrom: this.hand ? 'next hand' : 'now' });
+            // (A table resumed after a pause deals again from here.)
+            await this.afterChange();
+            return Response.json({ ok: true, appliesFrom: this.hand ? 'next hand' : 'now', paused: !!this.table?.handsPaused, handInProgress: !!this.hand && !this.hand.isSettled });
           }
           case 'close':
             await this.beginClose();
             return Response.json({ ok: true, closed: this.room.closed, handInProgress: !!this.hand });
+          case 'kick':
+            return Response.json(
+              await this.kick(url.searchParams.get('user') ?? '', url.searchParams.get('reason') === 'suspended' ? 'suspended' : 'disconnected', url.searchParams.get('leave') === '1'),
+            );
           case 'report-context':
             return Response.json(this.reportContext(url.searchParams.get('target') ?? '', url.searchParams.get('reporter') ?? ''));
           case 'seat-check':
@@ -518,6 +538,13 @@ export class TableRoom extends DurableObject<Env> {
       // hibernatable and never counted as a connection; another tab of the same user is left alone.
       server.accept();
       this.refuse(server);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    const kickedAt = this.room.kicks?.[identity.userId];
+    if (kickedAt && kickedAt + KICK_WINDOW_MS > Date.now() && (identity.authAt ?? 0) < kickedAt + KICK_SKEW_MS) {
+      // Authorised before an admin ended this member's connections here: turned away the same way (close 4004).
+      server.accept();
+      this.endConnection(server, 'disconnected');
       return new Response(null, { status: 101, webSocket: client });
     }
     // One live connection per user: a new tab replaces the old one.
@@ -547,6 +574,8 @@ export class TableRoom extends DurableObject<Env> {
 
   override async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
     const a = this.att(ws);
+    // Ended by an admin: whatever it sent before closing is not carried out.
+    if (a.kicked) return;
     if (!this.allow(a.connId)) {
       this.send(ws, { t: 'error', code: 'rate_limited', message: 'too many messages' });
       return;
@@ -569,6 +598,8 @@ export class TableRoom extends DurableObject<Env> {
       return;
     }
     await this.run(async () => {
+      // (Also a command that was waiting here when the admin's disconnect ran.)
+      if (this.att(ws).kicked) return;
       try {
         await this.ensureLoaded();
         await this.handle(ws, a, msg);
@@ -798,7 +829,7 @@ export class TableRoom extends DurableObject<Env> {
     if (!r.ok) {
       this.room.seats[seatIndex] = null;
       await this.save();
-      throw new CommandError(r.code, r.code === 'insufficient_balance' ? 'not enough chips in wallet' : 'already seated at this table');
+      throw new CommandError(r.code, r.code === 'insufficient_balance' ? 'not enough chips in wallet' : r.code === 'suspended' ? 'account suspended' : 'already seated at this table');
     }
     seat.phase = 'seated';
     this.room.waitlist = this.room.waitlist.filter((w) => w.userId !== a.userId);
@@ -873,13 +904,18 @@ export class TableRoom extends DurableObject<Env> {
   private async standUp(i: number) {
     const seat = this.room.seats[i];
     if (!seat) return;
-    // Chips from a top-up whose outcome is unknown are counted first; one still waiting for a hand is simply
-    // dropped, since nothing was taken for it.
-    await this.resolveTopUp(seat);
-    seat.topUp = null;
-    seat.phase = 'cashing';
-    await this.save();
-    await cashOut(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: seat.stack });
+    // A seat whose buy-in D1 never confirmed (the call failed) may have brought nothing: only the ledger says whether
+    // it did, and paying out a buy-in never taken would create chips. If that read fails too the seat stays pending
+    // for `recoverPendingSeats`.
+    if (seat.phase !== 'pending' || (await buyInCommitted(this.env.DB, seat.tableSessionId))) {
+      // Chips from a top-up whose outcome is unknown are counted first; one still waiting for a hand is simply
+      // dropped, since nothing was taken for it.
+      await this.resolveTopUp(seat);
+      seat.topUp = null;
+      seat.phase = 'cashing';
+      await this.save();
+      await cashOut(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: seat.stack });
+    }
     this.room.seats[i] = null;
     if (this.room.waitlist.length > 0 && !this.room.closing) {
       const head = this.room.waitlist[0]!;
@@ -928,8 +964,10 @@ export class TableRoom extends DurableObject<Env> {
       if ((await walletBalance(this.env.DB, userId)) < amount) throw new CommandError('insufficient_balance', 'not enough chips in wallet');
       // A newer request replaces the one waiting.
       seat.topUp = { key, amount, state: 'queued' };
-    } else if ((await this.debitTopUp(seat, { key, amount })) === 'insufficient') {
-      throw new CommandError('insufficient_balance', 'not enough chips in wallet');
+    } else {
+      const r = await this.debitTopUp(seat, { key, amount });
+      if (r === 'insufficient') throw new CommandError('insufficient_balance', 'not enough chips in wallet');
+      if (r === 'suspended') throw new CommandError('suspended', 'account suspended');
     }
     this.remember(reqId);
     await this.save();
@@ -942,7 +980,7 @@ export class TableRoom extends DurableObject<Env> {
    * A key the ledger already has was counted when it was committed (here or by `resolveTopUp`), so it is neither
    * noted nor written again: it is 'duplicate' and adds nothing. Noting it would let `resolveTopUp` count it twice.
    */
-  private async debitTopUp(seat: SeatState, p: { key: string; amount: number; auto?: boolean }): Promise<'applied' | 'duplicate' | 'insufficient'> {
+  private async debitTopUp(seat: SeatState, p: { key: string; amount: number; auto?: boolean }): Promise<'applied' | 'duplicate' | 'insufficient' | 'suspended'> {
     if ((await committedTopUp(this.env.DB, p.key)) !== null) {
       seat.topUp = null;
       await this.save();
@@ -1013,6 +1051,7 @@ export class TableRoom extends DurableObject<Env> {
             await this.save();
             if (!s.leaveAfterHand) notices.push({ userId: s.userId, code: 'topup_dropped' });
           } else {
+            // A suspended account's top-up is dropped without a word: its connections were ended.
             const r = await this.debitTopUp(s, { key: q.key, amount });
             if (r === 'applied') notices.push({ userId: s.userId, code: 'topup_applied', amount });
             else if (r === 'insufficient') notices.push({ userId: s.userId, code: 'topup_insufficient' });
@@ -1028,6 +1067,11 @@ export class TableRoom extends DurableObject<Env> {
             const r = await this.debitTopUp(s, { key: `rebuy:${s.tableSessionId}:${handId}`, amount, auto: true });
             if (r === 'applied') notices.push({ userId: s.userId, code: 'rebuy_applied', amount });
             else if (r === 'insufficient') stop = 'rebuy_insufficient';
+            else if (r === 'suspended') {
+              // Off, quietly: the busted seat of a suspended account stands up as usual.
+              s.autoRebuy = null;
+              await this.save();
+            }
           }
           if (stop) {
             // Off for good: the busted player stands up as usual.
@@ -1226,7 +1270,7 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   private async afterChange() {
-    if (!this.hand && this.eligibleSeats().length >= 2 && !this.room.nextHandAt && !this.room.closing) {
+    if (!this.hand && this.eligibleSeats().length >= 2 && !this.room.nextHandAt && !this.room.closing && !this.table?.handsPaused) {
       this.room.nextHandAt = Date.now() + FIRST_HAND_DELAY_MS;
       await this.save();
     }
@@ -1238,7 +1282,8 @@ export class TableRoom extends DurableObject<Env> {
     // Normally done when the last hand settled; this catches anything a restart or a failed D1 call left behind.
     this.notify(await this.applyTopUps(this.room.settledHandId));
     const dealt = this.eligibleSeats();
-    if (dealt.length < 2 || this.room.closing || t.status !== 'open') {
+    // A paused table deals nothing until an admin resumes it (`reload` then schedules the next hand).
+    if (dealt.length < 2 || this.room.closing || t.status !== 'open' || t.handsPaused) {
       this.room.nextHandAt = null;
       this.hand = null;
       await this.save();
@@ -1471,21 +1516,129 @@ export class TableRoom extends DurableObject<Env> {
     };
   }
 
-  private adminStatus() {
+  /** Closes a connection an admin ended (4004), saying why: the client shows it and does not reconnect by itself. */
+  private endConnection(ws: WebSocket, code: 'suspended' | 'disconnected') {
+    this.send(ws, { t: 'error', code, message: code === 'suspended' ? 'account suspended' : 'disconnected by an admin' });
+    try {
+      ws.close(4004, code);
+    } catch {
+      /* already closing */
+    }
+  }
+
+  /**
+   * An admin ended a member's connections here (a suspension, or a disconnect): each socket is told why and closed
+   * (4004), and handshakes authorised before now are turned away. With `leave` the member also leaves the waitlist and
+   * their seat, the way a player leaving does: between hands the stack goes back to the wallet at once; in a hand their
+   * cards are folded on their turn (now, if it is theirs) and the seat is cashed out once the hand settles, so the
+   * others play it out. Nothing is taken: chips already in the pot stay there, and an all-in is settled at showdown.
+   */
+  private async kick(userId: string, code: 'suspended' | 'disconnected', leave: boolean) {
+    if (!userId) throw new CommandError('bad_request', 'user required');
+    const now = Date.now();
+    const kicks = Object.fromEntries(Object.entries(this.room.kicks ?? {}).filter(([, at]) => at + KICK_WINDOW_MS > now));
+    kicks[userId] = now;
+    this.room.kicks = kicks;
+    let sockets = 0;
+    for (const ws of this.sockets()) {
+      const a = this.att(ws);
+      if (a.userId !== userId) continue;
+      ws.serializeAttachment({ ...a, kicked: true });
+      this.endConnection(ws, code);
+      sockets++;
+    }
+    const waiting = this.room.waitlist.some((w) => w.userId === userId);
+    const i = this.seatIndexOf(userId);
+    let seat: 'none' | 'kept' | 'left' | 'after_hand' | 'retrying' = i === null ? 'none' : 'kept';
+    await this.save();
+    if (leave) {
+      if (waiting || this.room.reservation?.userId === userId) {
+        this.room.waitlist = this.room.waitlist.filter((w) => w.userId !== userId);
+        if (this.room.reservation?.userId === userId) this.room.reservation = null;
+        await this.save();
+      }
+      if (i !== null) {
+        const inHand = this.handHasPlayer(userId);
+        try {
+          await this.leave(userId);
+          seat = this.seatIndexOf(userId) === null ? 'left' : inHand ? 'after_hand' : 'retrying';
+        } catch (e) {
+          // A cash-out cut short stays 'cashing' (a buy-in not confirmed stays 'pending'): the retry alarm finishes it.
+          this.fault('disconnect: leave unfinished; will retry', e);
+          seat = 'retrying';
+        }
+      }
+    }
+    this.broadcast();
+    await this.schedule();
+    return { ok: true, sockets, seat, waitlist: waiting };
+  }
+
+  /**
+   * The room as the admin table page shows it, with what looks wrong (`issues`). Never cards: no hole cards and no
+   * deck, only what everyone at the table can already see. `known` is the table row this room is working from, for the
+   * api to compare with D1 (a setting that never reached the room).
+   */
+  private async adminStatus() {
     const connected = this.connectedUsers();
+    const t = this.table!;
+    const h = this.hand;
+    const live = !!h && !h.isSettled;
+    const now = Date.now();
+    const deadline = live ? h!.deadline() : null;
+    const alarmAt = await this.ctx.storage.getAlarm();
+    const issues: string[] = [];
+    if (live && h!.isStalled()) issues.push('stalled_hand');
+    if (deadline && deadline + OVERDUE_MS < now) issues.push('turn_overdue');
+    if (!live && !t.handsPaused && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
+    if (!live && !t.handsPaused && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
+    if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
+    if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.handHasPlayer(s.userId))) issues.push('cashing_seat');
+    if (this.room.seats.some((s) => s?.topUp?.state === 'debiting')) issues.push('topup_debiting');
+    if (this.unrecorded.size > 0) issues.push('unrecorded_hands');
+    if (this.room.closing && !this.room.closed && !live) issues.push('close_unfinished');
+    if (this.unfinishedWork() && !alarmAt) issues.push('no_retry_alarm');
     return {
       tableId: this.tableId,
       handNumber: this.room.handNumber,
-      handInProgress: !!this.hand && !this.hand.isSettled,
-      stage: this.hand?.stage ?? null,
+      handInProgress: live,
+      stage: h?.stage ?? null,
       closing: this.room.closing,
       closed: this.room.closed,
       connections: this.sockets().length,
-      chipsOnTable: this.room.seats.reduce((a, s) => a + (s ? (this.hand && !this.hand.isSettled ? (this.hand.finalStacks().get(s.userId) ?? s.stack) : s.stack) : 0), 0) + (this.hand && !this.hand.isSettled ? this.hand.handView().potTotal : 0),
+      chipsOnTable: this.room.seats.reduce((a, s) => a + (s ? (live ? (h!.finalStacks().get(s.userId) ?? s.stack) : s.stack) : 0), 0) + (live ? h!.handView().potTotal : 0),
       seats: this.room.seats.map((s, i) =>
-        s ? { seatIndex: i, userId: s.userId, nickname: s.nickname, stack: s.stack, phase: s.phase, sittingOut: s.sittingOut, connected: connected.has(s.userId), buyIn: s.buyIn } : null,
+        s
+          ? {
+              seatIndex: i,
+              userId: s.userId,
+              nickname: s.nickname,
+              stack: s.stack,
+              phase: s.phase,
+              sittingOut: s.sittingOut,
+              connected: connected.has(s.userId),
+              buyIn: s.buyIn,
+              inHand: this.handHasPlayer(s.userId),
+              leaveAfterHand: s.leaveAfterHand,
+              timeouts: s.timeouts,
+              sitOutSince: s.sitOutSince,
+              topUp: s.topUp ? { state: s.topUp.state, amount: s.topUp.amount, auto: !!s.topUp.auto } : null,
+              tableSessionId: s.tableSessionId,
+            }
+          : null,
       ),
       waitlist: this.room.waitlist.length,
+      paused: t.handsPaused,
+      hand: live ? { id: h!.handId, stage: h!.stage, actorSeat: h!.handView().actorSeat, deadline, stalled: h!.isStalled() } : null,
+      settledHandId: this.room.settledHandId,
+      nextHandAt: this.room.nextHandAt,
+      reservation: this.room.reservation ? { seatIndex: this.room.reservation.seatIndex, until: this.room.reservation.until } : null,
+      unrecordedHands: this.unrecorded.size,
+      alarmAt,
+      version: this.room.version,
+      known: { status: t.status, entryBlocked: t.entryBlocked, handsPaused: t.handsPaused },
+      issues,
+      at: now,
     };
   }
 
@@ -1556,7 +1709,9 @@ export class TableRoom extends DurableObject<Env> {
       spectatorCount: [...connected].filter((u) => this.seatIndexOf(u) === null).length,
       waitlist: this.room.waitlist.map((w) => w.nickname),
       reservation: reservationLive ? { nickname: reservationLive.nickname, until: reservationLive.until } : null,
-      nextHandAt: this.room.nextHandAt,
+      // No countdown to a hand a pause will not deal.
+      nextHandAt: t.handsPaused ? null : this.room.nextHandAt,
+      paused: t.handsPaused,
       you: {
         userId: a.userId,
         seatIndex: mySeat,
