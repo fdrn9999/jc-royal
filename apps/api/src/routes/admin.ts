@@ -21,6 +21,7 @@ import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
+import { looksPersonal } from '../lib/pii';
 import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
 import { kickEverywhere, roomCall } from '../lib/room';
@@ -35,18 +36,6 @@ const SANCTION_ACTIONS = ['user.suspend', 'user.unsuspend', 'user.disconnect'];
 const CHIP_ACTIONS = ['user.chips', 'user.reconcile'];
 const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', ...CHIP_ACTIONS, 'user.reset_link', 'note.delete'];
 
-/**
- * Admin notes are for handover, not for collecting data about the member: refuse what looks like an e-mail address, a
- * phone number (Korean or international), a card number or a resident registration number. Chip amounts and dates pass.
- */
-const PERSONAL = [
-  /[^\s@]+@[^\s@]+\.[a-z]{2,}/i,
-  /(^|[^\d])0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)/,
-  /\+\d{1,3}[-.\s]?\d{1,4}[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)/,
-  /(^|[^\d])\d{6}[-\s]?[1-8]\d{6}(?!\d)/,
-  /(^|[^\d])\d{4}([-\s]?\d{4}){3}(?!\d)/,
-];
-const looksPersonal = (s: string) => PERSONAL.some((re) => re.test(s));
 
 /** Emergency table controls: `pause` lets the running hand finish and deals no new one until `resume`. */
 const TableControlSchema = z.object({ action: z.enum(['pause', 'resume', 'block', 'unblock']), reason: ReasonSchema });
@@ -361,7 +350,7 @@ const admin = new Hono<AppEnv>()
   })
   /**
    * What administrators did to this member, newest first: sanctions, role and chip changes, reset links, decisions on
-   * reports about them, and internal notes. `kind` = all | sanction | chips | note. Pages go back from the last item
+   * reports about them (not each severity, assignment or note on a report), and internal notes. `kind` = all | sanction | chips | note. Pages go back from the last item
    * shown: `before` (its time, ms) and `beforeId` (its id), so entries written in the same millisecond are not skipped.
    */
   .get('/users/:id/timeline', async (c) => {
@@ -387,7 +376,8 @@ const admin = new Hono<AppEnv>()
         DB.prepare(
           `SELECT a.id, a.action, a.detail, a.created_at AS createdAt, a.actor_id AS actorId, u.nickname AS actorNickname
              FROM admin_audit_log a LEFT JOIN users u ON u.id = a.actor_id
-            WHERE a.target_type = 'report' AND a.target_id IN (SELECT id FROM reports WHERE target_user_id = ?1) AND ${page('a')}`,
+            WHERE a.target_type = 'report' AND a.target_id IN (SELECT id FROM reports WHERE target_user_id = ?1)
+              AND a.action IN ('report.resolved', 'report.dismissed') AND ${page('a')}`,
         ).bind(id, before, limit + 1, beforeId || '￿'),
       );
     }
@@ -438,16 +428,25 @@ const admin = new Hono<AppEnv>()
     await audit(c, 'note.delete', { type: 'user', id }, { noteId, authorId: n.authorId, createdAt: n.createdAt });
     return c.json({ ok: true });
   })
+  /** `reportId`: the report this suspension is given for (it must be about this member); it is kept on both sides. */
   .post('/users/:id/suspend', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
-    const body = await parseBody(c, z.object({ reason: z.string().trim().min(2).max(200) }));
+    const body = await parseBody(c, z.object({ reason: z.string().trim().min(2).max(200), reportId: z.string().min(1).max(64).optional() }));
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot suspend yourself');
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!target) fail(404, 'not_found', 'user not found');
     if (target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can suspend administrators');
+    if (body.reportId) {
+      const rep = await c.var.db.query.reports.findFirst({ where: eq(schema.reports.id, body.reportId), columns: { targetUserId: true } });
+      if (rep?.targetUserId !== id) fail(400, 'bad_request', 'the report is not about this member');
+    }
+    const at = Date.now();
     await c.var.db.batch([
-      c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: body.reason, updatedAt: Date.now() }).where(eq(schema.users.id, id)),
+      c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: body.reason, updatedAt: at }).where(eq(schema.users.id, id)),
       c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
+      ...(body.reportId
+        ? [c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: body.reason, createdAt: at })]
+        : []),
     ]);
     // Deleting the sessions does not reach table connections already open: each room ends them and the member leaves
     // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.

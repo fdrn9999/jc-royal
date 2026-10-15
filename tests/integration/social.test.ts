@@ -573,7 +573,7 @@ describe('reports', () => {
     expect((await a.client.post('/api/reports', dm(hello.id))).status).toBe(201);
     // Earlier reports on the same member show up as history.
     const second = (await admin.get(`/api/admin/reports?userId=${b.me.id}`)).body.items.find((r: { targetId: string }) => r.targetId === hello.id);
-    expect(second.priorReports).toEqual({ total: 1, resolved: 0 });
+    expect(second.priorReports).toEqual({ total: 1, resolved: 0, reporters: 1 });
     expect(second.context.earlier).toEqual([]);
 
     // Messages leave with a deleted account, and can no longer be reported.

@@ -196,6 +196,7 @@ function describe(t: Tr, it: TimelineItem): string[] {
   }
   if (str('reason')) out.push(t('histReason', { r: str('reason')! }));
   if (it.action === 'user.unsuspend' && str('suspendedReason')) out.push(t('histPrevReason', { r: str('suspendedReason')! }));
+  if (it.action === 'user.suspend' && str('reportId')) out.push(t('histFromReport'));
   if (num('sessions')) out.push(t('histSessions', { n: num('sessions')! }));
   const kick = d.kick as { sockets?: number } | undefined;
   if (kick && typeof kick.sockets === 'number') out.push(t('histKick', { sockets: kick.sockets }));

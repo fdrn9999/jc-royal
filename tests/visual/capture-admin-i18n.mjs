@@ -70,6 +70,9 @@ for (const [i, p] of players.entries()) {
 }
 const post = await call('/api/board/posts', { title: `visual report ${stamp}`, body: 'spam body' }, { cookie: players[0].cookie });
 await call('/api/reports', { targetType: 'post', targetId: post.body.id, reason: 'spam', detail: 'visual' }, { cookie: players[1].cookie });
+// A second reporter and a severity, so the report statistics list a repeatedly reported member.
+await call('/api/reports', { targetType: 'post', targetId: post.body.id, reason: 'abuse' }, { cookie: owner.cookie });
+sql(`UPDATE reports SET severity = 'high' WHERE target_id = '${post.body.id}' AND reason = 'spam'`);
 const events = [
   { kind: 'lesson', id: 'cards', phase: 'start' },
   { kind: 'lesson', id: 'cards', phase: 'complete' },
@@ -109,7 +112,7 @@ await page.goto(`${admin}/hands`);
 await page.waitForTimeout(900);
 const handHref = await page.locator('main a[href^="/hands/"]').first().getAttribute('href', { timeout: 3000 }).catch(() => null);
 const handId = handHref ? decodeURIComponent(handHref.slice('/hands/'.length)) : null;
-const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/academy', '/reports', '/board', '/messages', '/service'];
+const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/academy', '/reports', '/reports?view=stats', '/board', '/messages', '/service'];
 
 // Dynamic values (nicknames, e-mails, ids, the brand) are not UI words.
 const ignore = new RegExp(`${stamp}|@visual\\.dev|^JC$|^ROYAL$|^ADMIN$|^EN$|^e2e|^E2E`, 'i');

@@ -186,16 +186,125 @@ export interface ReportDto {
   context: ReportContext | null;
   /** Current visibility of the reported post or comment. */
   contentStatus: 'visible' | 'hidden' | 'deleted' | null;
-  /** Other reports against the same member: all of them, and how many the staff upheld. */
-  priorReports: { total: number; resolved: number };
+  /** Other reports against the same member: all of them, how many the staff upheld, and how many different members filed them. */
+  priorReports: { total: number; resolved: number; reporters: number };
   handledBy: { id: string; nickname: string } | null;
   handledAt: number | null;
   note: string | null;
+  /** Set by staff while working the report; null = not rated yet. */
+  severity: ReportSeverity | null;
+  /** The administrator working on it. */
+  assignee: { id: string; nickname: string } | null;
+  assignedAt: number | null;
+  /** Whether the reporter and the reported member were told the outcome; null while open. */
+  notice: { reporter: boolean; target: boolean } | null;
+  /** The reported member's last five suspensions, lifts and forced disconnects, newest first. */
+  sanctions: ReportSanction[];
 }
 
-export const ReportResolveSchema = z.object({
-  status: z.enum(['resolved', 'dismissed']),
-  note: z.string().trim().max(500).optional(),
-  /** Hide the reported post or comment while resolving. */
-  hideContent: z.boolean().optional(),
-});
+/** A sanction on the reported member, from the audit log. `reportId` is set when it was given from a report. */
+export interface ReportSanction {
+  action: 'user.suspend' | 'user.unsuspend' | 'user.disconnect';
+  at: number;
+  reason: string | null;
+  reportId: string | null;
+  actor: { id: string; nickname: string | null };
+}
+
+export const ReportResolveSchema = z
+  .object({
+    status: z.enum(['resolved', 'dismissed']),
+    note: z.string().trim().max(500).optional(),
+    /** Hide the reported post or comment while resolving. */
+    hideContent: z.boolean().optional(),
+    /** Tell each member who reported it how it ended (no names, no internal note). */
+    notifyReporter: z.boolean().optional(),
+    /** Tell the reported member the report was upheld (resolved only; never who reported it). */
+    notifyTarget: z.boolean().optional(),
+  })
+  .refine((v) => !v.notifyTarget || v.status === 'resolved', 'notifyTarget applies to upheld reports only');
+
+export const REPORT_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
+export type ReportSeverity = (typeof REPORT_SEVERITIES)[number];
+
+/** PATCH /api/admin/reports/:id — one change at a time: severity, who works on it, or take it if nobody does. */
+export const ReportPatchSchema = z
+  .strictObject({
+    severity: z.enum(REPORT_SEVERITIES).nullable().optional(),
+    assigneeId: z.string().min(1).max(64).nullable().optional(),
+    take: z.literal(true).optional(),
+  })
+  .refine((v) => Object.keys(v).length === 1, 'exactly one of severity, assigneeId or take');
+
+export const ReportNoteSchema = z.object({ body: z.string().trim().min(2).max(500) });
+
+export type ReportEventKind = 'note' | 'severity' | 'assign' | 'status' | 'sanction';
+
+/** One entry of a report's history (GET /api/admin/reports/:id/events), oldest first. */
+export interface ReportEventDto {
+  id: string;
+  kind: ReportEventKind;
+  /** Before and after: a severity, an administrator id (assign), a status, or the sanction's audit action. */
+  from: string | null;
+  to: string | null;
+  /** Nicknames for an assign event's administrators. */
+  fromName: string | null;
+  toName: string | null;
+  /** A note's text, the decision note, or the sanction's reason. */
+  body: string | null;
+  actor: { id: string; nickname: string | null };
+  createdAt: number;
+}
+
+/** GET /api/admin/reports */
+export interface ReportListDto {
+  items: ReportDto[];
+  total: number;
+  page: number;
+  limit: number;
+  /** Open reports overall, whatever the filters. */
+  openCount: number;
+}
+
+export const REPORT_STATS_DAYS = [7, 30, 90] as const;
+
+interface ReportOutcomes {
+  total: number;
+  open: number;
+  resolved: number;
+  dismissed: number;
+  /** Average time from filing to decision of those closed; null if none. */
+  avgHandleMs: number | null;
+}
+
+/** GET /api/admin/reports/stats?days= — reference figures for staff; nothing here acts on a member. */
+export interface ReportStatsDto {
+  days: number;
+  since: number;
+  /** Reports filed in the period. */
+  byReason: (ReportOutcomes & { reason: ReportReason })[];
+  byTarget: (ReportOutcomes & { targetType: ReportTarget })[];
+  /** Every open report, whenever filed. */
+  backlog: {
+    open: number;
+    unassigned: number;
+    over24h: number;
+    over72h: number;
+    oldestOpenAt: number | null;
+    bySeverity: Record<ReportSeverity | 'none', number>;
+  };
+  /** Reports decided in the period. */
+  handled: { count: number; avgMs: number | null; maxMs: number | null };
+  /** Members reported at least twice in the period, most reported first (top 20). */
+  repeated: {
+    user: { id: string; nickname: string; status: 'active' | 'suspended' | 'deleted' };
+    reports: number;
+    reporters: number;
+    open: number;
+    resolved: number;
+    dismissed: number;
+    lastAt: number;
+    /** Suspensions ever given to the member. */
+    suspensions: number;
+  }[];
+}

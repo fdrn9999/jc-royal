@@ -36,6 +36,8 @@ export const users = sqliteTable(
   (t) => [
     uniqueIndex('users_email_uq').on(t.email),
     uniqueIndex('users_nickname_uq').on(sql`lower(${t.nickname})`),
+    // Administrators only (the people a report can be assigned to), without reading every member.
+    index('users_staff_idx').on(t.role, t.status).where(sql`role != 'user'`),
   ],
 );
 
@@ -470,6 +472,14 @@ export const reports = sqliteTable(
     handledAt: integer('handled_at'),
     note: text('note'),
     createdAt: integer('created_at').notNull().default(now),
+    /** Staff rating while working the report; null = not rated yet. */
+    severity: text('severity', { enum: ['low', 'medium', 'high', 'critical'] }),
+    /** The administrator working on it, and since when. */
+    assigneeId: text('assignee_id'),
+    assignedAt: integer('assigned_at'),
+    /** Set when closed: whether the reporter and the reported member were sent the outcome (null on older reports). */
+    noticeReporter: integer('notice_reporter', { mode: 'boolean' }),
+    noticeTarget: integer('notice_target', { mode: 'boolean' }),
   },
   (t) => [
     index('reports_status_idx').on(t.status, t.createdAt),
@@ -478,7 +488,33 @@ export const reports = sqliteTable(
     index('reports_reporter_idx').on(t.reporterId, t.createdAt),
     // One open report per reporter and target; a new one is possible after review.
     uniqueIndex('reports_open_uq').on(t.reporterId, t.targetType, t.targetId).where(sql`status = 'open'`),
+    // "Mine" and "unassigned" in the queue.
+    index('reports_assignee_idx').on(t.assigneeId, t.status),
+    // Statistics by period.
+    index('reports_created_idx').on(t.createdAt),
   ],
+);
+
+/**
+ * What happened to a report, in order: notes administrators leave while working it, and every change of severity,
+ * assignee and status, and a sanction given from it. Kept with the report (reports survive account deletion,
+ * pseudonymous). Notes are not a place for personal data: the API refuses e-mail addresses and phone or ID numbers.
+ */
+export const reportEvents = sqliteTable(
+  'report_events',
+  {
+    id: text('id').primaryKey(),
+    reportId: text('report_id').notNull().references(() => reports.id),
+    actorId: text('actor_id').notNull(),
+    kind: text('kind', { enum: ['note', 'severity', 'assign', 'status', 'sanction'] }).notNull(),
+    /** Before and after: a severity, an administrator id, a status, or the sanction's audit action. */
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    /** The note, the decision note, or the sanction's reason. */
+    body: text('body'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('report_events_report_idx').on(t.reportId, t.createdAt)],
 );
 
 // ------------------------------------------------------------------ operations

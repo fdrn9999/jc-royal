@@ -53,6 +53,8 @@ const BY_MESSAGE: Record<string, Key> = {
   'the end must come after the start': 'errNoticeEnd',
   'the end has already passed': 'errNoticeEnd',
   'this notice has already ended': 'errNoticeEnded',
+  'assignee must be an active administrator': 'errAssignee',
+  'the report is not about this member': 'errReportUser',
 };
 const BY_CODE: Record<string, Key> = {
   forbidden: 'errForbidden',
@@ -60,6 +62,7 @@ const BY_CODE: Record<string, Key> = {
   insufficient_balance: 'errNegative',
   room_unavailable: 'errRoom',
   report_closed: 'errReportClosed',
+  report_taken: 'errReportTaken',
   not_found: 'errNotFound',
   conflict: 'errConflict',
   invalid_credentials: 'errLogin',
