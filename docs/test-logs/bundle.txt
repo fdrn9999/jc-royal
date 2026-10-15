@@ -1,3 +1,6 @@
-> pnpm check:bundle   (node tests/bundle-check.mjs, 2026-10-15)
-entry index-0a8-9kk5.js + auth-CewpPbMc.js: 635 KB; engine in: routes-Bu47a3QM.js
+
+> jc-royal@ check:bundle <repo>
+> node tests/bundle-check.mjs
+
+entry index-BHOjAXcH.js + auth-zYoBv9ue.js: 645 KB; engine in: routes-DWpbo95W.js
 ✓ bundle guard passed

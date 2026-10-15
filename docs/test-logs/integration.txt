@@ -1,9 +1,29 @@
+
 > jc-royal@ test:integration <repo>
 > vitest run --config tests/vitest.config.ts
 
+
  RUN  v4.1.11 <repo>
 
- Test Files  14 passed (14)
-      Tests  105 passed (105)
-   Start at  07:49:44
-   Duration  199.02s (transform 311ms, setup 0ms, import 1.58s, tests 181.94s, environment 1ms)
+(node:10480) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1304) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:7300) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38208) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:44296) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:19912) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38332) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10448) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  19 passed (19)
+      Tests  131 passed (131)
+   Start at  14:53:42
+   Duration  302.47s (transform 380ms, setup 0ms, import 2.12s, tests 283.47s, environment 2ms)
+

@@ -263,4 +263,95 @@ describe('server restart recovery', () => {
     expect([...(await cashOuts(ca)), ...(await cashOuts(cb))]).toHaveLength(2);
     expect((await balanceOf(ca)) + (await balanceOf(cb))).toBe(20_000);
   }, 360_000);
+
+  it('a hand that ends while D1 is down, then a crash before any retry: after the restart it is recorded once and the leaver paid once', async () => {
+    if (!worker) {
+      await prepareState(state);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const ca = await user('ka', base);
+    const cb = await user('kb', base);
+    const created = await ca.post('/api/rooms', { name: '중단 방', maxSeats: 6, bigBlind: 20, minBuyIn: 400, maxBuyIn: 2000 });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    let a = await TableSocket.open(ca, id, { base });
+    const b = await TableSocket.open(cb, id, { base });
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 500 })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    const live = (s: NonNullable<typeof a.state>) => !!s.hand && s.hand.stage !== 'settled' && s.hand.actorSeat !== null;
+    await a.waitState(live, 15_000, 'hand start');
+    await b.waitState(live);
+
+    // D1 is unreachable as the hand ends: B leaves (folding if it is B's turn, else A folds), so the record and B's
+    // cash-out both fail and wait in room storage.
+    const logFrom = worker.log().length;
+    const release = holdD1WriteLock(state);
+    try {
+      expect(await b.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+      const s = await a.waitState((x) => !live(x) || isMyTurn(x), 15_000, 'A to act or the hand to end');
+      if (live(s)) await a.act('fold');
+      await until(async () => worker!.log().slice(logFrom), (l) => l.includes('cash-out failed; will retry'), 'the cash-out to fail', 90_000);
+      expect(worker.log().slice(logFrom)).toContain('recordHand failed; will retry');
+      // The process dies before the room's retry gets through.
+      await worker.stop();
+    } finally {
+      release();
+    }
+    a.close();
+    b.close();
+    // Read straight from D1 while the server is down: no record, no cash-out, B's buy-in still out of the wallet.
+    expect(await tableRow(id)).toMatchObject({ hands: 0, hands_played: 0 });
+    const sessions = await d1<{ status: string; cash_out: number | null }>(`SELECT status, cash_out FROM table_sessions WHERE table_id = '${id}' ORDER BY seat_index`, state);
+    expect(sessions).toEqual([
+      { status: 'seated', cash_out: null },
+      { status: 'seated', cash_out: null },
+    ]);
+    expect(await d1(`SELECT id FROM chip_ledger WHERE table_id = '${id}' AND type = 'cash_out'`, state)).toEqual([]);
+
+    // After the restart the room finishes both from storage: one hand record, one cash-out, no chips made or lost.
+    worker = await startWorker(port, state);
+    a = await TableSocket.open(ca, id, { base });
+    await until(async () => ({ row: await tableRow(id), paid: await cashOuts(cb) }), (x) => x.row.hands === 1 && x.paid.length === 1, 'the record and the cash-out', 60_000);
+    expect((await tableRow(id)).hands_played).toBe(1);
+    const stackA = (await a.waitState((x) => x.seats[1]!.state === 'empty', 15_000, 'B gone')).seats[0]!.stack;
+    expect(stackA + (await cashOuts(cb))[0]!.amount).toBe(900);
+    expect((await balanceOf(ca)) + (await balanceOf(cb)) + stackA).toBe(20_000);
+    a.close();
+
+    // Another restart and the daily sweep repeat neither.
+    await worker.stop();
+    worker = await startWorker(port, state);
+    await runCron(base);
+    a = await TableSocket.open(ca, id, { base });
+    expect(await tableRow(id)).toMatchObject({ hands: 1, hands_played: 1 });
+    expect(await cashOuts(cb)).toHaveLength(1);
+    expect(a.state!.seats[0]!.stack).toBe(stackA);
+    expect(await a.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+    await a.waitState((x) => x.you.seatIndex === null, 30_000, 'A stood up');
+    expect((await balanceOf(ca)) + (await balanceOf(cb))).toBe(20_000);
+    a.close();
+  }, 360_000);
+
+  it('a member room only D1 knows about (its opening call never reached it) is woken by the daily sweep and closes itself', async () => {
+    if (!worker) {
+      await prepareState(state);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const ca = await user('oa', base);
+    const host = (await ca.get('/api/auth/me')).body.id as string;
+    // What is left when the room cannot be woken and closing the new row fails too: open, empty, no idle close armed.
+    const id = `it-orphan-${Date.now() % 100_000}`;
+    await d1(
+      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, room_type, created_by, created_at, updated_at)
+       VALUES ('${id}', '깨지 않은 방', 6, 10, 20, 400, 2000, 20, 'member', '${host}', 0, 0)`,
+      state,
+    );
+    // Longer than the idle close (8 s here): nothing closes it on its own.
+    await new Promise((r) => setTimeout(r, 10_000));
+    expect((await tableRow(id)).status).toBe('open');
+    await runCron(base);
+    await until(() => tableRow(id), (t) => t.status === 'closed', 'the woken room to close itself', 60_000);
+  }, 180_000);
 });
