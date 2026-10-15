@@ -115,6 +115,8 @@ interface AdminCtx {
   api: <T>(path: string, init?: { method?: string; body?: unknown }) => Promise<T>;
   reauthPrompt: { open: boolean; error: string | null; confirm: (password: string) => void; cancel: () => void };
   logout: () => Promise<void>;
+  /** The browser reports no network; the last API request failed without an answer (cleared by the next answer). */
+  net: { offline: boolean; unreachable: boolean };
 }
 
 const Ctx = createContext<AdminCtx | null>(null);
@@ -125,6 +127,18 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [prompt, setPrompt] = useState<{ open: boolean; error: unknown }>({ open: false, error: null });
   const waiter = useRef<{ resolve: () => void; reject: (e: unknown) => void } | null>(null);
+  const [offline, setOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+  const [unreachable, setUnreachable] = useState(false);
+  useEffect(() => {
+    const on = () => setOffline(false);
+    const off = () => setOffline(true);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -151,8 +165,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const api = useCallback(
     async <T,>(path: string, init?: { method?: string; body?: unknown }): Promise<T> => {
       try {
-        return await rawApi<T>(path, init);
+        const r = await rawApi<T>(path, init);
+        setUnreachable(false);
+        return r;
       } catch (e) {
+        // fetch rejects with a TypeError only when no answer came back at all; any HTTP answer means the API is reachable.
+        setUnreachable(e instanceof TypeError);
         if (e instanceof ApiError && e.code === 'reauth_required') {
           await askReauth();
           return rawApi<T>(path, init);
@@ -192,7 +210,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setMe(null);
   }, []);
 
-  return <Ctx.Provider value={{ me, loading, refresh, api, reauthPrompt, logout }}>{children}</Ctx.Provider>;
+  const net = useMemo(() => ({ offline, unreachable }), [offline, unreachable]);
+  return <Ctx.Provider value={{ me, loading, refresh, api, reauthPrompt, logout, net }}>{children}</Ctx.Provider>;
 }
 
 export function useAdmin() {
@@ -209,20 +228,28 @@ export function useData<T>(path: string | null) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
+  // Only the newest request may change what is shown: an answer for an earlier path (a filter since changed) that
+  // arrives late is dropped instead of replacing the newer list.
+  const seq = useRef(0);
   const reload = useCallback(async () => {
-    if (!path) return;
+    if (!path) return setLoading(false);
+    const mine = ++seq.current;
     setLoading(true);
     try {
-      setData(await api<T>(path));
+      const d = await api<T>(path);
+      if (mine !== seq.current) return;
+      setData(d);
       setError(null);
     } catch (e) {
-      setError(e);
+      if (mine === seq.current) setError(e);
     } finally {
-      setLoading(false);
+      if (mine === seq.current) setLoading(false);
     }
   }, [api, path]);
   useEffect(() => {
     void reload();
+    // Leaving the page (or a null path) also drops whatever is still on its way.
+    return () => void ++seq.current;
   }, [reload]);
   // Worded at render time, so it follows a language switch.
   // loading is true while a request is out (the previous data stays shown meanwhile).

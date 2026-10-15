@@ -24,7 +24,7 @@ import { and, eq } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
-import { fail, parseBody } from '../lib/http';
+import { fail, isPreview, parseBody } from '../lib/http';
 import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
 import { clientIp, rateLimit } from '../lib/rate-limit';
@@ -524,6 +524,30 @@ export const adminReportRoutes = new Hono<AppEnv>()
     const hidable = r.targetType === 'post' || r.targetType === 'comment';
     if (body.hideContent && !hidable) fail(400, 'bad_request', 'only posts and comments can be hidden');
     const DB = c.env.DB;
+    // `preview: true`: what this decision would do, for the console's confirmation (one read batch; nothing written).
+    // The counts are of this moment: a report filed or a member leaving before the decision changes them.
+    if (await isPreview(c)) {
+      const [open, target, content] = await DB.batch<{ n: number; reporters?: number }>([
+        DB.prepare(
+          `SELECT COUNT(*) AS n, COUNT(DISTINCT CASE WHEN u.status != 'deleted' THEN r.reporter_id END) AS reporters
+             FROM reports r LEFT JOIN users u ON u.id = r.reporter_id WHERE r.target_type = ?1 AND r.target_id = ?2 AND r.status = 'open'`,
+        ).bind(r.targetType, r.targetId),
+        DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE id = ?1 AND status != 'deleted'`).bind(r.targetUserId),
+        r.targetType === 'post'
+          ? DB.prepare(`SELECT COUNT(*) AS n FROM posts WHERE id = ?1 AND status = 'visible'`).bind(r.targetId)
+          : r.targetType === 'comment'
+            ? DB.prepare(`SELECT COUNT(*) AS n FROM comments WHERE id = ?1 AND status = 'visible'`).bind(r.targetId)
+            : DB.prepare(`SELECT 0 AS n`),
+      ]);
+      const one = (x: D1Result<{ n: number; reporters?: number }> | undefined) => x?.results[0];
+      return c.json({
+        preview: true,
+        status: body.status,
+        closes: one(open)?.n ?? 0,
+        notify: { reporters: body.notifyReporter ? (one(open)?.reporters ?? 0) : 0, target: body.notifyTarget ? (one(target)?.n ?? 0) : 0 },
+        hides: !!body.hideContent && hidable && (one(content)?.n ?? 0) > 0,
+      });
+    }
     const me = c.var.user!.id;
     const at = Date.now();
     const claim = crypto.randomUUID();

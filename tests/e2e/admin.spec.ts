@@ -113,6 +113,10 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await item.getByTestId('report-hide').check();
   await item.getByLabel(/처리 내용|Resolution note/).fill('광고 글 숨김');
   await item.getByTestId('report-resolve').click();
+  // The decision waits in a confirmation that shows what it will do (the server's preview).
+  await expect(page.getByTestId('report-preview')).toContainText(/열린 신고 1건|close with it: 1/);
+  await expect(page.getByTestId('report-preview')).toContainText(/신고된 글·댓글을 숨깁니다|The reported post or comment is hidden/);
+  await page.getByTestId('report-confirm').click();
   await expect(page.getByRole('status').filter({ hasText: /1건|1 report/ })).toBeVisible();
   await expect(item).toHaveCount(0);
   await page.getByTestId('report-status').selectOption('resolved');

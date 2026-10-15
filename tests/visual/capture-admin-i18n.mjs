@@ -147,6 +147,14 @@ sql(`INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, 
   writeFileSync(file, `INSERT OR REPLACE INTO daily_stats (day, metric, n) VALUES\n${rows.map(([d, m, n]) => `(${d}, '${m}', ${n})`).join(',\n')};\n`);
   d1(['--file', file]);
 }
+// Two finished hands on a closed table, so the hands list has rows, a member filter and a detail page to open.
+sql(`INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, status) VALUES ('vis-h-${stamp}', 'vis-${stamp}', 6, 10, 20, 400, 2000, 'closed')`);
+sql(`INSERT INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log) VALUES
+  ('vis-h-${stamp}-1', 'vis-h-${stamp}', 1, ${at - 7_200_000}, ${at - 7_100_000}, '["As","Kd","7h","7c","2s"]', 400, '1', '{"actions":[],"engine":""}'),
+  ('vis-h-${stamp}-2', 'vis-h-${stamp}', 2, ${at - 3_600_000}, ${at - 3_500_000}, '["Qs","Jd","3c"]', 120, '1', '{"actions":[],"engine":""}')`);
+sql(`INSERT INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, went_to_showdown, ended_at) VALUES
+  ('vis-h-${stamp}-1', '${players[0].id}', 0, '["Ah","Ad"]', 1000, 1200, 200, 400, 1, ${at - 7_100_000}), ('vis-h-${stamp}-1', '${players[1].id}', 1, '["Kc","Qc"]', 1000, 800, -200, 0, 1, ${at - 7_100_000}),
+  ('vis-h-${stamp}-2', '${players[0].id}', 0, '["9h","8h"]', 1000, 940, -60, 0, 0, ${at - 3_500_000}), ('vis-h-${stamp}-2', '${players[1].id}', 1, '["Tc","Td"]', 1000, 1060, 60, 120, 0, ${at - 3_500_000})`);
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });
 const errors = [];
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -162,7 +170,9 @@ await page.goto(`${admin}/hands`);
 await page.waitForTimeout(900);
 const handHref = await page.locator('main a[href^="/hands/"]').first().getAttribute('href', { timeout: 3000 }).catch(() => null);
 const handId = handHref ? decodeURIComponent(handHref.slice('/hands/'.length)) : null;
-const routes = ['/', '/stats', '/stats?unit=month', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/audit?outcome=failed#detail', `/audit?targetType=user&targetId=${players[0].id}`, '/security', `/users/${players[0].id}#chips`, `/users/${players[0].id}#suspend`, `/users/${players[0].id}#role`, '/tables/e2e-six#close', '/academy', '/reports', '/reports?view=stats', '/board', '/messages', '/service'];
+const routes = ['/', '/stats', '/stats?unit=month', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/audit?outcome=failed#detail', `/audit?targetType=user&targetId=${players[0].id}`, '/security', `/users/${players[0].id}#chips`, `/users/${players[0].id}#suspend`, `/users/${players[0].id}#role`, '/tables/e2e-six#close', '/academy', '/reports', '/reports?view=stats', '/board', '/messages', '/service',
+  // Console states: a member's ledger and hands, nobody found, nothing matching, a failed load, and the confirmations.
+  `/ledger?member=${players[0].nickname}`, `/ledger?member=nobody${stamp}`, `/hands?member=${encodeURIComponent(players[0].email)}`, '/tables#empty', '/ledger#offline', '/board#delete', '/messages#send', '/reports#decide'];
 
 // Dynamic values (nicknames, e-mails, ids, the brand) are not UI words.
 const ignore = new RegExp(`${stamp}|@visual\\.dev|^JC$|^ROYAL$|^ADMIN$|^EN$|^e2e|^E2E`, 'i');
@@ -172,6 +182,9 @@ for (const lang of ['ko', 'en']) {
   for (const route of routes) {
     await page.setViewportSize({ width: 1440, height: 900 });
     const [path, step] = route.split('#');
+    // A load that cannot reach the server: the list says so with a retry, and the banner says the server is away.
+    const ledgerApi = (u) => u.pathname === '/api/admin/ledger';
+    if (step === 'offline') await page.route(ledgerApi, (r) => r.abort('internetdisconnected'));
     await page.goto(admin + path);
     await page.waitForTimeout(900);
     if (await page.getByTestId('reauth-confirm').isVisible().catch(() => false)) {
@@ -205,6 +218,29 @@ for (const lang of ['ko', 'en']) {
       await page.getByTestId('audit-detail-toggle').first().click();
       await page.getByTestId('audit-detail').waitFor();
     }
+    if (step === 'empty') {
+      await page.getByTestId('table-q').fill('no-such-table');
+      await page.getByTestId('table-q').press('Enter');
+      await page.getByTestId('list-empty').waitFor();
+    }
+    if (step === 'offline') await page.getByTestId('load-error').waitFor();
+    if (step === 'delete') {
+      await page.getByTestId('post-delete').first().click();
+      await page.getByTestId('post-delete-text').waitFor();
+    }
+    if (step === 'send') {
+      await page.locator('main form input').first().fill(players[0].nickname);
+      await page.locator('main form button[type="submit"]').first().click();
+      await page.getByRole('button', { name: `${players[0].nickname} +` }).click();
+      await page.getByLabel(/^제목$|^Title$/).fill('visual');
+      await page.getByLabel(/^내용$|^Body$/).fill('visual');
+      await page.getByTestId('send-message').click();
+      await page.getByTestId('send-summary').waitFor();
+    }
+    if (step === 'decide') {
+      await page.getByTestId('report-resolve').first().click();
+      await page.getByTestId('report-preview').waitFor();
+    }
     if (step) await page.waitForTimeout(400);
     const name = `${lang}-${route.replace(/\//g, '_').replace(/[^a-z0-9_-]/gi, '') || '_'}`;
     await page.screenshot({ path: `${out}/${name}-1440.png`, fullPage: true });
@@ -215,11 +251,20 @@ for (const lang of ['ko', 'en']) {
         const el = n.parentElement;
         if (!el || el.closest('.font-mono, script, style, [aria-hidden="true"]')) continue;
         const text = n.textContent ?? '';
-        for (const w of text.match(isKo ? /[A-Za-z][A-Za-z_.:-]+/g : /[가-힣]+/g) ?? []) found.add(w);
+        for (const w of text.match(isKo ? /[A-Za-z][A-Za-z0-9_.:-]+/g : /[가-힣]+/g) ?? []) found.add(w);
       }
       for (const el of document.querySelectorAll('input[placeholder], [aria-label], [title]')) {
         if (el.closest('.font-mono')) continue;
-        for (const a of ['placeholder', 'aria-label']) for (const w of (el.getAttribute(a) ?? '').match(isKo ? /[A-Za-z][A-Za-z_.:-]+/g : /[가-힣]+/g) ?? []) found.add(`${a}:${w}`);
+        for (const a of ['placeholder', 'aria-label']) for (const w of (el.getAttribute(a) ?? '').match(isKo ? /[A-Za-z][A-Za-z0-9_.:-]+/g : /[가-힣]+/g) ?? []) found.add(`${a}:${w}`);
+      }
+      // Visible Hangul on a badge drawn in the monospace font (inherited from a code cell) spaces its words apart.
+      for (const badge of document.querySelectorAll('span.rounded-full')) {
+        const texts = document.createTreeWalker(badge, NodeFilter.SHOW_TEXT);
+        for (let n = texts.nextNode(); n; n = texts.nextNode()) {
+          const el = n.parentElement;
+          if (!el || el.closest('.sr-only, [aria-hidden="true"]') || !/[가-힣]/.test(n.textContent ?? '')) continue;
+          if (/mono/i.test(getComputedStyle(el).fontFamily)) found.add(`mono-badge:${badge.textContent}`);
+        }
       }
       return [...found];
     }, lang === 'ko');
@@ -229,6 +274,7 @@ for (const lang of ['ko', 'en']) {
     const narrow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     if (lang === 'ko' || route === '/' || route === '/service' || route.startsWith('/hands/') || route.startsWith('/security') || step) await page.screenshot({ path: `${out}/${name}-390.png`, fullPage: true });
     if (step && step !== 'detail') await page.keyboard.press('Escape');
+    if (step === 'offline') await page.unroute(ledgerApi);
     result[`${lang} ${route}`] = { leftover: words.filter((w) => !ignore.test(w.replace(/^(placeholder|aria-label):/, '')) && !(lang === 'en' && w === '한국어')), overflow: [wide, narrow] };
   }
 }

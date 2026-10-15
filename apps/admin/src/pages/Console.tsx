@@ -1,7 +1,7 @@
-import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat } from '@jc/ui';
+import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat } from '@jc/ui';
 import { academyItemName, ageOn, isoDate, type AcademyItemKind } from '@jc/types';
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
 import {
   academyKindLabel,
@@ -19,6 +19,7 @@ import {
   userStatusLabel,
 } from '../labels';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { dayStart, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
@@ -69,14 +70,15 @@ function downloadCsv(filename: string, csv: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
+/** A dense table. `stack`: on a phone each row becomes a block its cells lay out themselves (no sideways scrolling). */
+export function Table({ head, children, stack = false }: { head: ReactNode[]; children: ReactNode; stack?: boolean }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] text-left text-sm">
-        <thead className="text-[11px] uppercase tracking-wider text-ink-400">
-          <tr>{head.map((h, i) => <th key={i} className="border-b border-white/5 px-2 py-2 font-semibold">{h}</th>)}</tr>
+    <div className={stack ? 'sm:overflow-x-auto' : 'overflow-x-auto'}>
+      <table className={stack ? 'w-full text-left text-sm max-sm:block sm:min-w-[640px]' : 'w-full min-w-[640px] text-left text-sm'}>
+        <thead className={stack ? 'text-[11px] uppercase tracking-wider text-ink-400 max-sm:hidden' : 'text-[11px] uppercase tracking-wider text-ink-400'}>
+          <tr>{head.map((h, i) => <th key={i} className="whitespace-nowrap border-b border-white/5 px-2 py-2 font-semibold">{h}</th>)}</tr>
         </thead>
-        <tbody className="divide-y divide-white/5">{children}</tbody>
+        <tbody className={stack ? 'divide-y divide-white/5 max-sm:block' : 'divide-y divide-white/5'}>{children}</tbody>
       </table>
     </div>
   );
@@ -113,7 +115,7 @@ export function UsersPage() {
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [exporting, setExporting] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [note, setNote] = useState<Note>(null);
   const [sortKey, dir] = sort.split(':') as [string, string];
   const params = new URLSearchParams({ q: query, sort: sortKey, dir, paged: '1', limit: String(PAGE), offset: String(offset) });
   if (lang) params.set('locale', lang);
@@ -148,13 +150,13 @@ export function UsersPage() {
     });
   async function exportCsv() {
     setExporting(true);
-    setMsg(null);
+    setNote(null);
     try {
       const r = await api<{ filename: string; count: number; csv: string }>('/api/admin/users/export', { body: { userIds: [...selected] } });
       downloadCsv(r.filename, r.csv);
-      setMsg(t('exported', { n: r.count }));
+      setNote({ ok: true, text: t('exported', { n: r.count }) });
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errText(e, t));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setNote({ ok: false, text: errText(e, t) });
     } finally {
       setExporting(false);
     }
@@ -194,8 +196,8 @@ export function UsersPage() {
         </Button>
         <p className="w-full text-xs text-ink-400">{mayExport ? t('exportHint') : t('exportSuperOnly')}</p>
       </div>
-      {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
-      {error && <Empty>{error}</Empty>}
+      <Feedback note={note} />
+      {error && <LoadError error={error} />}
       <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <Table
           head={[
@@ -391,7 +393,7 @@ export function UserDetailPage() {
   const { t, locale } = useT();
   const { api, me } = useAdmin();
   const { data, error, reload } = useData<UserDetail>(`/api/admin/users/${id}`);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [note, setNote] = useState<Note>(null);
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [reason, setReason] = useState('');
@@ -409,16 +411,16 @@ export function UserDetailPage() {
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
   const run = async (fn: () => Promise<unknown>) => {
-    setMsg(null);
+    setNote(null);
     setReset(null);
     setKick(null);
     try {
       await fn();
-      setMsg(t('saved'));
+      setNote({ ok: true, text: t('saved') });
       setRev((n) => n + 1);
       await reload();
     } catch (e) {
-      setMsg(errText(e, t));
+      setNote({ ok: false, text: errText(e, t) });
     }
   };
   // The dialog shows what the server says the change would do; the password is asked only when it is confirmed.
@@ -459,12 +461,12 @@ export function UserDetailPage() {
     setMemo('');
   };
   const issueReset = async () => {
-    setMsg(null);
+    setNote(null);
     setReset(null);
     try {
       setReset(await api<ResetLink>(`/api/admin/users/${id}/reset-link`, { body: {} }));
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errText(e, t));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setNote({ ok: false, text: errText(e, t) });
     }
   };
   // Suspending and ending connections reach the member's tables: confirmed first, then the result says what each table did.
@@ -501,8 +503,7 @@ export function UserDetailPage() {
         : api(`/api/admin/users/${id}/role`, { body: { role: p.role, reason: why } }),
     );
   };
-  if (error) return <Empty>{error}</Empty>;
-  if (!data) return <Empty>{t('loading')}</Empty>;
+  if (!data) return <PageState error={error} onRetry={reload} />;
   const u = data.user;
   const canModerate = me?.user.id !== u.id && (u.role === 'user' || canDo(me, 'admins.manage'));
   const pvData = pv && 'data' in pv ? pv.data : null;
@@ -541,7 +542,8 @@ export function UserDetailPage() {
           <Link to={`/reports?status=all&userId=${u.id}`} className="text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
         </span>
       </div>
-      {msg && <p className="break-all rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-gold-300" role="status">{msg}</p>}
+      <Feedback note={note} />
+      {error && <LoadError error={error} onRetry={reload} />}
       {kick && <KickResult r={kick} />}
       {reset && <ResetLinkResult reset={reset} />}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
@@ -764,50 +766,119 @@ interface TableRow {
   roomType: 'official' | 'member'; hostNickname: string | null;
 }
 
+/** One colour per table state wherever a table's state is shown: open green, closing gold, closed grey. */
+const TABLE_TONE = { open: 'green', closing: 'gold', closed: 'neutral' } as const;
+const tableTone = (s: string) => TABLE_TONE[s as keyof typeof TABLE_TONE] ?? 'neutral';
+const TABLE_STATUSES = ['active', 'open', 'closing', 'closed'] as const;
+
 export function TablesPage() {
   const { t } = useT();
   const { api } = useAdmin();
-  const { data, reload } = useData<TableRow[]>('/api/admin/tables');
+  const [text, setText] = useState('');
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const [roomType, setRoomType] = useState('');
+  const [issueOnly, setIssueOnly] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const params = new URLSearchParams({ paged: '1', limit: String(PAGE), offset: String(offset) });
+  if (q) params.set('q', q);
+  if (status) params.set('status', status);
+  if (roomType) params.set('roomType', roomType);
+  if (issueOnly) params.set('issue', '1');
+  const { data, error, loading, reload } = useData<{ items: TableRow[]; total: number }>(`/api/admin/tables?${params}`);
+  // Any change to what is searched starts again from the first page.
+  const filter = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setOffset(0);
+  };
+  const filtered = !!(q || status || roomType || issueOnly);
+  const reset = () => {
+    setText('');
+    setQ('');
+    setStatus('');
+    setRoomType('');
+    setIssueOnly(false);
+    setOffset(0);
+  };
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false });
-  const [msg, setMsg] = useState<string | null>(null);
+  const [note, setNote] = useState<Note>(null);
   async function create(e: FormEvent) {
     e.preventDefault();
     try {
       await api('/api/admin/tables', { body: { ...f, joinCode: f.isPrivate ? f.joinCode : undefined } });
       setOpen(false);
-      setMsg(t('saved'));
+      setNote({ ok: true, text: t('saved') });
       await reload();
     } catch (x) {
-      setMsg(errText(x, t));
+      setNote({ ok: false, text: errText(x, t) });
     }
   }
   const num = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: Number(e.target.value) || 0 });
+  const shown = data?.items ?? [];
+  const total = data?.total ?? 0;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-extrabold">{t('tables')}</h1>
         <Button onClick={() => setOpen(true)} data-testid="create-table">{t('createTable')}</Button>
       </div>
-      {msg && <p className="text-sm text-gold-300">{msg}</p>}
-      <Panel>
+      <Feedback note={note} />
+      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); filter(setQ)(text.trim()); }}>
+        <Input className="min-w-0 flex-1 basis-56" placeholder={t('tableSearch')} aria-label={t('tableSearch')} value={text} maxLength={64} onChange={(e) => setText(e.target.value)} data-testid="table-q" />
+        <select aria-label={t('status')} value={status} onChange={(e) => filter(setStatus)(e.target.value)} className={selectCls} data-testid="table-status">
+          <option value="">{t('status')}: {t('statusAll')}</option>
+          {TABLE_STATUSES.map((s) => <option key={s} value={s}>{t('status')}: {t(s === 'active' ? 'tableActive' : s)}</option>)}
+        </select>
+        <select aria-label={t('roomTypeLabel')} value={roomType} onChange={(e) => filter(setRoomType)(e.target.value)} className={selectCls} data-testid="table-room-type">
+          <option value="">{t('roomTypeLabel')}: {t('statusAll')}</option>
+          <option value="official">{t('roomTypeLabel')}: {t('officialRoom')}</option>
+          <option value="member">{t('roomTypeLabel')}: {t('memberRoom')}</option>
+        </select>
+        <label className="flex h-11 items-center gap-2 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm">
+          <input type="checkbox" className={checkbox} checked={issueOnly} onChange={(e) => filter(setIssueOnly)(e.target.checked)} data-testid="table-issue" />
+          {t('issueOnly')}
+        </label>
+        <Button type="submit" variant="subtle">{t('searchBtn')}</Button>
+        {filtered && <Button type="button" variant="ghost" onClick={reset} data-testid="table-reset">{t('auditReset')}</Button>}
+      </form>
+      {error && <LoadError error={error} onRetry={reload} />}
+      <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <Table head={[t('name'), t('status'), t('maxSeats'), t('blinds'), t('buyin'), t('colLive'), t('colHands'), '']}>
-          {data?.map((tb) => (
+          {shown.map((tb) => (
             <tr key={tb.id}>
               <td className="px-2 py-2 font-semibold">
                 {tb.name} {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}
                 {tb.roomType === 'member' && <Badge tone="blue" className="ml-1">{t('memberRoom')} · {tb.hostNickname ?? '—'}</Badge>}
               </td>
-              <td className="px-2 py-2"><Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>{tb.entryBlocked && <Badge tone="red" className="ml-1">{t('entryBlocked')}</Badge>}{tb.handsPaused && <Badge tone="red" className="ml-1">{t('pausedBadge')}</Badge>}</td>
+              <td className="px-2 py-2">
+                <span className="flex flex-wrap gap-1">
+                  <Badge tone={tableTone(tb.status)}>{t(tb.status as 'open')}</Badge>
+                  {tb.entryBlocked && <Badge tone="red">{t('entryBlocked')}</Badge>}
+                  {tb.handsPaused && <Badge tone="red">{t('pausedBadge')}</Badge>}
+                  {tb.lastIssue && <span title={tb.lastIssue}><Badge tone="red">{t('lastIssue')}</Badge></span>}
+                </span>
+              </td>
               <td className="px-2 py-2">{tb.maxSeats}</td>
               <td className="px-2 py-2 font-mono">{tb.smallBlind}/{tb.bigBlind}</td>
-              <td className="px-2 py-2 font-mono">{formatChips(tb.minBuyIn, true)}–{formatChips(tb.maxBuyIn, true)}</td>
+              <td className="whitespace-nowrap px-2 py-2 font-mono">{formatChips(tb.minBuyIn, true)}–{formatChips(tb.maxBuyIn, true)}</td>
               <td className="px-2 py-2 text-xs">{t('seatedWs', { seated: tb.liveSeated, ws: tb.liveConnections })} {tb.livePlaying && <Badge tone="green">{t('inHand')}</Badge>}</td>
               <td className="px-2 py-2">{tb.handsPlayed}</td>
               <td className="px-2 py-2"><Link to={`/tables/${tb.id}`} className="text-gold-300">{t('detail')}</Link></td>
             </tr>
           ))}
         </Table>
+        {(data || !error) && <ListState loading={!data} empty={shown.length === 0}>{filtered ? t('noMatch') : t('noTables')}</ListState>}
+        {total > 0 && (
+          <Pager
+            label={t('tables')}
+            testid="tables-pager"
+            range={t('auditRange', { from: offset + 1, to: offset + shown.length, total })}
+            prev={offset > 0 ? () => setOffset(Math.max(0, offset - PAGE)) : null}
+            next={offset + shown.length < total ? () => setOffset(offset + PAGE) : null}
+            busy={loading}
+          />
+        )}
       </Panel>
       <Modal open={open} onClose={() => setOpen(false)} title={t('createTable')} wide>
         <form className="grid grid-cols-2 gap-3" onSubmit={create}>
@@ -884,8 +955,8 @@ export function TableDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useT();
   const { api } = useAdmin();
-  const { data, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null }>(`/api/admin/tables/${id}`);
-  const [msg, setMsg] = useState<string | null>(null);
+  const { data, error, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null }>(`/api/admin/tables/${id}`);
+  const [note, setNote] = useState<Note>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [closePv, setClosePv] = useState<{ data: ClosePreview } | { error: unknown } | null>(null);
   const closeSeq = useRef(0);
@@ -895,22 +966,22 @@ export function TableDetailPage() {
   const act = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
-      setMsg(t('saved'));
+      setNote({ ok: true, text: t('saved') });
       await reload();
     } catch (e) {
-      setMsg(errText(e, t));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setNote({ ok: false, text: errText(e, t) });
     }
   };
   const runControl = async (action: TableControl) => {
     setControl(null);
-    setMsg(null);
+    setNote(null);
     try {
       const r = await api<{ paused: boolean; handInProgress: boolean }>(`/api/admin/tables/${id}/control`, { body: { action, reason: cReason } });
-      setMsg(action === 'pause' && r.handInProgress ? `${t('saved')} ${t('pausedAfterHand')}` : t('saved'));
+      setNote({ ok: true, text: action === 'pause' && r.handInProgress ? `${t('saved')} ${t('pausedAfterHand')}` : t('saved') });
       setCReason('');
       await reload();
     } catch (e) {
-      setMsg(errText(e, t));
+      setNote({ ok: false, text: errText(e, t) });
       await reload();
     }
   };
@@ -929,7 +1000,7 @@ export function TableDetailPage() {
     setConfirmClose(false);
     setClosePv(null);
   };
-  if (!data) return <Empty>{t('loading')}</Empty>;
+  if (!data) return <PageState error={error} onRetry={reload} />;
   const tb = data.table;
   const live = data.live;
   const diag = data.diagnosis;
@@ -939,13 +1010,14 @@ export function TableDetailPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-extrabold">{tb.name}</h1>
-        <Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>
+        <Badge tone={tableTone(tb.status)}>{t(tb.status as 'open')}</Badge>
         {tb.handsPaused && <Badge tone="red">{t('pausedBadge')}</Badge>}
         {tb.entryBlocked && <Badge tone="red">{t('entryBlockedShort')}</Badge>}
         {live?.maintenance?.active && <Badge tone="gold">{t('maintStateActive')}</Badge>}
         {tb.lastIssue && <Badge tone="red">{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></Badge>}
       </div>
-      {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
+      <Feedback note={note} />
+      {error && <LoadError error={error} onRetry={reload} />}
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('live')}>
           {!live ? <Empty>—</Empty> : (
@@ -1123,26 +1195,108 @@ export function TableDetailPage() {
 }
 
 // ------------------------------------------------------------------ hands (audit)
+/** A keyset page of the API (ledger, hands): `next` is the cursor of the following page; `member` whom it is narrowed to. */
+interface KeysetPage<T> {
+  items: T[];
+  next: string | null;
+  member: { id: string; nickname: string } | null;
+}
+const chipCls = 'rounded-full bg-gold-500/15 px-3 py-1 text-xs font-semibold text-gold-300';
+
+/**
+ * A list read cursor by cursor with its filters in the URL (a link opens it filtered): the cursors of the pages passed,
+ * for "previous", start over whenever a filter changes.
+ */
+function useKeysetFilters(keys: readonly string[]) {
+  const [params, setParams] = useSearchParams();
+  const filterKey = keys.map((k) => `${k}=${params.get(k) ?? ''}`).join('&');
+  const [pages, setPages] = useState<{ key: string; stack: string[] }>({ key: filterKey, stack: [] });
+  const stack = pages.key === filterKey ? pages.stack : [];
+  const set = (patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === '') next.delete(k);
+      else next.set(k, v);
+    }
+    setParams(next);
+  };
+  return {
+    params,
+    set,
+    filtered: keys.some((k) => params.get(k)),
+    reset: () => set(Object.fromEntries(keys.map((k) => [k, null]))),
+    cursor: stack[stack.length - 1] ?? null,
+    depth: stack.length,
+    prev: stack.length ? () => setPages({ key: filterKey, stack: stack.slice(0, -1) }) : null,
+    nextOf: (next: string | null | undefined) => (next ? () => setPages({ key: filterKey, stack: [...stack, next] }) : null),
+  };
+}
+
+/** The member box of the ledger and hand lists: an id, email or nickname, applied on submit. */
+function MemberFilter({ value, onApply }: { value: string; onApply: (v: string) => void }) {
+  const { t } = useT();
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  return (
+    <form className="flex min-w-0 flex-1 basis-64 gap-2" onSubmit={(e) => { e.preventDefault(); onApply(text.trim()); }}>
+      <Input className="min-w-0 flex-1" placeholder={t('search')} aria-label={t('memberFilter')} value={text} maxLength={254} onChange={(e) => setText(e.target.value)} data-testid="member-q" />
+      <Button type="submit" variant="subtle">{t('searchBtn')}</Button>
+    </form>
+  );
+}
+
+const HAND_KEYS = ['tableId', 'member'] as const;
+
 export function HandsPage() {
   const { t, locale } = useT();
-  const tableId = new URLSearchParams(location.search).get('tableId');
-  const { data } = useData<{ id: string; tableId: string; handNumber: number; endedAt: number; board: string[]; potTotal: number }[]>(`/api/admin/hands${tableId ? `?tableId=${tableId}` : ''}`);
+  const f = useKeysetFilters(HAND_KEYS);
+  const tableId = f.params.get('tableId') ?? '';
+  const member = f.params.get('member') ?? '';
+  const q = new URLSearchParams({ paged: '1', limit: String(PAGE) });
+  if (tableId) q.set('tableId', tableId);
+  if (member) q.set('member', member);
+  if (f.cursor) q.set('cursor', f.cursor);
+  const { data, error, loading, reload } = useData<KeysetPage<{ id: string; tableId: string; tableName: string | null; handNumber: number; endedAt: number; board: string[]; potTotal: number }>>(`/api/admin/hands?${q}`);
+  const shown = data?.items ?? [];
+  const first = f.depth * PAGE + 1;
+  const tableName = data?.items.find((h) => h.tableId === tableId)?.tableName ?? tableId;
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-testid="hands-page">
       <h1 className="text-xl font-extrabold">{t('hands')}</h1>
-      <Panel>
+      <div className="flex flex-wrap items-center gap-2">
+        <MemberFilter value={member} onApply={(v) => f.set({ member: v })} />
+        {tableId && (
+          <button className={chipCls} onClick={() => f.set({ tableId: null })} data-testid="table-chip">
+            {t('colTable')}: {tableName} ✕
+          </button>
+        )}
+        {member && data?.member && !loading && (
+          <Link to={`/users/${data.member.id}`} className={chipCls} data-testid="member-chip">{t('colUser')}: {data.member.nickname} →</Link>
+        )}
+        {f.filtered && <Button size="sm" variant="ghost" onClick={f.reset} data-testid="hands-reset">{t('auditReset')}</Button>}
+      </div>
+      <p className="text-xs text-ink-400">{t('handsAccessNote')}</p>
+      {member && data && !data.member && !loading && <p className="text-sm text-gold-300" role="status" data-testid="member-none">{t('memberNotFound', { q: member })}</p>}
+      {error && <LoadError error={error} onRetry={reload} />}
+      <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <Table head={[t('time'), t('colTable'), '#', t('colBoard'), t('colPot'), '']}>
-          {data?.map((h) => (
+          {shown.map((h) => (
             <tr key={h.id}>
-              <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(h.endedAt, locale)}</td>
-              <td className="px-2 py-1.5">{h.tableId}</td>
+              <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-400">{formatDate(h.endedAt, locale)}</td>
+              <td className="px-2 py-1.5">
+                <button className="text-left hover:underline" onClick={() => f.set({ tableId: h.tableId })} title={t('auditOnlyThis')}>{h.tableName ?? <span className="font-mono text-xs">{h.tableId}</span>}</button>
+              </td>
               <td className="px-2 py-1.5">{h.handNumber}</td>
-              <td className="px-2 py-1.5 font-mono text-xs">{h.board.join(' ') || '—'}</td>
+              <td className="whitespace-nowrap px-2 py-1.5 font-mono text-xs">{h.board.join(' ') || '—'}</td>
               <td className="px-2 py-1.5 font-mono">{formatChips(h.potTotal)}</td>
               <td className="px-2 py-1.5"><Link className="text-gold-300" to={`/hands/${encodeURIComponent(h.id)}`}>{t('detail')}</Link></td>
             </tr>
           ))}
         </Table>
+        {(data || !error) && <ListState loading={!data} empty={shown.length === 0}>{f.filtered ? t('noMatch') : t('noHands')}</ListState>}
+        {data && (shown.length > 0 || f.depth > 0) && (
+          <Pager label={t('hands')} testid="hands-pager" range={t('auditRangeNoTotal', { from: first, to: first + shown.length - 1 })} prev={f.prev} next={f.nextOf(data.next)} busy={loading} />
+        )}
       </Panel>
     </div>
   );
@@ -1158,9 +1312,8 @@ interface HandAudit {
 export function HandDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useT();
-  const { data, error } = useData<HandAudit>(`/api/admin/hands/${encodeURIComponent(id)}`);
-  if (error) return <Empty>{error}</Empty>;
-  if (!data) return <Empty>{t('loading')}</Empty>;
+  const { data, error, reload } = useData<HandAudit>(`/api/admin/hands/${encodeURIComponent(id)}`);
+  if (!data) return <PageState error={error} onRetry={reload} />;
   const nick = (s: number) => data.players.find((p) => p.seatIndex === s)?.nickname ?? `#${s + 1}`;
   return (
     <div className="flex flex-col gap-6">
@@ -1193,26 +1346,83 @@ export function HandDetailPage() {
 }
 
 // ------------------------------------------------------------------ ledger, reconcile, audit
+const LEDGER_KEYS = ['member', 'type', 'from', 'to'] as const;
+const LEDGER_TYPES = ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'] as const;
+
+/**
+ * The chip ledger, newest first, page by page. Every look (with its filters and page) is recorded in the audit log by
+ * the API: it is every member's balance history.
+ */
 export function LedgerPage() {
   const { t, locale } = useT();
-  const { data } = useData<{ id: string; nickname: string; userId: string; type: string; amount: number; balanceAfter: number; tableId: string | null; memo: string | null; createdAt: number }[]>('/api/admin/ledger?limit=200');
+  const f = useKeysetFilters(LEDGER_KEYS);
+  const member = f.params.get('member') ?? '';
+  const type = f.params.get('type') ?? '';
+  const q = new URLSearchParams({ paged: '1', limit: String(PAGE) });
+  if (member) q.set('member', member);
+  if (type) q.set('type', type);
+  const from = dayStart(f.params.get('from'));
+  const to = dayStart(f.params.get('to'), true);
+  if (from) q.set('from', String(from));
+  if (to) q.set('to', String(to));
+  if (f.cursor) q.set('cursor', f.cursor);
+  const { data, error, loading, reload } = useData<KeysetPage<{ id: string; nickname: string; userId: string; type: string; amount: number; balanceAfter: number; tableId: string | null; memo: string | null; createdAt: number }>>(`/api/admin/ledger?${q}`);
+  const shown = data?.items ?? [];
+  const first = f.depth * PAGE + 1;
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-testid="ledger-page">
       <h1 className="text-xl font-extrabold">{t('ledger')}</h1>
-      <Panel>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <MemberFilter value={member} onApply={(v) => f.set({ member: v })} />
+          <select value={type} onChange={(e) => f.set({ type: e.target.value })} className={selectCls} aria-label={t('colKind')} data-testid="ledger-type">
+            <option value="">{t('colKind')}: {t('statusAll')}</option>
+            {LEDGER_TYPES.map((v) => <option key={v} value={v}>{t('colKind')}: {ledgerTypeLabel(t, v)}</option>)}
+          </select>
+          <label className="flex items-center gap-1 text-xs text-ink-300">
+            {t('auditFrom')}
+            <input type="date" className={selectCls} value={f.params.get('from') ?? ''} max={f.params.get('to') ?? undefined} onChange={(e) => f.set({ from: e.target.value })} data-testid="ledger-from" />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-ink-300">
+            {t('auditTo')}
+            <input type="date" className={selectCls} value={f.params.get('to') ?? ''} min={f.params.get('from') ?? undefined} onChange={(e) => f.set({ to: e.target.value })} data-testid="ledger-to" />
+          </label>
+        </div>
+        {(f.filtered || (member && data?.member)) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {member && data?.member && !loading && (
+              <Link to={`/users/${data.member.id}`} className={chipCls} data-testid="member-chip">{t('colUser')}: {data.member.nickname} →</Link>
+            )}
+            {f.filtered && <Button size="sm" variant="ghost" onClick={f.reset} data-testid="ledger-reset">{t('auditReset')}</Button>}
+          </div>
+        )}
+      </div>
+      <p className="text-xs text-ink-400" data-testid="ledger-note">{t('ledgerAccessNote')}</p>
+      {member && data && !data.member && !loading && <p className="text-sm text-gold-300" role="status" data-testid="member-none">{t('memberNotFound', { q: member })}</p>}
+      {error && <LoadError error={error} onRetry={reload} />}
+      <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <Table head={[t('time'), t('colUser'), t('colKind'), t('amount'), t('balance'), t('colTable'), t('memo')]}>
-          {data?.map((l) => (
-            <tr key={l.id}>
-              <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</td>
-              <td className="px-2 py-1.5"><Link className="text-gold-300" to={`/users/${l.userId}`}>{l.nickname}</Link></td>
-              <td className="px-2 py-1.5">{ledgerTypeLabel(t, l.type)}</td>
-              <td className={`px-2 py-1.5 font-mono ${l.amount >= 0 ? 'text-success' : ''}`}>{l.amount > 0 ? '+' : ''}{formatChips(l.amount)}</td>
-              <td className="px-2 py-1.5 font-mono">{formatChips(l.balanceAfter)}</td>
-              <td className="px-2 py-1.5 text-xs">{l.tableId}</td>
+          {shown.map((l) => (
+            <tr key={l.id} data-testid="ledger-row">
+              <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</td>
+              <td className="px-2 py-1.5">
+                <button className="text-left hover:underline" onClick={() => f.set({ member: l.userId })} title={t('auditOnlyThis')}>{l.nickname}</button>
+                <Link to={`/users/${l.userId}`} className="ml-1 text-gold-300" aria-label={t('detail')}>→</Link>
+              </td>
+              <td className="px-2 py-1.5">
+                <button className="text-left hover:underline" onClick={() => f.set({ type: l.type })} title={t('auditOnlyThis')}>{ledgerTypeLabel(t, l.type)}</button>
+              </td>
+              <td className={`whitespace-nowrap px-2 py-1.5 font-mono ${l.amount >= 0 ? 'text-success' : ''}`}>{l.amount > 0 ? '+' : ''}{formatChips(l.amount)}</td>
+              <td className="whitespace-nowrap px-2 py-1.5 font-mono">{formatChips(l.balanceAfter)}</td>
+              <td className="px-2 py-1.5 text-xs">{l.tableId ? <Link to={`/tables/${l.tableId}`} className="font-mono text-gold-300 hover:underline">{l.tableId}</Link> : '—'}</td>
               <td className="px-2 py-1.5 text-xs text-ink-300">{memoLabel(t, l.memo)}</td>
             </tr>
           ))}
         </Table>
+        {(data || !error) && <ListState loading={!data} empty={shown.length === 0}>{f.filtered ? t('noMatch') : t('noLedger')}</ListState>}
+        {data && (shown.length > 0 || f.depth > 0) && (
+          <Pager label={t('ledger')} testid="ledger-pager" range={t('auditRangeNoTotal', { from: first, to: first + shown.length - 1 })} prev={f.prev} next={f.nextOf(data.next)} busy={loading} />
+        )}
       </Panel>
     </div>
   );
@@ -1234,7 +1444,7 @@ function AcademyItem({ kind, id }: { kind: AcademyItemKind; id: string }) {
 
 export function AcademyStatsPage() {
   const { t } = useT();
-  const { data } = useData<{ kind: 'lesson' | 'question' | 'scenario'; itemId: string; starts: number; completes: number; correct: number; wrong: number }[]>('/api/admin/academy/stats');
+  const { data, error, reload } = useData<{ kind: 'lesson' | 'question' | 'scenario'; itemId: string; starts: number; completes: number; correct: number; wrong: number }[]>('/api/admin/academy/stats');
   const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
   const funnel = (data ?? []).filter((r) => r.kind !== 'question' && r.starts > 0).sort((a, b) => b.starts - b.completes - (a.starts - a.completes));
   const hard = (data ?? []).filter((r) => r.kind === 'question' && r.correct + r.wrong > 0).sort((a, b) => b.wrong / (b.correct + b.wrong) - a.wrong / (a.correct + a.wrong)).slice(0, 30);
@@ -1242,8 +1452,9 @@ export function AcademyStatsPage() {
     <div className="flex flex-col gap-4" data-testid="academy-stats">
       <h1 className="text-xl font-extrabold">{t('academy')}</h1>
       <p className="text-xs text-ink-400">{t('academyNote')}</p>
+      {error && <LoadError error={error} onRetry={reload} />}
       <Panel title={t('lessonsFunnel')}>
-        {funnel.length === 0 ? <Empty>—</Empty> : (
+        {funnel.length === 0 ? <ListState loading={!data && !error} empty>—</ListState> : (
           <Table head={[t('colKind'), t('colItem'), t('starts'), t('completes'), t('dropRate')]}>
             {funnel.map((r) => (
               <tr key={`${r.kind}:${r.itemId}`}>
@@ -1258,7 +1469,7 @@ export function AcademyStatsPage() {
         )}
       </Panel>
       <Panel title={t('questionsHard')}>
-        {hard.length === 0 ? <Empty>—</Empty> : (
+        {hard.length === 0 ? <ListState loading={!data && !error} empty>—</ListState> : (
           <Table head={[t('colItem'), t('correctN'), t('wrongN'), t('wrongRate')]}>
             {hard.map((r) => (
               <tr key={`${r.kind}:${r.itemId}`}>

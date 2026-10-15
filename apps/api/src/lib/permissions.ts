@@ -155,7 +155,7 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'GET /reports/:id/events': r('reports', 'report.events', { target: 'report' }),
   'POST /reports/:id/notes': r('reports', 'report.note', { target: 'report' }),
   'PATCH /reports/:id': r('reports', 'report.update', { target: 'report' }),
-  'POST /reports/:id': r('reports', 'report.resolve', { target: 'report' }),
+  'POST /reports/:id': r('reports', 'report.resolve', { preview, target: 'report' }),
 
   'GET /service/notices': r('notices', 'service.notice.list'),
   'POST /service/notices': r('notices', 'service.notice.create'),

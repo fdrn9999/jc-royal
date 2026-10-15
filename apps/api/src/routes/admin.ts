@@ -6,7 +6,7 @@
  */
 import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
 import { ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
-import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, ne, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -153,6 +153,132 @@ const page = (c: Context<AppEnv>) => ({
   limit: Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200),
   offset: Math.max(Number(c.req.query('offset') ?? 0) || 0, 0),
 });
+
+/**
+ * Where a keyset page starts: "<rowid>" for a list in the order rows were written, "<time>.<rowid>" for one along a
+ * (key, time) index. A cursor of the other kind, or not a cursor at all, is refused rather than read as the first page.
+ */
+function cursorOf(raw: string | undefined, timed: boolean): { at: number; seq: number } | null {
+  if (!raw) return null;
+  const m = timed ? /^(\d{1,15})\.(\d{1,15})$/.exec(raw) : /^(\d{1,15})$/.exec(raw);
+  if (!m) fail(400, 'bad_request', 'invalid cursor');
+  return timed ? { at: Number(m[1]), seq: Number(m[2]) } : { at: 0, seq: Number(m[1]) };
+}
+
+/** The member a list is narrowed to, by exact id, email or nickname (nicknames are unique ignoring case). */
+async function findMember(d1: D1Database, q: string) {
+  return d1
+    .prepare(`SELECT id, nickname FROM users WHERE id = ?1 OR email = lower(?1) OR lower(nickname) = lower(?1) ORDER BY id = ?1 DESC, email = lower(?1) DESC LIMIT 1`)
+    .bind(q)
+    .first<{ id: string; nickname: string }>();
+}
+
+/** One page and the cursor of the next (the extra row asked for says whether there is one). */
+function keysetPage<T extends { seq: number }>(rows: T[], limit: number, timeOf: ((r: T) => number) | null) {
+  const items = rows.slice(0, limit);
+  const last = items[items.length - 1];
+  const next = rows.length > limit && last ? (timeOf ? `${timeOf(last)}.${last.seq}` : String(last.seq)) : null;
+  return { items, next };
+}
+
+const LEDGER_TYPES: readonly string[] = schema.chipLedger.type.enumValues;
+
+/**
+ * The chip ledger page by page (`paged=1`), newest first. Filters: `member` (an id, email or nickname) or `userId`,
+ * `type`, `from` / `to` (ms, `to` exclusive). Without a member, pages go back in the order rows were written (rowid,
+ * the table's own key); with one, along the member's ledger index (time, then rowid). Either way a later page reads no
+ * more than the first. No total is counted: that would read every matching row on every look. A rare type or an old
+ * period without a member can still read much of the table before a page fills (docs/API.md).
+ */
+async function ledgerPage(c: Context<AppEnv>) {
+  const d1 = c.env.DB;
+  const limit = page(c).limit;
+  const q = (c.req.query('userId') ?? c.req.query('member') ?? '').trim().slice(0, 254);
+  const type = c.req.query('type') || undefined;
+  if (type && !LEDGER_TYPES.includes(type)) fail(400, 'bad_request', 'unknown ledger type');
+  const ms = (k: string) => (Number.isSafeInteger(Number(c.req.query(k))) && Number(c.req.query(k)) > 0 ? Number(c.req.query(k)) : undefined);
+  const from = ms('from');
+  const to = ms('to');
+  const member = q ? await findMember(d1, q) : null;
+  const cursor = cursorOf(c.req.query('cursor'), !!member);
+  const where: string[] = [];
+  const binds: (string | number)[] = [];
+  const add = (cond: string, ...v: (string | number)[]) => {
+    where.push(cond);
+    binds.push(...v);
+  };
+  if (member) add('l.user_id = ?', member.id);
+  if (type) add('l.type = ?', type);
+  if (from) add('l.created_at >= ?', from);
+  if (to) add('l.created_at < ?', to);
+  if (cursor) {
+    if (member) add('(l.created_at, l.rowid) < (?, ?)', cursor.at, cursor.seq);
+    else add('l.rowid < ?', cursor.seq);
+  }
+  // Conditions are written only when present: an always-there "? IS NULL OR …" would keep the planner off the rowid range.
+  type Row = { seq: number; id: string; userId: string; nickname: string; type: string; amount: number; balanceAfter: number; tableId: string | null; refId: string | null; actorId: string | null; memo: string | null; createdAt: number };
+  const rows =
+    q && !member
+      ? []
+      : ((
+          await d1
+            .prepare(
+              `SELECT l.rowid AS seq, l.id, l.user_id AS userId, u.nickname, l.type, l.amount, l.balance_after AS balanceAfter, l.table_id AS tableId,
+                      l.ref_id AS refId, l.actor_id AS actorId, l.memo, l.created_at AS createdAt
+                 FROM chip_ledger l INNER JOIN users u ON u.id = l.user_id
+                 ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+                ORDER BY ${member ? 'l.created_at DESC, l.rowid DESC' : 'l.rowid DESC'} LIMIT ?`,
+            )
+            .bind(...binds, limit + 1)
+            .all<Row>()
+        ).results ?? []);
+  const { items, next } = keysetPage(rows, limit, member ? (r) => r.createdAt : null);
+  // The ledger is every member's balance history: every look is recorded (what was searched, which page, how many rows).
+  await audit(c, 'ledger.view', member ? { type: 'user', id: member.id } : undefined, { q: q || null, found: q ? !!member : null, type: type ?? null, from: from ?? null, to: to ?? null, page: cursor ? 'next' : 'first', count: items.length });
+  return c.json({ items, next, member });
+}
+
+/**
+ * Finished hands page by page (`paged=1`), newest first; no cards. Filters: `tableId`, `member` (an id, email or
+ * nickname) or `userId`. All hands go back in the order they were written (rowid); a table's along hands_table_idx and
+ * a member's along their hand_players index (end time, then rowid). With both, the member's hands are read and the
+ * table's kept. A look narrowed to a member is recorded (`hand.list`): it shows where that member played.
+ */
+async function handsPage(c: Context<AppEnv>) {
+  const d1 = c.env.DB;
+  const limit = page(c).limit;
+  const tableId = (c.req.query('tableId') ?? '').trim().slice(0, 64) || undefined;
+  const q = (c.req.query('userId') ?? c.req.query('member') ?? '').trim().slice(0, 254);
+  const member = q ? await findMember(d1, q) : null;
+  const cursor = cursorOf(c.req.query('cursor'), !!(member || tableId));
+  const where: string[] = [];
+  const binds: (string | number)[] = [];
+  const add = (cond: string, ...v: (string | number)[]) => {
+    where.push(cond);
+    binds.push(...v);
+  };
+  const cols = `h.id, h.table_id AS tableId, t.name AS tableName, h.hand_number AS handNumber, h.started_at AS startedAt, h.ended_at AS endedAt, h.board, h.pot_total AS potTotal`;
+  let stmt: string;
+  if (member) {
+    add('hp.user_id = ?', member.id);
+    if (tableId) add('h.table_id = ?', tableId);
+    if (cursor) add('(hp.ended_at, hp.rowid) < (?, ?)', cursor.at, cursor.seq);
+    stmt = `SELECT hp.rowid AS seq, hp.ended_at AS at, ${cols} FROM hand_players hp INNER JOIN hands h ON h.id = hp.hand_id LEFT JOIN tables t ON t.id = h.table_id
+             WHERE ${where.join(' AND ')} ORDER BY hp.ended_at DESC, hp.rowid DESC LIMIT ?`;
+  } else if (tableId) {
+    add('h.table_id = ?', tableId);
+    if (cursor) add('(h.ended_at, h.rowid) < (?, ?)', cursor.at, cursor.seq);
+    stmt = `SELECT h.rowid AS seq, h.ended_at AS at, ${cols} FROM hands h LEFT JOIN tables t ON t.id = h.table_id WHERE ${where.join(' AND ')} ORDER BY h.ended_at DESC, h.rowid DESC LIMIT ?`;
+  } else {
+    if (cursor) add('h.rowid < ?', cursor.seq);
+    stmt = `SELECT h.rowid AS seq, h.ended_at AS at, ${cols} FROM hands h LEFT JOIN tables t ON t.id = h.table_id ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY h.rowid DESC LIMIT ?`;
+  }
+  type Row = { seq: number; at: number; id: string; tableId: string; tableName: string | null; handNumber: number; startedAt: number; endedAt: number; board: string; potTotal: number };
+  const rows = q && !member ? [] : ((await d1.prepare(stmt).bind(...binds, limit + 1).all<Row>()).results ?? []);
+  const { items, next } = keysetPage(rows, limit, member || tableId ? (r) => r.at : null);
+  if (q) await audit(c, 'hand.list', member ? { type: 'user', id: member.id } : undefined, { q, found: !!member, tableId: tableId ?? null, page: cursor ? 'next' : 'first', count: items.length });
+  return c.json({ items: items.map(({ at: _at, ...r }) => ({ ...r, board: JSON.parse(r.board) as string[] })), next, member });
+}
 
 const admin = new Hono<AppEnv>()
   .use('*', requireAdminOrigin)
@@ -631,13 +757,37 @@ const admin = new Hono<AppEnv>()
     return c.json({ path, url: `${origin}${path}`, expiresInMinutes: 30, locale: u.locale, mailed, message: { subject: message.subject, text: message.text } });
   })
   // ---------------------------------------------------------------- tables
+  /**
+   * Tables, newest first. Without `paged=1` every table as a plain array, as before. With it: `q` (part of the name, or
+   * the exact id), `status` (open | closing | closed, or active = not closed), `roomType` (official | member), `issue=1`
+   * (a last issue recorded), `limit` / `offset`, and the number of matching tables.
+   */
   .get('/tables', async (c) => {
-    const rows = await c.var.db
-      .select({ t: schema.tables, host: schema.users.nickname })
-      .from(schema.tables)
-      .leftJoin(schema.users, eq(schema.users.id, schema.tables.createdBy))
-      .orderBy(desc(schema.tables.createdAt));
-    return c.json(rows.map(({ t: { joinCodeHash, ...t }, host }) => ({ ...t, hasJoinCode: !!joinCodeHash, hostNickname: t.roomType === 'member' ? host : null })));
+    const T = schema.tables;
+    const paged = c.req.query('paged') === '1';
+    const q = paged ? (c.req.query('q') ?? '').trim().slice(0, 64) : '';
+    const status = c.req.query('status');
+    const roomType = c.req.query('roomType');
+    const where = paged
+      ? and(
+          q ? or(like(T.name, `%${q}%`), eq(T.id, q)) : undefined,
+          status === 'open' || status === 'closing' || status === 'closed' ? eq(T.status, status) : status === 'active' ? ne(T.status, 'closed') : undefined,
+          roomType === 'official' || roomType === 'member' ? eq(T.roomType, roomType) : undefined,
+          c.req.query('issue') === '1' ? isNotNull(T.lastIssue) : undefined,
+        )
+      : undefined;
+    const { limit, offset } = page(c);
+    const base = c.var.db
+      .select({ t: T, host: schema.users.nickname })
+      .from(T)
+      .leftJoin(schema.users, eq(schema.users.id, T.createdBy))
+      .where(where)
+      .orderBy(desc(T.createdAt), T.id);
+    const rows = paged ? await base.limit(limit).offset(offset) : await base;
+    const items = rows.map(({ t: { joinCodeHash, ...t }, host }) => ({ ...t, hasJoinCode: !!joinCodeHash, hostNickname: t.roomType === 'member' ? host : null }));
+    if (!paged) return c.json(items);
+    const [count] = await c.var.db.select({ n: sql<number>`COUNT(*)` }).from(T).where(where);
+    return c.json({ items, total: count?.n ?? 0, limit, offset });
   })
   .post('/tables', async (c) => {
     const body = await parseBody(c, TableInputSchema);
@@ -757,6 +907,7 @@ const admin = new Hono<AppEnv>()
   })
   // ---------------------------------------------------------------- audit: hands, ledger, actions
   .get('/hands', async (c) => {
+    if (c.req.query('paged') === '1') return handsPage(c);
     const { limit, offset } = page(c);
     const tableId = c.req.query('tableId');
     const userId = c.req.query('userId');
@@ -812,6 +963,7 @@ const admin = new Hono<AppEnv>()
     });
   })
   .get('/ledger', async (c) => {
+    if (c.req.query('paged') === '1') return ledgerPage(c);
     const { limit, offset } = page(c);
     const userId = c.req.query('userId');
     const type = c.req.query('type');
@@ -823,6 +975,7 @@ const admin = new Hono<AppEnv>()
       .orderBy(desc(schema.chipLedger.createdAt))
       .limit(limit)
       .offset(offset);
+    await audit(c, 'ledger.view', userId ? { type: 'user', id: userId } : undefined, { q: userId ?? null, type: type ?? null, offset, count: rows.length });
     return c.json(rows.map((r) => ({ ...r.l, nickname: r.nickname })));
   })
   /**

@@ -18,12 +18,13 @@ import {
   type ReportStatus,
   type ReportTarget,
 } from '@jc/types';
-import { Badge, Button, Empty, formatChips, formatDate, Input, Modal, Panel, Stat } from '@jc/ui';
-import { useId, useState, type FormEvent } from 'react';
+import { Badge, Button, Empty, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
+import { useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
 import { auditActionLabel, contentStatusLabel, userStatusLabel, type Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { contentTone, Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
 
 export const REASON: Record<ReportReason, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
@@ -138,7 +139,7 @@ function Evidence({ r }: { r: ReportDto }) {
       <p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-ink-100" data-testid="report-content">{ctx.body}</p>
       {r.contentStatus && (
         <div className="text-xs text-ink-400">
-          {t('contentNow')}: <Badge tone={r.contentStatus === 'visible' ? 'green' : 'red'}>{contentStatusLabel(t, r.contentStatus)}</Badge>
+          {t('contentNow')}: <Badge tone={contentTone(r.contentStatus)}>{contentStatusLabel(t, r.contentStatus)}</Badge>
         </div>
       )}
     </div>
@@ -244,7 +245,11 @@ function ReportLog({ r }: { r: ReportDto }) {
   );
 }
 
-function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone: (msg: string) => void }) {
+/** The API's answer to a decision sent with `preview: true`: what it would do now; nothing is written. */
+interface DecisionPreview { closes: number; hides: boolean; notify: { reporters: number; target: number } }
+type Decision = 'resolved' | 'dismissed';
+
+function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone: (note: Note) => void }) {
   const { t, locale } = useT();
   const { api, me } = useAdmin();
   const fid = useId();
@@ -255,6 +260,9 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [suspend, setSuspend] = useState<{ reason: string; error: string | null } | null>(null);
+  // A decision waits in a confirmation that shows the server's preview of it (reports closed with it, content hidden, messages sent).
+  const [decide, setDecide] = useState<{ status: Decision; pv: { data: DecisionPreview } | { error: unknown } | null } | null>(null);
+  const pvSeq = useRef(0);
   const open = r.status === 'open';
   const canHide = r.targetType !== 'player' && r.contentStatus === 'visible';
   const now = Date.now();
@@ -263,9 +271,9 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
   const run = async (fn: () => Promise<string>) => {
     setBusy(true);
     try {
-      onDone(await fn());
+      onDone({ ok: true, text: await fn() });
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) onDone(errText(e, t));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) onDone({ ok: false, text: errText(e, t) });
     } finally {
       setBusy(false);
     }
@@ -275,27 +283,43 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
       await api(`/api/admin/reports/${r.id}`, { method: 'PATCH', body });
       return t('saved');
     });
-  const close = (status: 'resolved' | 'dismissed') =>
-    run(async () => {
-      const res = await api<{ closed: number; notified: { reporters: number; target: number } }>(`/api/admin/reports/${r.id}`, {
-        body: {
-          status,
-          note: note.trim() || undefined,
-          hideContent: canHide && hide && status === 'resolved' ? true : undefined,
-          notifyReporter: notifyReporter || undefined,
-          notifyTarget: status === 'resolved' && notifyTarget ? true : undefined,
-        },
-      });
+  const decision = (status: Decision) => ({
+    status,
+    note: note.trim() || undefined,
+    hideContent: canHide && hide && status === 'resolved' ? true : undefined,
+    notifyReporter: notifyReporter || undefined,
+    notifyTarget: status === 'resolved' && notifyTarget ? true : undefined,
+  });
+  const ask = (status: Decision) => {
+    const seq = ++pvSeq.current;
+    setDecide({ status, pv: null });
+    api<DecisionPreview>(`/api/admin/reports/${r.id}`, { body: { ...decision(status), preview: true } }).then(
+      (data) => seq === pvSeq.current && setDecide({ status, pv: { data } }),
+      (e: unknown) => seq === pvSeq.current && setDecide({ status, pv: { error: e } }),
+    );
+  };
+  const cancelDecide = () => {
+    pvSeq.current++;
+    setDecide(null);
+  };
+  // Sends the decision that was previewed (the form is not editable while the confirmation is open).
+  const close = (status: Decision) => {
+    cancelDecide();
+    void run(async () => {
+      const res = await api<{ closed: number; notified: { reporters: number; target: number } }>(`/api/admin/reports/${r.id}`, { body: decision(status) });
       const sent = res.notified.reporters + res.notified.target;
       return t('reportsClosed', { n: res.closed }) + (sent ? ` ${t('reportsNotified', { n: sent })}` : '');
     });
+  };
+  const pv = decide?.pv && 'data' in decide.pv ? decide.pv.data : null;
+  const pvError = decide?.pv && 'error' in decide.pv ? errText(decide.pv.error, t) : null;
   const confirmSuspend = async () => {
     if (!suspend) return;
     setBusy(true);
     try {
       await api(`/api/admin/users/${r.target.id}/suspend`, { body: { reason: suspend.reason.trim(), reportId: r.id } });
       setSuspend(null);
-      onDone(t('reportSuspended', { name: r.target.nickname }));
+      onDone({ ok: true, text: t('reportSuspended', { name: r.target.nickname }) });
     } catch (e) {
       if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setSuspend({ ...suspend, error: errText(e, t) });
     } finally {
@@ -401,13 +425,41 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
               {t('notifyTarget')}
             </label>
             <div className="ml-auto flex shrink-0 gap-2">
-              <Button size="sm" onClick={() => void close('resolved')} loading={busy} data-testid="report-resolve">{t('resolve')}</Button>
-              <Button size="sm" variant="outline" onClick={() => void close('dismissed')} disabled={busy} data-testid="report-dismiss">{t('dismiss')}</Button>
+              <Button size="sm" onClick={() => ask('resolved')} loading={busy} data-testid="report-resolve">{t('resolve')}</Button>
+              <Button size="sm" variant="outline" onClick={() => ask('dismissed')} disabled={busy} data-testid="report-dismiss">{t('dismiss')}</Button>
             </div>
           </div>
           <p className="text-xs text-ink-400">{t('notifyHint')}</p>
         </div>
       )}
+      <Modal
+        open={decide !== null}
+        onClose={cancelDecide}
+        title={decide?.status === 'dismissed' ? t('dismiss') : t('resolve')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={cancelDecide}>{t('cancel')}</Button>
+            <Button variant={decide?.status === 'dismissed' ? 'outline' : 'gold'} disabled={!pv} onClick={() => decide && close(decide.status)} data-testid="report-confirm">
+              {t('confirm')}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2 text-sm" data-testid="report-decision">
+          <p>{t(decide?.status === 'dismissed' ? 'decideDismiss' : 'decideResolve', { name: r.target.nickname })}</p>
+          {decide && !decide.pv && <p className="text-ink-400" aria-live="polite">{t('pvLoading')}</p>}
+          {pvError && <p className="break-all text-danger" role="alert">{pvError}</p>}
+          {pv && (
+            <ul className="flex list-disc flex-col gap-1 rounded-lg border border-white/10 bg-ink-950/40 py-2 pl-7 pr-3" data-testid="report-preview">
+              <li>{t('pvReportsClose', { n: pv.closes })}</li>
+              {canHide && hide && decide?.status === 'resolved' && <li>{t(pv.hides ? 'pvHides' : 'pvHideNone')}</li>}
+              <li>{pv.notify.reporters + pv.notify.target > 0 ? t('pvNotify', { reporters: pv.notify.reporters, target: pv.notify.target }) : t('pvNotifyNone')}</li>
+              {note.trim() && <li className="break-all">{t('note')}: {note.trim()}</li>}
+            </ul>
+          )}
+          {pv && <p className="text-xs text-ink-400">{t('pvBasis')}</p>}
+        </div>
+      </Modal>
       <Modal
         open={suspend !== null}
         onClose={() => setSuspend(null)}
@@ -456,7 +508,7 @@ function ReportStats() {
       <Button size="sm" variant="subtle" onClick={() => void reload()} loading={loading}>{t('refresh')}</Button>
     </div>
   );
-  if (error) return <div className="flex flex-col gap-4">{header}<Empty>{error}</Empty></div>;
+  if (error) return <div className="flex flex-col gap-4">{header}<LoadError error={error} onRetry={reload} /></div>;
   if (!data) return <div className="flex flex-col gap-4">{header}<Empty>{t('loading')}</Empty></div>;
   const b = data.backlog;
   const filed = data.byReason.reduce((s, x) => s + x.total, 0);
@@ -560,7 +612,7 @@ export function ReportsPage() {
   for (const k of FILTER_KEYS) if (k !== 'status' && params.get(k)) q.set(k, params.get(k)!);
   const { data, error, reload, loading } = useData<ReportListDto>(view === 'list' ? `/api/admin/reports?${q}` : null);
   const { data: staff } = useData<{ items: Staff[] }>(view === 'list' ? '/api/admin/reports/assignees' : null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Note>(null);
   /** Changing a filter starts again from the first page. */
   const set = (k: string, v: string | null) => {
     const next = new URLSearchParams(params);
@@ -631,8 +683,8 @@ export function ReportsPage() {
               {SORTS.map(([v, k]) => <option key={v} value={v}>{t(k)}</option>)}
             </select>
           </div>
-          {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
-          {error && <Empty>{error}</Empty>}
+          <Feedback note={msg} />
+          {error && <LoadError error={error} onRetry={reload} />}
           <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
             {data && data.items.length === 0 ? (
               <Empty>{t('noReports')}</Empty>

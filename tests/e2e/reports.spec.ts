@@ -108,6 +108,12 @@ test('report workflow: severity, assignment, internal notes, a suspension given 
   await item.getByTestId('report-notify-target').check();
   await item.getByLabel(/처리 내용|Resolution note/).fill('광고 글 반복');
   await item.getByTestId('report-resolve').click();
+  // Nothing is decided until the confirmation, which says what will happen: both reports close, 2 reporters and the member are told.
+  const preview = page.getByTestId('report-preview');
+  await expect(preview).toContainText('같은 대상의 열린 신고 2건이 함께 닫힙니다.');
+  await expect(preview).toContainText('결과 안내 쪽지: 신고자 2명, 피신고 회원 1명');
+  await expect(preview).toContainText('광고 글 반복');
+  await page.getByTestId('report-confirm').click();
   await expect(page.getByRole('status')).toContainText('같은 대상의 신고 2건을 처리했습니다. 안내 쪽지 3건을 보냈습니다.');
   await expect(item).toHaveCount(0);
   await page.getByTestId('report-assignee-filter').selectOption('');

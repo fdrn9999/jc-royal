@@ -1,9 +1,10 @@
-import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel } from '@jc/ui';
+import { Badge, Button, Empty, Field, formatDate, Input, Panel } from '@jc/ui';
 import type { NoticeKind } from '@jc/types';
 import { useState } from 'react';
 import { useT } from '../i18n';
 import { maintStateLabel, noticeKindLabel, noticeStateLabel } from '../labels';
-import { errText, useAdmin, useData } from '../lib';
+import { ApiError, errText, useAdmin, useData } from '../lib';
+import { Feedback, LoadError, Modal, type Note } from '../ui';
 
 interface NoticeRow {
   id: string;
@@ -74,7 +75,7 @@ function MaintenancePanel() {
   const [form, setForm] = useState<MaintForm | null>(null);
   const [confirm, setConfirm] = useState<'save' | 'stop' | null>(null);
   const [stopReason, setStopReason] = useState('');
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
   const current = data?.items.find((w) => w.state === 'active' || w.state === 'scheduled') ?? null;
   const past = data?.items.filter((w) => w !== current) ?? [];
@@ -91,11 +92,11 @@ function MaintenancePanel() {
     setMsg(null);
     try {
       const r = await fn();
-      setMsg(`${done} ${fanOutText(t, r.rooms)}`);
+      setMsg({ ok: true, text: `${done} ${fanOutText(t, r.rooms)}` });
       setForm(null);
       setStopReason('');
     } catch (e) {
-      setMsg(errText(e, t));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg({ ok: false, text: errText(e, t) });
     } finally {
       setBusy(false);
       setConfirm(null);
@@ -118,9 +119,9 @@ function MaintenancePanel() {
   return (
     <Panel title={t('maintTitle')}>
       <div className="flex flex-col gap-4 text-sm" data-testid="maintenance-panel">
-        {error && <p className="text-danger" role="alert">{error}</p>}
+        {error && <LoadError error={error} onRetry={reload} />}
         {data && <p className="text-ink-300" data-testid="maint-live">{t('maintLive', data.tables)}</p>}
-        {msg && <p className="text-gold-300" role="status" data-testid="maint-msg">{msg}</p>}
+        <Feedback note={msg} testid="maint-msg" />
         {!data ? (
           <Empty>{t('loading')}</Empty>
         ) : current ? (
@@ -257,7 +258,7 @@ function NoticesPanel() {
   const { data, error, reload, loading } = useData<{ now: number; items: NoticeRow[] }>(`/api/admin/service/notices?${q}`);
   const [form, setForm] = useState<NoticeForm | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'inbox' | 'delete'; row?: NoticeRow } | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
   const time = (ms: number) => formatDate(ms, locale);
 
@@ -272,10 +273,10 @@ function NoticesPanel() {
     setBusy(true);
     setMsg(null);
     try {
-      setMsg(await fn());
+      setMsg({ ok: true, text: await fn() });
       await reload();
     } catch (e) {
-      setMsg(errText(e, t));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg({ ok: false, text: errText(e, t) });
     } finally {
       setBusy(false);
       setConfirm(null);
@@ -311,8 +312,8 @@ function NoticesPanel() {
           </select>
           {loading && <span className="text-xs text-ink-400">{t('loading')}</span>}
         </div>
-        {error && <p className="text-danger" role="alert">{error}</p>}
-        {msg && <p className="text-gold-300" role="status" data-testid="notice-msg">{msg}</p>}
+        {error && <LoadError error={error} onRetry={reload} />}
+        <Feedback note={msg} testid="notice-msg" />
         {data && data.items.length === 0 ? (
           <Empty>{t('noticesEmpty')}</Empty>
         ) : (

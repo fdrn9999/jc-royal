@@ -1,4 +1,4 @@
-import { Button, Input, Logo, Modal, Spinner } from '@jc/ui';
+import { Button, Input, Logo, Spinner } from '@jc/ui';
 import { StrictMode, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, NavLink, Outlet, RouterProvider } from 'react-router';
@@ -6,6 +6,7 @@ import { setLocale, useT, type Key } from './i18n';
 import './index.css';
 import { roleLabel } from './labels';
 import { AdminProvider, useAdmin } from './lib';
+import { Modal } from './ui';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
@@ -58,6 +59,21 @@ function ReauthModal() {
   );
 }
 
+/**
+ * Shown while the browser is offline, or while the API cannot be reached (the last request failed before any answer).
+ * What the pages show stays as last loaded; it clears by itself with the next answer or when the browser is back.
+ */
+function ConnectionBanner() {
+  const { t } = useT();
+  const { net } = useAdmin();
+  if (!net.offline && !net.unreachable) return null;
+  return (
+    <div role="alert" className="border-b border-danger/40 bg-danger/15 px-4 py-2 text-center text-sm text-[#f3b0b2]" data-testid="conn-banner">
+      {t(net.offline ? 'connOffline' : 'connUnreachable')}
+    </div>
+  );
+}
+
 function Shell({ children }: { children: ReactNode }) {
   const { t, locale } = useT();
   const { me, logout } = useAdmin();
@@ -79,6 +95,7 @@ function Shell({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
+        <ConnectionBanner />
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
       <ReauthModal />

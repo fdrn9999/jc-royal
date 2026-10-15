@@ -53,7 +53,7 @@
 
 ## 변경 미리보기
 
-회원 정지·해제·강제 연결 종료·권한 변경·칩 조정과 테이블 종료는 실행 전에 무엇이 바뀌는지 먼저 보여 준다. 같은 라우트에 `preview: true`를 보내면 아무것도 쓰지 않고 다음을 돌려준다.
+회원 정지·해제·강제 연결 종료·권한 변경·칩 조정, 테이블 종료와 신고 처리(B9)는 실행 전에 무엇이 바뀌는지 먼저 보여 준다. 같은 라우트에 `preview: true`를 보내면 아무것도 쓰지 않고 다음을 돌려준다.
 
 | 작업 | 미리보기 |
 |---|---|
@@ -63,6 +63,7 @@
 | 권한 변경 | 권한 전 → 후, 관리자 콘솔 접속 가능 여부 전 → 후, 끝나는 관리자 콘솔 세션 수, 얻고 잃는 능력 |
 | 칩 조정 | 잔액 전 → 후, 큰 금액 여부, 같은 요청을 이미 처리했는지(중복이면 실행 버튼이 막힌다) |
 | 테이블 종료 | 앉은 회원과 스택(룸이 답하면), 바이인, 테이블 위 칩, 진행 중 핸드 여부, 대기자 수 |
+| 신고 처리 | 함께 닫힐 같은 대상의 열린 신고 수, 결과 쪽지를 받을 신고자 수(탈퇴 제외)와 대상 회원 안내 여부, 실제로 숨겨질 공개 글·댓글이 있는지 |
 
 - 미리보기는 비밀번호 재확인을 묻지 않는다(실제 변경이 묻는다). **역할 검사는 미리보기에도 그대로** 적용된다. 일반 관리자가 관리자 계정을 정지하려 하면 미리보기 단계에서 403으로 거절되고, 거절은 실패 감사에 남는다.
 - 미리보기에 담기는 내용은 회원·테이블 상세에서 관리자가 이미 보는 정보뿐이다. 카드 정보는 없다.
@@ -121,7 +122,7 @@ admin.bootstrap, admin.login, admin.login.failed, admin.reauth, admin.reauth.fai
 admin.session.end, admin.session.end_others, admin.access_denied, <조치>.failed,
 user.list, user.view, user.suspend, user.unsuspend, user.disconnect, user.role, user.chips, user.chips_refused, user.chips_duplicate, user.reconcile, user.reset_link, user.export,
 note.create, note.delete,
-table.create, table.update, table.control, table.close, hand.view_sensitive,
+table.create, table.update, table.control, table.close, hand.list, hand.view_sensitive, ledger.view,
 reconcile.run, reconcile.resolve, board.notice.create/update,
 service.notice.create, service.notice.update, service.notice.end, service.notice.delete,
 maintenance.schedule, maintenance.update, maintenance.end, maintenance.cancel,
@@ -133,6 +134,8 @@ report.view, report.resolved, report.dismissed, report.severity, report.assign, 
 
 신고 처리: 심각도·담당자 변경은 `report.severity`·`report.assign`(변경 전후), 내부 메모는 `report.note`(메모 ID와 길이, 본문 없음)로 남는다. 신고에서 준 정지는 `user.suspend` 상세에 `reportId`가 들어간다. 신고 통계(`/reports/stats`: 건수와 회원 ID·닉네임만, 증거·본문 없음), 담당자 후보 목록, 신고별 처리 기록(`/reports/:id/events`: 목록 조회 `report.view` 뒤에만 연다) 조회는 기록하지 않는다. 심각도·담당자·처리는 감사 행을 먼저 쓰고 그 행이 있을 때만 변경을 반영하는 한 batch라, 동시에 같은 신고를 맡거나 닫아도 감사 행과 변경은 하나뿐이다. 실패한 시도(409·400)도 B7부터 아래 "실패 감사"로 남는다. 신고 수·통계로 자동 정지하는 경로는 없다.
 
+원장·핸드 목록(B9): 원장은 모든 회원의 잔액 이력이라 `ledger.view`를 쪽마다 1행씩 남긴다(검색어, 회원을 찾았는지, 종류·기간 필터, 첫 쪽·다음 쪽, 건수; 회원을 찾으면 그 회원이 대상). 찾지 못한 검색어도 남겨 누구를 찾아보려 했는지 알 수 있다. 핸드 목록은 카드 없이 테이블·보드·팟만 담지만, 회원으로 좁히면 그 회원이 언제 어디서 게임했는지가 드러나므로 그 조회만 `hand.list`로 남긴다. 테이블로만 좁히거나 전체를 넘겨 보는 핸드 목록과 테이블 목록은 회원을 가리키지 않는 운영 정보라 남기지 않는다(관리자가 화면을 넘길 때마다 쓰기가 생기지 않게). 카드를 담은 핸드 상세는 지금처럼 재확인과 `hand.view_sensitive`를 거친다.
+
 운영 통계(`GET /api/admin/stats`, 기능 `stats`, 모든 관리자): 날짜별 합계만 돌려주고 회원 ID·닉네임·이메일을 담지 않으므로 조회를 감사 로그에 남기지 않는다. 화면을 열 때 빠진 날을 먼저 집계하는 쓰기(`daily_stats`)는 같은 날을 다시 집계해도 같은 값이 되는 작업이라 감사 대상으로 보지 않는다.
 
 ### 실패 감사
@@ -141,6 +144,7 @@ report.view, report.resolved, report.dismissed, report.severity, report.assign, 
 - 남기는 것: 모든 403(역할 부족, 규칙 없는 라우트, 관리자가 아닌 계정), 변경 요청(GET 외)의 400 이상. 남기지 않는 것: 401(세션 없음·재확인 필요: 콘솔이 비밀번호 창을 띄운다), 조회의 404 같은 403 외 실패, 라우트가 이미 자기 행을 쓴 요청(`user.chips_refused`처럼).
 - 로그인·재확인 실패(`admin.login.failed`, `admin.reauth.failed`)와 칩 거절(`user.chips_refused`)도 `failed`로 표시된다(마이그레이션 0018이 기존 행도 바꾼다).
 - 행을 쓰다 실패해도 응답은 바뀌지 않는다. 실패한 요청마다 D1 쓰기가 1회 늘어난다.
+- 미리보기도 같다. 신고 처리 미리보기가 400(예: 기각에 대상 회원 안내)이나 409(이미 처리됨)로 거절되면 `report.resolve.failed`(상세 `preview: true`)로 남는다. 성공한 미리보기는 남지 않는다.
 
 ### 감사 로그 검색
 

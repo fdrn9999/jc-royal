@@ -9,6 +9,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
 import { AUDIT_FAMILIES, auditActionLabel, auditFamilyLabel, roleLabel, targetTypeLabel } from '../labels';
 import { useData } from '../lib';
+import { dayStart } from '../ui';
 import { Table } from './Console';
 
 interface AuditItem {
@@ -38,15 +39,6 @@ const selectCls = 'h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-s
 const chipCls = 'rounded-full bg-gold-500/15 px-3 py-1 text-xs font-semibold text-gold-300';
 const TARGET_TYPES = ['user', 'table', 'hand', 'report', 'post', 'comment', 'notice', 'maintenance', 'reconciliation', 'batch', 'session'] as const;
 const FILTER_KEYS = ['actor', 'action', 'outcome', 'targetType', 'targetId', 'from', 'to', 'q'] as const;
-
-/** A day picked in this device's time zone, as the epoch ms of its midnight (`next`: the midnight after it). */
-function dayStart(v: string | null, next = false): number | null {
-  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
-  const d = new Date(`${v}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return null;
-  if (next) d.setDate(d.getDate() + 1);
-  return d.getTime();
-}
 
 function detailText(d: unknown): string {
   if (d === null || d === undefined) return '';
@@ -192,15 +184,15 @@ export function AuditPage() {
         {data && shown === 0 ? (
           <Empty>{t('auditEmpty')}</Empty>
         ) : (
-          <Table head={[t('time'), t('actor'), t('action'), t('target'), t('colDetail'), t('colIp')]}>
+          <Table stack head={[t('time'), t('actor'), t('action'), t('target'), t('colDetail'), t('colIp')]}>
             {data?.items.map((a) => {
               const d = detailText(a.detail);
               const expanded = open === a.id;
               return (
                 <Fragment key={a.id}>
-                  <tr className={a.outcome === 'failed' ? 'bg-danger/5' : undefined} data-testid="audit-row">
-                    <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-400">{formatDate(a.createdAt, locale)}</td>
-                    <td className="px-2 py-1.5">
+                  <tr className={`max-sm:grid max-sm:grid-cols-2 max-sm:py-1.5 ${a.outcome === 'failed' ? 'bg-danger/5' : ''}`} data-testid="audit-row">
+                    <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-400 max-sm:py-0.5">{formatDate(a.createdAt, locale)}</td>
+                    <td className="px-2 py-1.5 max-sm:py-0.5 max-sm:text-right">
                       {all ? (
                         <button className="text-left hover:underline" onClick={() => set({ actor: a.actor.id })} title={t('auditOnlyThis')}>{a.actor.nickname ?? a.actor.id}</button>
                       ) : (
@@ -208,14 +200,14 @@ export function AuditPage() {
                       )}
                       {a.actor.role && a.actor.role !== 'user' && <span className="block text-[10px] text-ink-400">{roleLabel(t, a.actor.role)}</span>}
                     </td>
-                    <td className="px-2 py-1.5 text-xs">
+                    <td className="px-2 py-1.5 text-xs max-sm:col-span-2 max-sm:py-0.5">
                       <span className="flex flex-wrap items-center gap-1">
                         <button className="text-left hover:underline" onClick={() => set({ action: a.action })} title={t('auditOnlyThis')}>{auditActionLabel(t, a.action)}</button>
                         {a.outcome === 'failed' && <Badge tone="red">{t('outcomeFailed')}</Badge>}
                       </span>
                       <span className="font-mono text-[10px] text-ink-400">{a.action}</span>
                     </td>
-                    <td className="px-2 py-1.5 text-xs">
+                    <td className="px-2 py-1.5 text-xs max-sm:col-span-2 max-sm:py-0.5">
                       {a.target ? (
                         <>
                           <span className="text-ink-400">{targetTypeLabel(t, a.target.type)}</span>{' '}
@@ -232,18 +224,18 @@ export function AuditPage() {
                         <span className="text-ink-400">—</span>
                       )}
                     </td>
-                    <td className="max-w-[18rem] px-2 py-1.5">
+                    <td className="max-w-[18rem] px-2 py-1.5 max-sm:col-span-2 max-sm:max-w-none max-sm:py-0.5">
                       {d && (
                         <button className="block w-full truncate text-left font-mono text-[11px] text-ink-300 hover:text-ink-100" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : a.id)} data-testid="audit-detail-toggle">
                           {d}
                         </button>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-xs">{a.ip}</td>
+                    <td className="px-2 py-1.5 text-xs max-sm:col-span-2 max-sm:py-0.5 max-sm:text-[10px] max-sm:text-ink-400">{a.ip}</td>
                   </tr>
                   {expanded && (
-                    <tr>
-                      <td colSpan={6} className="px-2 pb-3">
+                    <tr className="max-sm:block">
+                      <td colSpan={6} className="px-2 pb-3 max-sm:block">
                         <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-ink-950/70 p-3 font-mono text-[11px] text-ink-200" data-testid="audit-detail">
                           {typeof a.detail === 'string' ? a.detail : JSON.stringify(a.detail, null, 2)}
                         </pre>

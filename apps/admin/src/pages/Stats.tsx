@@ -7,6 +7,7 @@ import { Badge, Button, Empty, Panel, Stat } from '@jc/ui';
 import { useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
 import { useData } from '../lib';
+import { LoadError } from '../ui';
 import { Table } from './Console';
 import { dur } from './Reports';
 
@@ -72,7 +73,7 @@ export function StatsPage() {
       </div>
     </div>
   );
-  if (error) return <div className="flex flex-col gap-4">{header}<Empty>{error}</Empty></div>;
+  if (error) return <div className="flex flex-col gap-4">{header}<LoadError error={error} onRetry={reload} /></div>;
   if (!data || data.unit !== unit) return <div className="flex flex-col gap-4">{header}<Empty>{t('loading')}</Empty></div>;
   const d = data;
   const tot = d.total;
@@ -232,7 +233,7 @@ export function StatsPage() {
             {[...d.periods].reverse().map((p) => (
               <tr key={p.from} className={p.complete ? undefined : 'text-ink-300'} data-period={p.from}>
                 <td className={`${td} whitespace-nowrap font-mono text-xs`}>
-                  {label(p)} {!p.complete && <Badge>{p.days ? t('osPartial') : t('osNotRolled')}</Badge>}
+                  {label(p)} {!p.complete && <Badge className="font-sans">{p.days ? t('osPartial') : t('osNotRolled')}</Badge>}
                 </td>
                 <td className={`${td} font-mono`}>{p.days}</td>
                 <td className={`${td} font-mono`}>{num(p.members.signups)}</td>

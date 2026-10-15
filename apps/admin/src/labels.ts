@@ -70,7 +70,9 @@ const auditNames = labeler({
   'board.notice.create': 'auditNoticeCreate',
   'board.notice.update': 'auditNoticeUpdate',
   'board.post.status': 'auditPostStatus',
+  'hand.list': 'auditHandList',
   'hand.view_sensitive': 'auditHandView',
+  'ledger.view': 'auditLedgerView',
   'maintenance.cancel': 'auditMaintCancel',
   'maintenance.end': 'auditMaintEnd',
   'maintenance.schedule': 'auditMaintSchedule',
@@ -124,13 +126,14 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'reconcile', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'report', 'board', 'message', 'service', 'maintenance'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
   note: 'famNote',
   table: 'famTable',
   hand: 'famHand',
+  ledger: 'famLedger',
   reconcile: 'famReconcile',
   report: 'famReport',
   board: 'famBoard',

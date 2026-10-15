@@ -2,13 +2,14 @@
  * Member detail panels added for member management: recent tables, reports by and about the member, play activity by
  * period, and the administrators' history of the account with internal notes.
  */
-import { Badge, Button, Empty, formatChips, formatDate, Modal, Panel, Stat } from '@jc/ui';
+import { Badge, Button, Empty, formatChips, formatDate, Panel, Stat } from '@jc/ui';
 import type { ReportReason, ReportStatus } from '@jc/types';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { useT } from '../i18n';
 import { auditActionLabel, roleLabel, userStatusLabel, type Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { LoadError, Modal } from '../ui';
 import { Table } from './Console';
 import { REASON, STATUS } from './Reports';
 
@@ -41,7 +42,7 @@ export function RecentTablesPanel({ rows }: { rows: RecentTable[] }) {
                   {r.roomType === 'member' && <Badge tone="blue" className="ml-1">{t('memberRoom')}</Badge>}
                 </td>
                 <td className="px-2 py-1.5 font-mono">{formatChips(r.buyIn)}</td>
-                <td className="px-2 py-1.5 font-mono">{r.status === 'seated' ? <Badge tone="green">{t('seatedNow')}</Badge> : r.cashOut === null ? '—' : formatChips(r.cashOut)}</td>
+                <td className="px-2 py-1.5 font-mono">{r.status === 'seated' ? <Badge tone="green" className="font-sans">{t('seatedNow')}</Badge> : r.cashOut === null ? '—' : formatChips(r.cashOut)}</td>
                 <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(r.createdAt, locale)}</td>
                 <td className="px-2 py-1.5 text-xs text-ink-400">{r.closedAt ? formatDate(r.closedAt, locale) : '—'}</td>
               </tr>
@@ -104,7 +105,7 @@ export function MemberActivityPanel({ userId }: { userId: string }) {
   const [days, setDays] = useState<(typeof PERIODS)[number]>(7);
   // Minutes this browser's clock is ahead of UTC, so days end at the admin's own midnight.
   const tz = -new Date().getTimezoneOffset();
-  const { data, error, loading } = useData<Activity>(`/api/admin/users/${userId}/activity?days=${days}&tz=${tz}`);
+  const { data, error, loading, reload } = useData<Activity>(`/api/admin/users/${userId}/activity?days=${days}&tz=${tz}`);
   const max = Math.max(1, ...(data?.series.map((d) => d.hands) ?? []));
   const signed = (n: number) => `${n > 0 ? '+' : ''}${formatChips(n)}`;
   return (
@@ -121,7 +122,7 @@ export function MemberActivityPanel({ userId }: { userId: string }) {
       }
     >
       {error ? (
-        <Empty>{error}</Empty>
+        <LoadError error={error} onRetry={reload} />
       ) : !data ? (
         <Empty>{t('loading')}</Empty>
       ) : (
@@ -300,7 +301,7 @@ export function MemberHistoryPanel({ userId }: { userId: string }) {
         ))}
       </div>
       {error ? (
-        <Empty>{error}</Empty>
+        <LoadError error={error} onRetry={reload} />
       ) : !data ? (
         <Empty>{t('loading')}</Empty>
       ) : items.length === 0 ? (

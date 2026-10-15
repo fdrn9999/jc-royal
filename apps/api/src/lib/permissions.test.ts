@@ -49,9 +49,10 @@ describe('admin permission table', () => {
     // A preview skips only the password, so only routes that answer a preview and write nothing are marked.
     const previews = Object.entries(ROUTE_RULES).filter(([, r]) => r.preview).map(([k]) => k);
     expect(previews.sort()).toEqual(
-      ['POST /tables/:id/close', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend'].sort(),
+      ['POST /reports/:id', 'POST /tables/:id/close', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend'].sort(),
     );
-    expect(previews.every((k) => ROUTE_RULES[k]!.reauth)).toBe(true);
+    // Deciding a report asks for no password, so its preview skips nothing; every other preview stands before one.
+    expect(previews.filter((k) => !ROUTE_RULES[k]!.reauth)).toEqual(['POST /reports/:id']);
   });
 
   it('gives super admins every capability and plain administrators none of the super-admin ones', () => {

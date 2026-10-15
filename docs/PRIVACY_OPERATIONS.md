@@ -105,6 +105,8 @@
 | `report.view` | 신고 목록(증거 포함) | `{status, userId, reporterId, severity, reason, targetType, assignee, sort, page, count, dm: [1:1 메시지 신고 ID]}` |
 | `report.note` | 신고 내부 메모 작성 | 메모 ID와 길이. 본문은 넣지 않음 |
 | `note.create`·`note.delete` | 관리자 메모 작성·삭제 | 메모 ID와 길이, 삭제는 작성자·작성 시각. 본문은 넣지 않음 |
+| `ledger.view` | 칩 원장 목록, 쪽마다(B9) | `{q, found, type, from, to, page, count}`, 회원을 찾으면 대상 회원. 찾지 못한 검색어도 남김 |
+| `hand.list` | 회원으로 좁힌 핸드 목록, 쪽마다(B9) | `{q, found, tableId, page, count}`, 대상 회원. 테이블만·전체 핸드 목록은 회원을 가리키지 않아 남기지 않음 |
 
   기존에 기록하던 조치(내보내기, 칩 조정, 정지, 핸드 전체 열람, 신고 처리 등)는 `docs/ADMIN_SECURITY.md`에 있다. 조회 기록 때문에 감사 로그 양이 늘어난다(관리자 화면을 열 때마다 1행).
 - Cloudflare 계정 관리자는 D1에 직접 접근할 수 있고, 이 접근은 감사 로그에 남지 않는다. 처리방침 6항에 그대로 적었다. 계정 접근 통제(2단계 인증, 토큰 범위·교체)는 운영자가 관리한다.

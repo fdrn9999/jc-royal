@@ -1,6 +1,6 @@
 import { schema } from '@jc/db';
 import { MessageSendSchema } from '@jc/types';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, like, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -15,13 +15,27 @@ const StatusSchema = z.object({ status: z.enum(['visible', 'hidden', 'deleted'])
 /** Mounted inside the admin router (requireAdmin already applied). */
 export const adminCommunityRoutes = new Hono<AppEnv>()
   // ---------------- board moderation & notices
+  /**
+   * Posts for moderation, newest first, with their status. Without `paged=1` the newest 100 as a plain array, as before.
+   * With it: `q` (part of the title), `limit` (1–100, default 50) / `offset`, and whether more follow (one extra row
+   * is read instead of counting every post).
+   */
   .get('/board/posts', async (c) => {
     const status = c.req.query('status');
-    const where = status === 'visible' || status === 'hidden' || status === 'deleted' ? eq(schema.posts.status, status) : undefined;
-    const items = await listItems(c, and(where), 100, 0);
+    const paged = c.req.query('paged') === '1';
+    const q = paged ? (c.req.query('q') ?? '').trim().slice(0, 100) : '';
+    const where = and(
+      status === 'visible' || status === 'hidden' || status === 'deleted' ? eq(schema.posts.status, status) : undefined,
+      q ? like(schema.posts.title, `%${q}%`) : undefined,
+    );
+    const limit = paged ? Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 100) : 100;
+    const offset = paged ? Math.max(Number(c.req.query('offset') ?? 0) || 0, 0) : 0;
+    const rows = await listItems(c, where, paged ? limit + 1 : limit, offset);
+    const items = rows.slice(0, limit);
     const statuses = await c.var.db.select({ id: schema.posts.id, status: schema.posts.status }).from(schema.posts).where(inArray(schema.posts.id, items.map((i) => i.id).concat('-')));
     const st = new Map(statuses.map((s) => [s.id, s.status]));
-    return c.json(items.map((i) => ({ ...i, status: st.get(i.id) })));
+    const out = items.map((i) => ({ ...i, status: st.get(i.id) }));
+    return c.json(paged ? { items: out, limit, offset, more: rows.length > limit } : out);
   })
   .get('/board/posts/:id', async (c) => c.json(await postDetail(c, c.req.param('id'), c.var.user!.id, true)))
   .post('/board/notices', async (c) => {
@@ -71,14 +85,21 @@ export const adminCommunityRoutes = new Hono<AppEnv>()
     await audit(c, 'message.send', { type: 'batch', id: batchId }, { recipients: ids.length, category: body.category, title: body.title });
     return c.json({ batchId, sent }, 201);
   })
+  /** Sent batches, newest first. Without `paged=1` the newest 100 as a plain array; with it `limit` (1–100, default 20) / `offset` and whether more follow. */
   .get('/messages', async (c) => {
+    const paged = c.req.query('paged') === '1';
+    const limit = paged ? Math.min(Math.max(Number(c.req.query('limit') ?? 20) || 20, 1), 100) : 100;
+    const offset = paged ? Math.max(Number(c.req.query('offset') ?? 0) || 0, 0) : 0;
     const rows = await c.env.DB.prepare(
       `SELECT m.batch_id AS batchId, MIN(m.title) AS title, MIN(m.category) AS category, MIN(m.created_at) AS createdAt,
               COUNT(*) AS recipients, SUM(CASE WHEN m.read_at IS NOT NULL THEN 1 ELSE 0 END) AS readCount,
               MIN(u.nickname) AS sender
        FROM messages m LEFT JOIN users u ON u.id = m.sender_id
-       WHERE m.batch_id IS NOT NULL GROUP BY m.batch_id ORDER BY createdAt DESC LIMIT 100`,
-    ).all();
-    return c.json(rows.results);
+       WHERE m.batch_id IS NOT NULL GROUP BY m.batch_id ORDER BY createdAt DESC LIMIT ?1 OFFSET ?2`,
+    )
+      .bind(paged ? limit + 1 : limit, offset)
+      .all();
+    const items = rows.results.slice(0, limit);
+    return c.json(paged ? { items, limit, offset, more: rows.results.length > limit } : items);
   });
 

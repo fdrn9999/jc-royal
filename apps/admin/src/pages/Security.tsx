@@ -3,11 +3,12 @@
  * administrator may do, and the permission table read from the API. The table is code-defined (lib/permissions.ts in
  * the API), so this page shows it and never edits it.
  */
-import { Badge, Button, Empty, formatDate, Modal, Panel } from '@jc/ui';
+import { Badge, Button, Empty, formatDate, Panel } from '@jc/ui';
 import { useState } from 'react';
 import { useT } from '../i18n';
 import { auditActionLabel, capabilityLabel, featureLabel, roleLabel } from '../labels';
 import { errText, useAdmin, useData } from '../lib';
+import { Modal } from '../ui';
 import { Table } from './Console';
 
 interface SessionItem {

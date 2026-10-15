@@ -3,12 +3,13 @@
  * and transactions worth a look; and the reconciliation events with the evidence an administrator decides on. Nothing
  * here changes a wallet by itself: a correction is chosen by a super admin, shown before → after, and confirmed.
  */
-import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, Stat } from '@jc/ui';
+import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useT, type Key } from '../i18n';
 import { ledgerTypeLabel, memoLabel, roleLabel, scopeLabel, tableIssueLabel, userStatusLabel, type Tr } from '../labels';
 import { errText, useAdmin, useData } from '../lib';
+import { Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
 
 type Flow = { n: number; sum: number; plus: number; minus: number };
@@ -94,7 +95,7 @@ export function EconomyPage() {
       </div>
     </div>
   );
-  if (error) return <div className="flex flex-col gap-4">{header}<Empty>{error}</Empty></div>;
+  if (error) return <div className="flex flex-col gap-4">{header}<LoadError error={error} onRetry={reload} /></div>;
   if (!data) return <div className="flex flex-col gap-4">{header}<Empty>{t('loading')}</Empty></div>;
   const d = data;
   const a = d.anomalies;
@@ -341,7 +342,7 @@ export function ReconcilePage() {
   const { t } = useT();
   const { api } = useAdmin();
   const { data, error, reload } = useData<ReconcileEvent[]>('/api/admin/reconcile');
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<Note>(null);
   const [running, setRunning] = useState(false);
   const [openOnly, setOpenOnly] = useState(true);
   // A correction's outcome is shown here: once resolved, the event leaves the open list and its row goes with it.
@@ -356,10 +357,10 @@ export function ReconcilePage() {
     setNotice(null);
     try {
       const r = await api<{ mismatches: unknown[]; created: number; acknowledged: number }>('/api/admin/reconcile/run', { body: {} });
-      setResult(`${t('reconcileResult', { n: r.mismatches.length, created: r.created })}${r.acknowledged ? ` · ${t('recAcknowledged', { n: r.acknowledged })}` : ''}`);
+      setResult({ ok: true, text: `${t('reconcileResult', { n: r.mismatches.length, created: r.created })}${r.acknowledged ? ` · ${t('recAcknowledged', { n: r.acknowledged })}` : ''}` });
       await reload();
     } catch (e) {
-      setResult(errText(e, t));
+      setResult({ ok: false, text: errText(e, t) });
     } finally {
       setRunning(false);
     }
@@ -372,7 +373,7 @@ export function ReconcilePage() {
         <Link to="/economy" className="text-sm text-gold-300 hover:underline">{t('economy')} →</Link>
         <Button className="ml-auto" onClick={run} loading={running} data-testid="run-reconcile">{t('runReconcile')}</Button>
       </div>
-      {result && <p className="text-sm text-gold-300" role="status" data-testid="rec-run-result">{result}</p>}
+      <Feedback note={result} testid="rec-run-result" />
       {notice && <p className="text-sm text-gold-300" role="status" data-testid="rec-result">{notice}</p>}
       <p className="text-xs text-ink-400">{t('recPolicy')}</p>
       <Panel
@@ -385,7 +386,7 @@ export function ReconcilePage() {
         title={t('recEvents')}
       >
         {error ? (
-          <Empty>{error}</Empty>
+          <LoadError error={error} onRetry={reload} />
         ) : !data ? (
           <Empty>{t('loading')}</Empty>
         ) : rows.length === 0 ? (
@@ -452,7 +453,7 @@ function EvidencePanel({ id, onChanged }: { id: string; onChanged: (notice?: str
   const { data, error, reload } = useData<Evidence>(`/api/admin/reconcile/${id}`);
   // A refusal stays by the evidence (the event is unchanged); a success goes to the page, which may drop this row.
   const [failure, setFailure] = useState<string | null>(null);
-  if (error) return <p className="text-sm text-danger">{error}</p>;
+  if (error) return <LoadError error={error} onRetry={reload} />;
   if (!data) return <p className="text-sm text-ink-400">{t('loading')}</p>;
   const done: Done = async (o) => {
     setFailure(o.ok ? null : o.text);
