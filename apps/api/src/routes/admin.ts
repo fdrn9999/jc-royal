@@ -20,6 +20,7 @@ import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
+import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
 import { kickEverywhere, roomCall } from '../lib/room';
 
@@ -30,7 +31,8 @@ const ReasonSchema = z.string().trim().min(2).max(200);
 
 /** Audit actions on a member shown on their timeline (views, lists and the note.create twin of each note are left out). */
 const SANCTION_ACTIONS = ['user.suspend', 'user.unsuspend', 'user.disconnect'];
-const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', 'user.chips', 'user.reset_link', 'note.delete'];
+const CHIP_ACTIONS = ['user.chips', 'user.reconcile'];
+const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', ...CHIP_ACTIONS, 'user.reset_link', 'note.delete'];
 
 /**
  * Admin notes are for handover, not for collecting data about the member: refuse what looks like an e-mail address, a
@@ -72,6 +74,65 @@ async function diagnose(d1: D1Database, t: typeof schema.tables.$inferSelect, li
   if (sessionsOnlyInD1.length) issues.push('session_without_seat');
   if (seatsOnlyInRoom.length) issues.push('seat_without_session');
   return { issues, sessionsOnlyInD1, seatsOnlyInRoom };
+}
+
+/** Ledger rows checked for a wallet mismatch, newest first. */
+const EVIDENCE_ROWS = 1000;
+
+type EvidenceRow = { seq: number; id: string; type: string; amount: number; balanceAfter: number; tableId: string | null; idempotencyKey: string; actorId: string | null; memo: string | null; createdAt: number };
+
+/**
+ * A wallet held against its ledger. Each ledger row keeps the balance it left, so a row whose balance is not the row
+ * before's plus its amount marks a change to the wallet made without a ledger row, somewhere between the two; `afterLast`
+ * is such a change since the latest row. A recorded difference (`reconcile:…:record`) entered the ledger without moving
+ * the wallet. The latest EVIDENCE_ROWS rows are checked (`truncated`: there are older ones, and the oldest checked row
+ * has no row before it to compare with).
+ */
+async function walletEvidence(d1: D1Database, e: typeof schema.reconciliationEvents.$inferSelect) {
+  const uid = e.subjectId;
+  const [member, sums, latest, sessions, corrections] = await d1.batch([
+    d1.prepare(`SELECT id, nickname, status, role, balance FROM users WHERE id = ?1`).bind(uid),
+    d1.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS sum FROM chip_ledger WHERE user_id = ?1`).bind(uid),
+    d1.prepare(
+      `SELECT rowid AS seq, id, type, amount, balance_after AS balanceAfter, table_id AS tableId, idempotency_key AS idempotencyKey, actor_id AS actorId, memo, created_at AS createdAt
+         FROM chip_ledger WHERE user_id = ?1 ORDER BY rowid DESC LIMIT ?2`,
+    ).bind(uid, EVIDENCE_ROWS + 1),
+    d1.prepare(`SELECT id, table_id AS tableId, seat_index AS seatIndex, buy_in AS buyIn, created_at AS createdAt FROM table_sessions WHERE user_id = ?1 AND status = 'seated'`).bind(uid),
+    d1.prepare(`SELECT id, idempotency_key AS idempotencyKey, amount, balance_after AS balanceAfter, actor_id AS actorId, created_at AS createdAt FROM chip_ledger WHERE idempotency_key IN (?1, ?2)`).bind(
+      `reconcile:${e.id}:record`,
+      `reconcile:${e.id}:revert`,
+    ),
+  ]);
+  const m = member?.results[0] as { id: string; nickname: string; status: string; role: string; balance: number } | undefined;
+  const s = (sums?.results[0] ?? { n: 0, sum: 0 }) as { n: number; sum: number };
+  const desc = (latest?.results ?? []) as EvidenceRow[];
+  const truncated = desc.length > EVIDENCE_ROWS;
+  const asc = desc.slice(0, EVIDENCE_ROWS).reverse();
+  const isRecord = (r: EvidenceRow) => r.type === 'reconcile' && r.idempotencyKey.endsWith(':record');
+  const breaks: (EvidenceRow & { expected: number; difference: number; previousAt: number | null })[] = [];
+  let recorded = 0;
+  for (let i = 0; i < asc.length; i++) {
+    const r = asc[i]!;
+    if (isRecord(r)) recorded += r.amount;
+    const prev = i > 0 ? asc[i - 1]! : null;
+    if (!prev && truncated) continue;
+    const expected = (prev?.balanceAfter ?? 0) + (isRecord(r) ? 0 : r.amount);
+    if (expected !== r.balanceAfter) breaks.push({ ...r, expected, difference: r.balanceAfter - expected, previousAt: prev?.createdAt ?? null });
+  }
+  const last = asc[asc.length - 1];
+  return {
+    member: m ?? null,
+    ledger: { count: s.n, sum: s.sum, checked: asc.length, truncated },
+    difference: { event: e.actual - e.expected, current: m ? m.balance - s.sum : null },
+    // Newest first; a long history of breaks shows its latest 50.
+    breaks: breaks.reverse().slice(0, 50),
+    breakCount: breaks.length,
+    afterLast: { amount: m ? m.balance - (last?.balanceAfter ?? 0) : 0, since: last?.createdAt ?? null },
+    recorded,
+    recent: desc.slice(0, 20),
+    openSessions: sessions?.results ?? [],
+    corrections: corrections?.results ?? [],
+  };
 }
 
 const page = (c: Context<AppEnv>) => ({
@@ -308,7 +369,7 @@ const admin = new Hono<AppEnv>()
     const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 30) || 30, 1), 100);
     const before = Number(c.req.query('before')) || Number.MAX_SAFE_INTEGER;
     const beforeId = (c.req.query('beforeId') ?? '').slice(0, 64);
-    const actions = kind === 'sanction' ? SANCTION_ACTIONS : kind === 'chips' ? ['user.chips'] : kind === 'note' ? ['note.delete'] : MEMBER_ACTIONS;
+    const actions = kind === 'sanction' ? SANCTION_ACTIONS : kind === 'chips' ? CHIP_ACTIONS : kind === 'note' ? ['note.delete'] : MEMBER_ACTIONS;
     const DB = c.env.DB;
     // Newest first by (time, id); one row past the page tells whether there is more.
     const page = (t: string) => `(${t}.created_at < ?2 OR (${t}.created_at = ?2 AND ${t}.id < ?4)) ORDER BY ${t}.created_at DESC, ${t}.id DESC LIMIT ?3`;
@@ -442,7 +503,14 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const body = await parseBody(c, ChipAdjustSchema);
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true } });
-    if (target && target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can adjust chips of administrators');
+    const superAdmin = c.var.user!.role === 'super_admin';
+    // A refused adjustment is audited too: the economy page lists them.
+    const refuse = async (reason: string, status: 403 | 409, code: string, message: string): Promise<never> => {
+      await audit(c, 'user.chips_refused', { type: 'user', id }, { reason, amount: body.amount, memo: body.memo });
+      fail(status, code, message);
+    };
+    if (target && target.role !== 'user' && !superAdmin) await refuse('forbidden', 403, 'forbidden', 'only a super admin can adjust chips of administrators');
+    if (Math.abs(body.amount) >= LARGE_ADJUSTMENT && !superAdmin) await refuse('large_adjustment', 403, 'large_adjustment', `only a super admin can adjust ${LARGE_ADJUSTMENT} chips or more at once`);
     const r = await applyLedger(c.env.DB, {
       userId: id,
       type: 'admin_adjust',
@@ -451,7 +519,9 @@ const admin = new Hono<AppEnv>()
       actorId: c.var.user!.id,
       memo: body.memo,
     });
-    if (r.status === 'insufficient') fail(409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
+    if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
+    // The same request again (a retry, a double click): nothing changed, and that is on record.
+    if (r.status === 'duplicate') await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
     if (r.status === 'applied') {
       await sendMessages(c.var.db, {
         userIds: [id],
@@ -670,20 +740,48 @@ const admin = new Hono<AppEnv>()
       .offset(offset);
     return c.json(rows.map((r) => ({ ...r.a, actor: r.nickname, detail: r.a.detail ? JSON.parse(r.a.detail) : null })));
   })
+  // ---------------------------------------------------------------- chip economy
+  /**
+   * The chip economy over the last 7, 30 or 90 days, cut at the viewer's midnight (`tz` as on member activity): wallet
+   * and table totals, issuance, movement per day, failures and transactions worth a look. Read when the page is opened
+   * (the console does not poll it); nothing here changes a wallet.
+   */
+  .get('/economy', async (c) => {
+    const days = [7, 30, 90].includes(Number(c.req.query('days'))) ? Number(c.req.query('days')) : 7;
+    const tz = Math.min(Math.max(Math.trunc(Number(c.req.query('tz') ?? 0)) || 0, -840), 840);
+    const at = Date.now();
+    const out = await economy(c.env.DB, days, tz, at);
+    return c.json({ ...out, at, d1Ms: Date.now() - at });
+  })
   // ---------------------------------------------------------------- reconciliation
   /**
-   * Detects wallets whose balance differs from the sum of their ledger and
-   * records an open reconciliation event for each new mismatch. Balances are
-   * never "fixed" silently: an admin resolves each event explicitly.
+   * Detects wallets whose balance differs from the sum of their ledger, and tables whose open sessions differ from the
+   * seats their room holds, and records an event for each new mismatch. A mismatch is its difference (wallet − ledger,
+   * room seats − sessions): while that stays the same it is the same mismatch, even as the member keeps playing (balance
+   * and ledger move together), so it gets no second event while one is open, nor after an administrator acknowledged it
+   * with a note (`acknowledged` counts those). Balances are never "fixed" silently: an admin resolves each event.
    */
   .post('/reconcile/run', async (c) => {
+    const ev = schema.reconciliationEvents;
     const mismatches = await findLedgerMismatches(c.env.DB);
-    const open = await c.var.db.select().from(schema.reconciliationEvents).where(isNull(schema.reconciliationEvents.resolvedAt));
-    const openKeys = new Set(open.map((e) => `${e.subjectId}:${e.expected}:${e.actual}`));
+    // Open events, and wallet events acknowledged with a note (NULL: resolved before resolutions were kept, by a note).
+    const known = await c.var.db
+      .select({ scope: ev.scope, subjectId: ev.subjectId, expected: ev.expected, actual: ev.actual, resolvedAt: ev.resolvedAt })
+      .from(ev)
+      .where(or(isNull(ev.resolvedAt), and(eq(ev.scope, 'user_ledger'), or(isNull(ev.resolution), eq(ev.resolution, 'note')))));
+    const key = (scope: string, subject: string, difference: number) => `${scope}:${subject}:${difference}`;
+    const open = new Set(known.filter((e) => !e.resolvedAt).map((e) => key(e.scope, e.subjectId, e.actual - e.expected)));
+    const acked = new Set(known.filter((e) => e.resolvedAt).map((e) => key(e.scope, e.subjectId, e.actual - e.expected)));
     let created = 0;
+    let acknowledged = 0;
     for (const m of mismatches) {
-      if (openKeys.has(`${m.userId}:${m.ledgerSum}:${m.balance}`)) continue;
-      await c.var.db.insert(schema.reconciliationEvents).values({ id: crypto.randomUUID(), scope: 'user_ledger', subjectId: m.userId, expected: m.ledgerSum, actual: m.balance, detail: 'wallet balance != sum(chip_ledger)' });
+      const k = key('user_ledger', m.userId, m.balance - m.ledgerSum);
+      if (open.has(k)) continue;
+      if (acked.has(k)) {
+        acknowledged++;
+        continue;
+      }
+      await c.var.db.insert(ev).values({ id: crypto.randomUUID(), scope: 'user_ledger', subjectId: m.userId, expected: m.ledgerSum, actual: m.balance, detail: 'wallet balance != sum(chip_ledger)' });
       created++;
     }
     // Table-level: chips held at open seats vs. what the rooms report.
@@ -692,30 +790,119 @@ const admin = new Hono<AppEnv>()
     for (const row of seated.results) {
       const live = await roomCall(c, row.tableId, 'status');
       const liveSeats = ((live?.seats as ({ userId: string } | null)[] | undefined) ?? []).filter(Boolean).length;
-      if (live && liveSeats !== row.n) {
-        await c.var.db.insert(schema.reconciliationEvents).values({ id: crypto.randomUUID(), scope: 'table', subjectId: row.tableId, expected: row.n, actual: liveSeats, detail: 'open table_sessions != seats held by the room' });
+      if (live && liveSeats !== row.n && !open.has(key('table', row.tableId, liveSeats - row.n))) {
+        await c.var.db.insert(ev).values({ id: crypto.randomUUID(), scope: 'table', subjectId: row.tableId, expected: row.n, actual: liveSeats, detail: 'open table_sessions != seats held by the room' });
         created++;
       }
       tableReports.push({ tableId: row.tableId, openSessions: row.n, roomSeats: liveSeats, chipsOnTable: live?.chipsOnTable ?? null });
     }
-    await audit(c, 'reconcile.run', undefined, { mismatches: mismatches.length, created });
-    return c.json({ mismatches, created, tables: tableReports });
+    await audit(c, 'reconcile.run', undefined, { mismatches: mismatches.length, created, acknowledged });
+    return c.json({ mismatches, created, acknowledged, tables: tableReports });
   })
   .get('/reconcile', async (c) => {
     const rows = await c.var.db.select().from(schema.reconciliationEvents).orderBy(desc(schema.reconciliationEvents.createdAt)).limit(200);
     return c.json(rows);
   })
+  /**
+   * One event with what an administrator needs to decide on it: for a wallet, the member, the ledger against the balance
+   * and the rows where they part; for a table, the room against its open sessions (as on the table page).
+   */
+  .get('/reconcile/:id', async (c) => {
+    const e = await c.var.db.query.reconciliationEvents.findFirst({ where: eq(schema.reconciliationEvents.id, c.req.param('id')) });
+    if (!e) fail(404, 'not_found', 'event not found');
+    if (e.scope === 'table') {
+      const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, e.subjectId) });
+      const live = t && t.status !== 'closed' ? await roomCall(c, t.id, 'status') : null;
+      return c.json({
+        event: e,
+        table: t ? { id: t.id, name: t.name, status: t.status, entryBlocked: t.entryBlocked, handsPaused: t.handsPaused, lastIssue: t.lastIssue } : null,
+        diagnosis: t && live ? await diagnose(c.env.DB, t, live) : null,
+      });
+    }
+    return c.json({ event: e, ...(await walletEvidence(c.env.DB, e)) });
+  })
+  /**
+   * Resolves an event. `note` (any administrator): acknowledged with a note; nothing changes, and the same difference is
+   * not raised again. A wallet mismatch can instead be corrected by a super admin, in one transaction that holds only
+   * while the difference is still the event's (409 reconcile_stale once it moved):
+   * - `record`: a 'reconcile' ledger row for the difference; the wallet keeps its chips, which are now on record;
+   * - `revert`: that row and a second one taking the difference back out (or in), so the wallet returns to what its
+   *   ledger says; refused if the wallet would go below zero. The member is told their balance was corrected (the
+   *   note stays internal).
+   * A correction applies to an open event or one acknowledged with a note, once per event.
+   */
   .post('/reconcile/:id/resolve', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
-    const body = await parseBody(c, z.object({ note: z.string().trim().min(2).max(300) }));
-    const r = await c.var.db
-      .update(schema.reconciliationEvents)
-      .set({ resolvedBy: c.var.user!.id, resolvedAt: Date.now(), detail: sql`COALESCE(${schema.reconciliationEvents.detail}, '') || ' | resolved: ' || ${body.note}` })
-      .where(and(eq(schema.reconciliationEvents.id, id), isNull(schema.reconciliationEvents.resolvedAt)))
-      .returning();
-    if (!r[0]) fail(404, 'not_found', 'open event not found');
-    await audit(c, 'reconcile.resolve', { type: 'reconciliation', id }, body);
-    return c.json({ ok: true });
+    const body = await parseBody(c, z.object({ note: z.string().trim().min(2).max(300), action: z.enum(['note', 'record', 'revert']).default('note') }));
+    const ev = schema.reconciliationEvents;
+    if (body.action === 'note') {
+      const r = await c.var.db
+        .update(ev)
+        .set({ resolvedBy: c.var.user!.id, resolvedAt: Date.now(), resolution: 'note', detail: sql`COALESCE(${ev.detail}, '') || ' | resolved: ' || ${body.note}` })
+        .where(and(eq(ev.id, id), isNull(ev.resolvedAt)))
+        .returning();
+      if (!r[0]) fail(404, 'not_found', 'open event not found');
+      await audit(c, 'reconcile.resolve', { type: 'reconciliation', id }, body);
+      return c.json({ ok: true, action: body.action });
+    }
+    if (c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can correct a wallet or the ledger');
+    const e = await c.var.db.query.reconciliationEvents.findFirst({ where: eq(ev.id, id) });
+    if (!e) fail(404, 'not_found', 'event not found');
+    if (e.scope !== 'user_ledger') fail(400, 'bad_request', 'only a wallet mismatch can be corrected');
+    if (e.resolvedAt && e.resolution && e.resolution !== 'note') fail(409, 'already_resolved', 'this event was already corrected');
+    const difference = e.actual - e.expected;
+    const DB = c.env.DB;
+    const before = await DB.prepare(`SELECT balance, status, locale, (SELECT COALESCE(SUM(amount), 0) FROM chip_ledger WHERE user_id = ?1) AS ledgerSum FROM users WHERE id = ?1`)
+      .bind(e.subjectId)
+      .first<{ balance: number; status: string; locale: 'ko' | 'en'; ledgerSum: number }>();
+    if (!before) fail(404, 'not_found', 'member not found');
+    if (before.balance - before.ledgerSum !== difference) fail(409, 'reconcile_stale', 'the difference changed since this event was recorded; run reconciliation again');
+    const revert = body.action === 'revert';
+    if (revert && before.balance - difference < 0) fail(409, 'insufficient_balance', 'reverting would make the balance negative');
+    const actor = c.var.user!.id;
+    const recordId = crypto.randomUUID();
+    const revertId = crypto.randomUUID();
+    const keys = [`reconcile:${id}:record`, `reconcile:${id}:revert`] as const;
+    // Every write holds only if the one before it happened: the record row only while the wallet is still off its ledger
+    // by exactly this difference (and, to revert, the wallet can give it back), the revert row only after the record row,
+    // the wallet only with the revert row, the event only with our last row. The keys make a second correction a no-op.
+    const results = await DB.batch([
+      DB.prepare(
+        `INSERT INTO chip_ledger (id, user_id, type, amount, balance_after, ref_id, idempotency_key, actor_id, memo)
+         SELECT ?1, id, 'reconcile', ?2, balance, ?3, ?4, ?5, 'recorded difference' FROM users
+          WHERE id = ?6 AND balance - (SELECT COALESCE(SUM(amount), 0) FROM chip_ledger WHERE user_id = ?6) = ?2${revert ? ' AND balance - ?2 >= 0' : ''}
+         ON CONFLICT(idempotency_key) DO NOTHING`,
+      ).bind(recordId, difference, id, keys[0], actor, e.subjectId),
+      ...(revert
+        ? [
+            DB.prepare(
+              `INSERT INTO chip_ledger (id, user_id, type, amount, balance_after, ref_id, idempotency_key, actor_id, memo)
+               SELECT ?1, id, 'reconcile', ?2, balance + ?2, ?3, ?4, ?5, 'balance corrected' FROM users
+                WHERE id = ?6 AND EXISTS (SELECT 1 FROM chip_ledger WHERE id = ?7)
+               ON CONFLICT(idempotency_key) DO NOTHING`,
+            ).bind(revertId, -difference, id, keys[1], actor, e.subjectId, recordId),
+            DB.prepare(`UPDATE users SET balance = balance + ?1, updated_at = (unixepoch('subsec') * 1000) WHERE id = ?2 AND EXISTS (SELECT 1 FROM chip_ledger WHERE id = ?3)`).bind(-difference, e.subjectId, revertId),
+          ]
+        : []),
+      DB.prepare(
+        `UPDATE reconciliation_events SET resolved_by = ?1, resolved_at = ?2, resolution = ?3, detail = COALESCE(detail, '') || ?4
+          WHERE id = ?5 AND (resolution IS NULL OR resolution = 'note') AND EXISTS (SELECT 1 FROM chip_ledger WHERE id = ?6)`,
+      ).bind(actor, Date.now(), body.action, ` | ${body.action}: ${body.note}`, id, revert ? revertId : recordId),
+      DB.prepare(`SELECT id, idempotency_key AS idempotencyKey, amount, balance_after AS balanceAfter FROM chip_ledger WHERE idempotency_key IN (?1, ?2)`).bind(...keys),
+      DB.prepare(`SELECT balance FROM users WHERE id = ?1`).bind(e.subjectId),
+    ]);
+    const rows = (results[results.length - 2]?.results ?? []) as { id: string; idempotencyKey: string; amount: number; balanceAfter: number }[];
+    const balanceAfter = (results[results.length - 1]?.results[0] as { balance: number } | undefined)?.balance ?? null;
+    const ledgerIds = rows.filter((r) => r.id === recordId || r.id === revertId).map((r) => r.id);
+    if (!ledgerIds.length) {
+      if (rows.length) fail(409, 'already_resolved', 'this event was already corrected');
+      fail(409, 'reconcile_stale', 'the wallet changed while it was being corrected; open the event again');
+    }
+    if (revert && before.status !== 'deleted' && balanceAfter !== null) {
+      await sendMessages(c.var.db, { userIds: [e.subjectId], category: 'admin', ...notices(before.locale).reconcileReverted(-difference, balanceAfter), senderId: actor });
+    }
+    await audit(c, 'user.reconcile', { type: 'user', id: e.subjectId }, { eventId: id, action: body.action, difference, note: body.note, ledgerIds, balanceBefore: before.balance, balanceAfter });
+    return c.json({ ok: true, action: body.action, ledgerIds, balanceAfter });
   })
   // ---------------------------------------------------------------- academy (anonymous aggregates)
   .get('/academy/stats', async (c) => {

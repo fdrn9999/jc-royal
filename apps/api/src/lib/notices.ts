@@ -19,6 +19,10 @@ const NOTICES = {
       title: amount > 0 ? '가상 칩 지급 안내' : '가상 칩 조정 안내',
       body: `${amount > 0 ? '+' : ''}${n(amount)} 가상 칩이 ${amount > 0 ? '지급' : '차감'}되었습니다.\n사유: ${memo}\n현재 잔액: ${n(balance)}`,
     }),
+    reconcileReverted: (change: number, balance: number): Notice => ({
+      title: '가상 칩 잔액 정정 안내',
+      body: `가상 칩 잔액이 거래 기록과 맞지 않아 기록에 맞게 ${change > 0 ? '+' : ''}${n(change)} 정정했습니다.\n현재 잔액: ${n(balance)}`,
+    }),
   },
   en: {
     welcome: (grant: number): Notice => ({
@@ -30,6 +34,10 @@ const NOTICES = {
     chips: (amount: number, memo: string, balance: number): Notice => ({
       title: amount > 0 ? 'Virtual chips added' : 'Virtual chips adjusted',
       body: `${amount > 0 ? '+' : ''}${n(amount)} virtual chips were ${amount > 0 ? 'added to' : 'deducted from'} your wallet.\nReason: ${memo}\nBalance: ${n(balance)}`,
+    }),
+    reconcileReverted: (change: number, balance: number): Notice => ({
+      title: 'Virtual chip balance corrected',
+      body: `Your virtual chip balance did not match your transaction history, so it was corrected by ${change > 0 ? '+' : ''}${n(change)} to match it.\nBalance: ${n(balance)}`,
     }),
   },
 } as const;

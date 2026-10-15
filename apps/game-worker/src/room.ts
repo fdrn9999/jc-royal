@@ -858,13 +858,23 @@ export class TableRoom extends DurableObject<Env> {
       } else if (!this.handHasPlayer(s.userId)) {
         if (await this.resolveTopUp(s)) changed = true;
         if (s.phase === 'cashing') {
-          await cashOut(this.env.DB, { userId: s.userId, tableId: this.tableId!, tableSessionId: s.tableSessionId, amount: s.stack });
+          await this.cashOutSeat(s);
           this.room.seats[i] = null;
           changed = true;
         }
       }
     }
     if (changed) await this.save();
+  }
+
+  /** Pays the seat's stack back to the wallet. A failure is counted for the chip economy page and passed on to the caller's retry. */
+  private async cashOutSeat(seat: SeatState) {
+    try {
+      await cashOut(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: seat.stack });
+    } catch (e) {
+      this.ops.add('cashout_fail');
+      throw e;
+    }
   }
 
   private handHasPlayer(userId: string) {
@@ -914,7 +924,7 @@ export class TableRoom extends DurableObject<Env> {
       seat.topUp = null;
       seat.phase = 'cashing';
       await this.save();
-      await cashOut(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: seat.stack });
+      await this.cashOutSeat(seat);
     }
     this.room.seats[i] = null;
     if (this.room.waitlist.length > 0 && !this.room.closing) {

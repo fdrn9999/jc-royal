@@ -268,6 +268,12 @@ export const reconciliationEvents = sqliteTable('reconciliation_events', {
   detail: text('detail'),
   resolvedBy: text('resolved_by'),
   resolvedAt: integer('resolved_at'),
+  /**
+   * How it was resolved: 'note' acknowledged with a note only (the mismatch stays, and is not reopened while the
+   * difference is the same), 'record' the difference written to the ledger as it is, 'revert' the wallet put back to
+   * the ledger. NULL on events resolved before the column existed, which were notes.
+   */
+  resolution: text('resolution', { enum: ['note', 'record', 'revert'] }),
   createdAt: integer('created_at').notNull().default(now),
 });
 

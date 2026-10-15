@@ -60,6 +60,9 @@ const BY_CODE: Record<string, Key> = {
   rate_limited: 'errRateLimited',
   internal: 'errServer',
   note_pii: 'errNotePii',
+  large_adjustment: 'errLargeAdjustment',
+  reconcile_stale: 'errReconcileStale',
+  already_resolved: 'errAlreadyResolved',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

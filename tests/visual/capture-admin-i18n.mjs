@@ -82,6 +82,8 @@ const events = [
 ];
 console.log('academy events', (await call('/api/academy/events', { events }, { cookie: players[0].cookie })).status);
 sql(`INSERT INTO reconciliation_events (id, scope, subject_id, expected, actual, created_at) VALUES ('vis-i18n-${stamp}', 'user_ledger', '${players[0].id}', 1000, 990, ${Date.now() - 3_600_000})`);
+// A wallet changed outside the ledger, for the reconciliation evidence and its correction form.
+sql(`UPDATE users SET balance = balance + 250 WHERE id = '${players[1].id}'`);
 await new Promise((r) => setTimeout(r, 1500));
 
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });
@@ -99,7 +101,7 @@ await page.goto(`${admin}/hands`);
 await page.waitForTimeout(900);
 const handHref = await page.locator('main a[href^="/hands/"]').first().getAttribute('href', { timeout: 3000 }).catch(() => null);
 const handId = handHref ? decodeURIComponent(handHref.slice('/hands/'.length)) : null;
-const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/reconcile', '/audit', '/academy', '/reports', '/board', '/messages'];
+const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/academy', '/reports', '/board', '/messages'];
 
 // Dynamic values (nicknames, e-mails, ids, the brand) are not UI words.
 const ignore = new RegExp(`${stamp}|@visual\\.dev|^JC$|^ROYAL$|^ADMIN$|^EN$|^e2e|^E2E`, 'i');
@@ -114,6 +116,12 @@ for (const lang of ['ko', 'en']) {
       await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
       await page.getByTestId('reauth-confirm').click();
       await page.waitForTimeout(900);
+    }
+    if (route === '/reconcile') {
+      await page.getByTestId('run-reconcile').click();
+      await page.getByTestId('rec-row').filter({ hasText: players[1].id }).getByTestId('rec-evidence-toggle').click();
+      await page.getByTestId('rec-evidence').waitFor();
+      await page.waitForTimeout(600);
     }
     const name = `${lang}-${route.replace(/\//g, '_').replace(/[^a-z0-9_-]/gi, '') || '_'}`;
     await page.screenshot({ path: `${out}/${name}-1440.png`, fullPage: true });

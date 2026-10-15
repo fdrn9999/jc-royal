@@ -27,7 +27,13 @@ export const ledgerTypeLabel = labeler({
   reconcile: 'ledgerReconcile',
 });
 /** The memos the server writes itself (sign-up grant, buy-in seat, top-ups); a memo an admin typed is shown as it is. */
-const SYSTEM_MEMOS: Record<string, Key> = { 'welcome chips': 'memoWelcome', 'top-up': 'memoTopUp', 'auto rebuy': 'memoAutoRebuy' };
+const SYSTEM_MEMOS: Record<string, Key> = {
+  'welcome chips': 'memoWelcome',
+  'top-up': 'memoTopUp',
+  'auto rebuy': 'memoAutoRebuy',
+  'recorded difference': 'memoRecorded',
+  'balance corrected': 'memoCorrected',
+};
 export function memoLabel(t: Tr, memo: string | null | undefined): string {
   if (!memo) return '';
   const seat = /^seat (\d+)$/.exec(memo);
@@ -76,9 +82,12 @@ export const auditActionLabel = labeler({
   'table.update': 'auditTableUpdate',
   'table.control': 'auditTableControl',
   'user.chips': 'auditUserChips',
+  'user.chips_duplicate': 'auditChipsDuplicate',
+  'user.chips_refused': 'auditChipsRefused',
   'user.disconnect': 'auditUserDisconnect',
   'user.export': 'auditUserExport',
   'user.list': 'auditUserList',
+  'user.reconcile': 'auditUserReconcile',
   'user.reset_link': 'auditUserResetLink',
   'user.role': 'auditUserRole',
   'user.suspend': 'auditUserSuspend',

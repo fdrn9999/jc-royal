@@ -20,7 +20,7 @@
 
 - 회원 정지·해제, 권한 변경(슈퍼관리자만). 해제와 권한 변경도 사유(2–200자)가 필요하다. 콘솔은 실행 전에 변경 전 → 후(상태·권한)와 현재 정지 사유를 보여 주고, 감사 기록에 사유와 변경 전후를 남긴다(`user.suspend` `{reason, from, to, previousReason}`, `user.unsuspend` `{reason, from, to, suspendedReason}`, `user.role` `{from, to, reason}`)
 - 회원 강제 연결 종료(로그인 세션 삭제와 테이블 연결 종료, `user.disconnect` 감사 기록에 사유·결과)
-- 가상 칩 지급·차감(멱등 키, 음수 잔액 불가)
+- 가상 칩 지급·차감(멱등 키, 음수 잔액 불가, 절대값 100,000 이상은 슈퍼관리자만: 아래 "가상 칩 조정과 정합성 정정")
 - 비밀번호 재설정 링크 발급(자기 계정은 불가, 비밀번호 변경 사용)
 - 회원 정보 CSV 내보내기(`user.export` 감사 기록)
 
@@ -28,13 +28,20 @@
 - 테이블 종료(진행 중 핸드가 끝난 뒤 전원 환급)
 - 테이블 긴급 제어: 새 핸드 중단·재개, 신규 입장 차단·해제(사유 필수, `table.control` 감사 기록에 사유와 룸 반영 여부)
 - 종료된 핸드의 전체 카드 열람(`hand.view_sensitive` 감사 기록)
-- 정합성 이벤트 해결 처리
+- 정합성 이벤트 해결 처리(메모만 남기기, 차이를 원장에 기록, 잔액 되돌리기: 기록·되돌리기는 슈퍼관리자만)
 
 ## 비공개 정보 원칙
 
 - 진행 중인 핸드의 홀카드, 덱, 시드는 관리자 실시간 상태에도 포함하지 않는다. 테스트로 검증했다.
 - 모든 카드 정보는 핸드가 끝나 D1에 기록된 뒤에만, 위 재확인을 거쳐 열람할 수 있다.
 - 테이블 상태 진단(`GET /api/admin/tables/:id`의 `diagnosis`)는 카드 없이 좌석·스택·단계·차례·마감·대기 중 충전 같은 운영 정보와 D1 기록 비교만 담는다. 긴급 조치는 카드나 결과를 바꾸지 않고, 퇴장도 엔진의 폴드와 정상 정산을 쓴다.
+
+## 가상 칩 조정과 정합성 정정
+
+- 큰 금액 조정: 절대값 100,000칩 이상 지급·차감은 슈퍼관리자만 할 수 있다(그 밖은 403 `large_adjustment`). 콘솔은 금액을 입력할 때 미리 알린다.
+- 별도 승인(두 사람 확인)은 검토했지만 도입하지 않았다. 운영자가 적어 요청·승인 대기 상태를 따로 두면 처리만 늦어지고, 승인 대기 중인 조정의 멱등성·만료를 새로 관리해야 한다. 대신 (1) 금액 기준으로 슈퍼관리자에게만 열고, (2) 모든 조정·거절·중복 요청을 감사 로그에 남기며(`user.chips`, `user.chips_refused`, `user.chips_duplicate`), (3) 칩 경제 화면이 큰 금액 조정, 하루 안에 같은 회원에게 3회 이상 지급, 거절·중복 요청을 특이 거래로 보여 준다. 운영자가 늘면 다시 검토한다.
+- 기존 원장의 멱등성은 그대로다. 같은 `idempotencyKey`로 다시 보낸 조정은 원장과 잔액을 바꾸지 않고, 중복 요청으로만 기록된다.
+- 원장 불일치는 자동으로 고치지 않는다. 정합성 검사는 이상을 기록만 하고, 관리자가 증거(원장 행마다 직전 잔액과 기록 잔액의 연결, 마지막 원장 기록 뒤 원장 밖에서 바뀐 금액, 열린 착석, 지금 차이)를 본 뒤 셋 중 하나를 고른다. 메모만 남기기(모든 관리자), 차이를 원장에 기록(잔액 유지), 잔액 되돌리기(원장에 맞춤). 기록·되돌리기는 슈퍼관리자만, 재확인을 거쳐, 실행 전에 잔액 변경 전 → 후를 확인한 뒤 실행된다. 검사 뒤 잔액·원장이 바뀌었으면 409 `reconcile_stale`로 거절해 오래된 증거로 고치지 않는다. 정정은 이벤트마다 한 번만 원장에 반영된다(원장 키 `reconcile:<id>:record|revert`). 되돌리면 회원에게 계정 언어로 쪽지를 보내고, 관리자 메모는 보내지 않는다.
 
 ## 관리자 내부 메모
 
@@ -57,7 +64,7 @@
 
 ```
 admin.bootstrap, admin.login, admin.login.failed, admin.reauth, admin.reauth.failed,
-user.list, user.view, user.suspend, user.unsuspend, user.disconnect, user.role, user.chips, user.reset_link, user.export,
+user.list, user.view, user.suspend, user.unsuspend, user.disconnect, user.role, user.chips, user.chips_refused, user.chips_duplicate, user.reconcile, user.reset_link, user.export,
 note.create, note.delete,
 table.create, table.update, table.control, table.close, hand.view_sensitive,
 reconcile.run, reconcile.resolve, board.notice.create/update,

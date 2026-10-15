@@ -11,7 +11,6 @@ import {
   ledgerTypeLabel,
   memoLabel,
   roleLabel,
-  scopeLabel,
   seatOutcomeLabel,
   seatPhaseLabel,
   stageLabel,
@@ -25,6 +24,8 @@ import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTabl
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 const newKey = () => crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+/** The API's LARGE_ADJUSTMENT: an adjustment this large is left to a super admin (the server enforces it). */
+const LARGE_ADJUSTMENT = 100_000;
 
 type Locale = 'ko' | 'en';
 /** Account language: mail, reset links and system messages to this member use it. */
@@ -429,7 +430,13 @@ export function UserDetailPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('adjustChips')}>
           <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void run(() => api(`/api/admin/users/${id}/chips`, { body: { amount: Number(amount), memo, idempotencyKey: newKey() } })); }}>
-            <Field label={t('amount')}>{(fid) => <Input id={fid} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d-]/g, ''))} />}</Field>
+            <Field
+              label={t('amount')}
+              hint={t('largeAdjustHint', { n: formatChips(LARGE_ADJUSTMENT) })}
+              error={me?.user.role !== 'super_admin' && Math.abs(Number(amount)) >= LARGE_ADJUSTMENT ? t('errLargeAdjustment') : null}
+            >
+              {(fid) => <Input id={fid} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d-]/g, ''))} data-testid="chip-amount" />}
+            </Field>
             <Field label={t('memo')}>{(fid) => <Input id={fid} value={memo} onChange={(e) => setMemo(e.target.value)} />}</Field>
             <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2}>{t('confirm')}</Button>
           </form>
@@ -955,42 +962,6 @@ export function LedgerPage() {
             </tr>
           ))}
         </Table>
-      </Panel>
-    </div>
-  );
-}
-
-export function ReconcilePage() {
-  const { t, locale } = useT();
-  const { api } = useAdmin();
-  const { data, reload } = useData<{ id: string; scope: string; subjectId: string; expected: number; actual: number; detail: string | null; resolvedAt: number | null; createdAt: number }[]>('/api/admin/reconcile');
-  const [result, setResult] = useState<string | null>(null);
-  const [note, setNote] = useState('');
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-extrabold">{t('reconcile')}</h1>
-        <Button onClick={async () => { const r = await api<{ mismatches: unknown[]; created: number }>('/api/admin/reconcile/run', { body: {} }); setResult(t('reconcileResult', { n: r.mismatches.length, created: r.created })); await reload(); }} data-testid="run-reconcile">{t('runReconcile')}</Button>
-      </div>
-      {result && <p className="text-sm text-gold-300" role="status">{result}</p>}
-      <Panel>
-        {data && data.length === 0 ? <Empty>—</Empty> : (
-          <Table head={[t('time'), t('colScope'), t('colSubject'), t('colExpected'), t('colActual'), t('colDetail'), '']}>
-            {data?.map((e) => (
-              <tr key={e.id}>
-                <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(e.createdAt, locale)}</td>
-                <td className="px-2 py-1.5">{scopeLabel(t, e.scope)}</td>
-                <td className="px-2 py-1.5 font-mono text-xs">{e.subjectId}</td>
-                <td className="px-2 py-1.5 font-mono">{e.expected}</td>
-                <td className="px-2 py-1.5 font-mono">{e.actual}</td>
-                <td className="px-2 py-1.5 text-xs text-ink-300">{e.detail}</td>
-                <td className="px-2 py-1.5">{e.resolvedAt ? <Badge tone="green">{t('resolvedBadge')}</Badge> : (
-                  <span className="flex gap-1"><Input className="h-8 w-40" placeholder={t('note')} value={note} onChange={(x) => setNote(x.target.value)} /><Button size="sm" disabled={note.trim().length < 2} onClick={async () => { await api(`/api/admin/reconcile/${e.id}/resolve`, { body: { note } }); setNote(''); await reload(); }}>{t('resolve')}</Button></span>
-                )}</td>
-              </tr>
-            ))}
-          </Table>
-        )}
       </Panel>
     </div>
   );

@@ -7,8 +7,10 @@
  * - `ws_drop`: a table connection that ended abnormally as the room saw it (close 1006, or a socket error).
  * - `room_error`: a table room operation that failed unexpectedly (D1 unreachable, a cash-out left for the retry...).
  * - `api_error`: an API request that ended in a server error (5xx).
+ * - `cashout_fail`: a table room's attempt to pay a seat's chips back to the wallet that failed (the room retries; each
+ *   failed attempt counts, so one stuck cash-out keeps counting until it goes through). Also counted as `room_error`.
  */
-export const OPS_METRICS = ['ws_retry', 'ws_drop', 'room_error', 'api_error'] as const;
+export const OPS_METRICS = ['ws_retry', 'ws_drop', 'room_error', 'api_error', 'cashout_fail'] as const;
 export type OpsMetric = (typeof OPS_METRICS)[number];
 
 export const OPS_BUCKET_MS = 60_000;

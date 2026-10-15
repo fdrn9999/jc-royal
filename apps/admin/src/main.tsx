@@ -10,7 +10,8 @@ import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
 import { DashboardPage } from './pages/Dashboard';
-import { AcademyStatsPage, AuditPage, HandDetailPage, HandsPage, LedgerPage, ReconcilePage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
+import { EconomyPage, ReconcilePage } from './pages/Economy';
+import { AcademyStatsPage, AuditPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
 const NAV: [string, Key][] = [
   ['/', 'dashboard'],
@@ -19,6 +20,7 @@ const NAV: [string, Key][] = [
   ['/academy', 'academy'],
   ['/hands', 'hands'],
   ['/ledger', 'ledger'],
+  ['/economy', 'economy'],
   ['/reports', 'reports'],
   ['/board', 'board'],
   ['/messages', 'messages'],
@@ -96,6 +98,7 @@ const router = createBrowserRouter([
       { path: '/hands', element: <HandsPage /> },
       { path: '/hands/:id', element: <HandDetailPage /> },
       { path: '/ledger', element: <LedgerPage /> },
+      { path: '/economy', element: <EconomyPage /> },
       { path: '/reconcile', element: <ReconcilePage /> },
       { path: '/audit', element: <AuditPage /> },
       { path: '/academy', element: <AcademyStatsPage /> },

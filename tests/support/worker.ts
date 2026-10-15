@@ -65,6 +65,8 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-emg-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Member management: a hand played so the member page has a recent table and activity to show.
   { id: 'it-member-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Chip economy: a session the room does not hold (reconciliation, stale sessions) and a cash-out that fails.
+  ...Array.from({ length: 3 }, (_, i) => ({ id: `it-econ-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
 ];
 
 async function sha256b64url(s: string) {

@@ -187,6 +187,13 @@ function describe(t: Tr, it: TimelineItem): string[] {
     out.push(t('histChange', { from: userStatusLabel(t, str('from')), to: userStatusLabel(t, str('to')) }));
   }
   if (it.action === 'user.chips' && num('amount') !== null) out.push(`${num('amount')! > 0 ? '+' : ''}${formatChips(num('amount')!)}${str('memo') ? ` · ${str('memo')}` : ''}`);
+  if (it.action === 'user.reconcile') {
+    out.push(`${t(str('action') === 'revert' ? 'resRevert' : 'resRecord')} · ${t('recDifference')} ${num('difference')! > 0 ? '+' : ''}${formatChips(num('difference') ?? 0)}`);
+    if (num('balanceBefore') !== null && num('balanceAfter') !== null && num('balanceBefore') !== num('balanceAfter')) {
+      out.push(t('histChange', { from: formatChips(num('balanceBefore')!), to: formatChips(num('balanceAfter')!) }));
+    }
+    if (str('note')) out.push(t('histNote', { r: str('note')! }));
+  }
   if (str('reason')) out.push(t('histReason', { r: str('reason')! }));
   if (it.action === 'user.unsuspend' && str('suspendedReason')) out.push(t('histPrevReason', { r: str('suspendedReason')! }));
   if (num('sessions')) out.push(t('histSessions', { n: num('sessions')! }));
@@ -204,6 +211,7 @@ const SANCTION_TONE: Record<string, 'red' | 'green' | 'gold' | 'blue' | 'neutral
   'user.disconnect': 'red',
   'user.role': 'gold',
   'user.chips': 'blue',
+  'user.reconcile': 'gold',
   note: 'neutral',
 };
 
