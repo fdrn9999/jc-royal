@@ -4,12 +4,14 @@
 
 | 용도 | 주소 | Worker 이름(`env.production`) |
 |---|---|---|
-| 사용자 사이트 + API | https://play.jcroyal.workers.dev | `play` (`apps/api`) |
-| 관리자 콘솔 | https://admin.jcroyal.workers.dev | `admin` (`apps/admin`) |
+| 사용자 사이트 + API | https://jc-royal.site | `play` (`apps/api`) |
+| 관리자 콘솔 | https://admin.jc-royal.site | `admin` (`apps/admin`) |
 | 테이블 룸(Durable Object) | 공개 주소 없음(`workers_dev: false`) | `jc-royal-game-prod` (`apps/game-worker`) |
 
-- 계정의 workers.dev 서브도메인은 `jcroyal`이다(대시보드 Workers & Pages → Subdomain).
-- 도메인을 사면 4절대로 옮긴다.
+- 두 도메인은 Cloudflare 대시보드에서 각 Worker의 커스텀 도메인으로 붙였다(4절).
+- workers.dev 주소(https://play.jcroyal.workers.dev, https://admin.jcroyal.workers.dev)는 개발·미리보기용으로 남아 있다. 계정의 workers.dev 서브도메인은 `jcroyal`이다(대시보드 Workers & Pages → Subdomain).
+  - 사용자 사이트는 workers.dev에서도 동작한다. 다만 메일과 관리자 콘솔의 링크는 `APP_ORIGIN`(https://jc-royal.site)을 가리키고, 로그인 쿠키는 주소마다 따로다.
+  - 관리자 콘솔은 workers.dev에서 화면만 열린다. 관리자 API는 `ADMIN_ORIGIN`(https://admin.jc-royal.site)에서 온 요청만 받으므로 로그인할 수 없다.
 
 ## 1. 리소스 만들기(최초 1회)
 
@@ -20,7 +22,7 @@ pnpm exec wrangler d1 create jc-royal-db-prod     # 출력된 database_id를 아
 #   apps/game-worker/wrangler.jsonc env.production.d1_databases[0].database_id
 ```
 
-주소를 바꾸면 `apps/api/wrangler.jsonc`의 `env.production.vars`에서 `ALLOWED_ORIGINS`, `ADMIN_ORIGIN`, `APP_ORIGIN`을 함께 바꾼다.
+주소를 바꾸면 `apps/api/wrangler.jsonc`의 `env.production.vars`에서 `ALLOWED_ORIGINS`, `ADMIN_ORIGIN`, `APP_ORIGIN`을 함께 바꾼다(지금은 각각 `https://jc-royal.site,https://admin.jc-royal.site`, `https://admin.jc-royal.site`, `https://jc-royal.site`). 개발 환경(최상위 `vars`)은 localhost 그대로다. `tests/integration/production-config.test.ts`가 두 환경의 값을 확인한다.
 
 ## 2. 시크릿
 
@@ -29,16 +31,18 @@ pnpm exec wrangler d1 create jc-royal-db-prod     # 출력된 database_id를 아
 openssl rand -base64 48 | pnpm exec wrangler secret put INTERNAL_SECRET --env production -c apps/api/wrangler.jsonc
 #   (같은 값을) pnpm exec wrangler secret put INTERNAL_SECRET --env production -c apps/game-worker/wrangler.jsonc
 pnpm exec wrangler secret put ADMIN_BOOTSTRAP_TOKEN --env production -c apps/api/wrangler.jsonc   # 최초 관리자 생성 후 삭제
-pnpm exec wrangler secret put RESEND_API_KEY --env production -c apps/api/wrangler.jsonc          # 선택: 가입 인증·재설정 메일
+pnpm exec wrangler secret put RESEND_API_KEY --env production -c apps/api/wrangler.jsonc          # 가입 인증·재설정 메일
 ```
 
 **메일(Resend): 가입 이메일 인증, 비밀번호 재설정**
-- 켜지는 조건: `RESEND_API_KEY` 시크릿과 `MAIL_FROM` 변수가 모두 있어야 한다.
+- 발신 도메인: `jc-royal.site`(Resend에서 Verified). 발신 주소 `MAIL_FROM`은 `JC ROYAL <noreply@jc-royal.site>`이고 `apps/api/wrangler.jsonc`의 `env.production.vars`에 있다.
+- 켜지는 조건: `RESEND_API_KEY` 시크릿, `MAIL_FROM`, `APP_ORIGIN`이 모두 있어야 한다. 이 변경을 배포하면 켜진다.
 - 켜지면: 가입 화면에 이메일 인증번호 단계가 생기고(인증 없이는 가입 불가), 재설정 메일과 관리자 재설정 링크가 회원 계정 언어로 발송된다.
-- 켜지기 전: 가입은 이메일 인증 없이 진행된다(`emailVerifiedAt` 비어 있음). 관리자가 콘솔에서 재설정 링크를 발급하고, 화면에 나오는 회원 언어 안내문을 복사해 전달한다.
+  - 메일의 재설정 링크와 로고는 `APP_ORIGIN`(https://jc-royal.site)을 쓴다: `https://jc-royal.site/reset?token=…`, `https://jc-royal.site/email/logo.png`.
+  - 로그인에는 인증 여부를 묻지 않으므로, 메일이 꺼져 있던 동안 인증 없이 가입한 회원도 그대로 로그인한다.
+- 꺼져 있을 때(`MAIL_FROM`이나 `RESEND_API_KEY`가 없을 때): 가입은 이메일 인증 없이 진행된다(`emailVerifiedAt` 비어 있음). 관리자가 콘솔에서 재설정 링크를 발급하고, 화면에 나오는 회원 언어 안내문을 복사해 전달한다.
 - `onboarding@resend.dev`(Resend 테스트 발신자)는 Resend 계정 소유자 주소로만 보낼 수 있어 운영에 쓸 수 없다.
-- `MAIL_FROM` 형식: Resend에서 인증한 도메인의 주소(예: `JC ROYAL <no-reply@도메인>`).
-- `MAIL_FROM` 위치: `apps/api/wrangler.jsonc`의 `env.production.vars`. 넣은 뒤 API를 다시 배포한다.
+- 개발 환경(`wrangler.jsonc` 최상위 `vars`)에는 `MAIL_FROM`이 없어 메일을 보내지 않는다. 운영이 아니면 인증번호와 재설정 토큰을 응답의 `devCode`·`devToken`으로 받는다. 로컬에서 실제 메일을 시험하려면 `apps/api/.dev.vars`에 `RESEND_API_KEY`와 `MAIL_FROM`을 넣는다(`.dev.vars.example`).
 - 템플릿: `apps/api/src/lib/mail.ts`. 로고는 `apps/web/public/email/logo.png`(사용자 사이트에서 제공)를 쓴다.
 
 ## 3. 배포 순서
@@ -80,18 +84,28 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 
 ## 4. 커스텀 도메인
 
-도메인을 Cloudflare에 등록(zone)하면, 각 Worker의 `env.production`에 아래 설정을 추가하고 다시 배포한다. `jcroyal.example`은 실제 도메인으로 바꾼다.
+`jc-royal.site`는 Cloudflare zone이고, 두 커스텀 도메인은 대시보드(Workers & Pages → 각 Worker → Settings → Domains & Routes)에서 붙였다.
+
+| 도메인 | Worker |
+|---|---|
+| `jc-royal.site` | `play` |
+| `admin.jc-royal.site` | `admin` |
+
+- wrangler 설정에는 `routes`를 두지 않는다. `routes`가 없으면 `wrangler deploy`는 대시보드의 커스텀 도메인을 건드리지 않고, workers.dev 주소도 켜 둔다(wrangler 4.150 동작).
+- 설정으로 옮기려면 각 Worker의 `env.production`에 아래를 넣는다. 이때 주의할 점:
+  - `routes`를 넣으면 `workers_dev`의 기본값이 `false`가 되어 workers.dev 주소가 꺼진다. 미리보기 주소를 남기려면 `"workers_dev": true`를 함께 넣는다.
+  - 커스텀 도메인은 배포할 때마다 설정 내용으로 통째로 바뀐다. CI 토큰에 zone 권한이 있어야 한다(3절 토큰의 Zone Resources).
+  - `tests/integration/production-config.test.ts`가 지금의 방식(routes 없음, workers.dev 유지)을 확인하므로 함께 고친다.
 
 ```jsonc
-// apps/api/wrangler.jsonc
-"routes": [{ "pattern": "jcroyal.example", "custom_domain": true }]
-// apps/admin/wrangler.jsonc
-"routes": [{ "pattern": "admin.jcroyal.example", "custom_domain": true }]
+// apps/api/wrangler.jsonc env.production
+"routes": [{ "pattern": "jc-royal.site", "custom_domain": true }], "workers_dev": true
+// apps/admin/wrangler.jsonc env.production
+"routes": [{ "pattern": "admin.jc-royal.site", "custom_domain": true }], "workers_dev": true
 ```
 
-- 1절의 세 변수(`ALLOWED_ORIGINS`, `ADMIN_ORIGIN`, `APP_ORIGIN`)도 새 주소로 바꾼다.
-- 옮긴 뒤 workers.dev 주소를 끄려면 `"workers_dev": false`를 추가한다.
-- 같은 도메인을 Resend에서 인증하면 재설정 메일도 켤 수 있다(2절).
+- 도메인을 바꾸면 1절의 세 변수와 2절의 `MAIL_FROM`, `.github/workflows/deploy.yml`의 `PLAY_URL`·`ADMIN_URL`(배포 후 확인 주소)을 함께 바꾼다.
+- zone에 Cloudflare Web Analytics 자동 삽입이 켜져 있다. 두 도메인의 HTML에 `static.cloudflareinsights.com` 스크립트가 붙지만, CSP(`script-src 'self'`)가 막아 실행되지 않는다(브라우저 콘솔에 CSP 경고). 쓰지 않으면 대시보드에서 자동 삽입을 끈다. 쓰려면 사용자 사이트의 CSP에 해당 출처를 넣어야 한다. 관리자 콘솔에는 넣지 않는 것을 권장한다.
 
 - 게임 Worker에는 공개 경로가 없다(`workers_dev: false`). API가 DO 바인딩으로만 접근한다.
 - 관리자 도메인에는 Cloudflare Access를 붙이는 것을 권장한다(`docs/ADMIN_SECURITY.md`).
@@ -171,13 +185,14 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 
 **외부 유료 서비스**: 필요 없다.
 
-- 선택 사항: 비밀번호 재설정 메일(예: Resend 무료 월 3,000통)
+- 가입 인증·비밀번호 재설정 메일: Resend(무료 요금제 월 3,000통·하루 100통). 한도를 넘으면 인증번호 메일 발송이 실패해(`mail_failed`) 그동안은 새로 가입할 수 없다. 가입이 하루 100명에 가까워지면 요금제를 올린다(요금제와 한도는 Resend 대시보드에서 확인).
 - 선택 사항: Cloudflare Access(50명까지 무료)
 
 ## 6. 운영 점검표
 
 - [ ] D1 `database_id` 입력, 마이그레이션 적용(`0000_init`, `0001_community`, `0002_comment_replies`, `0003_academy`, `0004_signup_profile`, `0005_social`, `0006_social_safety`, `0007_social_play`, `0008_session_remember`, `0009_dm_seq`, `0010_hand_stats`). GitHub Actions 배포는 배포 전에 자동 적용한다. `0010_hand_stats`는 `hand_players`에 통계 열 5개와 부분 인덱스를 더하고, 같은 파일 안에서 기존 핸드 전체의 통계를 한 번 채운다(이후는 게임 워커가 핸드 기록 직후 채움). 기록 수에 비례해 실행 시간이 늘어나므로 운영 적용 전 `SELECT COUNT(*) FROM hand_players`로 규모를 확인한다
 - [ ] 두 Worker에 같은 `INTERNAL_SECRET`, 최초 관리자 생성 후 `ADMIN_BOOTSTRAP_TOKEN` 삭제
-- [ ] `ALLOWED_ORIGINS`·`ADMIN_ORIGIN`·`APP_ORIGIN`이 실제 운영 주소와 일치
+- [ ] `ALLOWED_ORIGINS`·`ADMIN_ORIGIN`·`APP_ORIGIN`이 실제 운영 주소(https://jc-royal.site, https://admin.jc-royal.site)와 일치
+- [ ] 배포 후 가입 인증번호 메일과 비밀번호 재설정 메일이 `noreply@jc-royal.site`에서 오고, 재설정 링크가 https://jc-royal.site/reset 으로 열리는지 확인
 - [ ] 관리자 콘솔에서 테이블 생성(운영 DB에는 개발용 시드 테이블을 넣지 않는다)
 - [ ] 대시보드 서버 상태, 정합성 검사 실행으로 확인

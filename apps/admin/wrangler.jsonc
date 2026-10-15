@@ -8,7 +8,9 @@
   "services": [{ "binding": "API", "service": "jc-royal-api" }],
   "env": {
     "production": {
-      // Served at https://admin.jcroyal.workers.dev
+      // Served at https://admin.jc-royal.site (custom domain attached in the dashboard; no "routes" here, see
+      // apps/api/wrangler.jsonc). https://admin.jcroyal.workers.dev still serves the page, but sign-in works only at
+      // the API's ADMIN_ORIGIN.
       "name": "admin",
       "services": [{ "binding": "API", "service": "play" }]
     }

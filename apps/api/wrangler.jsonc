@@ -36,7 +36,9 @@
   "triggers": { "crons": ["30 18 * * *"] },
   "env": {
     "production": {
-      // Served at https://play.jcroyal.workers.dev (account workers.dev subdomain: jcroyal).
+      // Served at https://jc-royal.site, a custom domain attached in the Cloudflare dashboard. No "routes" here on
+      // purpose: wrangler then leaves the dashboard's domains alone and keeps https://play.jcroyal.workers.dev
+      // (account workers.dev subdomain: jcroyal) for previews (docs/DEPLOYMENT.md section 4).
       "name": "play",
       "d1_databases": [
         {
@@ -51,11 +53,16 @@
       },
       "vars": {
         "ENVIRONMENT": "production",
-        "ALLOWED_ORIGINS": "https://play.jcroyal.workers.dev,https://admin.jcroyal.workers.dev",
-        "ADMIN_ORIGIN": "https://admin.jcroyal.workers.dev",
-        "APP_ORIGIN": "https://play.jcroyal.workers.dev",
-        // Password reset mail turns on once MAIL_FROM is set to an address on a
-        // domain verified in Resend (and the RESEND_API_KEY secret exists).
+        // Requests from the page's own address are always accepted (lib/http.ts csrfGuard, routes/tables.ts), so the
+        // workers.dev preview of the player site still works without being listed here.
+        "ALLOWED_ORIGINS": "https://jc-royal.site,https://admin.jc-royal.site",
+        // A single address: the admin console signs in only at https://admin.jc-royal.site.
+        "ADMIN_ORIGIN": "https://admin.jc-royal.site",
+        // Links in mail (sign-up code, password reset) and in the admin console point here.
+        "APP_ORIGIN": "https://jc-royal.site",
+        // jc-royal.site is verified in Resend. With the RESEND_API_KEY secret this turns mail on, and sign-up then
+        // requires the emailed code (routes/auth.ts emailVerificationOn).
+        "MAIL_FROM": "JC ROYAL <noreply@jc-royal.site>",
         "PBKDF2_ITERATIONS": "100000",
         "SIGNUP_GRANT": "10000"
       }

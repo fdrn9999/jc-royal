@@ -31,7 +31,7 @@
 | 브라우저 `localStorage` | `jc.locale`, `jc.prefs`(화면·게임 표시 설정), 자동 로그인 선택, `jc.mute:<id>`(채팅 음소거), `jc.academy:<id>`(아카데미 진도) | 아카데미 진도만 서버와 동기화 |
 | Cloudflare Workers 로그 | `observability.enabled`. 요청 메타데이터와 `console.log` 출력 | 보관 기간은 Cloudflare 요금제가 정한다 |
 
-쿠키는 `jc_sid`(회원), `jc_asid`(관리자) 두 개뿐이며 광고·분석 도구는 없다.
+쿠키는 `jc_sid`(회원), `jc_asid`(관리자) 두 개뿐이며 광고·분석 도구는 없다. `jc-royal.site` zone에 Cloudflare Web Analytics 자동 삽입이 켜져 있어 HTML에 그 스크립트가 붙지만, CSP(`script-src 'self'`)가 막아 실행되지 않는다(2026-10-15 확인). 켜서 쓰려면 CSP와 함께 처리방침의 분석 도구 문구를 고쳐야 한다(`docs/DEPLOYMENT.md` 4절).
 
 ## 2. 보존과 삭제
 
@@ -107,9 +107,10 @@
 
 ## 7. 운영 메일(Resend)
 
-- 메일 코드(`apps/api/src/lib/mail.ts`)는 있지만 운영 `MAIL_FROM`은 비어 있다. Resend에서 인증한 발신 도메인이 생기기 전에는 비워 둔다. 인증되지 않은 주소를 넣어 인증된 것처럼 동작하게 만들지 않는다.
-- 그동안 운영 가입은 이메일 인증 없이 진행되고(`/api/auth/signup-options`의 `emailVerification: false`), 비밀번호 재설정은 관리자가 링크를 발급한다(`docs/DEPLOYMENT.md` 2절).
-- 처리방침의 위탁 항목에는 Resend를 그대로 둔다. 메일을 켜는 순간부터 위탁이 실제로 일어나기 때문이다.
+- 발신 도메인 `jc-royal.site`가 Resend에서 인증되어, 운영 `MAIL_FROM`을 `JC ROYAL <noreply@jc-royal.site>`로 넣었다(`apps/api/wrangler.jsonc` `env.production.vars`). 이 설정을 배포하면 운영 메일이 켜진다.
+- 켜지면 가입에 이메일 인증번호가 필요하고(`/api/auth/signup-options`의 `emailVerification: true`), 비밀번호 재설정 메일이 회원 이메일로 간다(`docs/DEPLOYMENT.md` 2절). 메일에는 이메일 주소, 인증번호 또는 재설정 링크, 닉네임(재설정 메일)이 담겨 Resend로 전달된다.
+- 처리방침의 위탁 항목에는 Resend가 이미 있다. 이 배포부터 위탁이 실제로 일어나므로, 공개 전에 처리방침의 위탁·국외 이전 문구(9절 4번)를 다시 확인한다.
+- 배포 전까지(그리고 `MAIL_FROM`이나 `RESEND_API_KEY`가 빠지면) 운영 가입은 이메일 인증 없이 진행되고, 비밀번호 재설정은 관리자가 링크를 발급한다.
 
 ## 8. 운영자가 승인 후 실행할 일(아직 실행하지 않음)
 

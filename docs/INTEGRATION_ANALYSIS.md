@@ -121,11 +121,11 @@
 ### 4.1 배포 단위
 
 ```
-브라우저 ──(jcroyal.example)────────► apps/api  Worker
+브라우저 ──(jc-royal.site)──────────► apps/api  Worker
              /            정적 자산(apps/web 빌드, Workers Static Assets)
              /api/*       Hono REST (D1)
              /ws/tables/:id  세션 쿠키 검증 → TableRoom DO로 업그레이드 전달
-관리자 ──(admin.jcroyal.example)───► apps/admin Worker
+관리자 ──(admin.jc-royal.site)─────► apps/admin Worker
              /            정적 자산(apps/admin 빌드)
              /api/*       Service Binding → apps/api (관리자 라우트)
 apps/game-worker Worker ── TableRoom Durable Object (SQLite 저장소)
