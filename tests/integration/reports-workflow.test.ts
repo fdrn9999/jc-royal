@@ -122,6 +122,22 @@ describe('working a report', () => {
     expect((await admin.post(`/api/admin/reports/${id}`, { status: 'dismissed', note: 'not spam' })).status).toBe(200);
     expect((await admin.patch(`/api/admin/reports/${id}`, { severity: 'low' })).body.error.code).toBe('report_closed');
     expect((await admin.patch(`/api/admin/reports/${id}`, { take: true })).body.error.code).toBe('report_closed');
+    expect((await admin.post(`/api/admin/reports/${id}`, { status: 'resolved' })).body.error.code).toBe('report_closed');
+    // Every refused change is in the audit log as a failed attempt: its status and code, never the request body.
+    const refused = await d1<{ action: string; detail: string; outcome: string }>(
+      `SELECT action, detail, outcome FROM admin_audit_log WHERE action IN ('report.update.failed', 'report.resolve.failed') AND target_id = '${id}' ORDER BY created_at, rowid`,
+    );
+    expect(refused.map((r) => [r.action, JSON.parse(r.detail).status])).toEqual([
+      ['report.update.failed', 400],
+      ['report.update.failed', 400],
+      ['report.update.failed', 409],
+      ['report.update.failed', 400],
+      ['report.update.failed', 409],
+      ['report.update.failed', 409],
+      ['report.resolve.failed', 409],
+    ]);
+    expect(refused.map((r) => JSON.parse(r.detail).code).filter((code: string) => code.startsWith('report_'))).toEqual(['report_taken', 'report_closed', 'report_closed', 'report_closed']);
+    expect(refused.every((r) => r.outcome === 'failed' && !r.detail.includes('urgent'))).toBe(true);
     expect((await admin.post(`/api/admin/reports/${id}/notes`, { body: 'reopened by a new report later?' })).status).toBe(201);
     const after = await events(id);
     expect(after.filter((e) => e.kind === 'status').map((e) => [e.from, e.to])).toEqual([['open', 'dismissed']]);

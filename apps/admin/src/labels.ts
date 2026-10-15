@@ -57,12 +57,15 @@ export const actionLabel = labeler({
   'timeout-check': 'actTimeoutCheck',
 });
 export const stageLabel = labeler({ preflop: 'stagePreflop', flop: 'stageFlop', turn: 'stageTurn', river: 'stageRiver', showdown: 'stageShowdown', settled: 'stageSettled' });
-export const auditActionLabel = labeler({
+const auditNames = labeler({
+  'admin.access_denied': 'auditAccessDenied',
   'admin.bootstrap': 'auditAdminBootstrap',
   'admin.login': 'auditAdminLogin',
   'admin.login.failed': 'auditAdminLoginFailed',
   'admin.reauth': 'auditAdminReauth',
   'admin.reauth.failed': 'auditAdminReauthFailed',
+  'admin.session.end': 'auditSessionEnd',
+  'admin.session.end_others': 'auditSessionEndOthers',
   'board.comment.status': 'auditCommentStatus',
   'board.notice.create': 'auditNoticeCreate',
   'board.notice.update': 'auditNoticeUpdate',
@@ -71,6 +74,7 @@ export const auditActionLabel = labeler({
   'maintenance.cancel': 'auditMaintCancel',
   'maintenance.end': 'auditMaintEnd',
   'maintenance.schedule': 'auditMaintSchedule',
+  'maintenance.stop': 'auditMaintStop',
   'maintenance.update': 'auditMaintUpdate',
   'message.send': 'auditMessageSend',
   note: 'noteEntry',
@@ -88,6 +92,8 @@ export const auditActionLabel = labeler({
   'report.severity': 'auditReportSeverity',
   'report.assign': 'auditReportAssign',
   'report.note': 'auditReportNote',
+  'report.update': 'auditReportUpdate',
+  'report.resolve': 'auditReportResolve',
   'table.close': 'auditTableClose',
   'table.create': 'auditTableCreate',
   'table.update': 'auditTableUpdate',
@@ -104,6 +110,70 @@ export const auditActionLabel = labeler({
   'user.suspend': 'auditUserSuspend',
   'user.unsuspend': 'auditUserUnsuspend',
   'user.view': 'auditUserView',
+});
+/**
+ * An audit action's name. A refused or failed attempt is `<action>.failed` (the API's permission table names it); it
+ * is shown as the action's name and "failed" when the action has a name here, as it is otherwise.
+ */
+export function auditActionLabel(t: Tr, v: string | null | undefined): string {
+  if (!v) return '';
+  const own = auditNames(t, v);
+  if (own !== v || !v.endsWith('.failed')) return own;
+  const base = v.slice(0, -'.failed'.length);
+  const name = auditNames(t, base);
+  return name === base ? v : t('auditFailedOf', { action: name });
+}
+/** The action families the audit page filters by (`family.*`). */
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'reconcile', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const auditFamilyLabel = labeler({
+  admin: 'famAdmin',
+  user: 'famUser',
+  note: 'famNote',
+  table: 'famTable',
+  hand: 'famHand',
+  reconcile: 'famReconcile',
+  report: 'famReport',
+  board: 'famBoard',
+  message: 'famMessage',
+  service: 'famService',
+  maintenance: 'famMaintenance',
+});
+/** Super-admin abilities (the API's lib/permissions.ts). */
+export const capabilityLabel = labeler({
+  'members.export': 'capMembersExport',
+  'roles.change': 'capRolesChange',
+  'admins.manage': 'capAdminsManage',
+  'chips.large': 'capChipsLarge',
+  'ledger.correct': 'capLedgerCorrect',
+  'notes.delete_any': 'capNotesDeleteAny',
+  'audit.all': 'capAuditAll',
+  'sessions.all': 'capSessionsAll',
+});
+/** Console features in the permission table; most are the menu's names. */
+export const featureLabel = labeler({
+  dashboard: 'dashboard',
+  members: 'users',
+  memberExport: 'featMemberExport',
+  memberNotes: 'featMemberNotes',
+  sanctions: 'featSanctions',
+  chips: 'featChips',
+  resetLinks: 'featResetLinks',
+  roles: 'featRoles',
+  tables: 'tables',
+  tableControl: 'featTableControl',
+  hands: 'hands',
+  handRecords: 'featHandRecords',
+  ledger: 'ledger',
+  economy: 'economy',
+  reconcile: 'reconcile',
+  audit: 'audit',
+  reports: 'reports',
+  board: 'board',
+  messages: 'messages',
+  notices: 'featNotices',
+  maintenance: 'featMaintenance',
+  academy: 'academy',
+  security: 'security',
 });
 /** What became of a member's seat when an admin ended their connections (the room's `kick`). */
 export const seatOutcomeLabel = labeler({ left: 'seatLeft', after_hand: 'seatAfterHand', kept: 'seatKept', retrying: 'seatRetrying' });
@@ -138,6 +208,7 @@ export const targetTypeLabel = labeler({
   post: 'targetPost',
   reconciliation: 'targetReconciliation',
   report: 'targetReport',
+  session: 'targetSession',
   table: 'targetTable',
   user: 'targetUser',
 });

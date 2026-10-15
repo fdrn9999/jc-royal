@@ -9,10 +9,12 @@ import { AdminProvider, useAdmin } from './lib';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
+import { SecurityPage } from './pages/Security';
 import { ServicePage } from './pages/Service';
 import { DashboardPage } from './pages/Dashboard';
 import { EconomyPage, ReconcilePage } from './pages/Economy';
-import { AcademyStatsPage, AuditPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
+import { AuditPage } from './pages/Audit';
+import { AcademyStatsPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
 const NAV: [string, Key][] = [
   ['/', 'dashboard'],
@@ -28,6 +30,7 @@ const NAV: [string, Key][] = [
   ['/service', 'service'],
   ['/reconcile', 'reconcile'],
   ['/audit', 'audit'],
+  ['/security', 'security'],
 ];
 
 function ReauthModal() {
@@ -103,6 +106,7 @@ const router = createBrowserRouter([
       { path: '/economy', element: <EconomyPage /> },
       { path: '/reconcile', element: <ReconcilePage /> },
       { path: '/audit', element: <AuditPage /> },
+      { path: '/security', element: <SecurityPage /> },
       { path: '/academy', element: <AcademyStatsPage /> },
       { path: '/reports', element: <ReportsPage /> },
       { path: '/board', element: <BoardAdminPage /> },

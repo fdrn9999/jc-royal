@@ -276,13 +276,21 @@ describe('member data: account language, profile fields, CSV export', () => {
     expect(detail.privacyConsentAt).toEqual(expect.any(Number));
   });
 
-  it('exports selected members only after re-confirmation, escapes formulas and records the export', async () => {
-    const [staff, a, b] = [await newUser(), await newUser(), await newUser(undefined, { locale: 'en' })];
+  it('exports selected members (super admins, after re-confirmation), escapes formulas and records the export', async () => {
+    const [staff, boss, a, b] = [await newUser(), await newUser(), await newUser(), await newUser(undefined, { locale: 'en' })];
     await reauth(superAdmin.c);
     expect((await superAdmin.c.post(`/api/admin/users/${staff.me.id}/role`, { role: 'admin', reason: 'staffing change' })).status).toBe(200);
+    // A second super admin, signed in fresh (sign-ins are rate limited per account).
+    expect((await superAdmin.c.post(`/api/admin/users/${boss.me.id}/role`, { role: 'super_admin', reason: 'staffing change' })).status).toBe(200);
     expect((await superAdmin.c.post(`/api/admin/users/${b.me.id}/suspend`, { reason: '=HYPERLINK("http://x")' })).status).toBe(200);
-    const { c: adminC, r } = await adminClient(staff.email);
+    // A plain administrator cannot export member data, even after re-confirming.
+    const { c: staffC, r } = await adminClient(staff.email);
     expect(r.status).toBe(200);
+    await reauth(staffC);
+    const refused = await staffC.post('/api/admin/users/export', { userIds: [a.me.id] });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.message).toBe('super admin only');
+    const { c: adminC } = await adminClient(boss.email);
     const cold = await adminC.post('/api/admin/users/export', { userIds: [a.me.id] });
     expect(cold.status).toBe(401);
     expect(cold.body.error.code).toBe('reauth_required');
@@ -301,8 +309,9 @@ describe('member data: account language, profile fields, CSV export', () => {
     expect(rowB).toContain(',1990-01-01,');
     expect(rowB.endsWith(`,"'=HYPERLINK(""http://x"")"`)).toBe(true);
     const audit = (await superAdmin.c.get('/api/admin/audit?limit=200')).body as { action: string; actorId: string; detail: { count: number; userIds: string[] } }[];
-    const entry = audit.find((e) => e.action === 'user.export' && e.actorId === staff.me.id);
+    const entry = audit.find((e) => e.action === 'user.export' && e.actorId === boss.me.id);
     expect(entry?.detail.count).toBe(2);
+    expect(audit.some((e) => e.action === 'user.export.failed' && e.actorId === staff.me.id)).toBe(true);
     expect(entry?.detail.userIds.sort()).toEqual([a.me.id, b.me.id].sort());
   });
 

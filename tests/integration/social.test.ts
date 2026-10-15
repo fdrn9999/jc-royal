@@ -643,7 +643,7 @@ describe('reports', () => {
     wc.close();
   });
 
-  it('admins handling the same report at once: exactly one decision and one audit row', async () => {
+  it('admins handling the same report at once: exactly one decision, one decision row, the others audited as refused', async () => {
     const author = await newUser();
     const r1 = await newUser();
     const r2 = await newUser();
@@ -664,8 +664,14 @@ describe('reports', () => {
     expect(new Set(closed.map((r) => `${r.status}|${r.note}`)).size).toBe(1);
     const won = closed[0]!;
     expect(won.contentStatus).toBe(won.status === 'resolved' ? 'hidden' : 'visible');
-    const audits = ((await admin.get('/api/admin/audit?limit=50')).body as { action: string; targetId: string; detail: unknown }[]).filter((x) => x.targetId === rep.id);
-    expect(audits).toHaveLength(1);
-    expect(JSON.stringify(audits[0]!.detail)).toContain('"closed":2');
+    const audits = ((await admin.get('/api/admin/audit?limit=50')).body as { action: string; outcome: string; targetId: string; detail: unknown }[]).filter((x) => x.targetId === rep.id);
+    const decided = audits.filter((x) => x.outcome === 'ok');
+    expect(decided).toHaveLength(1);
+    expect(JSON.stringify(decided[0]!.detail)).toContain('"closed":2');
+    // The two losers are kept as refused attempts (409), not as decisions.
+    const refused = audits.filter((x) => x.outcome === 'failed');
+    expect(refused.map((x) => x.action)).toEqual(['report.resolve.failed', 'report.resolve.failed']);
+    expect(refused.every((x) => JSON.stringify(x.detail).includes('"code":"report_closed"'))).toBe(true);
+    expect(audits).toHaveLength(3);
   });
 });

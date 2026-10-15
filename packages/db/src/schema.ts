@@ -236,11 +236,17 @@ export const adminAuditLog = sqliteTable(
     detail: text('detail'),
     ip: text('ip'),
     createdAt: integer('created_at').notNull().default(now),
+    /** 'failed': an attempt the API refused or that broke off (the action names it, e.g. `user.suspend.failed`). */
+    outcome: text('outcome', { enum: ['ok', 'failed'] }).notNull().default('ok'),
   },
   (t) => [
     index('audit_created_idx').on(t.createdAt),
     // A member's (or table's) action history on its detail page.
     index('audit_target_idx').on(t.targetType, t.targetId, t.createdAt),
+    // The audit log page: one administrator's actions, one kind of action, failed attempts.
+    index('audit_actor_idx').on(t.actorId, t.createdAt),
+    index('audit_action_idx').on(t.action, t.createdAt),
+    index('audit_failed_idx').on(t.createdAt).where(sql`outcome = 'failed'`),
   ],
 );
 

@@ -9,31 +9,26 @@
  *  - role re-read from D1 on every request, admin-origin check,
  *  - per-account and per-IP login rate limits, failed attempts audited,
  *  - password re-confirmation (`reauthAt`, 5 min) before sensitive actions,
- *  - every admin action written to admin_audit_log.
+ *  - every admin action written to admin_audit_log, refused and failed attempts too (lib/audit.ts),
+ *  - one table of who may do what (lib/permissions.ts).
  */
 import { schema } from '@jc/db';
 import { EmailSchema } from '@jc/types';
 import { eq } from 'drizzle-orm';
-import { Hono, type Context, type MiddlewareHandler } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
+import { audit } from '../lib/audit';
 import { requireAdmin } from '../lib/auth';
 import { DUMMY_HASH, verifyPassword } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { capabilitiesOf } from '../lib/permissions';
 import { ADMIN_REAUTH_WINDOW, createSession, destroySession } from '../lib/session';
 
-export async function audit(c: Context<AppEnv>, action: string, target?: { type: string; id: string }, detail?: unknown) {
-  await c.var.db.insert(schema.adminAuditLog).values({
-    id: crypto.randomUUID(),
-    actorId: c.var.user?.id ?? 'anonymous',
-    action,
-    targetType: target?.type ?? null,
-    targetId: target?.id ?? null,
-    detail: detail === undefined ? null : JSON.stringify(detail),
-    ip: clientIp(c),
-  });
-}
+
+export { audit };
+
 
 /** Admin console requests must come from the admin origin (defence in depth on top of SameSite=Strict). */
 export const requireAdminOrigin: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -68,7 +63,7 @@ export const adminAuthRoutes = new Hono<AppEnv>()
     if (!u || !ok || u.status !== 'active' || (u.role !== 'admin' && u.role !== 'super_admin')) {
       if (u) {
         c.set('user', { ...u });
-        await audit(c, 'admin.login.failed', { type: 'user', id: u.id });
+        await audit(c, 'admin.login.failed', { type: 'user', id: u.id }, undefined, 'failed');
       }
       fail(401, 'invalid_credentials', 'invalid credentials');
     }
@@ -88,6 +83,8 @@ export const adminAuthRoutes = new Hono<AppEnv>()
       user: { id: u.id, email: u.email, nickname: u.nickname, role: u.role },
       reauthValidUntil: s.reauthAt ? s.reauthAt + ADMIN_REAUTH_WINDOW : null,
       sessionStartedAt: s.createdAt,
+      /** What this administrator may do beyond the console's common features (the console hides the rest). */
+      permissions: capabilitiesOf(u.role),
     });
   })
   /** Re-enter the password to unlock sensitive actions for a few minutes. */
@@ -96,7 +93,7 @@ export const adminAuthRoutes = new Hono<AppEnv>()
     const body = await parseBody(c, z.object({ password: z.string().min(1).max(128) }));
     const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, c.var.user!.id) });
     if (!u || !(await verifyPassword(body.password, u.passwordHash))) {
-      await audit(c, 'admin.reauth.failed');
+      await audit(c, 'admin.reauth.failed', undefined, undefined, 'failed');
       fail(401, 'invalid_credentials', 'password is incorrect');
     }
     const now = Date.now();

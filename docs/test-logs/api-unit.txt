@@ -6,8 +6,8 @@
  RUN  v4.1.11 <repo>/apps/api
 
 
- Test Files  4 passed (4)
-      Tests  18 passed (18)
-   Start at  21:34:29
-   Duration  2.30s (transform 596ms, setup 0ms, import 2.42s, tests 74ms, environment 0ms)
+ Test Files  5 passed (5)
+      Tests  22 passed (22)
+   Start at  23:58:54
+   Duration  1.15s (transform 600ms, setup 0ms, import 2.05s, tests 77ms, environment 1ms)
 

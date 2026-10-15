@@ -95,6 +95,10 @@ sql(`INSERT INTO service_notices (id, kind, title_ko, title_en, body_ko, body_en
   ('vis-n1-${stamp}', 'urgent', '결제 지연 안내', 'Delayed top-ups', '일부 충전이 늦어지고 있습니다.', 'Some top-ups are slow.', ${at - 3_600_000}, ${at + day}, '${owner.id}'),
   ('vis-n2-${stamp}', 'maintenance', '정기 점검', 'Planned upkeep', NULL, NULL, ${at + day}, NULL, '${owner.id}'),
   ('vis-n3-${stamp}', 'general', '새 테이블', 'New tables', NULL, NULL, ${at - 3 * day}, ${at - day}, '${owner.id}')`);
+// Refused attempts on the audit log (the failure audit writes these; seeded so the failed filter has rows to show).
+sql(`INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, detail, ip, outcome, created_at) VALUES
+  ('vis-af1-${stamp}', '${owner.id}', 'user.suspend.failed', 'user', '${players[0].id}', '{"status":403,"code":"forbidden","message":"only a super admin can suspend administrators","route":"POST /api/admin/users/:id/suspend"}', '127.0.0.1', 'failed', ${at - 120_000}),
+  ('vis-af2-${stamp}', '${owner.id}', 'admin.access_denied', NULL, NULL, '{"status":403,"code":"forbidden","message":"super admin only","route":"GET /api/admin/users/export"}', '127.0.0.1', 'failed', ${at - 60_000})`);
 await new Promise((r) => setTimeout(r, 1500));
 
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });
@@ -112,7 +116,7 @@ await page.goto(`${admin}/hands`);
 await page.waitForTimeout(900);
 const handHref = await page.locator('main a[href^="/hands/"]').first().getAttribute('href', { timeout: 3000 }).catch(() => null);
 const handId = handHref ? decodeURIComponent(handHref.slice('/hands/'.length)) : null;
-const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/academy', '/reports', '/reports?view=stats', '/board', '/messages', '/service'];
+const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/audit?outcome=failed#detail', `/audit?targetType=user&targetId=${players[0].id}`, '/security', `/users/${players[0].id}#chips`, `/users/${players[0].id}#suspend`, `/users/${players[0].id}#role`, '/tables/e2e-six#close', '/academy', '/reports', '/reports?view=stats', '/board', '/messages', '/service'];
 
 // Dynamic values (nicknames, e-mails, ids, the brand) are not UI words.
 const ignore = new RegExp(`${stamp}|@visual\\.dev|^JC$|^ROYAL$|^ADMIN$|^EN$|^e2e|^E2E`, 'i');
@@ -121,7 +125,8 @@ for (const lang of ['ko', 'en']) {
   await page.getByRole('button', { name: lang === 'ko' ? '한국어' : 'EN' }).click().catch(() => {});
   for (const route of routes) {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(admin + route);
+    const [path, step] = route.split('#');
+    await page.goto(admin + path);
     await page.waitForTimeout(900);
     if (await page.getByTestId('reauth-confirm').isVisible().catch(() => false)) {
       await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
@@ -134,6 +139,27 @@ for (const lang of ['ko', 'en']) {
       await page.getByTestId('rec-evidence').waitFor();
       await page.waitForTimeout(600);
     }
+    // Change previews: the dialog opens with what would change; nothing is applied (closed with Escape afterwards).
+    if (step === 'chips') {
+      await page.getByTestId('chip-amount').fill('500');
+      await page.getByLabel(/^메모$|^Memo$/).first().fill('visual');
+      await page.getByTestId('chip-submit').click();
+    }
+    if (step === 'suspend') {
+      await page.locator('form:has([data-testid="suspend"]) input').fill('visual check');
+      await page.getByTestId('suspend').click();
+    }
+    if (step === 'role') await page.getByTestId('role-admin').click();
+    if (step === 'chips' || step === 'suspend' || step === 'role') await page.getByTestId('change-preview').waitFor();
+    if (step === 'close') {
+      await page.getByTestId('close-table').click();
+      await page.getByTestId('close-preview').waitFor();
+    }
+    if (step === 'detail') {
+      await page.getByTestId('audit-detail-toggle').first().click();
+      await page.getByTestId('audit-detail').waitFor();
+    }
+    if (step) await page.waitForTimeout(400);
     const name = `${lang}-${route.replace(/\//g, '_').replace(/[^a-z0-9_-]/gi, '') || '_'}`;
     await page.screenshot({ path: `${out}/${name}-1440.png`, fullPage: true });
     const words = await page.evaluate((isKo) => {
@@ -155,7 +181,8 @@ for (const lang of ['ko', 'en']) {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(300);
     const narrow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    if (lang === 'ko' || route === '/' || route === '/service' || route.startsWith('/hands/')) await page.screenshot({ path: `${out}/${name}-390.png`, fullPage: true });
+    if (lang === 'ko' || route === '/' || route === '/service' || route.startsWith('/hands/') || route.startsWith('/security') || step) await page.screenshot({ path: `${out}/${name}-390.png`, fullPage: true });
+    if (step && step !== 'detail') await page.keyboard.press('Escape');
     result[`${lang} ${route}`] = { leftover: words.filter((w) => !ignore.test(w.replace(/^(placeholder|aria-label):/, '')) && !(lang === 'en' && w === '한국어')), overflow: [wide, narrow] };
   }
 }

@@ -39,7 +39,7 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await member.page.reload();
   await expect(member.page.getByText('E2E 로열 라운지')).toBeVisible();
 
-  // Chip grant requires the admin password again.
+  // Chip grant: the balance before and after is shown first, then the admin password is asked again.
   await page.getByRole('link', { name: /^회원$|^Users$/ }).click();
   await page.getByPlaceholder(/검색|Search/).fill(member.nickname);
   await page.getByPlaceholder(/검색|Search/).press('Enter');
@@ -47,7 +47,10 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await page.getByLabel(/금액|Amount/).fill('777');
   // The chip memo, not the internal-note box further down.
   await page.getByLabel(/^메모$|^Memo$/).fill('E2E 이벤트');
-  await page.getByRole('button', { name: /^확인$|^Confirm$/ }).first().click();
+  await page.getByTestId('chip-submit').click();
+  await expect(page.getByTestId('confirm-change')).toContainText('10,000 → 10,777');
+  await expect(page.getByTestId('change-preview')).toContainText('+777');
+  await page.getByTestId('confirm-end').click();
   await expect(page.getByTestId('reauth-confirm')).toBeVisible();
   await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByTestId('reauth-confirm').click();

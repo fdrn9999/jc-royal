@@ -1,12 +1,12 @@
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat } from '@jc/ui';
 import { academyItemName, ageOn, isoDate, type AcademyItemKind } from '@jc/types';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useT } from '../i18n';
 import {
   academyKindLabel,
   actionLabel,
-  auditActionLabel,
+  capabilityLabel,
   handRankLabel,
   ledgerTypeLabel,
   memoLabel,
@@ -15,11 +15,10 @@ import {
   seatPhaseLabel,
   stageLabel,
   tableIssueLabel,
-  targetTypeLabel,
   topUpStateLabel,
   userStatusLabel,
 } from '../labels';
-import { ApiError, errText, useAdmin, useData } from '../lib';
+import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
@@ -102,7 +101,8 @@ const checkbox = 'size-4 cursor-pointer accent-gold-500';
 
 export function UsersPage() {
   const { t, locale } = useT();
-  const { api } = useAdmin();
+  const { api, me } = useAdmin();
+  const mayExport = canDo(me, 'members.export');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [lang, setLang] = useState<'' | Locale>('');
@@ -189,10 +189,10 @@ export function UsersPage() {
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-ink-900/60 px-3 py-2" data-testid="export-bar">
         <span className="text-sm font-semibold" aria-live="polite">{t('selectedN', { n: selected.size })}</span>
         {selected.size > 0 && <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>{t('clearSelection')}</Button>}
-        <Button size="sm" className="ml-auto" onClick={exportCsv} loading={exporting} disabled={selected.size === 0 || selected.size > EXPORT_MAX} data-testid="export-csv">
+        <Button size="sm" className="ml-auto" onClick={exportCsv} loading={exporting} disabled={!mayExport || selected.size === 0 || selected.size > EXPORT_MAX} data-testid="export-csv">
           {t('exportCsv')}
         </Button>
-        <p className="w-full text-xs text-ink-400">{t('exportHint')}</p>
+        <p className="w-full text-xs text-ink-400">{mayExport ? t('exportHint') : t('exportSuperOnly')}</p>
       </div>
       {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
       {error && <Empty>{error}</Empty>}
@@ -270,8 +270,90 @@ interface UserDetail {
 }
 
 type Role = 'user' | 'admin' | 'super_admin';
-/** What the confirmation dialog is about to do; lifting a suspension and changing a role ask for a reason there. */
-type Pending = null | { kind: 'suspend' } | { kind: 'disconnect' } | { kind: 'unsuspend' } | { kind: 'role'; role: Role };
+/**
+ * What the confirmation dialog is about to do; lifting a suspension and changing a role ask for a reason there. A chip
+ * adjustment carries its idempotency key, so confirming sends exactly the request that was previewed.
+ */
+type Pending =
+  | null
+  | { kind: 'suspend' }
+  | { kind: 'disconnect' }
+  | { kind: 'unsuspend' }
+  | { kind: 'role'; role: Role }
+  | { kind: 'chips'; amount: number; memo: string; key: string };
+
+/** The API's answer to `preview: true`: what the change would do, computed now; nothing is written. */
+interface SanctionPreview {
+  member: { nickname: string; role: string; status: string };
+  sessions: { user: number; admin: number };
+  seats: { tableId: string; tableName: string | null; seatIndex: number; buyIn: number }[];
+  buyIns: number;
+  removeFromTable?: boolean;
+}
+interface UnsuspendPreview { from: string; to: string; suspendedReason: string | null }
+interface RolePreview { from: string; to: string; console: { from: boolean; to: boolean }; adminSessions: number; capabilities: { gained: string[]; lost: string[] } }
+interface ChipPreview { amount: number; balanceBefore: number; balanceAfter: number; large: boolean; duplicate: boolean }
+
+function ChangePreview({ p, data }: { p: Exclude<Pending, null>; data: unknown }) {
+  const { t } = useT();
+  if (p.kind === 'suspend' || p.kind === 'disconnect') {
+    const d = data as SanctionPreview;
+    const leaves = p.kind === 'suspend' || !!d.removeFromTable;
+    return (
+      <div className="flex flex-col gap-1.5 rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2" data-testid="change-preview">
+        <p>{t('pvSessions', { user: d.sessions.user, admin: d.sessions.admin })}</p>
+        {d.seats.length === 0 ? (
+          <p className="text-ink-300">{t('pvNoSeats')}</p>
+        ) : (
+          <>
+            <p>{t(leaves ? 'pvSeatsLeave' : 'pvSeatsKept', { n: d.seats.length, chips: formatChips(d.buyIns) })}</p>
+            <ul className="flex flex-col gap-0.5 text-xs text-ink-300">
+              {d.seats.map((s) => (
+                <li key={`${s.tableId}:${s.seatIndex}`} className="break-all">#{s.seatIndex + 1} · {s.tableName ?? s.tableId} · {t('seatBuyIn', { n: formatChips(s.buyIn) })}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    );
+  }
+  if (p.kind === 'role') {
+    const d = data as RolePreview;
+    const access = (on: boolean) => t(on ? 'pvConsoleOn' : 'pvConsoleOff');
+    return (
+      <div className="flex flex-col gap-1.5 rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2" data-testid="change-preview">
+        <p>{t('pvConsole', { from: access(d.console.from), to: access(d.console.to) })}</p>
+        <p>{d.adminSessions > 0 ? t('pvAdminSessions', { n: d.adminSessions }) : t('pvAdminSessionsNone')}</p>
+        {d.capabilities.gained.length > 0 && (
+          <div>
+            <p className="text-xs text-ink-400">{t('pvGained')}</p>
+            <ul className="list-disc pl-5 text-xs">{d.capabilities.gained.map((k) => <li key={k}>{capabilityLabel(t, k)}</li>)}</ul>
+          </div>
+        )}
+        {d.capabilities.lost.length > 0 && (
+          <div>
+            <p className="text-xs text-ink-400">{t('pvLost')}</p>
+            <ul className="list-disc pl-5 text-xs">{d.capabilities.lost.map((k) => <li key={k}>{capabilityLabel(t, k)}</li>)}</ul>
+          </div>
+        )}
+        {d.capabilities.gained.length + d.capabilities.lost.length === 0 && <p className="text-ink-300">{t('pvNoCapChange')}</p>}
+      </div>
+    );
+  }
+  if (p.kind === 'chips') {
+    const d = data as ChipPreview;
+    return (
+      <div className="flex flex-col gap-1.5 rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2" data-testid="change-preview">
+        <p>
+          {t('amount')}: <span className="font-mono">{d.amount > 0 ? '+' : ''}{formatChips(d.amount)}</span> {d.large && <Badge tone="gold">{t('pvLarge')}</Badge>}
+        </p>
+        <p className="break-all text-ink-300">{t('memo')}: {p.memo}</p>
+        {d.duplicate && <p className="text-danger" role="alert">{t('pvDuplicate')}</p>}
+      </div>
+    );
+  }
+  return null;
+}
 
 /** What ending a member's table connections did (the api's kickEverywhere). */
 interface KickReport { tables: number; reached: number; unreached: string[]; truncated: boolean; sockets: number; seats: { tableId: string; seat: string }[] }
@@ -319,6 +401,11 @@ export function UserDetailPage() {
   const [dReason, setDReason] = useState('');
   const [removeSeat, setRemoveSeat] = useState(false);
   const [kick, setKick] = useState<{ kick: KickReport; sessions?: number } | null>(null);
+  // The server's preview of the pending change; confirming waits for it.
+  const [pv, setPv] = useState<{ data: unknown } | { error: unknown } | null>(null);
+  const previewSeq = useRef(0);
+  // Kept while the same amount and memo are tried again, so a retry after a lost answer cannot pay twice.
+  const [chipKey, setChipKey] = useState<{ key: string; amount: number; memo: string } | null>(null);
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
   const run = async (fn: () => Promise<unknown>) => {
@@ -334,9 +421,42 @@ export function UserDetailPage() {
       setMsg(errText(e, t));
     }
   };
+  // The dialog shows what the server says the change would do; the password is asked only when it is confirmed.
   const ask = (p: Exclude<Pending, null>) => {
     setCReason('');
     setConfirm(p);
+    setPv(null);
+    const seq = ++previewSeq.current;
+    const body =
+      p.kind === 'suspend'
+        ? { preview: true, reason }
+        : p.kind === 'disconnect'
+          ? { preview: true, reason: dReason, removeFromTable: removeSeat }
+          : p.kind === 'role'
+            ? { preview: true, role: p.role }
+            : p.kind === 'chips'
+              ? { preview: true, amount: p.amount, memo: p.memo, idempotencyKey: p.key }
+              : { preview: true };
+    api<unknown>(`/api/admin/users/${id}/${p.kind}`, { body }).then(
+      (data) => seq === previewSeq.current && setPv({ data }),
+      (e: unknown) => seq === previewSeq.current && setPv({ error: e }),
+    );
+  };
+  const dismiss = () => {
+    previewSeq.current++;
+    setConfirm(null);
+    setPv(null);
+  };
+  const askChips = () => {
+    const n = Number(amount);
+    const key = chipKey && chipKey.amount === n && chipKey.memo === memo ? chipKey.key : newKey();
+    setChipKey({ key, amount: n, memo });
+    ask({ kind: 'chips', amount: n, memo, key });
+  };
+  const clearChips = () => {
+    setChipKey(null);
+    setAmount('');
+    setMemo('');
   };
   const issueReset = async () => {
     setMsg(null);
@@ -349,7 +469,7 @@ export function UserDetailPage() {
   };
   // Suspending and ending connections reach the member's tables: confirmed first, then the result says what each table did.
   const endConnections = (kind: 'suspend' | 'disconnect') => {
-    setConfirm(null);
+    dismiss();
     void run(async () => {
       setKick(
         kind === 'suspend'
@@ -365,7 +485,15 @@ export function UserDetailPage() {
     const p = confirm;
     if (!p) return;
     if (p.kind === 'suspend' || p.kind === 'disconnect') return endConnections(p.kind);
-    setConfirm(null);
+    dismiss();
+    if (p.kind === 'chips') {
+      // The previewed request itself: same amount, memo and key.
+      void run(async () => {
+        await api(`/api/admin/users/${id}/chips`, { body: { amount: p.amount, memo: p.memo, idempotencyKey: p.key } });
+        clearChips();
+      });
+      return;
+    }
     const why = cReason.trim();
     void run(() =>
       p.kind === 'unsuspend'
@@ -376,17 +504,30 @@ export function UserDetailPage() {
   if (error) return <Empty>{error}</Empty>;
   if (!data) return <Empty>{t('loading')}</Empty>;
   const u = data.user;
-  const canModerate = me?.user.id !== u.id && (u.role === 'user' || me?.user.role === 'super_admin');
-  // Before → after, shown in the confirmation so the admin sees exactly what changes.
+  const canModerate = me?.user.id !== u.id && (u.role === 'user' || canDo(me, 'admins.manage'));
+  const pvData = pv && 'data' in pv ? pv.data : null;
+  const pvError = pv && 'error' in pv && !(pv.error instanceof ApiError && pv.error.code === 'reauth_cancelled') ? errText(pv.error, t) : null;
+  // Before → after, shown in the confirmation so the admin sees exactly what changes (the server's values once previewed).
+  const fromTo = pvData as { from?: string; to?: string; member?: { status?: string }; balanceBefore?: number; balanceAfter?: number } | null;
   const change =
     confirm?.kind === 'suspend'
-      ? t('histChange', { from: userStatusLabel(t, u.status), to: userStatusLabel(t, 'suspended') })
+      ? t('histChange', { from: userStatusLabel(t, fromTo?.member?.status ?? u.status), to: userStatusLabel(t, 'suspended') })
       : confirm?.kind === 'unsuspend'
-        ? t('histChange', { from: userStatusLabel(t, u.status), to: userStatusLabel(t, 'active') })
+        ? t('histChange', { from: userStatusLabel(t, fromTo?.from ?? u.status), to: userStatusLabel(t, fromTo?.to ?? 'active') })
         : confirm?.kind === 'role'
-          ? t('histChange', { from: roleLabel(t, u.role), to: roleLabel(t, confirm.role) })
-          : null;
+          ? t('histChange', { from: roleLabel(t, fromTo?.from ?? u.role), to: roleLabel(t, fromTo?.to ?? confirm.role) })
+          : confirm?.kind === 'chips' && fromTo?.balanceBefore !== undefined
+            ? t('histChange', { from: formatChips(fromTo.balanceBefore), to: formatChips(fromTo.balanceAfter ?? fromTo.balanceBefore) })
+            : null;
   const needsReason = confirm?.kind === 'unsuspend' || confirm?.kind === 'role';
+  // Someone else already made this change: there is nothing left to confirm.
+  const noChange = (confirm?.kind === 'unsuspend' || confirm?.kind === 'role') && !!fromTo?.from && fromTo.from === fromTo.to;
+  const duplicate = confirm?.kind === 'chips' && !!(pvData as ChipPreview | null)?.duplicate;
+  const closeDialog = () => {
+    // An adjustment already applied under this key is done: the form starts over instead of offering it again.
+    if (duplicate) clearChips();
+    dismiss();
+  };
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -395,7 +536,10 @@ export function UserDetailPage() {
         {data.online && <Badge tone="blue">{t('online')}</Badge>}
         <Badge tone="gold">{roleLabel(t, u.role)}</Badge>
         {!data.ledgerConsistent && <Badge tone="red">{t('ledgerMismatch')}</Badge>}
-        <Link to={`/reports?status=all&userId=${u.id}`} className="ml-auto text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
+        <span className="ml-auto flex flex-wrap gap-3">
+          <Link to={`/audit?targetType=user&targetId=${encodeURIComponent(u.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="user-audit">{t('audit')} →</Link>
+          <Link to={`/reports?status=all&userId=${u.id}`} className="text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
+        </span>
       </div>
       {msg && <p className="break-all rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-gold-300" role="status">{msg}</p>}
       {kick && <KickResult r={kick} />}
@@ -429,16 +573,17 @@ export function UserDetailPage() {
       </Panel>
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('adjustChips')}>
-          <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void run(() => api(`/api/admin/users/${id}/chips`, { body: { amount: Number(amount), memo, idempotencyKey: newKey() } })); }}>
+          <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); askChips(); }}>
             <Field
               label={t('amount')}
               hint={t('largeAdjustHint', { n: formatChips(LARGE_ADJUSTMENT) })}
-              error={me?.user.role !== 'super_admin' && Math.abs(Number(amount)) >= LARGE_ADJUSTMENT ? t('errLargeAdjustment') : null}
+              error={!canDo(me, 'chips.large') && Math.abs(Number(amount)) >= LARGE_ADJUSTMENT ? t('errLargeAdjustment') : null}
             >
               {(fid) => <Input id={fid} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d-]/g, ''))} data-testid="chip-amount" />}
             </Field>
             <Field label={t('memo')}>{(fid) => <Input id={fid} value={memo} onChange={(e) => setMemo(e.target.value)} />}</Field>
-            <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2}>{t('confirm')}</Button>
+            <p className="text-xs text-ink-400">{t('chipPreviewHint')}</p>
+            <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2} data-testid="chip-submit">{t('confirm')}</Button>
           </form>
         </Panel>
         <Panel title={t('status')}>
@@ -452,7 +597,7 @@ export function UserDetailPage() {
               <Button variant="outline" onClick={() => ask({ kind: 'unsuspend' })} data-testid="unsuspend">{t('unsuspend')} ({u.suspendedReason})</Button>
             ) : null}
             <Button variant="subtle" onClick={issueReset} data-testid="reset-link">{t('resetLink')}</Button>
-            {me?.user.role === 'super_admin' && me.user.id !== u.id && (
+            {canDo(me, 'roles.change') && me?.user.id !== u.id && (
               <div className="flex flex-wrap gap-2">
                 <span className="self-center text-sm text-ink-300">{t('setRole')}:</span>
                 {(['user', 'admin', 'super_admin'] as const).map((r) => (
@@ -506,12 +651,29 @@ export function UserDetailPage() {
       </Panel>
       <Modal
         open={confirm !== null}
-        onClose={() => setConfirm(null)}
-        title={confirm?.kind === 'suspend' ? t('suspend') : confirm?.kind === 'unsuspend' ? t('unsuspend') : confirm?.kind === 'role' ? t('setRole') : t('disconnect')}
+        onClose={closeDialog}
+        title={
+          confirm?.kind === 'suspend'
+            ? t('suspend')
+            : confirm?.kind === 'unsuspend'
+              ? t('unsuspend')
+              : confirm?.kind === 'role'
+                ? t('setRole')
+                : confirm?.kind === 'chips'
+                  ? t('adjustChips')
+                  : t('disconnect')
+        }
         footer={
           <>
-            <Button variant="ghost" onClick={() => setConfirm(null)}>{t('cancel')}</Button>
-            <Button variant={confirm?.kind === 'unsuspend' ? 'gold' : 'danger'} onClick={apply} disabled={needsReason && cReason.trim().length < 2} data-testid="confirm-end">{t('confirm')}</Button>
+            <Button variant="ghost" onClick={closeDialog}>{t('cancel')}</Button>
+            <Button
+              variant={confirm?.kind === 'unsuspend' || confirm?.kind === 'chips' ? 'gold' : 'danger'}
+              onClick={apply}
+              disabled={!pvData || noChange || duplicate || (needsReason && cReason.trim().length < 2)}
+              data-testid="confirm-end"
+            >
+              {t('confirm')}
+            </Button>
           </>
         }
       >
@@ -523,20 +685,29 @@ export function UserDetailPage() {
                 ? t('unsuspendConfirm', { name: u.nickname })
                 : confirm?.kind === 'role'
                   ? t('roleConfirm', { name: u.nickname })
-                  : t('disconnectConfirm', { name: u.nickname })}
+                  : confirm?.kind === 'chips'
+                    ? t('chipConfirm', { name: u.nickname })
+                    : t('disconnectConfirm', { name: u.nickname })}
           </p>
           {change && (
             <p className="font-semibold" data-testid="confirm-change">
-              <span className="font-normal text-ink-400">{t('changeLine')}:</span> {change}
+              <span className="font-normal text-ink-400">{confirm?.kind === 'chips' ? t('balance') : t('changeLine')}:</span> {change}
             </p>
           )}
-          {confirm?.kind === 'unsuspend' && u.suspendedReason && <p className="break-all text-ink-300">{t('currentSuspendReason', { r: u.suspendedReason })}</p>}
+          {confirm && pvData !== null && <ChangePreview p={confirm} data={pvData} />}
+          {confirm && !pv && <p className="text-ink-400" aria-live="polite" data-testid="preview-loading">{t('pvLoading')}</p>}
+          {pvError && <p className="break-all text-danger" role="alert" data-testid="preview-error">{pvError}</p>}
+          {noChange && <p className="text-danger" role="alert">{t('pvNoChange')}</p>}
+          {confirm?.kind === 'unsuspend' && ((pvData as UnsuspendPreview | null)?.suspendedReason ?? u.suspendedReason) && (
+            <p className="break-all text-ink-300">{t('currentSuspendReason', { r: (pvData as UnsuspendPreview | null)?.suspendedReason ?? u.suspendedReason ?? '' })}</p>
+          )}
           {needsReason ? (
             <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={cReason} maxLength={200} onChange={(e) => setCReason(e.target.value)} data-testid="confirm-reason" />}</Field>
-          ) : (
+          ) : confirm?.kind === 'chips' ? null : (
             <p className="break-all text-ink-300">{t('reason')}: {confirm?.kind === 'suspend' ? reason : dReason}</p>
           )}
           {(confirm?.kind === 'suspend' || (confirm?.kind === 'disconnect' && removeSeat)) && <p className="text-xs text-ink-400">{t('seatPolicy')}</p>}
+          {pvData !== null && <p className="text-xs text-ink-400">{t('pvBasis')}</p>}
         </div>
       </Modal>
       <MemberActivityPanel userId={u.id} />
@@ -700,6 +871,15 @@ type TableControl = 'pause' | 'resume' | 'block' | 'unblock';
 const CONTROL_HINT: Record<TableControl, 'pauseHint' | 'resumeHint' | 'blockHint' | 'unblockHint'> = { pause: 'pauseHint', resume: 'resumeHint', block: 'blockHint', unblock: 'unblockHint' };
 const CONTROL_LABEL: Record<TableControl, 'pauseHands' | 'resumeHands' | 'entryBlocked' | 'unblockEntry'> = { pause: 'pauseHands', resume: 'resumeHands', block: 'entryBlocked', unblock: 'unblockEntry' };
 
+/** The API's close preview: who is seated with how many chips (the room's stacks; null when it did not answer). */
+interface ClosePreview {
+  seats: { userId: string; nickname: string | null; seatIndex: number; buyIn: number; stack: number | null; inHand: boolean | null }[];
+  chipsOnTable: number | null;
+  handInProgress: boolean | null;
+  waitlist: number | null;
+  roomAnswered: boolean;
+}
+
 export function TableDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useT();
@@ -707,6 +887,8 @@ export function TableDetailPage() {
   const { data, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null }>(`/api/admin/tables/${id}`);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [closePv, setClosePv] = useState<{ data: ClosePreview } | { error: unknown } | null>(null);
+  const closeSeq = useRef(0);
   const [control, setControl] = useState<TableControl | null>(null);
   const [cReason, setCReason] = useState('');
   const [edit, setEdit] = useState<{ smallBlind?: number; bigBlind?: number; minBuyIn?: number; maxBuyIn?: number }>({});
@@ -731,6 +913,21 @@ export function TableDetailPage() {
       setMsg(errText(e, t));
       await reload();
     }
+  };
+  // Closing shows who is cashed out first; the password is asked when it is confirmed.
+  const askClose = () => {
+    setConfirmClose(true);
+    setClosePv(null);
+    const seq = ++closeSeq.current;
+    api<ClosePreview>(`/api/admin/tables/${id}/close`, { body: { preview: true } }).then(
+      (d) => seq === closeSeq.current && setClosePv({ data: d }),
+      (e: unknown) => seq === closeSeq.current && setClosePv({ error: e }),
+    );
+  };
+  const endClose = () => {
+    closeSeq.current++;
+    setConfirmClose(false);
+    setClosePv(null);
   };
   if (!data) return <Empty>{t('loading')}</Empty>;
   const tb = data.table;
@@ -790,7 +987,7 @@ export function TableDetailPage() {
               <li>{t('blockHint')}</li>
               <li>{t('closeHint')}</li>
             </ul>
-            <Button variant="danger" disabled={tb.status !== 'open'} onClick={() => setConfirmClose(true)} data-testid="close-table">{t('closeTable')}</Button>
+            <Button variant="danger" disabled={tb.status !== 'open'} onClick={askClose} data-testid="close-table">{t('closeTable')}</Button>
           </div>
         </Panel>
       </div>
@@ -855,9 +1052,60 @@ export function TableDetailPage() {
           </form>
         </Panel>
       </div>
-      <Link to={`/hands?tableId=${id}`} className="text-sm text-gold-300">{t('hands')} →</Link>
-      <Modal open={confirmClose} onClose={() => setConfirmClose(false)} title={t('closeTable')} footer={<><Button variant="ghost" onClick={() => setConfirmClose(false)}>{t('cancel')}</Button><Button variant="danger" onClick={() => { setConfirmClose(false); void act(() => api(`/api/admin/tables/${id}/close`, { body: {} })); }}>{t('confirm')}</Button></>}>
-        <p className="text-sm">{t('closeConfirm')}</p>
+      <div className="flex flex-wrap gap-4">
+        <Link to={`/hands?tableId=${id}`} className="text-sm text-gold-300">{t('hands')} →</Link>
+        <Link to={`/audit?targetType=table&targetId=${encodeURIComponent(id)}`} className="text-sm text-gold-300" data-testid="table-audit">{t('audit')} →</Link>
+      </div>
+      <Modal
+        open={confirmClose}
+        onClose={endClose}
+        title={t('closeTable')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={endClose}>{t('cancel')}</Button>
+            <Button
+              variant="danger"
+              disabled={!closePv || !('data' in closePv)}
+              onClick={() => {
+                endClose();
+                void act(() => api(`/api/admin/tables/${id}/close`, { body: {} }));
+              }}
+              data-testid="confirm-close"
+            >
+              {t('confirm')}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2 text-sm">
+          <p>{t('closeConfirm')}</p>
+          {!closePv && <p className="text-ink-400" aria-live="polite">{t('pvLoading')}</p>}
+          {closePv && 'error' in closePv && !(closePv.error instanceof ApiError && closePv.error.code === 'reauth_cancelled') && (
+            <p className="break-all text-danger" role="alert">{errText(closePv.error, t)}</p>
+          )}
+          {closePv && 'data' in closePv && (
+            <div className="flex flex-col gap-1.5 rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2" data-testid="close-preview">
+              {!closePv.data.roomAnswered && <p className="text-danger" role="alert">{t('pvRoomSilent')}</p>}
+              {closePv.data.handInProgress && <p className="text-gold-300">{t('pvHandRunning')}</p>}
+              <p>{closePv.data.seats.length === 0 ? t('pvNoSeated') : t('pvSeated', { n: closePv.data.seats.length })}</p>
+              {closePv.data.seats.length > 0 && (
+                <ul className="flex flex-col gap-0.5 text-xs text-ink-300">
+                  {closePv.data.seats.map((s) => (
+                    <li key={s.userId} className="flex flex-wrap items-center gap-x-2">
+                      <span>#{s.seatIndex + 1} {s.nickname ?? s.userId}</span>
+                      <span className="font-mono">{t('pvStack', { chips: s.stack === null ? '—' : formatChips(s.stack) })}</span>
+                      <span>{t('seatBuyIn', { n: formatChips(s.buyIn) })}</span>
+                      {s.inHand && <Badge tone="gold">{t('pvInHand')}</Badge>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {closePv.data.chipsOnTable !== null && <p>{t('pvChipsOnTable', { chips: formatChips(closePv.data.chipsOnTable) })}</p>}
+              {!!closePv.data.waitlist && <p>{t('pvWaitlist', { n: closePv.data.waitlist })}</p>}
+              <p className="text-xs text-ink-400">{t('pvBasis')}</p>
+            </div>
+          )}
+        </div>
       </Modal>
       <Modal
         open={control !== null}
@@ -962,30 +1210,6 @@ export function LedgerPage() {
               <td className="px-2 py-1.5 font-mono">{formatChips(l.balanceAfter)}</td>
               <td className="px-2 py-1.5 text-xs">{l.tableId}</td>
               <td className="px-2 py-1.5 text-xs text-ink-300">{memoLabel(t, l.memo)}</td>
-            </tr>
-          ))}
-        </Table>
-      </Panel>
-    </div>
-  );
-}
-
-export function AuditPage() {
-  const { t, locale } = useT();
-  const { data } = useData<{ id: string; actor: string | null; action: string; targetType: string | null; targetId: string | null; detail: unknown; ip: string | null; createdAt: number }[]>('/api/admin/audit?limit=200');
-  return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-extrabold">{t('audit')}</h1>
-      <Panel>
-        <Table head={[t('time'), t('actor'), t('action'), t('target'), t('colDetail'), t('colIp')]}>
-          {data?.map((a) => (
-            <tr key={a.id}>
-              <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(a.createdAt, locale)}</td>
-              <td className="px-2 py-1.5">{a.actor ?? '—'}</td>
-              <td className="px-2 py-1.5 text-xs"><span className="block">{auditActionLabel(t, a.action)}</span><span className="font-mono text-[10px] text-ink-400">{a.action}</span></td>
-              <td className="px-2 py-1.5 text-xs">{targetTypeLabel(t, a.targetType)} <span className="font-mono">{a.targetId}</span></td>
-              <td className="max-w-[18rem] truncate px-2 py-1.5 font-mono text-[11px] text-ink-300">{a.detail ? JSON.stringify(a.detail) : ''}</td>
-              <td className="px-2 py-1.5 text-xs">{a.ip}</td>
             </tr>
           ))}
         </Table>

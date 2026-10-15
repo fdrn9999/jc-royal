@@ -30,6 +30,16 @@ export async function parseBody<T extends z.ZodType>(c: Context<AppEnv>, schema:
   return parsed.data;
 }
 
+/** `preview: true` in the JSON body: the admin console asks what an action would do. Nothing is written. */
+export async function isPreview(c: Context<AppEnv>): Promise<boolean> {
+  try {
+    const body: unknown = await c.req.json();
+    return typeof body === 'object' && body !== null && (body as { preview?: unknown }).preview === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * CSRF defence for cookie-authenticated endpoints: state-changing requests must
  * carry an allowed Origin (browsers always send it on cross-site POSTs) and a

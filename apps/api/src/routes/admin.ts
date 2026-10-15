@@ -1,8 +1,8 @@
 /**
- * Admin console API. Every route requires an admin session (requireAdmin);
- * sensitive mutations additionally require the password to have been
- * re-confirmed within the last minutes (requireRecentReauth). All changes are
- * written to admin_audit_log.
+ * Admin console API. Every route requires an admin session (requireAdmin) and passes its rule in lib/permissions.ts
+ * (the least role, and for sensitive actions a password re-confirmed within the last minutes). All changes are written
+ * to admin_audit_log, refused and failed attempts too (lib/audit.ts). Actions marked so take preview: true and answer
+ * what they would change without changing it.
  */
 import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
 import { ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
@@ -10,12 +10,15 @@ import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from 'drizzle-
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
-import { requireAdmin, requireRecentReauth, requireSuperAdmin } from '../lib/auth';
+import { audit, auditFailures, searchAudit, AUDIT_COUNT_CAP } from '../lib/audit';
+import { requireAdmin } from '../lib/auth';
 import { randomToken, sha256 } from '../lib/crypto';
 import { toCsv } from '../lib/csv';
-import { fail, parseBody } from '../lib/http';
-import { adminAuthRoutes, audit, requireAdminOrigin } from './admin-auth';
+import { fail, isPreview, parseBody } from '../lib/http';
+import { can, capabilitiesOf, requirePermission } from '../lib/permissions';
+import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
+import { adminSecurityRoutes } from './admin-security';
 import { adminServiceRoutes } from './admin-service';
 import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
@@ -30,6 +33,9 @@ import { kickEverywhere, roomCall } from '../lib/room';
 const ONLINE_MS = 5 * 60_000;
 
 const ReasonSchema = z.string().trim().min(2).max(200);
+const SuspendSchema = z.object({ reason: ReasonSchema, reportId: z.string().min(1).max(64).optional() });
+const DisconnectSchema = z.object({ reason: ReasonSchema, removeFromTable: z.boolean().default(false) });
+const RoleSchema = z.object({ role: z.enum(['user', 'admin', 'super_admin']), reason: ReasonSchema });
 
 /** Audit actions on a member shown on their timeline (views, lists and the note.create twin of each note are left out). */
 const SANCTION_ACTIONS = ['user.suspend', 'user.unsuspend', 'user.disconnect'];
@@ -125,6 +131,23 @@ async function walletEvidence(d1: D1Database, e: typeof schema.reconciliationEve
   };
 }
 
+/**
+ * What suspending or disconnecting a member would end (a preview; nothing changes): their signed-in sessions and the
+ * seats they hold, with the chips they brought to each.
+ */
+async function sanctionPreview(DB: D1Database, id: string) {
+  const [sessions, seats] = await DB.batch([
+    DB.prepare(`SELECT kind, COUNT(*) AS n FROM sessions WHERE user_id = ?1 AND expires_at > ?2 GROUP BY kind`).bind(id, Date.now()),
+    DB.prepare(
+      `SELECT s.table_id AS tableId, t.name AS tableName, s.seat_index AS seatIndex, s.buy_in AS buyIn
+         FROM table_sessions s LEFT JOIN tables t ON t.id = s.table_id WHERE s.user_id = ?1 AND s.status = 'seated' ORDER BY s.created_at`,
+    ).bind(id),
+  ]);
+  const by = Object.fromEntries(((sessions?.results ?? []) as { kind: string; n: number }[]).map((r) => [r.kind, r.n]));
+  const open = (seats?.results ?? []) as { tableId: string; tableName: string | null; seatIndex: number; buyIn: number }[];
+  return { sessions: { user: by.user ?? 0, admin: by.admin ?? 0 }, seats: open, buyIns: open.reduce((a, s) => a + s.buyIn, 0) };
+}
+
 const page = (c: Context<AppEnv>) => ({
   limit: Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200),
   offset: Math.max(Number(c.req.query('offset') ?? 0) || 0, 0),
@@ -132,7 +155,9 @@ const page = (c: Context<AppEnv>) => ({
 
 const admin = new Hono<AppEnv>()
   .use('*', requireAdminOrigin)
+  .use('*', auditFailures)
   .use('*', requireAdmin)
+  .use('*', requirePermission)
   // ---------------------------------------------------------------- dashboard
   .get('/dashboard', async (c) => {
     const t0 = Date.now();
@@ -216,8 +241,8 @@ const admin = new Hono<AppEnv>()
     const [count] = await c.var.db.select({ n: sql<number>`COUNT(*)` }).from(U).where(where);
     return c.json({ items, total: count?.n ?? 0, limit, offset });
   })
-  /** Member data export for the selected members. The notice members accept at signup covers this use. */
-  .post('/users/export', requireRecentReauth, async (c) => {
+  /** Member data export for the selected members (super admins). The notice members accept at signup covers this use. */
+  .post('/users/export', async (c) => {
     const body = await parseBody(c, z.object({ userIds: z.array(z.string().min(1).max(64)).min(1).max(1000) }));
     const ids = [...new Set(body.userIds)];
     const u = schema.users;
@@ -423,35 +448,43 @@ const admin = new Hono<AppEnv>()
     const noteId = c.req.param('noteId');
     const n = await c.var.db.query.adminNotes.findFirst({ where: and(eq(schema.adminNotes.id, noteId), eq(schema.adminNotes.userId, id)) });
     if (!n) fail(404, 'not_found', 'note not found');
-    if (n.authorId !== c.var.user!.id && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only the author or a super admin can delete a note');
+    if (n.authorId !== c.var.user!.id && !can(c.var.user!.role, 'notes.delete_any')) fail(403, 'forbidden', 'only the author or a super admin can delete a note');
     await c.var.db.delete(schema.adminNotes).where(eq(schema.adminNotes.id, noteId));
     await audit(c, 'note.delete', { type: 'user', id }, { noteId, authorId: n.authorId, createdAt: n.createdAt });
     return c.json({ ok: true });
   })
-  /** `reportId`: the report this suspension is given for (it must be about this member); it is kept on both sides. */
-  .post('/users/:id/suspend', requireRecentReauth, async (c) => {
+  /**
+   * `reportId`: the report this suspension is given for (it must be about this member); it is kept on both sides.
+   * `preview`: what it would end (sign-ins, seats), before the reason is typed.
+   */
+  .post('/users/:id/suspend', async (c) => {
     const id = c.req.param('id');
-    const body = await parseBody(c, z.object({ reason: z.string().trim().min(2).max(200), reportId: z.string().min(1).max(64).optional() }));
+    const preview = await isPreview(c);
+    const body = await parseBody(c, preview ? SuspendSchema.partial({ reason: true }) : SuspendSchema);
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot suspend yourself');
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!target) fail(404, 'not_found', 'user not found');
-    if (target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can suspend administrators');
+    if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can suspend administrators');
     if (body.reportId) {
       const rep = await c.var.db.query.reports.findFirst({ where: eq(schema.reports.id, body.reportId), columns: { targetUserId: true } });
       if (rep?.targetUserId !== id) fail(400, 'bad_request', 'the report is not about this member');
     }
+    if (preview) {
+      return c.json({ preview: true, member: { nickname: target.nickname, role: target.role, status: target.status }, ...(await sanctionPreview(c.env.DB, id)) });
+    }
+    const { reason } = SuspendSchema.parse(body);
     const at = Date.now();
     await c.var.db.batch([
-      c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: body.reason, updatedAt: at }).where(eq(schema.users.id, id)),
+      c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: reason, updatedAt: at }).where(eq(schema.users.id, id)),
       c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
       ...(body.reportId
-        ? [c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: body.reason, createdAt: at })]
+        ? [c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: reason, createdAt: at })]
         : []),
     ]);
     // Deleting the sessions does not reach table connections already open: each room ends them and the member leaves
     // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
     const kick = await kickEverywhere(c.env, id, 'suspended', true);
-    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).suspended(body.reason), senderId: c.var.user!.id });
+    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).suspended(reason), senderId: c.var.user!.id });
     await audit(c, 'user.suspend', { type: 'user', id }, { ...body, from: target.status, to: 'suspended', previousReason: target.suspendedReason, kick });
     return c.json({ ok: true, kick });
   })
@@ -459,24 +492,30 @@ const admin = new Hono<AppEnv>()
    * Ends a member's sign-ins and table connections without suspending them (they can sign in again). With
    * `removeFromTable` they also leave their seats and waitlists the way a suspension does.
    */
-  .post('/users/:id/disconnect', requireRecentReauth, async (c) => {
+  .post('/users/:id/disconnect', async (c) => {
     const id = c.req.param('id');
-    const body = await parseBody(c, z.object({ reason: ReasonSchema, removeFromTable: z.boolean().default(false) }));
+    const preview = await isPreview(c);
+    const body = await parseBody(c, preview ? DisconnectSchema.partial({ reason: true }) : DisconnectSchema);
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot disconnect yourself');
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true } });
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, nickname: true, status: true } });
     if (!target) fail(404, 'not_found', 'user not found');
-    if (target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can disconnect administrators');
+    if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can disconnect administrators');
+    if (preview) return c.json({ preview: true, member: target, removeFromTable: body.removeFromTable, ...(await sanctionPreview(c.env.DB, id)) });
     const ended = await c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)).returning({ kind: schema.sessions.kind });
     const kick = await kickEverywhere(c.env, id, 'disconnected', body.removeFromTable);
     await audit(c, 'user.disconnect', { type: 'user', id }, { ...body, sessions: ended.length, kick });
     return c.json({ ok: true, sessions: ended.length, kick });
   })
-  .post('/users/:id/unsuspend', requireRecentReauth, async (c) => {
+  .post('/users/:id/unsuspend', async (c) => {
     const id = c.req.param('id');
-    const body = await parseBody(c, z.object({ reason: ReasonSchema }));
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, status: true, suspendedReason: true } });
+    const preview = await isPreview(c);
+    const body = await parseBody(c, z.object({ reason: preview ? ReasonSchema.optional() : ReasonSchema }));
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, status: true, suspendedReason: true, nickname: true } });
     if (!target) fail(404, 'not_found', 'user not found');
-    if (target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can unsuspend administrators');
+    if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can unsuspend administrators');
+    if (preview) {
+      return c.json({ preview: true, member: { nickname: target.nickname, role: target.role }, from: target.status, to: target.status === 'suspended' ? 'active' : target.status, suspendedReason: target.suspendedReason });
+    }
     const lifted = await c.var.db
       .update(schema.users)
       .set({ status: 'active', suspendedReason: null, updatedAt: Date.now() })
@@ -487,30 +526,66 @@ const admin = new Hono<AppEnv>()
     await audit(c, 'user.unsuspend', { type: 'user', id }, { reason: body.reason, from: target.status, to: lifted[0] ? 'active' : target.status, suspendedReason: target.suspendedReason });
     return c.json({ ok: true });
   })
-  .post('/users/:id/role', requireSuperAdmin, requireRecentReauth, async (c) => {
+  /** Super admins (the rule). `preview`: the change, the console sessions it ends and the abilities gained or lost. */
+  .post('/users/:id/role', async (c) => {
     const id = c.req.param('id');
-    const body = await parseBody(c, z.object({ role: z.enum(['user', 'admin', 'super_admin']), reason: ReasonSchema }));
+    const preview = await isPreview(c);
+    const body = await parseBody(c, preview ? RoleSchema.partial({ reason: true }) : RoleSchema);
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot change your own role');
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!target || target.status !== 'active') fail(404, 'not_found', 'active user not found');
+    if (preview) {
+      const sessions = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?1 AND kind = 'admin' AND expires_at > ?2`).bind(id, Date.now()).first<{ n: number }>();
+      const before = capabilitiesOf(target.role);
+      const after = capabilitiesOf(body.role);
+      return c.json({
+        preview: true,
+        member: { nickname: target.nickname, status: target.status },
+        from: target.role,
+        to: body.role,
+        console: { from: target.role !== 'user', to: body.role !== 'user' },
+        // Saving ends the member's console sessions; the new role applies from their next sign-in.
+        adminSessions: sessions?.n ?? 0,
+        capabilities: { gained: after.filter((k) => !before.includes(k)), lost: before.filter((k) => !after.includes(k)) },
+      });
+    }
     await c.var.db.update(schema.users).set({ role: body.role, updatedAt: Date.now() }).where(eq(schema.users.id, id));
     // Role changes take effect immediately: drop existing admin sessions of the target.
     await c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     return c.json({ ok: true });
   })
-  .post('/users/:id/chips', requireRecentReauth, async (c) => {
+  /**
+   * `preview` (the same body, idempotency key included): the balance before and after, whether it is a large
+   * adjustment and whether this key was already applied. Refused the same way, but a refused preview is not listed with
+   * the refused adjustments (the attempt is on the audit log as `user.chips.failed`).
+   */
+  .post('/users/:id/chips', async (c) => {
     const id = c.req.param('id');
+    const preview = await isPreview(c);
     const body = await parseBody(c, ChipAdjustSchema);
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true } });
-    const superAdmin = c.var.user!.role === 'super_admin';
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, nickname: true, status: true, balance: true } });
+    const role = c.var.user!.role;
     // A refused adjustment is audited too: the economy page lists them.
     const refuse = async (reason: string, status: 403 | 409, code: string, message: string): Promise<never> => {
-      await audit(c, 'user.chips_refused', { type: 'user', id }, { reason, amount: body.amount, memo: body.memo });
+      if (!preview) await audit(c, 'user.chips_refused', { type: 'user', id }, { reason, amount: body.amount, memo: body.memo }, 'failed');
       fail(status, code, message);
     };
-    if (target && target.role !== 'user' && !superAdmin) await refuse('forbidden', 403, 'forbidden', 'only a super admin can adjust chips of administrators');
-    if (Math.abs(body.amount) >= LARGE_ADJUSTMENT && !superAdmin) await refuse('large_adjustment', 403, 'large_adjustment', `only a super admin can adjust ${LARGE_ADJUSTMENT} chips or more at once`);
+    if (target && target.role !== 'user' && !can(role, 'admins.manage')) await refuse('forbidden', 403, 'forbidden', 'only a super admin can adjust chips of administrators');
+    if (Math.abs(body.amount) >= LARGE_ADJUSTMENT && !can(role, 'chips.large')) await refuse('large_adjustment', 403, 'large_adjustment', `only a super admin can adjust ${LARGE_ADJUSTMENT} chips or more at once`);
+    if (preview) {
+      const done = await c.env.DB.prepare(`SELECT 1 AS x FROM chip_ledger WHERE idempotency_key = ?1`).bind(`admin:${body.idempotencyKey}`).first();
+      if (!target || (!done && target.balance + body.amount < 0)) await refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
+      return c.json({
+        preview: true,
+        member: { nickname: target!.nickname, role: target!.role, status: target!.status },
+        amount: body.amount,
+        balanceBefore: target!.balance,
+        balanceAfter: done ? target!.balance : target!.balance + body.amount,
+        large: Math.abs(body.amount) >= LARGE_ADJUSTMENT,
+        duplicate: !!done,
+      });
+    }
     const r = await applyLedger(c.env.DB, {
       userId: id,
       type: 'admin_adjust',
@@ -537,13 +612,13 @@ const admin = new Hono<AppEnv>()
    * Issues a one-time password reset link. With mail configured it is also mailed to the
    * member; either way the response carries the link and a copy-ready message in the member's language.
    */
-  .post('/users/:id/reset-link', requireRecentReauth, async (c) => {
+  .post('/users/:id/reset-link', async (c) => {
     const id = c.req.param('id');
     if (id === c.var.user!.id) fail(400, 'bad_request', 'use the change-password flow for your own account');
     const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.id, id), eq(schema.users.status, 'active')) });
     if (!u) fail(404, 'not_found', 'user not found');
     // A reset link is an account takeover token: plain admins may only issue them for members.
-    if (u.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can issue reset links for administrators');
+    if (u.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can issue reset links for administrators');
     const token = randomToken();
     await c.var.db.insert(schema.passwordResets).values({ tokenHash: await sha256(token), userId: id, expiresAt: Date.now() + 30 * 60 * 1000 });
     const path = `/reset?token=${encodeURIComponent(token)}`;
@@ -598,7 +673,7 @@ const admin = new Hono<AppEnv>()
    * (the running one finishes normally), `block` takes no new players (seated players stay). To close the table and pay
    * everyone out, use /close.
    */
-  .post('/tables/:id/control', requireRecentReauth, async (c) => {
+  .post('/tables/:id/control', async (c) => {
     const id = c.req.param('id');
     const body = await parseBody(c, TableControlSchema);
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
@@ -646,10 +721,30 @@ const admin = new Hono<AppEnv>()
     if (!live) fail(503, 'room_unavailable', 'saved, but the table did not confirm; try again', { saved: true });
     return c.json({ ok: true, appliesFrom: live.appliesFrom ?? 'next hand' });
   })
-  .post('/tables/:id/close', requireRecentReauth, async (c) => {
+  /** `preview`: who is seated with how many chips, and whether a hand is running (it finishes before the close). */
+  .post('/tables/:id/close', async (c) => {
     const id = c.req.param('id');
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
+    if (await isPreview(c)) {
+      const live = await roomCall(c, id, 'status');
+      const { results: open } = await c.env.DB.prepare(
+        `SELECT s.user_id AS userId, u.nickname, s.seat_index AS seatIndex, s.buy_in AS buyIn FROM table_sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.table_id = ?1 AND s.status = 'seated' ORDER BY s.seat_index`,
+      )
+        .bind(id)
+        .all<{ userId: string; nickname: string | null; seatIndex: number; buyIn: number }>();
+      const stacks = new Map(((live?.seats as ({ userId: string; stack: number; inHand: boolean } | null)[] | undefined) ?? []).filter((s) => !!s).map((s) => [s!.userId, s!]));
+      return c.json({
+        preview: true,
+        table: { id, name: t.name, status: t.status, roomType: t.roomType },
+        // A stack is the room's (null when it did not answer); the buy-in is what the seat's session holds in D1.
+        seats: open.map((s) => ({ ...s, stack: stacks.get(s.userId)?.stack ?? null, inHand: stacks.get(s.userId)?.inHand ?? null })),
+        chipsOnTable: typeof live?.chipsOnTable === 'number' ? live.chipsOnTable : null,
+        handInProgress: live ? !!live.handInProgress : null,
+        waitlist: typeof live?.waitlist === 'number' ? live.waitlist : null,
+        roomAnswered: !!live,
+      });
+    }
     // Stop new hands; the room finishes the current hand, cashes everyone out, then marks the table closed.
     await c.var.db.update(schema.tables).set({ status: 'closing', entryBlocked: true, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
     // If the room cannot be reached the table stays 'closing' (no one can join) and the room finishes the close when it
@@ -684,7 +779,7 @@ const admin = new Hono<AppEnv>()
    * engine log. Hands are only written once settled, so live hidden state can
    * never be read here. Requires re-auth and is audited.
    */
-  .get('/hands/:id', requireRecentReauth, async (c) => {
+  .get('/hands/:id', async (c) => {
     const id = c.req.param('id');
     const h = await c.var.db.query.hands.findFirst({ where: eq(schema.hands.id, id) });
     if (!h) fail(404, 'not_found', 'hand not found');
@@ -729,16 +824,48 @@ const admin = new Hono<AppEnv>()
       .offset(offset);
     return c.json(rows.map((r) => ({ ...r.l, nickname: r.nickname })));
   })
+  /**
+   * The audit log, newest first. Super admins read every administrator's entries; others read their own (`scope`).
+   * Without `paged=1`: the plain array of before (`limit`, `offset`). With it: filters `actor`, `action` (exact, or
+   * `user.*` for a family), `outcome` (ok | failed), `targetType` and `targetId`, `from` / `to` (ms), `q` (2–50
+   * characters in the detail, or a target id); pages go back from the last entry shown (`before`, `beforeId`), and the
+   * first page counts the matches up to AUDIT_COUNT_CAP.
+   */
   .get('/audit', async (c) => {
-    const { limit, offset } = page(c);
-    const rows = await c.var.db
-      .select({ a: schema.adminAuditLog, nickname: schema.users.nickname })
-      .from(schema.adminAuditLog)
-      .leftJoin(schema.users, eq(schema.users.id, schema.adminAuditLog.actorId))
-      .orderBy(desc(schema.adminAuditLog.createdAt))
-      .limit(limit)
-      .offset(offset);
-    return c.json(rows.map((r) => ({ ...r.a, actor: r.nickname, detail: r.a.detail ? JSON.parse(r.a.detail) : null })));
+    const self = c.var.user!;
+    const all = can(self.role, 'audit.all');
+    if (c.req.query('paged') !== '1') {
+      const { limit, offset } = page(c);
+      const rows = await c.var.db
+        .select({ a: schema.adminAuditLog, nickname: schema.users.nickname })
+        .from(schema.adminAuditLog)
+        .leftJoin(schema.users, eq(schema.users.id, schema.adminAuditLog.actorId))
+        .where(all ? undefined : eq(schema.adminAuditLog.actorId, self.id))
+        .orderBy(desc(schema.adminAuditLog.createdAt))
+        .limit(limit)
+        .offset(offset);
+      return c.json(rows.map((r) => ({ ...r.a, actor: r.nickname, detail: r.a.detail ? JSON.parse(r.a.detail) : null })));
+    }
+    const q = (k: string, max = 64) => (c.req.query(k) ?? '').trim().slice(0, max) || undefined;
+    const ms = (k: string) => (Number.isFinite(Number(c.req.query(k))) && Number(c.req.query(k)) > 0 ? Number(c.req.query(k)) : undefined);
+    const outcome = c.req.query('outcome');
+    const before = ms('before');
+    const text = q('q', 50);
+    const result = await searchAudit(c.env.DB, {
+      actor: all ? q('actor') : self.id,
+      action: q('action'),
+      outcome: outcome === 'ok' || outcome === 'failed' ? outcome : undefined,
+      targetType: q('targetType', 32),
+      targetId: q('targetId'),
+      from: ms('from'),
+      to: ms('to'),
+      q: text && text.length >= 2 ? text : undefined,
+      before,
+      beforeId: q('beforeId'),
+      limit: Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 100),
+      count: before === undefined,
+    });
+    return c.json({ ...result, scope: all ? 'all' : 'own', countCap: AUDIT_COUNT_CAP });
   })
   // ---------------------------------------------------------------- chip economy
   /**
@@ -831,7 +958,7 @@ const admin = new Hono<AppEnv>()
    *   note stays internal).
    * A correction applies to an open event or one acknowledged with a note, once per event.
    */
-  .post('/reconcile/:id/resolve', requireRecentReauth, async (c) => {
+  .post('/reconcile/:id/resolve', async (c) => {
     const id = c.req.param('id');
     const body = await parseBody(c, z.object({ note: z.string().trim().min(2).max(300), action: z.enum(['note', 'record', 'revert']).default('note') }));
     const ev = schema.reconciliationEvents;
@@ -845,7 +972,7 @@ const admin = new Hono<AppEnv>()
       await audit(c, 'reconcile.resolve', { type: 'reconciliation', id }, body);
       return c.json({ ok: true, action: body.action });
     }
-    if (c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can correct a wallet or the ledger');
+    if (!can(c.var.user!.role, 'ledger.correct')) fail(403, 'forbidden', 'only a super admin can correct a wallet or the ledger');
     const e = await c.var.db.query.reconciliationEvents.findFirst({ where: eq(ev.id, id) });
     if (!e) fail(404, 'not_found', 'event not found');
     if (e.scope !== 'user_ledger') fail(400, 'bad_request', 'only a wallet mismatch can be corrected');
@@ -911,4 +1038,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes));

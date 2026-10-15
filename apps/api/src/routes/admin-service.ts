@@ -9,7 +9,6 @@ import { and, desc, eq, gt, isNotNull, isNull, lte, or, sql } from 'drizzle-orm'
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
-import { requireRecentReauth } from '../lib/auth';
 import { fail, parseBody } from '../lib/http';
 import { tellRoomsAboutMaintenance, type RoomFanOut } from '../lib/service';
 import { audit } from './admin-auth';
@@ -254,7 +253,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       items: rows.map((r) => ({ ...r.w, author: r.author, state: windowState(r.w, now) })),
     });
   })
-  .post('/service/maintenance', requireRecentReauth, async (c) => {
+  .post('/service/maintenance', async (c) => {
     const body = await parseBody(c, MaintenanceSchema);
     const now = Date.now();
     const startsAt = Math.max(body.startsAt, now);
@@ -274,7 +273,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
     return c.json({ id, startsAt, rooms }, 201);
   })
   /** Move a planned window, or extend / shorten one under way (its start stays). */
-  .patch('/service/maintenance/:id', requireRecentReauth, async (c) => {
+  .patch('/service/maintenance/:id', async (c) => {
     const id = c.req.param('id');
     const body = await parseBody(c, MaintenancePatchSchema);
     const W = schema.maintenanceWindows;
@@ -311,7 +310,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, rooms });
   })
   /** Ends a window under way now, or cancels a planned one. Tables deal again as soon as they hear of it. */
-  .post('/service/maintenance/:id/stop', requireRecentReauth, async (c) => {
+  .post('/service/maintenance/:id/stop', async (c) => {
     const id = c.req.param('id');
     const body = await parseBody(c, StopSchema);
     const W = schema.maintenanceWindows;

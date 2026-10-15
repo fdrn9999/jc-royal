@@ -55,6 +55,9 @@ const BY_MESSAGE: Record<string, Key> = {
   'this notice has already ended': 'errNoticeEnded',
   'assignee must be an active administrator': 'errAssignee',
   'the report is not about this member': 'errReportUser',
+  'no permission rule for this action': 'errNoRule',
+  "only a super admin can end other administrators' sessions": 'errAdminSessions',
+  'session not found': 'errSessionGone',
 };
 const BY_CODE: Record<string, Key> = {
   forbidden: 'errForbidden',
@@ -94,6 +97,14 @@ export interface AdminMe {
   user: { id: string; email: string; nickname: string; role: 'admin' | 'super_admin' | 'user' };
   reauthValidUntil: number | null;
   sessionStartedAt: number;
+  /** Super-admin abilities this administrator has (the API's permission table; absent from an older API). */
+  permissions?: string[];
+}
+
+/** Whether the signed-in administrator has a super-admin ability (lib/permissions.ts in the API). */
+export function canDo(me: AdminMe | null, capability: string): boolean {
+  if (!me) return false;
+  return me.permissions ? me.permissions.includes(capability) : me.user.role === 'super_admin';
 }
 
 interface AdminCtx {
@@ -146,7 +157,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           await askReauth();
           return rawApi<T>(path, init);
         }
-        if (e instanceof ApiError && e.code === 'unauthorized') void refresh();
+        // A role or status changed elsewhere applies at once: signed out, or the console's own view of what it may do.
+        if (e instanceof ApiError && (e.code === 'unauthorized' || e.message === 'not an administrator' || e.message === 'super admin only')) void refresh();
         throw e;
       }
     },
