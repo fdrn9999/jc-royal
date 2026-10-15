@@ -1,5 +1,6 @@
-import type { ActionType, ChatMessage, ErrorCode, NoticeCode, ServerMessage, TableCue, TableView } from '@jc/types';
+import type { ActionType, ChatMessage, ClientMessage, ErrorCode, NoticeCode, ServerMessage, TableCue, TableView } from '@jc/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Heartbeat, Outbox, type Outgoing } from './link';
 
 /** `locked`: a private table that needs the join code first (the room closed the socket with 4003). */
 export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'closed' | 'unauthorized' | 'locked';
@@ -21,8 +22,9 @@ export interface TableSocketApi {
   /** Latest top-up / automatic rebuy outcome the room reported to this player. */
   lastNotice: { code: NoticeCode; amount?: number; at: number } | null;
   /**
-   * Sends a command and resolves on its ack. Pass the same `reqId` to retry a request whose answer was lost: the
-   * server applies a request id once.
+   * Sends a command and resolves on its ack. A connection lost on the way is replaced and the command sent again with
+   * the same id, which the server applies once. Rejects with `internal` when there is no connection, or no answer
+   * within the deadline: pass the same `reqId` to retry such a request.
    */
   request: (
     msg:
@@ -32,6 +34,7 @@ export interface TableSocketApi {
       | { t: 'autoRebuy'; on: boolean; amount?: number; cap?: number; consent?: true },
     reqId?: string,
   ) => Promise<void>;
+  /** Like request, without a result: a refusal shows in `lastError`. */
   send: (msg: { t: 'sitOut' } | { t: 'sitIn' } | { t: 'waitlist'; join: boolean } | { t: 'chat'; text: string } | { t: 'sync' } | { t: 'cancelTopUp' }) => void;
   act: (type: ActionType, amount?: number) => boolean;
   /** True while an action is in flight (until the next state arrives). */
@@ -50,6 +53,22 @@ export class RequestError extends Error {
 
 export const rid = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/-/g, '').slice(0, 24);
 
+/** What the hook keeps with a command until its answer. */
+interface Waiting {
+  /** request()'s promise. */
+  resolve?: () => void;
+  reject?: (e: RequestError) => void;
+  /** An action: the hand and seq it was taken on. */
+  turn?: string;
+}
+
+/** Refusals of a command sent again that only mean its first copy did the work, or its moment passed. */
+const RESENT_OK = new Set<ErrorCode>(['stale_version', 'conflict', 'duplicate', 'not_your_turn']);
+/** Exactly the text the room answers without waking up (its WebSocket auto-response). */
+const PING = '{"t":"ping"}';
+const SYNC = '{"t":"sync"}';
+const TICK_MS = 2_000;
+
 /**
  * Connection to a table room. Server state is authoritative: the hook only
  * stores the latest TableView and queues the cues for animations/sounds.
@@ -63,7 +82,9 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const [lastNotice, setLastNotice] = useState<TableSocketApi['lastNotice']>(null);
   const [acting, setActing] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const pending = useRef(new Map<string, { resolve: () => void; reject: (e: RequestError) => void }>());
+  /** Commands waiting for their answer (see link.ts). */
+  const [box] = useState(() => new Outbox<ClientMessage, Waiting>());
+  const [beat] = useState(() => new Heartbeat());
   const stateRef = useRef<TableView | null>(null);
   /** Hand and seq of the action in flight: one action per betting turn until the server answers. */
   const sentFor = useRef<string | null>(null);
@@ -76,13 +97,23 @@ export function useTableSocket(tableId: string): TableSocketApi {
     stop.current = false;
     let attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let ping: ReturnType<typeof setInterval> | undefined;
+    /** Gives up on the current connection without waiting for the browser to notice it is gone. */
+    let drop = () => {};
 
-    const failPending = () => {
-      for (const p of pending.current.values()) p.reject(new RequestError('internal', 'connection closed'));
-      pending.current.clear();
+    /** The connection ended for good: nothing waiting will be answered. */
+    const failAll = () => {
+      for (const o of box.drain()) o.h.reject?.(new RequestError('internal', 'connection closed'));
       sentFor.current = null;
       setActing(false);
+    };
+
+    /** No answer in time: a request fails; anything else gives up quietly (the caller then fetches the state). */
+    const expire = (o: Outgoing<ClientMessage, Waiting>) => {
+      o.h.reject?.(new RequestError('internal', 'no answer'));
+      if (o.h.turn && sentFor.current === o.h.turn) {
+        sentFor.current = null;
+        setActing(false);
+      }
     };
 
     const connect = () => {
@@ -96,10 +127,14 @@ export function useTableSocket(tableId: string): TableSocketApi {
         opened = true;
         attempt = 0;
         setStatus('open');
-        ping = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ t: 'ping' })), 25_000);
+        const now = Date.now();
+        beat.reset(now);
+        // Commands the last connection lost the answers to, with the ids they had: the room applies each once.
+        for (const o of box.resend(now)) ws.send(JSON.stringify(o.msg));
       };
       ws.onmessage = (ev) => {
         if (wsRef.current !== ws) return; // superseded by reopen
+        beat.received(Date.now());
         let m: ServerMessage;
         try {
           m = JSON.parse(String(ev.data)) as ServerMessage;
@@ -114,6 +149,9 @@ export function useTableSocket(tableId: string): TableSocketApi {
             stateRef.current = m.state;
             setState(m.state);
             setActing(false);
+            // An action whose turn has passed was applied or overtaken: either way nothing is waiting for it.
+            const turn = m.state.hand ? `${m.state.hand.id}:${m.state.hand.seq}` : null;
+            for (const o of box.values()) if (o.h.turn && o.h.turn !== turn) box.take(o.id);
             if (m.cues.length) {
               const evs = m.cues.map((cue) => ({ id: ++cueSeq.current, cue, state: m.state }));
               setCues((q) => [...q, ...evs].slice(-60));
@@ -126,22 +164,19 @@ export function useTableSocket(tableId: string): TableSocketApi {
           case 'chat':
             setChat((c) => [...c, m.message].slice(-100));
             return;
-          case 'ack': {
-            pending.current.get(m.reqId)?.resolve();
-            pending.current.delete(m.reqId);
+          case 'ack':
+            box.take(m.reqId)?.h.resolve?.();
             return;
-          }
           case 'error': {
             sentFor.current = null;
             setActing(false);
-            if (m.reqId && pending.current.has(m.reqId)) {
-              pending.current.get(m.reqId)!.reject(new RequestError(m.code, m.message));
-              pending.current.delete(m.reqId);
-            } else if (m.code !== 'join_code_required') {
-              // (The page asks for the code instead: `locked` or `you.needsCode`.)
+            const o = m.reqId ? box.take(m.reqId) : undefined;
+            if (o?.h.reject) o.h.reject(new RequestError(m.code, m.message));
+            else if (!(o && o.sends > 1 && RESENT_OK.has(m.code)) && m.code !== 'join_code_required') {
+              // (For a missing join code the page asks for it instead: `locked` or `you.needsCode`.)
               setLastError({ code: m.code, message: m.message, at: Date.now() });
             }
-            if (m.code === 'stale_version') ws.send(JSON.stringify({ t: 'sync' }));
+            if (m.code === 'stale_version') ws.send(SYNC);
             if (m.code === 'table_closed') {
               stop.current = true;
               setStatus('closed');
@@ -159,13 +194,12 @@ export function useTableSocket(tableId: string): TableSocketApi {
             return;
         }
       };
-      ws.onclose = (ev) => {
-        if (wsRef.current !== ws) return; // superseded by a manual reconnect
-        clearInterval(ping);
-        failPending();
-        if (ev.code === 4003) {
+      const closed = (code: number) => {
+        box.detach();
+        if (code === 4003) {
           // Private table without a valid join code: wait for the code rather than retrying. What was shown before
           // (the code may have changed while connected) is dropped.
+          failAll();
           stop.current = true;
           stateRef.current = null;
           setState(null);
@@ -173,12 +207,17 @@ export function useTableSocket(tableId: string): TableSocketApi {
           setStatus('locked');
           return;
         }
-        if (stop.current || ev.code === 4001 || ev.code === 4002) return;
+        if (stop.current || code === 4001 || code === 4002) {
+          failAll();
+          return;
+        }
+        // Commands still waiting go out again on the next connection.
         if (!opened && attempt >= 2) {
           // Handshake keeps failing: most likely the session expired.
           void fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => {
             if (r.status === 401) {
               stop.current = true;
+              failAll();
               setStatus('unauthorized');
             }
           });
@@ -186,6 +225,18 @@ export function useTableSocket(tableId: string): TableSocketApi {
         setStatus('reconnecting');
         const delay = Math.min(10_000, 800 * 2 ** attempt++);
         timer = setTimeout(() => !stop.current && connect(), delay);
+      };
+      ws.onclose = (ev) => {
+        if (wsRef.current !== ws) return; // superseded by a manual reconnect
+        closed(ev.code);
+      };
+      drop = () => {
+        if (wsRef.current !== ws) return;
+        // A dead link can take a minute or more to report its close: stop listening and start over now.
+        ws.onclose = null;
+        ws.onmessage = null;
+        ws.close();
+        closed(1006);
       };
     };
     kick.current = () => {
@@ -197,8 +248,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
     };
     fresh.current = () => {
       clearTimeout(timer);
-      clearInterval(ping);
-      failPending();
+      failAll();
       stop.current = false;
       attempt = 0;
       const old = wsRef.current;
@@ -209,21 +259,39 @@ export function useTableSocket(tableId: string): TableSocketApi {
       connect();
     };
     connect();
+    const tick = setInterval(() => {
+      const now = Date.now();
+      const { late, expired } = box.sweep(now);
+      for (const o of expired) expire(o);
+      const ws = wsRef.current;
+      if (ws?.readyState !== WebSocket.OPEN) return;
+      if (expired.length) ws.send(SYNC);
+      // An answer is late: find out whether the connection still carries anything at all.
+      if (late && beat.check(now)) ws.send(PING);
+      const b = beat.tick(now);
+      if (b === 'ping') ws.send(PING);
+      else if (b === 'dead') drop();
+    }, TICK_MS);
     // Mobile browsers drop sockets in the background: resync, or reconnect at once on return.
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ t: 'sync' }));
-      else kick.current();
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        // The socket may have died while the page slept; the answer to the sync shows it did not.
+        beat.check(Date.now());
+        ws.send(SYNC);
+      } else kick.current();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       stop.current = true;
       clearTimeout(timer);
-      clearInterval(ping);
+      clearInterval(tick);
       document.removeEventListener('visibilitychange', onVisible);
+      failAll();
       wsRef.current?.close();
     };
-  }, [tableId]);
+  }, [tableId, box, beat]);
 
   const raw = (msg: unknown) => {
     const ws = wsRef.current;
@@ -232,33 +300,48 @@ export function useTableSocket(tableId: string): TableSocketApi {
     return true;
   };
 
-  const request = useCallback<TableSocketApi['request']>((msg, reqId = rid()) => {
-    return new Promise<void>((resolve, reject) => {
-      pending.current.set(reqId, { resolve, reject });
-      if (!raw({ ...msg, reqId })) {
-        pending.current.delete(reqId);
-        reject(new RequestError('internal', 'not connected'));
+  const request = useCallback<TableSocketApi['request']>(
+    (msg, reqId = rid()) => {
+      return new Promise<void>((resolve, reject) => {
+        const full = { ...msg, reqId } as ClientMessage;
+        if (!raw(full)) return reject(new RequestError('internal', 'not connected'));
+        box.add(reqId, full, { resolve, reject }, Date.now());
+      });
+    },
+    [box],
+  );
+
+  const send = useCallback<TableSocketApi['send']>(
+    (msg) => {
+      if (msg.t === 'sync') {
+        raw(msg);
+        return;
       }
-    });
-  }, []);
+      const reqId = rid();
+      const full = { ...msg, reqId } as ClientMessage;
+      if (raw(full)) box.add(reqId, full, {}, Date.now());
+    },
+    [box],
+  );
 
-  const send = useCallback<TableSocketApi['send']>((msg) => {
-    raw(msg);
-  }, []);
-
-  const act = useCallback((type: ActionType, amount?: number) => {
-    const s = stateRef.current;
-    if (!s?.hand) return false;
-    // A second press (or key) before the server answers carries the same seq and would only come back as an error toast.
-    const turn = `${s.hand.id}:${s.hand.seq}`;
-    if (sentFor.current === turn) return false;
-    const ok = raw({ t: 'action', intentId: rid(), handId: s.hand.id, seq: s.hand.seq, type, amount });
-    if (ok) {
-      sentFor.current = turn;
-      setActing(true);
-    }
-    return ok;
-  }, []);
+  const act = useCallback(
+    (type: ActionType, amount?: number) => {
+      const s = stateRef.current;
+      if (!s?.hand) return false;
+      // A second press (or key) before the server answers carries the same seq and would only come back as an error toast.
+      const turn = `${s.hand.id}:${s.hand.seq}`;
+      if (sentFor.current === turn) return false;
+      const msg: ClientMessage = { t: 'action', intentId: rid(), handId: s.hand.id, seq: s.hand.seq, type, amount };
+      const ok = raw(msg);
+      if (ok) {
+        box.add(msg.intentId, msg, { turn }, Date.now());
+        sentFor.current = turn;
+        setActing(true);
+      }
+      return ok;
+    },
+    [box],
+  );
 
   const consumeCues = useCallback((upToId: number) => setCues((q) => q.filter((c) => c.id > upToId)), []);
   const reconnect = useCallback(() => kick.current(), []);

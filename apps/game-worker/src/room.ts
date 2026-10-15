@@ -136,6 +136,12 @@ interface UnrecordedHand {
   log: PersistedHand;
 }
 
+/** A chat line's id from its sender and request id: a line sent again is recognised without storing anything more. */
+async function chatLineId(userId: string, reqId: string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${userId}:${reqId}`)));
+  return Array.from(d.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 class CommandError extends Error {
   constructor(
     public code: ErrorCode,
@@ -160,6 +166,8 @@ export class TableRoom extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    // Keep-alive pings are answered by the runtime: they neither wake a hibernating room nor wait behind its work.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
     ctx.blockConcurrencyWhile(async () => {
       const [room, hand, chat, tableId, unrecorded] = await Promise.all([
         ctx.storage.get<RoomState>('room'),
@@ -514,17 +522,20 @@ export class TableRoom extends DurableObject<Env> {
         this.send(ws, { t: 'state', state: this.view(a, this.connectedUsers()), cues: [] });
         return;
       case 'chat': {
+        const id = msg.reqId ? await chatLineId(a.userId, msg.reqId) : crypto.randomUUID();
+        // Sent again after its answer was lost: the line is already posted.
+        if (msg.reqId && this.chat.some((l) => l.id === id)) return this.ack(ws, msg.reqId);
         const b = this.buckets.get(a.connId)!;
         const now = Date.now();
         if (now - b.lastChat < 1_000) throw new CommandError('rate_limited', 'slow down');
         b.lastChat = now;
         const isSeated = this.seatIndexOf(a.userId) !== null;
         if (!isSeated && !t.allowSpectators) throw new CommandError('forbidden', 'spectator chat is disabled');
-        const line: ChatMessage = { id: crypto.randomUUID(), userId: a.userId, nickname: a.nickname, text: msg.text, at: now };
+        const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, text: msg.text, at: now };
         this.chat = [...this.chat, line].slice(-CHAT_HISTORY);
         await this.ctx.storage.put('chat', this.chat);
         for (const s of this.sockets()) this.send(s, { t: 'chat', message: line });
-        return;
+        return this.ack(ws, msg.reqId);
       }
       case 'sit':
         if (this.room.recentReqs.includes(msg.reqId)) return this.send(ws, { t: 'ack', reqId: msg.reqId });
@@ -543,11 +554,12 @@ export class TableRoom extends DurableObject<Env> {
         return;
       case 'cancelTopUp': {
         const seat = this.seatedSeat(a.userId);
-        if (seat.topUp?.state !== 'queued') return;
+        // Nothing queued (any more): already cancelled, perhaps by this same request sent before.
+        if (seat.topUp?.state !== 'queued') return this.ack(ws, msg.reqId);
         seat.topUp = null;
         await this.save();
         this.broadcast();
-        return;
+        return this.ack(ws, msg.reqId);
       }
       case 'autoRebuy':
         if (this.room.recentReqs.includes(msg.reqId)) return this.send(ws, { t: 'ack', reqId: msg.reqId });
@@ -559,18 +571,22 @@ export class TableRoom extends DurableObject<Env> {
         return;
       case 'sitOut':
       case 'sitIn': {
+        if (msg.reqId && this.room.recentReqs.includes(msg.reqId)) return this.ack(ws, msg.reqId);
         const i = this.seatIndexOf(a.userId);
         const seat = i === null ? null : this.room.seats[i];
         if (!seat || seat.phase !== 'seated') throw new CommandError('forbidden', 'not seated');
         seat.sittingOut = msg.t === 'sitOut';
         seat.sitOutSince = seat.sittingOut ? Date.now() : null;
         seat.timeouts = 0;
+        if (msg.reqId) this.remember(msg.reqId);
         await this.save();
         this.broadcast();
+        this.ack(ws, msg.reqId);
         await this.afterChange();
         return;
       }
       case 'waitlist': {
+        if (msg.reqId && this.room.recentReqs.includes(msg.reqId)) return this.ack(ws, msg.reqId);
         const w = this.room.waitlist.filter((x) => x.userId !== a.userId);
         if (msg.join) {
           if (this.seatIndexOf(a.userId) !== null) throw new CommandError('already_seated', 'already seated');
@@ -580,18 +596,24 @@ export class TableRoom extends DurableObject<Env> {
           w.push({ userId: a.userId, nickname: a.nickname, codeHash: this.mayEnter(a.userId, a.codeHash) ? a.codeHash : kept });
         }
         this.room.waitlist = w;
+        if (msg.reqId) this.remember(msg.reqId);
         await this.save();
         this.broadcast();
-        return;
+        return this.ack(ws, msg.reqId);
       }
       case 'action':
-        await this.action(a.userId, msg);
+        await this.action(ws, a.userId, msg);
         return;
     }
   }
 
   private remember(reqId: string) {
     this.room.recentReqs = [...this.room.recentReqs, reqId].slice(-200);
+  }
+
+  /** Answers a command that carried an id (older clients send some without one). */
+  private ack(ws: WebSocket, reqId: string | undefined) {
+    if (reqId) this.send(ws, { t: 'ack', reqId });
   }
 
   /** Seat checks shared by `sit` and quick play's `seatCheck`: the table takes entries and this seat is free. */
@@ -912,11 +934,14 @@ export class TableRoom extends DurableObject<Env> {
     }
   }
 
-  private async action(userId: string, msg: Extract<ClientMessage, { t: 'action' }>) {
+  private async action(ws: WebSocket, userId: string, msg: Extract<ClientMessage, { t: 'action' }>) {
     const h = this.hand;
+    // Sent again because its answer was lost: it already counted, so only the answer is repeated.
+    if (h && h.handId === msg.handId && h.hasApplied(msg.intentId)) return this.ack(ws, msg.intentId);
     if (!h || h.isSettled || h.handId !== msg.handId) throw new CommandError('conflict', 'no such hand in progress');
     if (msg.seq !== h.version) throw new CommandError('stale_version', 'table state changed; refresh and retry');
     await this.applyAction(userId, { type: msg.type, amount: msg.amount }, msg.intentId);
+    this.ack(ws, msg.intentId);
   }
 
   private async applyAction(userId: string, req: { type: Extract<ClientMessage, { t: 'action' }>['type']; amount?: number }, intentId: string) {

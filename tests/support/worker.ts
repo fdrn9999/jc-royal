@@ -39,6 +39,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-invite-priv', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'invite-42' },
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-restart-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-stats-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  // Delivery: commands whose answer a closed connection lost, sent again on the next one.
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-link-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Quick play: each group has a big blind no other table uses, so a filter on it sees only that group.
   { id: 'it-qp-a-beg', maxSeats: 6, sb: 13, bb: 26, min: 260, max: 2600, beginner: true },
   { id: 'it-qp-a-reg', maxSeats: 6, sb: 13, bb: 26, min: 260, max: 2600 },

@@ -400,6 +400,11 @@ export class HandEngine {
     return this.meta.seats.reduce((a, s) => a + s.stack, 0);
   }
 
+  /** Whether an action with this intent id was applied (of the last 500 kept). */
+  hasApplied(intentId: string): boolean {
+    return this.meta.appliedIntents.includes(intentId);
+  }
+
   // ---------------------------------------------------------------- commands
 
   async act(playerId: string, req: ActionRequest, intentId: string, now: number): Promise<ActResult> {

@@ -1,4 +1,4 @@
-import type { TableView } from '@jc/types';
+import type { ServerMessage, TableView } from '@jc/types';
 import http from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newUser } from '../support/client';
@@ -143,12 +143,19 @@ describe('table room over WebSocket (real workerd + Durable Objects)', () => {
     // forged amount (raise beyond stack)
     const big = await actor.ws.act('raise', 999_999);
     expect(big.result).toMatchObject({ t: 'error', code: 'illegal_action' });
-    // valid action, then replay the identical message
+    // valid action (acknowledged), then replay the identical message: answered again, applied once
     const ok = await actor.ws.act('call');
     expect(ok.result.t).toBe('state');
-    const pDup = actor.ws.waitNext((m) => m.t === 'error' && m.reqId === ok.intentId);
+    await actor.ws.wait((m) => m.t === 'ack' && m.reqId === ok.intentId);
+    const before = actor.ws.state!;
+    const pDup = actor.ws.waitNext((m) => (m.t === 'ack' || m.t === 'error') && m.reqId === ok.intentId);
     actor.ws.send({ t: 'action', intentId: ok.intentId, handId: ok.handId, seq: ok.seq, type: 'call' });
-    expect(await pDup).toMatchObject({ t: 'error' });
+    expect(await pDup).toMatchObject({ t: 'ack' });
+    const sync = actor.ws.waitNext((m) => m.t === 'state');
+    actor.ws.send({ t: 'sync' });
+    const after = ((await sync) as Extract<ServerMessage, { t: 'state' }>).state;
+    expect(after.hand!.seq).toBe(before.hand!.seq);
+    expect(after.seats.map((s) => s.stack)).toEqual(before.seats.map((s) => s.stack));
     // Malformed payloads are rejected by schema validation.
     const pBad = actor.ws.waitNext((m) => m.t === 'error' && m.code === 'bad_request');
     actor.ws.send({ t: 'action', type: 'call', amount: -5 });
