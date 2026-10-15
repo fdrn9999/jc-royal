@@ -1,12 +1,12 @@
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat } from '@jc/ui';
-import { ageOn, isoDate } from '@jc/types';
+import { academyItemName, ageOn, isoDate, type AcademyItemKind } from '@jc/types';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useT } from '../i18n';
-import { ApiError, useAdmin, useData } from '../lib';
+import { academyKindLabel, actionLabel, auditActionLabel, handRankLabel, ledgerTypeLabel, memoLabel, roleLabel, scopeLabel, stageLabel, targetTypeLabel, userStatusLabel } from '../labels';
+import { ApiError, errText, useAdmin, useData } from '../lib';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
-const errMsg = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e));
 const newKey = () => crypto.randomUUID().replace(/-/g, '').slice(0, 24);
 
 type Locale = 'ko' | 'en';
@@ -108,7 +108,7 @@ export function UsersPage() {
       downloadCsv(r.filename, r.csv);
       setMsg(t('exported', { n: r.count }));
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errMsg(e));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errText(e, t));
     } finally {
       setExporting(false);
     }
@@ -123,7 +123,7 @@ export function UsersPage() {
           <option value="ko">{t('langKo')}</option>
           <option value="en">{t('langEn')}</option>
         </select>
-        <Button type="submit" variant="subtle">⌕</Button>
+        <Button type="submit" variant="subtle">{t('searchBtn')}</Button>
       </form>
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-ink-900/60 px-3 py-2" data-testid="export-bar">
         <span className="text-sm font-semibold" aria-live="polite">{t('selectedN', { n: selected.size })}</span>
@@ -151,7 +151,7 @@ export function UsersPage() {
               disabled={shown.length === 0}
               data-testid="select-all"
             />,
-            'nickname', t('email'), t('language'), t('role'), t('status'), t('balance'), t('createdAt'), '',
+            t('nickname'), t('email'), t('language'), t('role'), t('status'), t('balance'), t('createdAt'), '',
           ]}
         >
           {data?.map((u) => (
@@ -162,8 +162,8 @@ export function UsersPage() {
               <td className="px-2 py-2 font-semibold">{u.nickname}</td>
               <td className="px-2 py-2 text-ink-300">{u.email}</td>
               <td className="px-2 py-2"><LangBadge locale={u.locale} /></td>
-              <td className="px-2 py-2"><Badge tone={u.role === 'user' ? 'neutral' : 'gold'}>{u.role}</Badge></td>
-              <td className="px-2 py-2"><Badge tone={u.status === 'active' ? 'green' : 'red'}>{u.status}</Badge></td>
+              <td className="px-2 py-2"><Badge tone={u.role === 'user' ? 'neutral' : 'gold'}>{roleLabel(t, u.role)}</Badge></td>
+              <td className="px-2 py-2"><Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge></td>
               <td className="px-2 py-2 font-mono">{formatChips(u.balance)}</td>
               <td className="px-2 py-2 text-xs text-ink-400">{formatDate(u.createdAt, locale)}</td>
               <td className="px-2 py-2"><Link to={`/users/${u.id}`} className="text-gold-300">{t('detail')}</Link></td>
@@ -218,7 +218,7 @@ export function UserDetailPage() {
       setMsg(t('saved'));
       await reload();
     } catch (e) {
-      setMsg(errMsg(e));
+      setMsg(errText(e, t));
     }
   };
   const issueReset = async () => {
@@ -227,26 +227,26 @@ export function UserDetailPage() {
     try {
       setReset(await api<ResetLink>(`/api/admin/users/${id}/reset-link`, { body: {} }));
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errMsg(e));
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setMsg(errText(e, t));
     }
   };
   if (error) return <Empty>{error}</Empty>;
-  if (!data) return <Empty>…</Empty>;
+  if (!data) return <Empty>{t('loading')}</Empty>;
   const u = data.user;
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-extrabold">{u.nickname}</h1>
-        <Badge tone={u.status === 'active' ? 'green' : 'red'}>{u.status}</Badge>
-        <Badge tone="gold">{u.role}</Badge>
-        {!data.ledgerConsistent && <Badge tone="red">ledger mismatch</Badge>}
+        <Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge>
+        <Badge tone="gold">{roleLabel(t, u.role)}</Badge>
+        {!data.ledgerConsistent && <Badge tone="red">{t('ledgerMismatch')}</Badge>}
         <Link to={`/reports?status=all&userId=${u.id}`} className="ml-auto text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
       </div>
       {msg && <p className="break-all rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-gold-300" role="status">{msg}</p>}
       {reset && <ResetLinkResult reset={reset} />}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label={t('balance')} value={formatChips(u.balance)} />
-        <Stat label="hands" value={formatChips(data.hands.n)} sub={`net ${formatChips(data.hands.net)}`} />
+        <Stat label={t('handsPlayed')} value={formatChips(data.hands.n)} sub={t('netN', { n: formatChips(data.hands.net) })} />
         <Stat label={t('openSeats')} value={data.openSeats.length} />
         <Stat label={t('createdAt')} value={<span className="text-sm">{formatDate(u.createdAt, locale)}</span>} sub={u.email} />
       </div>
@@ -293,7 +293,7 @@ export function UserDetailPage() {
               <div className="flex flex-wrap gap-2">
                 <span className="self-center text-sm text-ink-300">{t('setRole')}:</span>
                 {(['user', 'admin', 'super_admin'] as const).map((r) => (
-                  <Button key={r} size="sm" variant={u.role === r ? 'gold' : 'outline'} disabled={u.role === r} onClick={() => run(() => api(`/api/admin/users/${id}/role`, { body: { role: r } }))}>{r}</Button>
+                  <Button key={r} size="sm" variant={u.role === r ? 'gold' : 'outline'} disabled={u.role === r} onClick={() => run(() => api(`/api/admin/users/${id}/role`, { body: { role: r } }))}>{roleLabel(t, r)}</Button>
                 ))}
               </div>
             )}
@@ -301,14 +301,14 @@ export function UserDetailPage() {
         </Panel>
       </div>
       <Panel title={t('ledger')}>
-        <Table head={[t('time'), 'type', t('amount'), t('balance'), t('memo')]}>
+        <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (
             <tr key={l.id}>
               <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</td>
-              <td className="px-2 py-1.5">{l.type}</td>
+              <td className="px-2 py-1.5">{ledgerTypeLabel(t, l.type)}</td>
               <td className={`px-2 py-1.5 font-mono ${l.amount >= 0 ? 'text-success' : ''}`}>{l.amount > 0 ? '+' : ''}{formatChips(l.amount)}</td>
               <td className="px-2 py-1.5 font-mono">{formatChips(l.balanceAfter)}</td>
-              <td className="px-2 py-1.5 text-xs text-ink-300">{l.memo}</td>
+              <td className="px-2 py-1.5 text-xs text-ink-300">{memoLabel(t, l.memo)}</td>
             </tr>
           ))}
         </Table>
@@ -365,7 +365,7 @@ export function TablesPage() {
       setMsg(t('saved'));
       await reload();
     } catch (x) {
-      setMsg(errMsg(x));
+      setMsg(errText(x, t));
     }
   }
   const num = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: Number(e.target.value) || 0 });
@@ -377,7 +377,7 @@ export function TablesPage() {
       </div>
       {msg && <p className="text-sm text-gold-300">{msg}</p>}
       <Panel>
-        <Table head={[t('name'), t('status'), t('maxSeats'), t('blinds'), t('buyin'), 'live', 'hands', '']}>
+        <Table head={[t('name'), t('status'), t('maxSeats'), t('blinds'), t('buyin'), t('colLive'), t('colHands'), '']}>
           {data?.map((tb) => (
             <tr key={tb.id}>
               <td className="px-2 py-2 font-semibold">
@@ -388,7 +388,7 @@ export function TablesPage() {
               <td className="px-2 py-2">{tb.maxSeats}</td>
               <td className="px-2 py-2 font-mono">{tb.smallBlind}/{tb.bigBlind}</td>
               <td className="px-2 py-2 font-mono">{formatChips(tb.minBuyIn, true)}–{formatChips(tb.maxBuyIn, true)}</td>
-              <td className="px-2 py-2 text-xs">{tb.liveSeated} seated · {tb.liveConnections} ws {tb.livePlaying && <Badge tone="green">play</Badge>}</td>
+              <td className="px-2 py-2 text-xs">{t('seatedWs', { seated: tb.liveSeated, ws: tb.liveConnections })} {tb.livePlaying && <Badge tone="green">{t('inHand')}</Badge>}</td>
               <td className="px-2 py-2">{tb.handsPlayed}</td>
               <td className="px-2 py-2"><Link to={`/tables/${tb.id}`} className="text-gold-300">{t('detail')}</Link></td>
             </tr>
@@ -404,10 +404,10 @@ export function TablesPage() {
             </select>
           )}</Field>
           <Field label={t('turnSeconds')}>{(id) => <Input id={id} inputMode="numeric" value={f.turnSeconds} onChange={num('turnSeconds')} />}</Field>
-          <Field label="SB">{(id) => <Input id={id} inputMode="numeric" value={f.smallBlind} onChange={num('smallBlind')} />}</Field>
-          <Field label="BB">{(id) => <Input id={id} inputMode="numeric" value={f.bigBlind} onChange={num('bigBlind')} />}</Field>
-          <Field label={`${t('buyin')} min`}>{(id) => <Input id={id} inputMode="numeric" value={f.minBuyIn} onChange={num('minBuyIn')} />}</Field>
-          <Field label={`${t('buyin')} max`}>{(id) => <Input id={id} inputMode="numeric" value={f.maxBuyIn} onChange={num('maxBuyIn')} />}</Field>
+          <Field label={t('smallBlind')}>{(id) => <Input id={id} inputMode="numeric" value={f.smallBlind} onChange={num('smallBlind')} />}</Field>
+          <Field label={t('bigBlind')}>{(id) => <Input id={id} inputMode="numeric" value={f.bigBlind} onChange={num('bigBlind')} />}</Field>
+          <Field label={t('minBuyIn')}>{(id) => <Input id={id} inputMode="numeric" value={f.minBuyIn} onChange={num('minBuyIn')} />}</Field>
+          <Field label={t('maxBuyIn')}>{(id) => <Input id={id} inputMode="numeric" value={f.maxBuyIn} onChange={num('maxBuyIn')} />}</Field>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.allowSpectators} onChange={(e) => setF({ ...f, allowSpectators: e.target.checked })} /> {t('spectators')}</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.beginner} onChange={(e) => setF({ ...f, beginner: e.target.checked })} data-testid="table-beginner" /> {t('beginnerTable')}</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.isPrivate} onChange={(e) => setF({ ...f, isPrivate: e.target.checked })} /> {t('private')}</label>
@@ -433,10 +433,10 @@ export function TableDetailPage() {
       setMsg(t('saved'));
       await reload();
     } catch (e) {
-      setMsg(errMsg(e));
+      setMsg(errText(e, t));
     }
   };
-  if (!data) return <Empty>…</Empty>;
+  if (!data) return <Empty>{t('loading')}</Empty>;
   const tb = data.table;
   const live = data.live as { seats?: ({ seatIndex: number; nickname: string; stack: number; connected: boolean; sittingOut: boolean } | null)[]; handNumber?: number; handInProgress?: boolean; stage?: string | null; connections?: number; chipsOnTable?: number } | null;
   return (
@@ -444,27 +444,27 @@ export function TableDetailPage() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-extrabold">{tb.name}</h1>
         <Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>
-        {tb.lastIssue && <Badge tone="red">{tb.lastIssue}</Badge>}
+        {tb.lastIssue && <Badge tone="red">{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></Badge>}
       </div>
       {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('live')}>
           {!live ? <Empty>—</Empty> : (
             <div className="flex flex-col gap-2 text-sm">
-              <div>hand #{live.handNumber} · {live.handInProgress ? live.stage : 'idle'} · ws {live.connections} · chips on table {formatChips(live.chipsOnTable ?? 0)}</div>
+              <div>{t('liveLine', { n: live.handNumber ?? 0, state: live.handInProgress ? stageLabel(t, live.stage) : t('idleState'), ws: live.connections ?? 0, chips: formatChips(live.chipsOnTable ?? 0) })}</div>
               <ul className="divide-y divide-white/5">
                 {live.seats?.map((s, i) => s && (
-                  <li key={i} className="flex justify-between py-1.5"><span>#{s.seatIndex + 1} {s.nickname} {!s.connected && <Badge>offline</Badge>} {s.sittingOut && <Badge>sit-out</Badge>}</span><span className="font-mono">{formatChips(s.stack)}</span></li>
+                  <li key={i} className="flex justify-between py-1.5"><span>#{s.seatIndex + 1} {s.nickname} {!s.connected && <Badge>{t('offline')}</Badge>} {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}</span><span className="font-mono">{formatChips(s.stack)}</span></li>
                 ))}
               </ul>
-              <p className="text-xs text-ink-400">Hole cards of hands in progress are never shown here.</p>
+              <p className="text-xs text-ink-400">{t('holeCardsHidden')}</p>
             </div>
           )}
         </Panel>
         <Panel title={t('blinds')}>
           <form className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: edit })); }}>
             {(['smallBlind', 'bigBlind', 'minBuyIn', 'maxBuyIn'] as const).map((k) => (
-              <Field key={k} label={k}>{(fid) => <Input id={fid} inputMode="numeric" defaultValue={tb[k]} onChange={(e) => setEdit({ ...edit, [k]: Number(e.target.value) || undefined })} />}</Field>
+              <Field key={k} label={t(k)}>{(fid) => <Input id={fid} inputMode="numeric" defaultValue={tb[k]} onChange={(e) => setEdit({ ...edit, [k]: Number(e.target.value) || undefined })} />}</Field>
             ))}
             <p className="col-span-2 text-xs text-ink-400">{t('appliesNextHand')}</p>
             <div className="col-span-2 flex flex-wrap gap-2">
@@ -494,7 +494,7 @@ export function HandsPage() {
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-extrabold">{t('hands')}</h1>
       <Panel>
-        <Table head={[t('time'), 'table', '#', 'board', 'pot', '']}>
+        <Table head={[t('time'), t('colTable'), '#', t('colBoard'), t('colPot'), '']}>
           {data?.map((h) => (
             <tr key={h.id}>
               <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(h.endedAt, locale)}</td>
@@ -514,7 +514,7 @@ export function HandsPage() {
 interface HandAudit {
   hand: { id: string; tableId: string; handNumber: number; endedAt: number; board: string[]; potTotal: number; engineVersion: string };
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
-  players: { userId: string; nickname: string; seatIndex: number; holeCards: string[]; stackStart: number; stackEnd: number; net: number; won: number; rankClass: string | null; wentToShowdown: boolean }[];
+  players: { userId: string; nickname: string; seatIndex: number; holeCards: string[]; stackStart: number; stackEnd: number; net: number; won: number; rankClass: string | null; bestFive: string[] | null; wentToShowdown: boolean }[];
   settlementBalanced: boolean;
 }
 
@@ -523,32 +523,32 @@ export function HandDetailPage() {
   const { t, locale } = useT();
   const { data, error } = useData<HandAudit>(`/api/admin/hands/${encodeURIComponent(id)}`);
   if (error) return <Empty>{error}</Empty>;
-  if (!data) return <Empty>…</Empty>;
+  if (!data) return <Empty>{t('loading')}</Empty>;
   const nick = (s: number) => data.players.find((p) => p.seatIndex === s)?.nickname ?? `#${s + 1}`;
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-extrabold">Hand #{data.hand.handNumber} <span className="text-sm text-ink-400">{data.hand.tableId} · {formatDate(data.hand.endedAt, locale)}</span></h1>
+      <h1 className="text-xl font-extrabold">{t('handN', { n: data.hand.handNumber })} <span className="text-sm text-ink-400">{data.hand.tableId} · {formatDate(data.hand.endedAt, locale)}</span></h1>
       <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-[#f3b0b2]">{t('sensitive')}</p>
-      <Panel title="board" actions={<Badge tone={data.settlementBalanced ? 'green' : 'red'}>{data.settlementBalanced ? 'settlement balanced' : 'IMBALANCE'}</Badge>}>
+      <Panel title={t('boardTitle')} actions={<Badge tone={data.settlementBalanced ? 'green' : 'red'}>{data.settlementBalanced ? t('settlementOk') : t('settlementBad')}</Badge>}>
         <div className="flex gap-1">{data.hand.board.map((c) => <PlayingCard key={c} card={c as Card} size="2.6rem" />)}</div>
-        <p className="mt-2 text-xs text-ink-400">pot {formatChips(data.hand.potTotal)} · engine {data.hand.engineVersion}</p>
+        <p className="mt-2 text-xs text-ink-400">{t('potEngine', { pot: formatChips(data.hand.potTotal), v: data.hand.engineVersion })}</p>
       </Panel>
       <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title="players">
+        <Panel title={t('playersTitle')}>
           <ul className="divide-y divide-white/5 text-sm">
             {data.players.map((p) => (
               <li key={p.userId} className="flex items-center gap-2 py-2">
                 <span className="w-6 text-xs text-ink-400">#{p.seatIndex + 1}</span>
                 <span className="flex gap-0.5">{p.holeCards.map((c) => <PlayingCard key={c} card={c as Card} size="1.6rem" />)}</span>
                 <Link to={`/users/${p.userId}`} className="flex-1 truncate text-gold-300">{p.nickname}</Link>
-                <span className="text-xs text-ink-300">{p.rankClass}</span>
+                <span className="text-xs text-ink-300">{handRankLabel(t, p.rankClass, p.bestFive)}</span>
                 <span className="font-mono">{p.net > 0 ? '+' : ''}{formatChips(p.net)}</span>
               </li>
             ))}
           </ul>
         </Panel>
-        <Panel title="actions">
-          <ol className="text-sm">{data.actions.map((a, i) => <li key={i} className="flex gap-2"><span className="w-16 text-xs text-ink-400">{a.stage}</span><span className="flex-1">{nick(a.seatIndex)}</span><span>{a.type}</span><span className="w-14 text-right font-mono">{a.amount || ''}</span></li>)}</ol>
+        <Panel title={t('actionsTitle')}>
+          <ol className="text-sm">{data.actions.map((a, i) => <li key={i} className="flex gap-2"><span className="w-16 text-xs text-ink-400">{stageLabel(t, a.stage)}</span><span className="flex-1">{nick(a.seatIndex)}</span><span>{actionLabel(t, a.type)}</span><span className="w-14 text-right font-mono">{a.amount || ''}</span></li>)}</ol>
         </Panel>
       </div>
     </div>
@@ -563,16 +563,16 @@ export function LedgerPage() {
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-extrabold">{t('ledger')}</h1>
       <Panel>
-        <Table head={[t('time'), 'user', 'type', t('amount'), t('balance'), 'table', t('memo')]}>
+        <Table head={[t('time'), t('colUser'), t('colKind'), t('amount'), t('balance'), t('colTable'), t('memo')]}>
           {data?.map((l) => (
             <tr key={l.id}>
               <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</td>
               <td className="px-2 py-1.5"><Link className="text-gold-300" to={`/users/${l.userId}`}>{l.nickname}</Link></td>
-              <td className="px-2 py-1.5">{l.type}</td>
+              <td className="px-2 py-1.5">{ledgerTypeLabel(t, l.type)}</td>
               <td className={`px-2 py-1.5 font-mono ${l.amount >= 0 ? 'text-success' : ''}`}>{l.amount > 0 ? '+' : ''}{formatChips(l.amount)}</td>
               <td className="px-2 py-1.5 font-mono">{formatChips(l.balanceAfter)}</td>
               <td className="px-2 py-1.5 text-xs">{l.tableId}</td>
-              <td className="px-2 py-1.5 text-xs text-ink-300">{l.memo}</td>
+              <td className="px-2 py-1.5 text-xs text-ink-300">{memoLabel(t, l.memo)}</td>
             </tr>
           ))}
         </Table>
@@ -591,21 +591,21 @@ export function ReconcilePage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-extrabold">{t('reconcile')}</h1>
-        <Button onClick={async () => { const r = await api<{ mismatches: unknown[]; created: number }>('/api/admin/reconcile/run', { body: {} }); setResult(`mismatches ${r.mismatches.length}, new events ${r.created}`); await reload(); }} data-testid="run-reconcile">{t('runReconcile')}</Button>
+        <Button onClick={async () => { const r = await api<{ mismatches: unknown[]; created: number }>('/api/admin/reconcile/run', { body: {} }); setResult(t('reconcileResult', { n: r.mismatches.length, created: r.created })); await reload(); }} data-testid="run-reconcile">{t('runReconcile')}</Button>
       </div>
       {result && <p className="text-sm text-gold-300" role="status">{result}</p>}
       <Panel>
         {data && data.length === 0 ? <Empty>—</Empty> : (
-          <Table head={[t('time'), 'scope', 'subject', 'expected', 'actual', '', '']}>
+          <Table head={[t('time'), t('colScope'), t('colSubject'), t('colExpected'), t('colActual'), t('colDetail'), '']}>
             {data?.map((e) => (
               <tr key={e.id}>
                 <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(e.createdAt, locale)}</td>
-                <td className="px-2 py-1.5">{e.scope}</td>
+                <td className="px-2 py-1.5">{scopeLabel(t, e.scope)}</td>
                 <td className="px-2 py-1.5 font-mono text-xs">{e.subjectId}</td>
                 <td className="px-2 py-1.5 font-mono">{e.expected}</td>
                 <td className="px-2 py-1.5 font-mono">{e.actual}</td>
                 <td className="px-2 py-1.5 text-xs text-ink-300">{e.detail}</td>
-                <td className="px-2 py-1.5">{e.resolvedAt ? <Badge tone="green">resolved</Badge> : (
+                <td className="px-2 py-1.5">{e.resolvedAt ? <Badge tone="green">{t('resolvedBadge')}</Badge> : (
                   <span className="flex gap-1"><Input className="h-8 w-40" placeholder={t('note')} value={note} onChange={(x) => setNote(x.target.value)} /><Button size="sm" disabled={note.trim().length < 2} onClick={async () => { await api(`/api/admin/reconcile/${e.id}/resolve`, { body: { note } }); setNote(''); await reload(); }}>{t('resolve')}</Button></span>
                 )}</td>
               </tr>
@@ -624,13 +624,13 @@ export function AuditPage() {
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-extrabold">{t('audit')}</h1>
       <Panel>
-        <Table head={[t('time'), t('actor'), t('action'), t('target'), 'detail', 'ip']}>
+        <Table head={[t('time'), t('actor'), t('action'), t('target'), t('colDetail'), t('colIp')]}>
           {data?.map((a) => (
             <tr key={a.id}>
               <td className="px-2 py-1.5 text-xs text-ink-400">{formatDate(a.createdAt, locale)}</td>
               <td className="px-2 py-1.5">{a.actor ?? '—'}</td>
-              <td className="px-2 py-1.5 font-mono text-xs">{a.action}</td>
-              <td className="px-2 py-1.5 text-xs">{a.targetType} {a.targetId}</td>
+              <td className="px-2 py-1.5 text-xs"><span className="block">{auditActionLabel(t, a.action)}</span><span className="font-mono text-[10px] text-ink-400">{a.action}</span></td>
+              <td className="px-2 py-1.5 text-xs">{targetTypeLabel(t, a.targetType)} <span className="font-mono">{a.targetId}</span></td>
               <td className="max-w-[18rem] truncate px-2 py-1.5 font-mono text-[11px] text-ink-300">{a.detail ? JSON.stringify(a.detail) : ''}</td>
               <td className="px-2 py-1.5 text-xs">{a.ip}</td>
             </tr>
@@ -642,6 +642,19 @@ export function AuditPage() {
 }
 
 // ------------------------------------------------------------------ academy (anonymous aggregates)
+/** The item's name in the console's language, with the tracked id underneath (an unnamed id is shown as it is). */
+function AcademyItem({ kind, id }: { kind: AcademyItemKind; id: string }) {
+  const { locale } = useT();
+  const name = academyItemName(kind, id, locale);
+  if (!name) return <span className="font-mono text-xs">{id}</span>;
+  return (
+    <>
+      <span className="block">{name}</span>
+      <span className="font-mono text-[10px] text-ink-400">{id}</span>
+    </>
+  );
+}
+
 export function AcademyStatsPage() {
   const { t } = useT();
   const { data } = useData<{ kind: 'lesson' | 'question' | 'scenario'; itemId: string; starts: number; completes: number; correct: number; wrong: number }[]>('/api/admin/academy/stats');
@@ -654,11 +667,11 @@ export function AcademyStatsPage() {
       <p className="text-xs text-ink-400">{t('academyNote')}</p>
       <Panel title={t('lessonsFunnel')}>
         {funnel.length === 0 ? <Empty>—</Empty> : (
-          <Table head={['kind', 'id', t('starts'), t('completes'), t('dropRate')]}>
+          <Table head={[t('colKind'), t('colItem'), t('starts'), t('completes'), t('dropRate')]}>
             {funnel.map((r) => (
               <tr key={`${r.kind}:${r.itemId}`}>
-                <td className="px-2 py-1.5 text-xs text-ink-400">{r.kind}</td>
-                <td className="px-2 py-1.5 font-mono text-xs">{r.itemId}</td>
+                <td className="px-2 py-1.5 text-xs text-ink-400">{academyKindLabel(t, r.kind)}</td>
+                <td className="px-2 py-1.5"><AcademyItem kind={r.kind} id={r.itemId} /></td>
                 <td className="px-2 py-1.5 font-mono">{r.starts}</td>
                 <td className="px-2 py-1.5 font-mono">{r.completes}</td>
                 <td className="px-2 py-1.5 font-mono">{pct(Math.max(0, r.starts - r.completes), r.starts)}</td>
@@ -669,10 +682,10 @@ export function AcademyStatsPage() {
       </Panel>
       <Panel title={t('questionsHard')}>
         {hard.length === 0 ? <Empty>—</Empty> : (
-          <Table head={['id', t('correctN'), t('wrongN'), t('wrongRate')]}>
+          <Table head={[t('colItem'), t('correctN'), t('wrongN'), t('wrongRate')]}>
             {hard.map((r) => (
-              <tr key={r.itemId}>
-                <td className="px-2 py-1.5 font-mono text-xs">{r.itemId}</td>
+              <tr key={`${r.kind}:${r.itemId}`}>
+                <td className="px-2 py-1.5"><AcademyItem kind={r.kind} id={r.itemId} /></td>
                 <td className="px-2 py-1.5 font-mono">{r.correct}</td>
                 <td className="px-2 py-1.5 font-mono">{r.wrong}</td>
                 <td className="px-2 py-1.5 font-mono">{pct(r.wrong, r.correct + r.wrong)}</td>

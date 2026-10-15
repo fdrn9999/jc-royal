@@ -346,7 +346,7 @@ function BusyTables({ d }: { d: Live }) {
             <tr key={tb.id} data-testid="busy-table">
               <td className="px-2 py-2">
                 <Link className="font-semibold text-gold-300" to={`/tables/${tb.id}`}>{tb.name}</Link>
-                {tb.lastIssue && <div className="mt-0.5 max-w-[22rem] truncate text-[11px] text-[#f0a0a2]" title={tb.lastIssue}>{tb.lastIssue}</div>}
+                {tb.lastIssue && <div className="mt-0.5 max-w-[22rem] truncate text-[11px] text-[#f0a0a2]" title={tb.lastIssue}>{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></div>}
               </td>
               <td className="px-2 py-2">
                 <div className="flex flex-wrap gap-1">

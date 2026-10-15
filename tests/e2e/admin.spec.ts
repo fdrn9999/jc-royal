@@ -111,7 +111,7 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await expect(item).toHaveCount(0);
   await page.getByTestId('report-status').selectOption('resolved');
   await expect(item).toContainText('광고 글 숨김');
-  await expect(item).toContainText('hidden');
+  await expect(item).toContainText('숨김');
   await member.page.goto(`/board/${postId}`);
   await expect(member.page.getByTestId('post-title')).toHaveCount(0);
   // Member detail links to the reports about that member.

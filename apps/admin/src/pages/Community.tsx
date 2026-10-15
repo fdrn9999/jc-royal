@@ -1,10 +1,10 @@
 import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel } from '@jc/ui';
 import { useState, type FormEvent } from 'react';
 import { useT } from '../i18n';
-import { ApiError, useAdmin, useData } from '../lib';
+import { categoryLabel, contentStatusLabel } from '../labels';
+import { errText, useAdmin, useData } from '../lib';
 import { LangBadge } from './Console';
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
 
 interface AdminPost {
   id: string;
@@ -31,7 +31,7 @@ export function BoardAdminPage() {
       setMsg(t('saved'));
       await reload();
     } catch (e) {
-      setMsg(errMsg(e));
+      setMsg(errText(e, t));
     }
   };
   async function openNotice(id?: string) {
@@ -45,10 +45,10 @@ export function BoardAdminPage() {
         <h1 className="text-xl font-extrabold">{t('board')}</h1>
         <div className="flex gap-2">
           <select value={filter} onChange={(e) => setFilter(e.target.value)} className="h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm" aria-label={t('status')}>
-            <option value="">all</option>
-            <option value="visible">visible</option>
-            <option value="hidden">hidden</option>
-            <option value="deleted">deleted</option>
+            <option value="">{t('statusAll')}</option>
+            <option value="visible">{t('contentVisible')}</option>
+            <option value="hidden">{t('contentHidden')}</option>
+            <option value="deleted">{t('contentDeleted')}</option>
           </select>
           <Button onClick={() => openNotice()} data-testid="new-notice">{t('newNotice')}</Button>
         </div>
@@ -62,7 +62,7 @@ export function BoardAdminPage() {
                 {p.isNotice && <Badge tone="gold">📌</Badge>}
                 <span className={`min-w-0 flex-1 truncate ${p.isNotice ? 'font-extrabold text-gold-300' : ''}`}>{p.title}</span>
                 <span className="text-xs text-ink-400">{p.author.withdrawn ? `${t('withdrawnAuthor')} (${p.author.id.slice(0, 8)})` : p.author.nickname} ·{formatDate(p.createdAt, locale)} · 💬{p.commentCount} · ♠{p.handCount}</span>
-                <Badge tone={p.status === 'visible' ? 'green' : 'red'}>{p.status}</Badge>
+                <Badge tone={p.status === 'visible' ? 'green' : 'red'}>{contentStatusLabel(t, p.status)}</Badge>
                 {p.isNotice && <Button size="sm" variant="subtle" onClick={() => openNotice(p.id)}>{t('edit')}</Button>}
                 {p.status !== 'visible' ? (
                   <Button size="sm" variant="outline" onClick={() => act(() => api(`/api/admin/board/posts/${p.id}/status`, { body: { status: 'visible' } }))}>{t('restore')}</Button>
@@ -140,7 +140,7 @@ export function MessagesAdminPage() {
       setBody('');
       await history.reload();
     } catch (e) {
-      setMsg(errMsg(e));
+      setMsg(errText(e, t));
     }
   }
   return (
@@ -151,7 +151,7 @@ export function MessagesAdminPage() {
         <Panel title={t('recipients')}>
           <form className="mb-3 flex gap-2" onSubmit={search}>
             <Input placeholder={t('search')} value={q} onChange={(e) => setQ(e.target.value)} />
-            <Button type="submit" variant="subtle">⌕</Button>
+            <Button type="submit" variant="subtle">{t('searchBtn')}</Button>
           </form>
           <ul className="max-h-64 divide-y divide-white/5 overflow-y-auto text-sm">
             {results.map((u) => (
@@ -178,10 +178,10 @@ export function MessagesAdminPage() {
             )}
             <Field label={t('category')}>{(id) => (
               <select id={id} value={category} onChange={(e) => setCategory(e.target.value as typeof category)} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3">
-                <option value="notice">notice</option>
-                <option value="event">event</option>
-                <option value="admin">admin</option>
-                <option value="sanction">sanction</option>
+                <option value="notice">{t('catNotice')}</option>
+                <option value="event">{t('catEvent')}</option>
+                <option value="admin">{t('catAdmin')}</option>
+                <option value="sanction">{t('catSanction')}</option>
               </select>
             )}</Field>
             <Field label={t('titleLabel')}>{(id) => <Input id={id} value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />}</Field>
@@ -196,9 +196,9 @@ export function MessagesAdminPage() {
           <ul className="divide-y divide-white/5 text-sm">
             {history.data?.map((b) => (
               <li key={b.batchId} className="flex flex-wrap items-center gap-2 py-2">
-                <Badge>{b.category}</Badge>
+                <Badge>{categoryLabel(t, b.category)}</Badge>
                 <span className="min-w-0 flex-1 truncate">{b.title}</span>
-                <span className="text-xs text-ink-400">{b.sender} · {formatDate(b.createdAt, locale)} · {b.readCount}/{b.recipients} read</span>
+                <span className="text-xs text-ink-400">{b.sender} · {formatDate(b.createdAt, locale)} · {t('readOfN', { read: b.readCount, n: b.recipients })}</span>
               </li>
             ))}
           </ul>

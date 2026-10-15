@@ -3,9 +3,9 @@ import { Badge, Button, Empty, formatDate, Input, Panel } from '@jc/ui';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
-import { ApiError, useAdmin, useData } from '../lib';
+import { contentStatusLabel, userStatusLabel } from '../labels';
+import { errText, useAdmin, useData } from '../lib';
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
 
 const REASON: Record<ReportReason, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
 const TARGET: Record<ReportTarget, Key> = { post: 'targetPost', comment: 'targetComment', player: 'targetPlayer', dm: 'targetDm' };
@@ -91,7 +91,7 @@ function Evidence({ r }: { r: ReportDto }) {
       <p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-ink-100" data-testid="report-content">{ctx.body}</p>
       {r.contentStatus && (
         <div className="text-xs text-ink-400">
-          {t('contentNow')}: <Badge tone={r.contentStatus === 'visible' ? 'green' : 'red'}>{r.contentStatus}</Badge>
+          {t('contentNow')}: <Badge tone={r.contentStatus === 'visible' ? 'green' : 'red'}>{contentStatusLabel(t, r.contentStatus)}</Badge>
         </div>
       )}
     </div>
@@ -111,7 +111,7 @@ function ReportItem({ r, onDone }: { r: ReportDto; onDone: (msg: string) => void
       const res = await api<{ closed: number }>(`/api/admin/reports/${r.id}`, { body: { status, note: note.trim() || undefined, hideContent: canHide && hide && status === 'resolved' ? true : undefined } });
       onDone(t('reportsClosed', { n: res.closed }));
     } catch (e) {
-      onDone(errMsg(e));
+      onDone(errText(e, t));
     } finally {
       setBusy(false);
     }
@@ -129,7 +129,7 @@ function ReportItem({ r, onDone }: { r: ReportDto; onDone: (msg: string) => void
           <dt className="text-ink-400">{t('reportedUser')}</dt>
           <dd className="flex items-center gap-1.5">
             <Link to={`/users/${r.target.id}`} className="font-semibold text-gold-300 hover:underline">{r.target.nickname}</Link>
-            {r.target.status !== 'active' && <Badge tone="red">{r.target.status}</Badge>}
+            {r.target.status !== 'active' && <Badge tone="red">{userStatusLabel(t, r.target.status)}</Badge>}
           </dd>
         </div>
         <div className="flex gap-2">

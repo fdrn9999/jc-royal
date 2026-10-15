@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, NavLink, Outlet, RouterProvider } from 'react-router';
 import { setLocale, useT, type Key } from './i18n';
 import './index.css';
+import { roleLabel } from './labels';
 import { AdminProvider, useAdmin } from './lib';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
@@ -58,8 +59,8 @@ function Shell({ children }: { children: ReactNode }) {
           <Logo size={30} />
           <span className="hidden whitespace-nowrap font-display text-sm font-bold tracking-[0.2em] jc-gold-text sm:inline">JC ROYAL</span>
           <span className="rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-bold text-[#f0a0a2]">ADMIN</span>
-          <span className="ml-auto truncate text-xs text-ink-300">{me?.user.nickname} · {me?.user.role}</span>
-          <button className="text-xs text-ink-300" onClick={() => setLocale(locale === 'ko' ? 'en' : 'ko')}>{locale === 'ko' ? 'EN' : '한국어'}</button>
+          <span className="ml-auto truncate text-xs text-ink-300">{me?.user.nickname} · {roleLabel(t, me?.user.role)}</span>
+          <button className="shrink-0 whitespace-nowrap text-xs text-ink-300" onClick={() => setLocale(locale === 'ko' ? 'en' : 'ko')}>{locale === 'ko' ? 'EN' : '한국어'}</button>
           <Button size="sm" variant="ghost" onClick={logout}>{t('logout')}</Button>
         </div>
         <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2">

@@ -6,8 +6,8 @@
  RUN  v4.1.11 <repo>/apps/web
 
 
- Test Files  8 passed (8)
-      Tests  99 passed (99)
-   Start at  16:09:29
-   Duration  1.18s (transform 1.01s, setup 0ms, import 2.06s, tests 535ms, environment 1ms)
+ Test Files  9 passed (9)
+      Tests  104 passed (104)
+   Start at  16:38:41
+   Duration  2.69s (transform 1.24s, setup 0ms, import 2.79s, tests 2.40s, environment 2ms)
 

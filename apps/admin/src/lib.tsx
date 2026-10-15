@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-
+import { useT, type Key } from './i18n';
+import type { Tr } from './labels';
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -26,6 +27,50 @@ async function rawApi<T>(path: string, init: { method?: string; body?: unknown }
   return data as T;
 }
 
+/** API messages that have their own wording; anything else is named by its error code. */
+const BY_MESSAGE: Record<string, Key> = {
+  'super admin only': 'errSuperOnly',
+  'not an administrator': 'noAccess',
+  'origin not allowed': 'errOrigin',
+  'admin origin required': 'errOrigin',
+  'cannot suspend yourself': 'errSelfSuspend',
+  'cannot change your own role': 'errSelfRole',
+  'use the change-password flow for your own account': 'errSelfReset',
+  'invalid blind / buy-in combination': 'errBlinds',
+  'private tables need a join code': 'errJoinCode',
+  'some recipients do not exist': 'errRecipients',
+  'only posts and comments can be hidden': 'errHideKind',
+  'saved, but the table did not confirm; try again': 'errSavedUnconfirmed',
+  'password is incorrect': 'errPassword',
+};
+const BY_CODE: Record<string, Key> = {
+  forbidden: 'errForbidden',
+  bad_request: 'errBadRequest',
+  insufficient_balance: 'errNegative',
+  room_unavailable: 'errRoom',
+  report_closed: 'errReportClosed',
+  not_found: 'errNotFound',
+  conflict: 'errConflict',
+  invalid_credentials: 'errLogin',
+  unauthorized: 'errLoginRequired',
+  reauth_required: 'errReauth',
+  reauth_cancelled: 'errReauthCancelled',
+  rate_limited: 'errRateLimited',
+  internal: 'errServer',
+};
+
+/** A failed request in the console's language (the API's own messages are English). */
+export function errText(e: unknown, t: Tr): string {
+  if (e instanceof ApiError) {
+    if (/^only a super admin can .+ administrators$/.test(e.message)) return t('errAdminTarget');
+    const k = (Object.hasOwn(BY_MESSAGE, e.message) ? BY_MESSAGE[e.message] : undefined) ?? (Object.hasOwn(BY_CODE, e.code) ? BY_CODE[e.code] : undefined);
+    return k ? t(k) : t('errUnknown', { code: e.code, msg: e.message });
+  }
+  if (e instanceof TypeError) return t('errNetwork');
+  if (e instanceof SyntaxError) return t('errBadResponse');
+  return e instanceof Error ? e.message : String(e);
+}
+
 export interface AdminMe {
   user: { id: string; email: string; nickname: string; role: 'admin' | 'super_admin' | 'user' };
   reauthValidUntil: number | null;
@@ -45,9 +90,10 @@ interface AdminCtx {
 const Ctx = createContext<AdminCtx | null>(null);
 
 export function AdminProvider({ children }: { children: ReactNode }) {
+  const { t } = useT();
   const [me, setMe] = useState<AdminMe | null>(null);
   const [loading, setLoading] = useState(true);
-  const [prompt, setPrompt] = useState<{ open: boolean; error: string | null }>({ open: false, error: null });
+  const [prompt, setPrompt] = useState<{ open: boolean; error: unknown }>({ open: false, error: null });
   const waiter = useRef<{ resolve: () => void; reject: (e: unknown) => void } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -90,7 +136,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const reauthPrompt = useMemo(
     () => ({
-      ...prompt,
+      open: prompt.open,
+      error: prompt.error == null ? null : errText(prompt.error, t),
       confirm: async (password: string) => {
         try {
           await rawApi('/api/admin/auth/reauth', { body: { password } });
@@ -98,7 +145,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           waiter.current?.resolve();
           void refresh();
         } catch (e) {
-          setPrompt({ open: true, error: e instanceof Error ? e.message : String(e) });
+          setPrompt({ open: true, error: e });
         }
       },
       cancel: () => {
@@ -106,7 +153,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         waiter.current?.reject(new ApiError(401, 'reauth_cancelled', 'cancelled'));
       },
     }),
-    [prompt, refresh],
+    [prompt, refresh, t],
   );
 
   const logout = useCallback(async () => {
@@ -127,19 +174,21 @@ export { rawApi };
 
 export function useData<T>(path: string | null) {
   const { api } = useAdmin();
+  const { t } = useT();
   const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const reload = useCallback(async () => {
     if (!path) return;
     try {
       setData(await api<T>(path));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e);
     }
   }, [api, path]);
   useEffect(() => {
     void reload();
   }, [reload]);
-  return { data, error, reload, setData };
+  // Worded at render time, so it follows a language switch.
+  return { data, error: error == null ? null : errText(error, t), reload, setData };
 }
