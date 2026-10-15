@@ -20,6 +20,7 @@ import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
 import { adminServiceRoutes } from './admin-service';
+import { adminStatsRoutes } from './admin-stats';
 import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
@@ -1038,4 +1039,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes));

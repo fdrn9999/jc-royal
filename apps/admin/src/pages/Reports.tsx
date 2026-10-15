@@ -49,7 +49,7 @@ const NOWRAP = '[&_td]:whitespace-nowrap [&_th]:whitespace-nowrap';
 interface Staff { id: string; nickname: string; role: string }
 
 /** How long something took or has waited: minutes under an hour, hours under two days, then days. */
-function dur(t: Tr, ms: number): string {
+export function dur(t: Tr, ms: number): string {
   if (ms < MIN) return t('durUnderMin');
   if (ms < HOUR) return t('durMin', { n: Math.floor(ms / MIN) });
   if (ms < 48 * HOUR) return t('durHour', { n: Math.floor(ms / HOUR) });

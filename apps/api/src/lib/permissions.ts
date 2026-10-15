@@ -66,6 +66,7 @@ export const FEATURES = [
   'handRecords',
   'ledger',
   'economy',
+  'stats',
   'reconcile',
   'audit',
   'reports',
@@ -131,6 +132,8 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'GET /ledger': r('ledger', 'ledger.view'),
   'GET /audit': r('audit', 'audit.view'),
   'GET /economy': r('economy', 'economy.view'),
+  // Aggregate numbers only; opening the page may roll up days the daily cron has not reached yet.
+  'GET /stats': r('stats', 'stats.view'),
   'POST /reconcile/run': r('reconcile', 'reconcile.run'),
   'GET /reconcile': r('reconcile', 'reconcile.list'),
   'GET /reconcile/:id': r('reconcile', 'reconcile.view', { target: 'reconciliation' }),

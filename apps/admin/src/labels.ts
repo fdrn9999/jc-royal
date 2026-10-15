@@ -165,6 +165,7 @@ export const featureLabel = labeler({
   handRecords: 'featHandRecords',
   ledger: 'ledger',
   economy: 'economy',
+  stats: 'featStats',
   reconcile: 'reconcile',
   audit: 'audit',
   reports: 'reports',

@@ -11,6 +11,7 @@ import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
 import { SecurityPage } from './pages/Security';
 import { ServicePage } from './pages/Service';
+import { StatsPage } from './pages/Stats';
 import { DashboardPage } from './pages/Dashboard';
 import { EconomyPage, ReconcilePage } from './pages/Economy';
 import { AuditPage } from './pages/Audit';
@@ -18,6 +19,7 @@ import { AcademyStatsPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPag
 
 const NAV: [string, Key][] = [
   ['/', 'dashboard'],
+  ['/stats', 'opsStats'],
   ['/users', 'users'],
   ['/tables', 'tables'],
   ['/academy', 'academy'],
@@ -96,6 +98,7 @@ const router = createBrowserRouter([
     element: <Gate />,
     children: [
       { path: '/', element: <DashboardPage /> },
+      { path: '/stats', element: <StatsPage /> },
       { path: '/users', element: <UsersPage /> },
       { path: '/users/:id', element: <UserDetailPage /> },
       { path: '/tables', element: <TablesPage /> },

@@ -33,7 +33,7 @@
 
 ## 권한 매트릭스
 
-- 모든 관리자 API(`/api/admin/*`, 로그인·재확인 `/auth` 제외)는 `apps/api/src/lib/permissions.ts`의 `ROUTE_RULES`에 규칙이 하나씩 있다. 규칙은 기능(23개), 감사 이름, 최소 역할(ADMIN 또는 SUPER_ADMIN), 재확인 여부, 미리보기 지원 여부를 정한다. `requirePermission`이 라우트 실행 전에 적용하고, **규칙이 없는 라우트는 403 `no permission rule for this action`으로 닫힌다**(새 라우트를 만들고 규칙을 빠뜨리면 열리지 않는다). 단위 테스트가 실제 라우트 목록과 표를 맞춰 본다.
+- 모든 관리자 API(`/api/admin/*`, 로그인·재확인 `/auth` 제외)는 `apps/api/src/lib/permissions.ts`의 `ROUTE_RULES`에 규칙이 하나씩 있다. 규칙은 기능(24개), 감사 이름, 최소 역할(ADMIN 또는 SUPER_ADMIN), 재확인 여부, 미리보기 지원 여부를 정한다. `requirePermission`이 라우트 실행 전에 적용하고, **규칙이 없는 라우트는 403 `no permission rule for this action`으로 닫힌다**(새 라우트를 만들고 규칙을 빠뜨리면 열리지 않는다). 단위 테스트가 실제 라우트 목록과 표를 맞춰 본다.
 - 요청 내용에 따라 달라지는 권한은 능력(capability)으로 이름을 붙였고, 지금은 모두 슈퍼관리자 전용이다.
 
 | 능력 | 뜻 |
@@ -132,6 +132,8 @@ report.view, report.resolved, report.dismissed, report.severity, report.assign, 
 조회도 남긴다. `user.list`(회원 목록·검색: 검색어, 필터, 정렬, 건수), `user.view`(회원 상세: 생년월일·동의 기록 포함), `report.view`(신고 목록: 1:1 메시지 신고 ID 포함)는 화면을 열 때마다 1행씩 쌓인다. 1:1 대화를 읽는 관리자 API는 없고, 관리자가 보는 1:1 메시지는 신고 증거뿐이다. 보관 기간은 정하지 않았다(`docs/PRIVACY_OPERATIONS.md` 5·9절). 회원 상세의 "관리 이력·메모"는 이 감사 로그(그 회원 대상의 제재·권한·칩·재설정 링크·메모 삭제와 그 회원에 대한 신고 결정)와 메모를 시간순으로 보여 준다. 최근 참여 테이블과 신고 건수는 상세 조회(`user.view`)에 함께 담기고, 기간별 활동(`/activity`)과 이력(`/timeline`) 조회는 따로 기록하지 않는다(콘솔은 상세를 연 뒤에만 부른다).
 
 신고 처리: 심각도·담당자 변경은 `report.severity`·`report.assign`(변경 전후), 내부 메모는 `report.note`(메모 ID와 길이, 본문 없음)로 남는다. 신고에서 준 정지는 `user.suspend` 상세에 `reportId`가 들어간다. 신고 통계(`/reports/stats`: 건수와 회원 ID·닉네임만, 증거·본문 없음), 담당자 후보 목록, 신고별 처리 기록(`/reports/:id/events`: 목록 조회 `report.view` 뒤에만 연다) 조회는 기록하지 않는다. 심각도·담당자·처리는 감사 행을 먼저 쓰고 그 행이 있을 때만 변경을 반영하는 한 batch라, 동시에 같은 신고를 맡거나 닫아도 감사 행과 변경은 하나뿐이다. 실패한 시도(409·400)도 B7부터 아래 "실패 감사"로 남는다. 신고 수·통계로 자동 정지하는 경로는 없다.
+
+운영 통계(`GET /api/admin/stats`, 기능 `stats`, 모든 관리자): 날짜별 합계만 돌려주고 회원 ID·닉네임·이메일을 담지 않으므로 조회를 감사 로그에 남기지 않는다. 화면을 열 때 빠진 날을 먼저 집계하는 쓰기(`daily_stats`)는 같은 날을 다시 집계해도 같은 값이 되는 작업이라 감사 대상으로 보지 않는다.
 
 ### 실패 감사
 

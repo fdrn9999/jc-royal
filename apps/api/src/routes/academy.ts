@@ -2,7 +2,7 @@
  * Academy API: per-user progress sync, cosmetic badges and anonymous content
  * statistics. Nothing here touches wallets, the chip ledger or game history.
  */
-import { schema } from '@jc/db';
+import { schema, statsDay, statsIncrements, type AcademyMetric } from '@jc/db';
 import { AcademyEventsSchema, AcademyProgressPutSchema, BADGES, plausibleBadges, type AcademyProgressDto, type BadgeDto, type BadgeId } from '@jc/types';
 import { eq } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
@@ -10,6 +10,11 @@ import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
+
+const DAY_METRIC = {
+  lesson: { start: 'ac_lesson_start', complete: 'ac_lesson_done' },
+  scenario: { start: 'ac_scenario_start', complete: 'ac_scenario_done' },
+} as const;
 
 async function badgesOf(c: Context<AppEnv>, userId: string): Promise<BadgeDto[]> {
   const rows = await c.var.db.select().from(schema.userBadges).where(eq(schema.userBadges.userId, userId));
@@ -62,7 +67,8 @@ export const academyRoutes = new Hono<AppEnv>()
   .get('/badges', async (c) => c.json(await badgesOf(c, c.var.user!.id)))
   /**
    * Anonymous counters: academy_stats never holds a user id. The id appears only in this request's rate-limit key,
-   * a rate_limits row that the daily housekeeping deletes once its window is long over.
+   * a rate_limits row that the daily housekeeping deletes once its window is long over. The same events are added to
+   * the day's totals of the operations statistics (daily_stats, per day and kind, also without a user id).
    */
   .post('/events', async (c) => {
     await rateLimit(c, `academy-events:${c.var.user!.id}`, 30, 60_000);
@@ -73,12 +79,21 @@ export const academyRoutes = new Hono<AppEnv>()
          correct = correct + excluded.correct, wrong = wrong + excluded.wrong, updated_at = excluded.updated_at`,
     );
     const now = Date.now();
-    await c.env.DB.batch(
-      events.map((e) =>
+    const day: Partial<Record<AcademyMetric, number>> = {};
+    const add = (k: AcademyMetric) => (day[k] = (day[k] ?? 0) + 1);
+    for (const e of events) {
+      if (e.kind === 'question') {
+        add('ac_answer');
+        if (e.correct) add('ac_correct');
+      } else add(DAY_METRIC[e.kind][e.phase]);
+    }
+    await c.env.DB.batch([
+      ...events.map((e) =>
         e.kind === 'question'
           ? stmt.bind('question', e.id, 0, 0, e.correct ? 1 : 0, e.correct ? 0 : 1, now)
           : stmt.bind(e.kind, e.id, e.phase === 'start' ? 1 : 0, e.phase === 'complete' ? 1 : 0, 0, 0, now),
       ),
-    );
+      ...statsIncrements(c.env.DB, statsDay(now), day),
+    ]);
     return c.json({ ok: true, recorded: events.length });
   });

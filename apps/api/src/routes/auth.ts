@@ -344,6 +344,8 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.passwordResets).where(eq(schema.passwordResets.userId, me.id)),
       // Administrators' internal notes about the member (sanction reasons stay in the audit log).
       db.delete(schema.adminNotes).where(eq(schema.adminNotes.userId, me.id)),
+      // Days the member was active (operations statistics; the day totals already counted stay).
+      db.delete(schema.activeDays).where(eq(schema.activeDays.userId, me.id)),
       // Kept, under the pseudonymous id only: chip ledger, hands and seats (integrity), posts and comments (shown as
       // a withdrawn member), and reports. See docs/PRIVACY_OPERATIONS.md.
     ]);

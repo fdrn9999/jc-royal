@@ -134,6 +134,13 @@
       "when": 1792072938744,
       "tag": "0018_admin_audit_search",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792080038471,
+      "tag": "0019_daily_stats",
+      "breakpoints": true
     }
   ]
 }

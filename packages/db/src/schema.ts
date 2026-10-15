@@ -167,6 +167,8 @@ export const tableSessions = sqliteTable(
     // A user can only hold one open seat per table at a time.
     uniqueIndex('tsess_open_user_uq').on(t.tableId, t.userId).where(sql`status = 'seated'`),
     index('tsess_user_idx').on(t.userId),
+    // Seats closed in a period, for the daily statistics (only closed seats, which have a closing time).
+    index('tsess_closed_idx').on(t.closedAt).where(sql`closed_at IS NOT NULL`),
   ],
 );
 
@@ -537,6 +539,30 @@ export const opsMetrics = sqliteTable(
     n: integer('n').notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.bucket, t.metric] })],
+);
+
+/**
+ * Days on which a member used the service (see stats.ts): the day and the member, nothing else. Kept for
+ * ACTIVE_DAYS_RETENTION days by the daily housekeeping; deleted with the account.
+ */
+export const activeDays = sqliteTable(
+  'active_days',
+  {
+    day: integer('day').notNull(),
+    userId: text('user_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.userId] })],
+);
+
+/** Daily operations statistics, one number per day and metric (see stats.ts). Day 0 holds markers. */
+export const dailyStats = sqliteTable(
+  'daily_stats',
+  {
+    day: integer('day').notNull(),
+    metric: text('metric').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.metric] })],
 );
 
 /**

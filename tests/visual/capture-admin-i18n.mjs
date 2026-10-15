@@ -5,7 +5,7 @@
 // Usage: node tests/visual/capture-admin-i18n.mjs
 import { chromium } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const api = 'http://127.0.0.1:8798';
@@ -44,10 +44,14 @@ function socket(cookie, tableId) {
 }
 
 function sql(command) {
+  return d1(['--command', command]);
+}
+
+function d1(args) {
   const wrangler = resolve('node_modules/wrangler/bin/wrangler.js');
   for (let i = 0; ; i++) {
     try {
-      return execFileSync(process.execPath, [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', 'tests/.state/e2e', '-c', 'apps/api/wrangler.jsonc', '--json', '--command', command], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      return execFileSync(process.execPath, [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', 'tests/.state/e2e', '-c', 'apps/api/wrangler.jsonc', '--json', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     } catch (e) {
       if (i > 8) throw e;
     }
@@ -99,8 +103,50 @@ sql(`INSERT INTO service_notices (id, kind, title_ko, title_en, body_ko, body_en
 sql(`INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, detail, ip, outcome, created_at) VALUES
   ('vis-af1-${stamp}', '${owner.id}', 'user.suspend.failed', 'user', '${players[0].id}', '{"status":403,"code":"forbidden","message":"only a super admin can suspend administrators","route":"POST /api/admin/users/:id/suspend"}', '127.0.0.1', 'failed', ${at - 120_000}),
   ('vis-af2-${stamp}', '${owner.id}', 'admin.access_denied', NULL, NULL, '{"status":403,"code":"forbidden","message":"super admin only","route":"GET /api/admin/users/export"}', '127.0.0.1', 'failed', ${at - 60_000})`);
-await new Promise((r) => setTimeout(r, 1500));
-
+// Operations stats: 90 rolled-up days (and the markers saying so), written straight into daily_stats so the stats page
+// draws its charts, share bars, hourly profile and table without a real rollup (tests/integration covers that).
+{
+  const KST = 9 * 3_600_000;
+  const today = Math.floor((at + KST) / day);
+  let s = 7;
+  const rnd = (n) => {
+    s = (s + 0x6d2b79f5) | 0;
+    let x = Math.imul(s ^ (s >>> 15), 1 | s);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return Math.floor((((x ^ (x >>> 14)) >>> 0) / 4_294_967_296) * n);
+  };
+  const rows = [[0, 'rolled_from', today - 90], [0, 'rolled_through', today - 1], [0, 'activity_since', today - 30]];
+  for (let d = today - 90; d < today; d++) {
+    const busy = (d + 3) % 7 >= 5 ? 1.5 : 1; // weekends
+    const signups = rnd(5);
+    rows.push([d, 'signups', signups], [d, 'hands_official', Math.round((40 + rnd(120)) * busy)], [d, 'hands_member', 10 + rnd(50)], [d, 'tables_official', 2 + rnd(4)], [d, 'tables_member', 1 + rnd(3)]);
+    for (const room of ['official', 'member']) {
+      const seats = 6 + rnd(24);
+      rows.push([d, `seats_${room}`, seats], [d, `seat_ms_${room}`, seats * (15 + rnd(40)) * 60_000]);
+    }
+    let peak = 0;
+    for (let h = 0; h < 24; h++) {
+      const n = Math.round(((h >= 19 || h <= 1 ? 10 : h >= 12 ? 5 : 1) + rnd(4)) * busy);
+      peak = Math.max(peak, n);
+      rows.push([d, `peak_h${String(h).padStart(2, '0')}`, n]);
+    }
+    rows.push([d, 'peak', peak]);
+    const reports = rnd(3);
+    if (reports) rows.push([d, 'reports', reports], [d, 'handled', reports], [d, 'handle_ms', reports * (1 + rnd(30)) * 3_600_000]);
+    if (signups && d < today - 8) {
+      const first = rnd(signups + 1);
+      rows.push([d, 'cohort_play_1d', first], [d, 'cohort_play_7d', Math.min(signups, first + rnd(3))]);
+    }
+    if (d >= today - 30) {
+      const dau = 8 + rnd(18);
+      rows.push([d, 'dau', dau], [d, 'returning', dau - rnd(4)], [d, 'wau', Math.min(40, dau + 10 + (d - today + 30) * 2)], [d, 'mau', Math.min(70, dau + 20 + (d - today + 30) * 2)]);
+    }
+    if (d >= today - 10) rows.push([d, 'ac_lesson_start', 4 + rnd(6)], [d, 'ac_lesson_done', 2 + rnd(3)], [d, 'ac_scenario_start', 2 + rnd(4)], [d, 'ac_scenario_done', 1 + rnd(2)], [d, 'ac_answer', 20 + rnd(30)], [d, 'ac_correct', 12 + rnd(8)]);
+  }
+  const file = resolve(out, 'stats-seed.sql');
+  writeFileSync(file, `INSERT OR REPLACE INTO daily_stats (day, metric, n) VALUES\n${rows.map(([d, m, n]) => `(${d}, '${m}', ${n})`).join(',\n')};\n`);
+  d1(['--file', file]);
+}
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });
 const errors = [];
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -116,7 +162,7 @@ await page.goto(`${admin}/hands`);
 await page.waitForTimeout(900);
 const handHref = await page.locator('main a[href^="/hands/"]').first().getAttribute('href', { timeout: 3000 }).catch(() => null);
 const handId = handHref ? decodeURIComponent(handHref.slice('/hands/'.length)) : null;
-const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/audit?outcome=failed#detail', `/audit?targetType=user&targetId=${players[0].id}`, '/security', `/users/${players[0].id}#chips`, `/users/${players[0].id}#suspend`, `/users/${players[0].id}#role`, '/tables/e2e-six#close', '/academy', '/reports', '/reports?view=stats', '/board', '/messages', '/service'];
+const routes = ['/', '/stats', '/stats?unit=month', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/audit?outcome=failed#detail', `/audit?targetType=user&targetId=${players[0].id}`, '/security', `/users/${players[0].id}#chips`, `/users/${players[0].id}#suspend`, `/users/${players[0].id}#role`, '/tables/e2e-six#close', '/academy', '/reports', '/reports?view=stats', '/board', '/messages', '/service'];
 
 // Dynamic values (nicknames, e-mails, ids, the brand) are not UI words.
 const ignore = new RegExp(`${stamp}|@visual\\.dev|^JC$|^ROYAL$|^ADMIN$|^EN$|^e2e|^E2E`, 'i');
