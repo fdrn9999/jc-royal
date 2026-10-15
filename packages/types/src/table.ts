@@ -104,6 +104,12 @@ export interface TableView {
   nextHandAt: number | null;
   /** An admin paused the table: the hand running finishes, no new one starts until it is resumed (absent from older rooms). */
   paused?: boolean;
+  /**
+   * Service maintenance known to the room: from startsAt to endsAt no one new sits down and no new hand is dealt (a
+   * hand already running plays out). `active` by the room's clock (a new view is sent when it starts and ends). Null
+   * when none is planned; absent from older rooms.
+   */
+  maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
   you: {
     userId: string;
     seatIndex: number | null;

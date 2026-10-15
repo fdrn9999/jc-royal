@@ -17,6 +17,7 @@
   - 룸은 종료 시각을 60초 동안 기억하고, api가 그 시각(시계 차이 2초 허용) 이전에 인증한 핸드셰이크를 같은 방식으로 거절합니다(api가 세션을 지우기 전에 인증된 연결이 늦게 도착하는 경우). 그래서 종료 직후 2초 안에 다시 로그인한 연결은 4004로 거절될 수 있고, 그 뒤에는 정상 연결됩니다. 정지된 계정은 로그인 자체가 막힙니다.
   - 정지된 회원이 아직 열린 소켓으로 보낸 착석·충전은 지갑(`users.status = 'active'` 조건)이 거절해 `suspended`로 끝나고 칩은 움직이지 않습니다. 핸드가 끝난 뒤 적용될 충전도 같은 조건으로 차감하지 않고 버립니다.
 - **새 핸드 중단**: 관리자가 새 핸드를 멈추면(`tables.hands_paused`) 진행 중 핸드는 정상 종료하고, 그 뒤로 핸드를 시작하지 않습니다. `state.paused: true`, `nextHandAt: null`. 착석·일어서기·채팅은 그대로 됩니다.
+- **서비스 점검**: 관리자가 정한 점검 시간(`maintenance_windows`) 동안 룸은 `sit`과 대기 등록(`waitlist join`)을 `error maintenance`로 거절하고 새 핸드를 시작하지 않습니다. 진행 중 핸드는 끝까지 진행하고, 일어서기(환급)·충전·채팅은 그대로 됩니다. 점검 중 빈 자리는 대기 명단에 넘기지 않고, 점검이 끝나면 넘깁니다. 룸은 테이블 설정을 읽을 때·점유 현황을 기록할 때·점검 시작과 종료 시각의 알람에서 D1을 읽어 점검을 알고, 관리자가 바꾸면 api가 사용 중인 룸(최대 60곳)에 바로 다시 읽게 합니다. `state.maintenance: {startsAt, endsAt, active}`(없으면 null, 이전 룸은 보내지 않음), 점검 중에는 `you.canSit: false`, `nextHandAt: null`.
 
 ## 클라이언트 → 서버
 
@@ -58,7 +59,7 @@
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
 - **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다.
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
-- **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음).
+- **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음), `maintenance`(서비스 점검 `{startsAt, endsAt, active}` 또는 null. 이전 룸은 보내지 않음).
 
 ### TableCue (연출 전용, 권한 없음)
 
@@ -108,6 +109,6 @@
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, internal`
 
 `suspended`·`disconnected`가 `reqId` 없이 오면 관리자가 연결을 끝낸 것이고 4004 종료가 뒤따릅니다. `reqId`가 붙은 `suspended`는 정지된 계정의 착석·충전을 지갑이 거절한 것입니다.

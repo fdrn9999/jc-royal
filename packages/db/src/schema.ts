@@ -496,3 +496,51 @@ export const opsMetrics = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.bucket, t.metric] })],
 );
+
+/**
+ * Service-wide notices shown as a banner on every page between starts_at and ends_at (open-ended when null), in the
+ * reader's language. A notice can also be pinned on the board (post_id). Deleting is soft so the audit trail stays readable.
+ */
+export const serviceNotices = sqliteTable(
+  'service_notices',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: ['general', 'urgent', 'maintenance'] }).notNull(),
+    titleKo: text('title_ko').notNull(),
+    titleEn: text('title_en').notNull(),
+    bodyKo: text('body_ko'),
+    bodyEn: text('body_en'),
+    startsAt: integer('starts_at').notNull(),
+    endsAt: integer('ends_at'),
+    postId: text('post_id'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+    deletedAt: integer('deleted_at'),
+  },
+  (t) => [index('service_notices_live_idx').on(t.deletedAt, t.startsAt)],
+);
+
+/**
+ * Scheduled maintenance. Between starts_at and ends_at no new seat is taken and no new hand is dealt anywhere (a hand
+ * already running plays out); with block_login, players other than staff cannot sign in or sign up. It never touches
+ * a table's own pause / entry block / close flags, so those stay as they were when it ends. ended_at is a manual early
+ * end, cancelled_at a cancel before it began. At most one window is unfinished at a time.
+ */
+export const maintenanceWindows = sqliteTable(
+  'maintenance_windows',
+  {
+    id: text('id').primaryKey(),
+    startsAt: integer('starts_at').notNull(),
+    endsAt: integer('ends_at').notNull(),
+    blockLogin: integer('block_login', { mode: 'boolean' }).notNull().default(false),
+    messageKo: text('message_ko'),
+    messageEn: text('message_en'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+    endedAt: integer('ended_at'),
+    cancelledAt: integer('cancelled_at'),
+  },
+  (t) => [index('maintenance_windows_ends_idx').on(t.endsAt)],
+);

@@ -688,6 +688,8 @@ interface LiveStatus {
   unrecordedHands?: number;
   version?: number;
   at?: number;
+  /** The service maintenance window the room knows of (active by its clock). */
+  maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
 }
 interface Diagnosis {
   issues: string[];
@@ -743,6 +745,7 @@ export function TableDetailPage() {
         <Badge tone={tb.status === 'open' ? 'green' : 'neutral'}>{t(tb.status as 'open')}</Badge>
         {tb.handsPaused && <Badge tone="red">{t('pausedBadge')}</Badge>}
         {tb.entryBlocked && <Badge tone="red">{t('entryBlockedShort')}</Badge>}
+        {live?.maintenance?.active && <Badge tone="gold">{t('maintStateActive')}</Badge>}
         {tb.lastIssue && <Badge tone="red">{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></Badge>}
       </div>
       {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}

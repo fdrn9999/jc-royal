@@ -9,6 +9,7 @@ import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
 import { roomCall } from '../lib/room';
 import { hasRoomAccess, issueRoomAccess } from '../lib/room-access';
+import { refuseNewGamesInMaintenance } from '../lib/service';
 import { resolveSession } from '../lib/session';
 
 type TableRow = typeof schema.tables.$inferSelect;
@@ -81,6 +82,7 @@ export const tableRoutes = new Hono<AppEnv>()
     const body = await parseBody(c, QuickPlaySchema);
     const me = c.var.user!;
     await rateLimit(c, `quick-play:${me.id}`, 30, 60_000);
+    await refuseNewGamesInMaintenance(c);
     const T = schema.tables;
     const rows = await withHost(c).where(
       and(

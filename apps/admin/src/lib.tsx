@@ -44,6 +44,15 @@ const BY_MESSAGE: Record<string, Key> = {
   'saved, but the table did not confirm; try again': 'errSavedUnconfirmed',
   'password is incorrect': 'errPassword',
   'only the author or a super admin can delete a note': 'errNoteAuthor',
+  'another maintenance window is planned or under way': 'errMaintTaken',
+  'this maintenance is already over': 'errMaintOver',
+  'maintenance under way keeps its start': 'errMaintStart',
+  'the end must come after the start and after now': 'errMaintEnd',
+  'maintenance lasts at most 48 hours': 'errMaint48h',
+  'maintenance can be planned at most 90 days ahead': 'errMaint90d',
+  'the end must come after the start': 'errNoticeEnd',
+  'the end has already passed': 'errNoticeEnd',
+  'this notice has already ended': 'errNoticeEnded',
 };
 const BY_CODE: Record<string, Key> = {
   forbidden: 'errForbidden',
@@ -63,6 +72,7 @@ const BY_CODE: Record<string, Key> = {
   large_adjustment: 'errLargeAdjustment',
   reconcile_stale: 'errReconcileStale',
   already_resolved: 'errAlreadyResolved',
+  maintenance: 'errMaintenance',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

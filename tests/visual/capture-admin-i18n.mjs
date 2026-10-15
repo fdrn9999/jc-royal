@@ -84,6 +84,14 @@ console.log('academy events', (await call('/api/academy/events', { events }, { c
 sql(`INSERT INTO reconciliation_events (id, scope, subject_id, expected, actual, created_at) VALUES ('vis-i18n-${stamp}', 'user_ledger', '${players[0].id}', 1000, 990, ${Date.now() - 3_600_000})`);
 // A wallet changed outside the ledger, for the reconciliation evidence and its correction form.
 sql(`UPDATE users SET balance = balance + 250 WHERE id = '${players[1].id}'`);
+// A planned maintenance window and three notices (shown now, scheduled, ended), for the notices page's cards and badges.
+const day = 86_400_000;
+const at = Date.now();
+sql(`INSERT INTO maintenance_windows (id, starts_at, ends_at, block_login, message_ko, message_en, created_by) VALUES ('vis-mt-${stamp}', ${at + 2 * day}, ${at + 2 * day + 7_200_000}, 1, '서버 점검', 'Server upkeep', '${owner.id}')`);
+sql(`INSERT INTO service_notices (id, kind, title_ko, title_en, body_ko, body_en, starts_at, ends_at, created_by) VALUES
+  ('vis-n1-${stamp}', 'urgent', '결제 지연 안내', 'Delayed top-ups', '일부 충전이 늦어지고 있습니다.', 'Some top-ups are slow.', ${at - 3_600_000}, ${at + day}, '${owner.id}'),
+  ('vis-n2-${stamp}', 'maintenance', '정기 점검', 'Planned upkeep', NULL, NULL, ${at + day}, NULL, '${owner.id}'),
+  ('vis-n3-${stamp}', 'general', '새 테이블', 'New tables', NULL, NULL, ${at - 3 * day}, ${at - day}, '${owner.id}')`);
 await new Promise((r) => setTimeout(r, 1500));
 
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });
@@ -101,7 +109,7 @@ await page.goto(`${admin}/hands`);
 await page.waitForTimeout(900);
 const handHref = await page.locator('main a[href^="/hands/"]').first().getAttribute('href', { timeout: 3000 }).catch(() => null);
 const handId = handHref ? decodeURIComponent(handHref.slice('/hands/'.length)) : null;
-const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/academy', '/reports', '/board', '/messages'];
+const routes = ['/', '/users', `/users/${players[0].id}`, '/tables', '/tables/e2e-six', '/hands', ...(handHref ? [handHref] : []), '/ledger', '/economy', '/reconcile', '/audit', '/academy', '/reports', '/board', '/messages', '/service'];
 
 // Dynamic values (nicknames, e-mails, ids, the brand) are not UI words.
 const ignore = new RegExp(`${stamp}|@visual\\.dev|^JC$|^ROYAL$|^ADMIN$|^EN$|^e2e|^E2E`, 'i');
@@ -144,7 +152,7 @@ for (const lang of ['ko', 'en']) {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(300);
     const narrow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    if (lang === 'ko' || route === '/' || route.startsWith('/hands/')) await page.screenshot({ path: `${out}/${name}-390.png`, fullPage: true });
+    if (lang === 'ko' || route === '/' || route === '/service' || route.startsWith('/hands/')) await page.screenshot({ path: `${out}/${name}-390.png`, fullPage: true });
     result[`${lang} ${route}`] = { leftover: words.filter((w) => !ignore.test(w.replace(/^(placeholder|aria-label):/, '')) && !(lang === 'en' && w === '한국어')), overflow: [wide, narrow] };
   }
 }

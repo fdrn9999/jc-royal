@@ -13,6 +13,7 @@ import { meRoutes } from './routes/me';
 import { messageRoutes } from './routes/messages';
 import { reportRoutes } from './routes/reports';
 import { roomRoutes } from './routes/rooms';
+import { serviceRoutes } from './routes/service';
 import { blockRoutes, dmRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 
@@ -38,6 +39,7 @@ app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
 app.route('/api/rooms', roomRoutes);
 app.route('/api/academy', academyRoutes);
+app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
 
@@ -51,7 +53,8 @@ app.notFound(async (c) => {
 app.onError((err, c) => {
   if (err instanceof HttpError) {
     // A table that did not answer, mail that could not be sent: server-side failures the admin dashboard counts.
-    if (err.status >= 500) countOps(c, 'api_error');
+    // (Refusals during planned maintenance are not failures.)
+    if (err.status >= 500 && err.code !== 'maintenance') countOps(c, 'api_error');
     return c.json({ error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) } }, err.status);
   }
   console.error('unhandled', err instanceof Error ? err.message : String(err));

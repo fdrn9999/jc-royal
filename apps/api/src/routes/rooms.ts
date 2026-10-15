@@ -14,6 +14,7 @@ import { sha256 } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
 import { roomCallEnv, roomCallOrFail } from '../lib/room';
+import { refuseNewGamesInMaintenance } from '../lib/service';
 
 const TURN_SECONDS = 20;
 
@@ -30,6 +31,7 @@ export const roomRoutes = new Hono<AppEnv>()
   .post('/', async (c) => {
     const body = await parseBody(c, RoomCreateSchema);
     const me = c.var.user!.id;
+    await refuseNewGamesInMaintenance(c);
     await rateLimit(c, `room-create:${me}`, 5, 60 * 60_000);
     const id = crypto.randomUUID().slice(0, 12);
     const now = Date.now();

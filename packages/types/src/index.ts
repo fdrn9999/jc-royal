@@ -6,3 +6,4 @@ export * from './community';
 export * from './academy';
 export * from './academy-names';
 export * from './social';
+export * from './service';

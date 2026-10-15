@@ -22,6 +22,8 @@ import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { rememberVisit } from '../lib/lobby';
 import { usePrefs } from '../lib/prefs';
+import { when } from '../lib/service';
+import { ServiceBanner } from '../components/ServiceBanner';
 
 function useCountdown(target: number | null) {
   const [now, setNow] = useState(Date.now());
@@ -46,7 +48,7 @@ export function TablePage() {
   const quick = useMemo(() => parseQuick(params.get('quick')), [params]);
   const quickPlay = useQuickPlay();
   const [quickMissed, setQuickMissed] = useState(false);
-  const { t, err } = useI18n();
+  const { t, err, locale } = useI18n();
   const { me, refresh } = useAuth();
   const nav = useNavigate();
   const prefs = usePrefs();
@@ -263,9 +265,15 @@ export function TablePage() {
               ? t('table.reconnecting')
               : sock.status === 'connecting' || !s
                 ? t('table.connecting')
-                : s.paused && s.status !== 'closing' && s.status !== 'closed'
-                  ? t('table.paused')
-                  : null;
+                : s.status === 'closing' || s.status === 'closed'
+                  ? null
+                  : s.maintenance?.active
+                    ? t('table.maintenance', { end: when(s.maintenance.endsAt, locale) })
+                    : s.paused
+                      ? t('table.paused')
+                      : s.maintenance && s.maintenance.startsAt - Date.now() < 3600_000
+                        ? t('table.maintenanceSoon', { start: when(s.maintenance.startsAt, locale) })
+                        : null;
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
@@ -327,6 +335,9 @@ export function TablePage() {
           </Button>
         </div>
       </header>
+      <div className="z-40">
+        <ServiceBanner compact />
+      </div>
 
       {banner && (
         <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status">
@@ -450,7 +461,7 @@ export function TablePage() {
                   </span>
                 )}
                 {!seated && s.reservation && <span className="text-gold-300">{t('table.reserved', { name: s.reservation.nickname })}</span>}
-                {!seated && !s.you.canSit && !s.you.needsCode && s.seats.every((x) => x.state !== 'empty') && (
+                {!seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && s.seats.every((x) => x.state !== 'empty') && (
                   <Button size="sm" variant="outline" onClick={() => sock.send({ t: 'waitlist', join: !s.you.inWaitlist })}>
                     {s.you.inWaitlist ? t('table.leaveWaitlist') : t('table.joinWaitlist')} ({s.waitlist.length})
                   </Button>

@@ -9,6 +9,7 @@ import { AdminProvider, useAdmin } from './lib';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
+import { ServicePage } from './pages/Service';
 import { DashboardPage } from './pages/Dashboard';
 import { EconomyPage, ReconcilePage } from './pages/Economy';
 import { AcademyStatsPage, AuditPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
@@ -24,6 +25,7 @@ const NAV: [string, Key][] = [
   ['/reports', 'reports'],
   ['/board', 'board'],
   ['/messages', 'messages'],
+  ['/service', 'service'],
   ['/reconcile', 'reconcile'],
   ['/audit', 'audit'],
 ];
@@ -65,7 +67,7 @@ function Shell({ children }: { children: ReactNode }) {
           <button className="shrink-0 whitespace-nowrap text-xs text-ink-300" onClick={() => setLocale(locale === 'ko' ? 'en' : 'ko')}>{locale === 'ko' ? 'EN' : '한국어'}</button>
           <Button size="sm" variant="ghost" onClick={logout}>{t('logout')}</Button>
         </div>
-        <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2">
+        <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 md:flex-wrap">
           {NAV.map(([to, k]) => (
             <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${isActive ? 'bg-gold-500/15 text-gold-300' : 'text-ink-300 hover:text-ivory'}`}>
               {t(k)}
@@ -105,6 +107,7 @@ const router = createBrowserRouter([
       { path: '/reports', element: <ReportsPage /> },
       { path: '/board', element: <BoardAdminPage /> },
       { path: '/messages', element: <MessagesAdminPage /> },
+      { path: '/service', element: <ServicePage /> },
     ],
   },
 ]);

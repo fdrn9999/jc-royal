@@ -67,6 +67,9 @@ export const TABLES: TestTable[] = [
   { id: 'it-member-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Chip economy: a session the room does not hold (reconciliation, stale sessions) and a cash-out that fails.
   ...Array.from({ length: 3 }, (_, i) => ({ id: `it-econ-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Service maintenance: tables that stop dealing and seating while it runs, and one with a waitlist.
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-mt-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  { id: 'it-mt-wl', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {

@@ -158,6 +158,15 @@
 - **플레이어 신고는 같은 테이블에 있었던 사람만**: 둘 다 지금 그 테이블에 있으면(앉아 있거나, 관전 중으로 접속해 있거나, 남아 있는 채팅에 글이 있으면) 바로 접수합니다. 한쪽이 떠났으면 착석 기록(`table_sessions`)에서 최근 24시간 안에 두 사람이 동시에 앉아 있던 구간을 찾고, 없으면 409 `not_at_table`. 그 구간의 공동 핸드와 그때 채팅만 증거로 남깁니다.
 - 400 `report_self`, 409 `already_reported`(같은 대상에 대한 내 신고가 아직 처리 중).
 
+## 서비스 공지·점검 `/api/service` (로그인 불필요)
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/status` | `ServiceStatusDto` `{now, rev, notices, maintenance}`(`packages/types/src/service.ts`, D1 batch 1회, `cache-control: no-store`). `notices`는 지금 보이거나 나중에 보일 공지(삭제·종료 제외, 시작 순 20개, 한국어·영어 둘 다 담아 화면이 언어를 고름). `maintenance`는 끝나지 않은 점검 하나(`{id, startsAt, endsAt, blockLogin, messageKo, messageEn, active}`, 없으면 null). `now`는 서버 시각(기기 시계가 틀려도 제때 보이고 사라지게), `rev`는 관리자가 공지·점검을 바꿀 때마다 바뀌는 값 |
+
+- 로그인한 화면은 `/api/messages/unread-count`의 `serviceRev`가 바뀔 때만 다시 읽는다(추가 폴링 없음). 로그인 전 화면(로그인·가입·점검 안내 `/maintenance`)은 페이지를 열 때 읽고, 점검 안내 페이지는 탭이 보이는 동안 30초마다 다시 읽는다. 어떤 요청이든 `maintenance` 코드로 거절되면 바로 다시 읽는다.
+- **점검 중 거절(503 `maintenance`, `details.endsAt`)**: 점검이 진행 중이면 빠른 참가(`POST /api/tables/quick`)와 회원 방 만들기(`POST /api/rooms`)가 거절되고, 테이블 룸은 `sit`·대기 등록을 WebSocket 오류 `maintenance`로 거절한다. `blockLogin`이면 회원 로그인(비밀번호 확인 뒤)과 가입도 거절한다. 관리자·슈퍼관리자 계정의 게임 로그인과 이미 열린 세션, 관리자 콘솔은 막지 않는다. 진행 중 핸드는 끝까지 진행하고, 점검 중에는 새 핸드를 시작하지 않는다. 자리에서 일어나 칩을 지갑으로 돌려받는 것, 테이블 닫기와 테이블별 일시 정지는 그대로 동작한다. `TableView.maintenance`(`{startsAt, endsAt, active}`)로 테이블 화면에도 알린다.
+
 ## 관리자 `/api/admin` (관리자 출처 + `jc_asid`)
 
 인증:
@@ -201,7 +210,17 @@
 | GET / POST | `/board/posts` · `/board/posts/:id` · `/board/notices` · PATCH `/board/notices/:id` | 게시판 관리와 공지 |
 | POST | `/board/posts/:id/status` · `/board/comments/:id/status` | `visible`/`hidden`/`deleted` |
 | POST / GET | `/messages` | `{userIds(1-500), category, title, body}` 발송과 발송 이력 |
+| GET | `/service/notices?status&limit(≤200)&offset` | 서비스 공지 목록(시작 최신 순) `{now, items[{…, author, state}]}`. `state`·`status`: `live`·`scheduled`·`ended`·`deleted`(기본은 삭제 제외 전체) |
+| POST | `/service/notices` | `{kind:'general'\|'urgent'\|'maintenance', titleKo, titleEn(2–100자), bodyKo?, bodyEn?(≤2000자), startsAt?(기본 지금, 과거면 지금), endsAt?(null = 직접 내릴 때까지), postToBoard?, sendInbox?}` → 201 `{id, postId, batchId, sent}`. `postToBoard`면 게시판 고정 공지 글(한국어 본문 아래 `[English]` 영어 본문), `sendInbox`면 활성 회원 모두에게 계정 언어로 쪽지(한 문장, 쪽지 발송 이력에 한 건). 글과 쪽지는 표시 시작 시각과 상관없이 바로 나간다. 감사 로그 `service.notice.create` |
+| PATCH | `/service/notices/:id` | 위 필드 일부(게시판 글도 함께 고침, 이미 보낸 쪽지는 그대로). 종료가 시작보다 앞서거나 이미 지났으면 400. 감사 로그 `service.notice.update`(변경 전후) |
+| POST · DELETE | `/service/notices/:id/end` · `/service/notices/:id` | 지금 내리기(이미 끝났으면 409)와 삭제(목록에서만 빠지고 감사 기록은 남음, 게시판 글은 게시판 관리에서 처리). 감사 로그 `service.notice.end`·`service.notice.delete` |
+| GET | `/service/maintenance?limit&offset` | 점검 이력(만든 최신 순) `{now, tables{playing, withSeats, players}, items[{…, author, state}]}`. `state`: `scheduled`·`active`·`finished`·`ended_early`·`cancelled`. `tables`는 지금 핸드 진행 중·착석자가 있는 테이블 수와 착석 인원(룸이 마지막으로 기록한 값) |
+| POST | `/service/maintenance` 🔒 | `{startsAt, endsAt, blockLogin?, messageKo?, messageEn?, reason(2–200자)}` → 201 `{id, startsAt, rooms}`. 과거 시작은 지금으로 당김. 최대 48시간, 최대 90일 뒤까지 예약(400). 끝나지 않은 점검이 있으면 409 `conflict`(한 문장으로 확인해 동시 예약도 하나만 성공). 감사 로그 `maintenance.schedule`(사유, `rooms`) |
+| PATCH | `/service/maintenance/:id` 🔒 | `{startsAt?, endsAt?, blockLogin?, messageKo?, messageEn?, reason}` → `{ok, rooms}`. 예약된 점검은 옮기고, 진행 중 점검은 시작을 그대로 두고 종료만 늘이거나 줄인다(시작 변경 400). 이미 끝났거나 취소됐으면 409. 감사 로그 `maintenance.update`(변경 전후, 사유) |
+| POST | `/service/maintenance/:id/stop` 🔒 | `{reason}` → `{ok, ended, rooms}`. 진행 중이면 지금 끝내고(`maintenance.end`), 예약이면 취소한다(`maintenance.cancel`). 이미 끝났으면 409 |
 | GET | `/reports?status&userId&reporterId` | `{items, openCount}`. `status`는 `open`(기본)·`resolved`·`dismissed`·`all`, `userId`는 신고당한 회원, `reporterId`는 신고한 회원. 항목마다 신고 시점 증거, 지금 콘텐츠 상태, 같은 회원의 다른 신고 수(전체·인정). 조회마다 감사 로그 `report.view`(1:1 메시지 신고 ID 포함). 최근 200건 |
 | POST | `/reports/:id` | `{status:'resolved'\|'dismissed', note?, hideContent?}` → `{ok, closed}`. 같은 대상의 열린 신고를 함께 닫고, `hideContent`면 글·댓글을 숨김(그 밖의 대상은 400). 감사 행 기록·숨김·상태 변경을 한 batch로 처리해, 두 관리자가 동시에 처리해도 결정·숨김·감사 행은 하나뿐이고 늦은 쪽은 409 `report_closed` |
+
+`rooms`(점검 예약·변경·종료 응답): `{tables, reached, unreached[], truncated}`. 접속자나 착석자가 있는 열린·종료 중 테이블(연결 많은 순, 최대 60곳)의 룸에 테이블 설정을 다시 읽게 해(한 번 더 시도) 점검 표시와 핸드 중단·재개를 바로 반영한다. 답하지 않았거나 60곳 밖의 룸은 다음 점유 기록 때나 점검 시작·종료 시각의 알람에서 D1을 다시 읽는다. 설정·좌석·칩은 바꾸지 않는다.
 
 아카데미 지표(관리자): `GET /api/admin/academy/stats` → `[{kind, itemId, starts, completes, correct, wrong}]`(익명 집계). 테이블 생성·수정 본문에 `beginner`(입문 테이블) 추가.

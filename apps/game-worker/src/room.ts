@@ -36,12 +36,14 @@ import {
   buyInCommitted,
   cashOut,
   committedTopUp,
+  loadMaintenance,
   loadTable,
   markTableClosed,
   publishLiveStats,
   recordHand,
   topUp,
   walletBalance,
+  type Maintenance,
   type TableRow,
 } from './settlement';
 
@@ -208,6 +210,16 @@ export class TableRoom extends DurableObject<Env> {
   private dropped = new Set<string>();
   /** Storage keys of finished hands D1 does not have yet (see `retryUnrecorded`). */
   private unrecorded = new Set<string>();
+  /**
+   * The service maintenance window D1 last showed (see `inMaintenance`). Read with the table, with each occupancy
+   * write, when an admin changes it (`reload`) and once more when it seems to end. Not stored: a woken room reads it.
+   */
+  private maint: Maintenance | null = null;
+  /** Order of maintenance reads, so a slow one cannot undo a newer one. */
+  private maintReads = 0;
+  private maintApplied = 0;
+  /** Whether the views last sent showed maintenance under way (its start is announced by the alarm). */
+  private maintShown = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -245,9 +257,11 @@ export class TableRoom extends DurableObject<Env> {
     }
     if (!this.tableId) throw new CommandError('not_found', 'table not initialised');
     if (!this.loaded || !this.table) {
-      const t = await loadTable(this.env.DB, this.tableId);
+      const read = ++this.maintReads;
+      const { table: t, maintenance } = await loadTable(this.env.DB, this.tableId);
       if (!t) throw new CommandError('not_found', 'table not found');
       this.table = t;
+      this.takeMaint(maintenance, read);
       if (this.room.seats.length !== t.maxSeats) {
         // Room created before config load: size the seat array once.
         const seats: (SeatState | null)[] = Array.from({ length: t.maxSeats }, (_, i) => this.room.seats[i] ?? null);
@@ -374,6 +388,7 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   private broadcast(cues: TableCue[] = [], exclude?: WebSocket) {
+    this.maintShown = this.inMaintenance();
     const connected = this.connectedUsers(exclude);
     for (const ws of this.sockets(exclude)) {
       const a = this.att(ws);
@@ -407,8 +422,10 @@ export class TableRoom extends DurableObject<Env> {
     const issue = this.pendingIssue;
     this.pendingIssue = null;
     if (extra) this.lastOpsFlush = now;
+    const read = ++this.maintReads;
     try {
-      await publishLiveStats(this.env.DB, this.tableId, stats, issue, ops);
+      const m = await publishLiveStats(this.env.DB, this.tableId, stats, issue, ops, now);
+      if (this.takeMaint(m, read)) void this.run(() => this.maintenanceChanged());
     } catch (e) {
       this.ops.restore(ops);
       this.pendingIssue ??= issue;
@@ -497,19 +514,29 @@ export class TableRoom extends DurableObject<Env> {
               this.room.idleCloseMs = idleMs;
               await this.ctx.storage.put('room', this.room);
             }
-            const t = await loadTable(this.env.DB, tableId);
+            const read = ++this.maintReads;
+            const { table: t, maintenance } = await loadTable(this.env.DB, tableId);
             if (t) {
               this.table = t;
+              // Maintenance an admin planned, moved or ended (this broadcast and afterChange show it and deal again).
+              this.takeMaint(maintenance, read);
               if (t.status === 'closing' && !this.room.closed) await this.beginClose();
               // A room an older build closed before telling D1.
               else if (this.room.closed && t.status !== 'closed') await markTableClosed(this.env.DB, tableId);
               // A new join code, privacy or spectator setting applies to people already here.
               await this.enforceAccess();
             }
+            if (this.maintShown && !this.inMaintenance()) await this.offerFreedSeat();
             this.broadcast();
-            // (A table resumed after a pause deals again from here.)
+            // (A table resumed after a pause or a maintenance deals again from here.)
             await this.afterChange();
-            return Response.json({ ok: true, appliesFrom: this.hand ? 'next hand' : 'now', paused: !!this.table?.handsPaused, handInProgress: !!this.hand && !this.hand.isSettled });
+            return Response.json({
+              ok: true,
+              appliesFrom: this.hand ? 'next hand' : 'now',
+              paused: !!this.table?.handsPaused,
+              maintenance: this.inMaintenance(),
+              handInProgress: !!this.hand && !this.hand.isSettled,
+            });
           }
           case 'close':
             await this.beginClose();
@@ -723,6 +750,8 @@ export class TableRoom extends DurableObject<Env> {
         const w = this.room.waitlist.filter((x) => x.userId !== a.userId);
         if (msg.join) {
           if (this.seatIndexOf(a.userId) !== null) throw new CommandError('already_seated', 'already seated');
+          // (Leaving the waitlist stays possible.)
+          if (this.inMaintenance()) throw new CommandError('maintenance', 'service maintenance: no new entries');
           if (!this.hasAccess(a)) throw new CommandError('join_code_required', 'join code required');
           // A place kept from before (re-joining) keeps the code it was taken with.
           const kept = this.room.waitlist.find((x) => x.userId === a.userId)?.codeHash;
@@ -767,6 +796,7 @@ export class TableRoom extends DurableObject<Env> {
     const t = this.table!;
     if (this.room.closing || this.room.closed || t.status !== 'open') throw new CommandError('table_closed', 'table is closed');
     if (t.entryBlocked) throw new CommandError('entry_blocked', 'new entries are blocked');
+    if (this.inMaintenance()) throw new CommandError('maintenance', 'service maintenance: no new entries');
     if (!codeOk) throw new CommandError('join_code_required', 'join code required');
     if (seatIndex < 0 || seatIndex >= t.maxSeats) throw new CommandError('bad_request', 'invalid seat');
     if (this.seatIndexOf(userId) !== null) throw new CommandError('already_seated', 'already seated');
@@ -927,7 +957,8 @@ export class TableRoom extends DurableObject<Env> {
       await this.cashOutSeat(seat);
     }
     this.room.seats[i] = null;
-    if (this.room.waitlist.length > 0 && !this.room.closing) {
+    // During maintenance nobody could take it in time: the waitlist is offered the seat when it ends.
+    if (this.room.waitlist.length > 0 && !this.room.closing && !this.inMaintenance()) {
       const head = this.room.waitlist[0]!;
       this.room.reservation = { userId: head.userId, nickname: head.nickname, seatIndex: i, until: Date.now() + RESERVATION_MS };
     }
@@ -1279,8 +1310,45 @@ export class TableRoom extends DurableObject<Env> {
     return out;
   }
 
+  /**
+   * Service maintenance under way: no one new sits down or joins the waitlist and no new hand is dealt. A hand already
+   * running plays out, and seated players keep their seats, top up and leave as usual. The table's own pause, entry
+   * block and close are separate and stay as they are.
+   */
+  private inMaintenance(now = Date.now()): boolean {
+    const m = this.maint;
+    return !!m && m.startsAt <= now && now < m.endsAt;
+  }
+
+  /** Takes on what a maintenance read found, unless a later read was already taken. Returns whether it changed. */
+  private takeMaint(m: Maintenance | null, read: number): boolean {
+    if (read < this.maintApplied) return false;
+    this.maintApplied = read;
+    const same = m?.startsAt === this.maint?.startsAt && m?.endsAt === this.maint?.endsAt;
+    this.maint = m;
+    return !same;
+  }
+
+  /** A maintenance window an occupancy write found planned, moved or ended: shown, and the alarm set for it. */
+  private async maintenanceChanged() {
+    if (!this.table || this.room.closed) return;
+    if (this.maintShown && !this.inMaintenance()) await this.offerFreedSeat();
+    this.broadcast();
+    await this.afterChange();
+  }
+
+  /** A seat freed during maintenance, when the waitlist was not offered it (see `standUp`), is offered once it ends. */
+  private async offerFreedSeat() {
+    if (this.room.reservation || this.room.waitlist.length === 0 || this.room.closing) return;
+    const free = this.room.seats.findIndex((s) => !s);
+    if (free < 0) return;
+    const head = this.room.waitlist[0]!;
+    this.room.reservation = { userId: head.userId, nickname: head.nickname, seatIndex: free, until: Date.now() + RESERVATION_MS };
+    await this.save();
+  }
+
   private async afterChange() {
-    if (!this.hand && this.eligibleSeats().length >= 2 && !this.room.nextHandAt && !this.room.closing && !this.table?.handsPaused) {
+    if (!this.hand && this.eligibleSeats().length >= 2 && !this.room.nextHandAt && !this.room.closing && !this.table?.handsPaused && !this.inMaintenance()) {
       this.room.nextHandAt = Date.now() + FIRST_HAND_DELAY_MS;
       await this.save();
     }
@@ -1292,8 +1360,9 @@ export class TableRoom extends DurableObject<Env> {
     // Normally done when the last hand settled; this catches anything a restart or a failed D1 call left behind.
     this.notify(await this.applyTopUps(this.room.settledHandId));
     const dealt = this.eligibleSeats();
-    // A paused table deals nothing until an admin resumes it (`reload` then schedules the next hand).
-    if (dealt.length < 2 || this.room.closing || t.status !== 'open' || t.handsPaused) {
+    // A paused table deals nothing until an admin resumes it (`reload` then schedules the next hand), nor does any table
+    // during maintenance (the alarm at its end does).
+    if (dealt.length < 2 || this.room.closing || t.status !== 'open' || t.handsPaused || this.inMaintenance()) {
       this.room.nextHandAt = null;
       this.hand = null;
       await this.save();
@@ -1341,6 +1410,12 @@ export class TableRoom extends DurableObject<Env> {
     if (this.room.nextHandAt) times.push(this.room.nextHandAt);
     if (this.room.reservation) times.push(this.room.reservation.until);
     for (const s of this.room.seats) if (s?.sittingOut && s.sitOutSince) times.push(s.sitOutSince + SIT_OUT_STAND_UP_MS);
+    // Maintenance: its start is shown on the table, its end deals again.
+    const m = this.maint;
+    if (m && !this.room.closed) {
+      if (m.startsAt > Date.now()) times.push(m.startsAt);
+      times.push(m.endsAt);
+    }
     if (!this.loaded || this.unfinishedWork()) times.push(Date.now() + RETRY_MS);
     if (times.length === 0) {
       await this.ctx.storage.deleteAlarm();
@@ -1402,6 +1477,27 @@ export class TableRoom extends DurableObject<Env> {
             this.fault('cash-out failed; will retry', e);
           }
         }
+      }
+      // Maintenance start and end. At each D1 is asked once more, since an admin may have moved, extended or cancelled
+      // it without this room hearing; when it is over, a seat freed meanwhile goes to the waitlist and dealing starts again.
+      let ended = false;
+      const m = this.maint;
+      if (m && !this.room.closed && (m.endsAt <= now || (m.startsAt <= now && !this.maintShown))) {
+        const read = ++this.maintReads;
+        try {
+          this.takeMaint(await loadMaintenance(this.env.DB, now), read);
+        } catch (e) {
+          // At the end, over by this room's clock: play resumes (a window still running reaches the room with its next
+          // D1 write). At the start, the window as planned holds.
+          if (m.endsAt <= now) this.takeMaint(null, read);
+          this.fault('maintenance check failed', e);
+        }
+        ended = !this.inMaintenance(now);
+      }
+      if (!this.room.closed && (ended || this.inMaintenance(now) !== this.maintShown)) {
+        if (!this.inMaintenance(now)) await this.offerFreedSeat();
+        this.broadcast();
+        await this.afterChange();
       }
       // Next hand.
       if (this.room.nextHandAt && this.room.nextHandAt <= now && (!this.hand || this.hand.isSettled)) {
@@ -1600,8 +1696,10 @@ export class TableRoom extends DurableObject<Env> {
     const issues: string[] = [];
     if (live && h!.isStalled()) issues.push('stalled_hand');
     if (deadline && deadline + OVERDUE_MS < now) issues.push('turn_overdue');
-    if (!live && !t.handsPaused && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
-    if (!live && !t.handsPaused && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
+    // (No hand is due while the table is paused or the service is in maintenance.)
+    const dealing = !t.handsPaused && !this.inMaintenance(now);
+    if (!live && dealing && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
+    if (!live && dealing && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
     if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
     if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.handHasPlayer(s.userId))) issues.push('cashing_seat');
     if (this.room.seats.some((s) => s?.topUp?.state === 'debiting')) issues.push('topup_debiting');
@@ -1639,6 +1737,7 @@ export class TableRoom extends DurableObject<Env> {
       ),
       waitlist: this.room.waitlist.length,
       paused: t.handsPaused,
+      maintenance: this.maint ? { ...this.maint, active: this.inMaintenance(now) } : null,
       hand: live ? { id: h!.handId, stage: h!.stage, actorSeat: h!.handView().actorSeat, deadline, stalled: h!.isStalled() } : null,
       settledHandId: this.room.settledHandId,
       nextHandAt: this.room.nextHandAt,
@@ -1693,6 +1792,7 @@ export class TableRoom extends DurableObject<Env> {
       access &&
       t.status === 'open' &&
       !t.entryBlocked &&
+      !this.inMaintenance() &&
       !this.room.closing &&
       this.openSeats() > 0 &&
       (!reservationLive || reservationLive.userId === a.userId) &&
@@ -1719,9 +1819,10 @@ export class TableRoom extends DurableObject<Env> {
       spectatorCount: [...connected].filter((u) => this.seatIndexOf(u) === null).length,
       waitlist: this.room.waitlist.map((w) => w.nickname),
       reservation: reservationLive ? { nickname: reservationLive.nickname, until: reservationLive.until } : null,
-      // No countdown to a hand a pause will not deal.
-      nextHandAt: t.handsPaused ? null : this.room.nextHandAt,
+      // No countdown to a hand a pause or maintenance will not deal.
+      nextHandAt: t.handsPaused || (this.room.nextHandAt && this.inMaintenance(this.room.nextHandAt)) ? null : this.room.nextHandAt,
       paused: t.handsPaused,
+      maintenance: this.maint ? { ...this.maint, active: this.inMaintenance() } : null,
       you: {
         userId: a.userId,
         seatIndex: mySeat,

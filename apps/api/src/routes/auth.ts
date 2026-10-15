@@ -27,6 +27,7 @@ import { fail, parseBody } from '../lib/http';
 import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
 
 export function toMe(u: AuthUser): MeDto {
@@ -152,6 +153,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post('/register', async (c) => {
     await rateLimit(c, `register:${clientIp(c)}`, 10, HOUR, { perIp: true });
     const body = await parseBody(c, RegisterSchema);
+    await refuseSignInInMaintenance(c);
     if (ageOn(body.birthDate, isoDate()) < MIN_SIGNUP_AGE) fail(400, 'underage', `members must be ${MIN_SIGNUP_AGE} or older`);
     const db = c.var.db;
     const ev = schema.emailVerifications;
@@ -203,6 +205,8 @@ export const authRoutes = new Hono<AppEnv>()
     const ok = await verifyPassword(body.password, u?.passwordHash ?? DUMMY_HASH);
     if (!u || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
     if (u.status === 'suspended') fail(403, 'suspended', u.suspendedReason ?? 'account suspended');
+    // After the password check, so the refusal tells nothing to someone who does not know it.
+    await refuseSignInInMaintenance(c, u.role);
     await createSession(c, u.id, 'user', body.remember);
     return c.json(toMe(u));
   })

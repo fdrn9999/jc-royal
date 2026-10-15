@@ -68,12 +68,20 @@ export const auditActionLabel = labeler({
   'board.notice.update': 'auditNoticeUpdate',
   'board.post.status': 'auditPostStatus',
   'hand.view_sensitive': 'auditHandView',
+  'maintenance.cancel': 'auditMaintCancel',
+  'maintenance.end': 'auditMaintEnd',
+  'maintenance.schedule': 'auditMaintSchedule',
+  'maintenance.update': 'auditMaintUpdate',
   'message.send': 'auditMessageSend',
   note: 'noteEntry',
   'note.create': 'auditNoteCreate',
   'note.delete': 'auditNoteDelete',
   'reconcile.resolve': 'auditReconcileResolve',
   'reconcile.run': 'auditReconcileRun',
+  'service.notice.create': 'auditSvcNoticeCreate',
+  'service.notice.delete': 'auditSvcNoticeDelete',
+  'service.notice.end': 'auditSvcNoticeEnd',
+  'service.notice.update': 'auditSvcNoticeUpdate',
   'report.view': 'auditReportView',
   'report.resolved': 'auditReportResolved',
   'report.dismissed': 'auditReportDismissed',
@@ -112,12 +120,18 @@ export const tableIssueLabel = labeler({
   session_without_seat: 'issueSessionWithoutSeat',
   seat_without_session: 'issueSeatWithoutSession',
 });
+/** Service notices and maintenance windows (the admin service page). */
+export const noticeKindLabel = labeler({ general: 'noticeKindGeneral', urgent: 'noticeKindUrgent', maintenance: 'noticeKindMaintenance' });
+export const noticeStateLabel = labeler({ live: 'noticeStateLive', scheduled: 'noticeStateScheduled', ended: 'noticeStateEnded', deleted: 'noticeStateDeleted' });
+export const maintStateLabel = labeler({ active: 'maintStateActive', scheduled: 'maintStateScheduled', finished: 'maintStateFinished', ended_early: 'maintStateEndedEarly', cancelled: 'maintStateCancelled' });
 export const seatPhaseLabel = labeler({ pending: 'phasePending', cashing: 'phaseCashing' });
 export const topUpStateLabel = labeler({ queued: 'topUpQueued', debiting: 'topUpDebiting' });
 export const targetTypeLabel = labeler({
   batch: 'targetBatch',
   comment: 'targetComment',
   hand: 'targetHand',
+  maintenance: 'targetMaintenance',
+  notice: 'targetNotice',
   post: 'targetPost',
   reconciliation: 'targetReconciliation',
   report: 'targetReport',

@@ -112,6 +112,8 @@ export interface UnreadCountsDto {
   unread: number;
   dmUnread: number;
   friendRequests: number;
+  /** ServiceStatusDto.rev: a change means the banner should be fetched again. */
+  serviceRev?: number;
 }
 
 // ------------------------------------------------------------------ reports

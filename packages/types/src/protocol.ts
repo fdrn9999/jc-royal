@@ -86,6 +86,7 @@ export type ErrorCode =
   | 'buyin_out_of_range'
   | 'table_closed'
   | 'entry_blocked'
+  | 'maintenance'
   | 'not_your_turn'
   | 'illegal_action'
   | 'stale_version'

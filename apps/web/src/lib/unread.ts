@@ -1,6 +1,7 @@
 import type { UnreadCountsDto } from '@jc/types';
 import { useEffect, useSyncExternalStore } from 'react';
 import { api } from './api';
+import { refreshService } from './service';
 
 /** Unread counters (inbox, 1:1 messages, friend requests) shared by the header badges and the pages. */
 let counts: UnreadCountsDto = { unread: 0, dmUnread: 0, friendRequests: 0 };
@@ -9,6 +10,7 @@ const subs = new Set<() => void>();
 export async function refreshUnread() {
   try {
     const r = await api<UnreadCountsDto>('/api/messages/unread-count');
+    if (r.serviceRev !== undefined) refreshService(r.serviceRev);
     if (r.unread === counts.unread && r.dmUnread === counts.dmUnread && r.friendRequests === counts.friendRequests) return;
     counts = r;
     subs.forEach((f) => f());

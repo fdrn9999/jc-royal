@@ -30,18 +30,48 @@ export interface TableRow {
   joinCodeHash: string | null;
 }
 
-export async function loadTable(d1: D1Database, tableId: string): Promise<TableRow | null> {
-  const r = await d1
+/** The next maintenance window that has not finished (the current one while it runs): see maintenance_windows. */
+export interface Maintenance {
+  startsAt: number;
+  endsAt: number;
+}
+
+function maintenanceQuery(d1: D1Database, now: number) {
+  return d1
     .prepare(
-      `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
-              min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
-              is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
-              room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash
-       FROM tables WHERE id = ?1`,
+      `SELECT starts_at AS startsAt, ends_at AS endsAt FROM maintenance_windows
+       WHERE ended_at IS NULL AND cancelled_at IS NULL AND ends_at > ?1 ORDER BY starts_at LIMIT 1`,
     )
-    .bind(tableId)
-    .first<Record<string, unknown>>();
-  if (!r) return null;
+    .bind(now);
+}
+
+function toMaintenance(r: { startsAt: unknown; endsAt: unknown } | undefined): Maintenance | null {
+  return r ? { startsAt: Number(r.startsAt), endsAt: Number(r.endsAt) } : null;
+}
+
+export async function loadMaintenance(d1: D1Database, now = Date.now()): Promise<Maintenance | null> {
+  return toMaintenance((await maintenanceQuery(d1, now).first<Maintenance>()) ?? undefined);
+}
+
+/** The table's settings and the maintenance window, in one D1 call. */
+export async function loadTable(d1: D1Database, tableId: string, now = Date.now()): Promise<{ table: TableRow | null; maintenance: Maintenance | null }> {
+  const [t, m] = await d1.batch([
+    d1
+      .prepare(
+        `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
+                min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
+                is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
+                room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash
+         FROM tables WHERE id = ?1`,
+      )
+      .bind(tableId),
+    maintenanceQuery(d1, now),
+  ]);
+  const r = t?.results[0] as Record<string, unknown> | undefined;
+  return { table: r ? toTableRow(r) : null, maintenance: toMaintenance(m?.results[0] as Maintenance | undefined) };
+}
+
+function toTableRow(r: Record<string, unknown>): TableRow {
   return {
     id: String(r.id),
     name: String(r.name),
@@ -239,9 +269,13 @@ export interface LiveStats {
   connections: number;
 }
 
-/** Writes the room's live occupancy, its latest problem (if any) and its pending operations counters in one D1 batch. */
-export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveStats, issue: string | null = null, ops: OpsCount[] = []): Promise<void> {
-  await d1.batch([
+/**
+ * Writes the room's live occupancy, its latest problem (if any) and its pending operations counters in one D1 batch,
+ * which also reads the maintenance window back (so a room learns of one without a D1 call of its own).
+ */
+export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveStats, issue: string | null = null, ops: OpsCount[] = [], now = Date.now()): Promise<Maintenance | null> {
+  const results = await d1.batch([
+    maintenanceQuery(d1, now),
     d1
       .prepare(
         `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
@@ -251,6 +285,7 @@ export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveS
       .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue),
     ...opsUpserts(d1, ops),
   ]);
+  return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
 }
 
 export async function markTableClosed(d1: D1Database, tableId: string): Promise<void> {

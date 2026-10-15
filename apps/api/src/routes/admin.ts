@@ -16,6 +16,7 @@ import { toCsv } from '../lib/csv';
 import { fail, parseBody } from '../lib/http';
 import { adminAuthRoutes, audit, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
+import { adminServiceRoutes } from './admin-service';
 import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
@@ -911,4 +912,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes));
