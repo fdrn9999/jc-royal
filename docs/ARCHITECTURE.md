@@ -24,7 +24,7 @@
 | `packages/types` | 공용 타입, zod 스키마(WebSocket 메시지, REST 입력) |
 | `packages/db` | Drizzle D1 스키마, 마이그레이션, 원장 함수(`applyLedger`) |
 | `packages/ui` | 디자인 토큰, 4개 테마, 공통 컴포넌트, 카드·칩 |
-| `packages/audio` | Web Audio 합성 효과음 |
+| `packages/audio` | 카드·칩 녹음 효과음(Pixabay), 그 밖의 소리와 불러오기 전·실패 시에는 Web Audio 합성음 |
 | `apps/api` | REST, 인증, WS 진입, 정적 사이트 |
 | `apps/game-worker` | TableRoom DO |
 | `apps/web` / `apps/admin` | 사용자 / 관리자 SPA |

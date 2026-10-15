@@ -1,10 +1,14 @@
 /**
- * JC ROYAL sound engine — Web Audio synthesis (no audio files).
+ * JC ROYAL sound engine — recorded table effects with Web Audio synthesis as the fallback.
  *
  * Ported from Elite-Poker's `useSound.js` (MIT, © 2026 OpaDips): one shared
  * AudioContext, oscillator/noise voices. Extended with a master/effects gain
  * chain, mute, persisted settings and autoplay-policy compliance (the context
  * is only created/resumed after a user gesture via `unlock()`).
+ *
+ * Card and chip sounds play short recordings from Pixabay (Pixabay Content License; sources in
+ * THIRD_PARTY_NOTICES.md). Until a recording is fetched and decoded — or if that fails — the
+ * synthesized voice plays instead, so a sound is never silently lost.
  */
 
 export type SoundId =
@@ -34,6 +38,22 @@ export interface AudioSettings {
 const KEY = 'jc.audio';
 const DEFAULTS: AudioSettings = { master: 0.8, effects: 0.8, muted: false };
 
+/**
+ * Recorded voices. The files are peak-normalised; `volume` brings each one to the loudness
+ * (RMS of the audible part) of the synthesized voice it replaces, with a -36 dB floor for the
+ * very soft card noises.
+ */
+const SAMPLES: Partial<Record<SoundId, { url: string; volume: number }>> = {
+  deal: { url: new URL('./sfx/deal.mp3', import.meta.url).href, volume: 0.5 },
+  flip: { url: new URL('./sfx/flip.mp3', import.meta.url).href, volume: 0.19 },
+  chip: { url: new URL('./sfx/chip.mp3', import.meta.url).href, volume: 0.32 },
+  call: { url: new URL('./sfx/call.mp3', import.meta.url).href, volume: 0.31 },
+  raise: { url: new URL('./sfx/raise.mp3', import.meta.url).href, volume: 0.56 },
+  allin: { url: new URL('./sfx/allin.mp3', import.meta.url).href, volume: 0.33 },
+  fold: { url: new URL('./sfx/fold.mp3', import.meta.url).href, volume: 0.09 },
+  win: { url: new URL('./sfx/win.mp3', import.meta.url).href, volume: 0.45 },
+};
+
 function readSettings(): AudioSettings {
   try {
     const raw = localStorage.getItem(KEY);
@@ -49,6 +69,9 @@ class SoundEngine {
   private master: GainNode | null = null;
   private fx: GainNode | null = null;
   private unlocked = false;
+  private files = new Map<SoundId, Promise<ArrayBuffer | null>>();
+  private buffers = new Map<SoundId, AudioBuffer>();
+  private decoding = false;
   private listeners = new Set<(s: AudioSettings) => void>();
   settings: AudioSettings = typeof window === 'undefined' ? { ...DEFAULTS } : readSettings();
 
@@ -68,14 +91,43 @@ class SoundEngine {
       }
       if (this.ctx.state === 'suspended') void this.ctx.resume();
       this.unlocked = true;
+      this.decode(this.ctx);
     } catch {
       /* audio unsupported */
+    }
+  }
+
+  /** Starts downloading the recordings (no AudioContext needed, so it can run before the first gesture). */
+  preload() {
+    if (typeof window === 'undefined' || typeof fetch !== 'function' || this.files.size) return;
+    for (const [id, s] of Object.entries(SAMPLES) as [SoundId, { url: string }][]) {
+      this.files.set(
+        id,
+        fetch(s.url)
+          .then((r) => (r.ok ? r.arrayBuffer() : null))
+          .catch(() => null),
+      );
+    }
+  }
+
+  private decode(ctx: AudioContext) {
+    if (this.decoding) return;
+    this.decoding = true;
+    this.preload();
+    for (const [id, file] of this.files) {
+      void file
+        .then((buf) => (buf ? ctx.decodeAudioData(buf) : null))
+        .then((b) => b && this.buffers.set(id, b))
+        .catch(() => {
+          /* keep the synthesized voice */
+        });
     }
   }
 
   /** Installs one-shot listeners that unlock audio on the first interaction. */
   installAutoUnlock() {
     if (typeof window === 'undefined') return;
+    this.preload();
     const handler = () => {
       this.unlock();
       if (this.unlocked) for (const ev of ['pointerdown', 'keydown', 'touchstart']) window.removeEventListener(ev, handler);
@@ -158,7 +210,21 @@ class SoundEngine {
     src.stop(t0 + dur);
   }
 
+  private sample(buffer: AudioBuffer, volume: number) {
+    const ctx = this.ready();
+    if (!ctx || !this.fx) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    src.connect(gain);
+    gain.connect(this.fx);
+    src.start();
+  }
+
   play(id: SoundId) {
+    const recorded = this.buffers.get(id);
+    if (recorded) return this.sample(recorded, SAMPLES[id]!.volume);
     switch (id) {
       case 'deal':
         this.noise({ duration: 0.09, volume: 0.14, filterFreq: 1800 });

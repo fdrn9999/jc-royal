@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-JC ROYAL includes or adapts code from the following open-source projects.
+JC ROYAL includes or adapts code and media from the following sources.
 
 ## poker-engine-ts — MIT
 
@@ -69,6 +69,24 @@ SOFTWARE.```
 - The repository has no LICENSE file (only "MIT" in the README). Because the grant is unclear, **no code
   was copied**; its route layout, table/transaction model and admin feature list were used only as a
   reference for an independent implementation.
+
+## Sound effects — Pixabay Content License
+
+- Source: Pixabay sound effects (https://pixabay.com/service/license-summary/). Attribution is not required;
+  it is listed here for provenance.
+- Use: `packages/audio/src/sfx/*.mp3`, trimmed, converted to mono, level-matched and re-encoded for the
+  table. They are part of the game and are not offered for download on their own.
+
+| File | Title | Author | Page |
+| --- | --- | --- | --- |
+| `deal.mp3` | Placing playing card | OxidVideos | https://pixabay.com/sound-effects/film-special-effects-placing-playing-card-522514/ |
+| `flip.mp3` | Taking playing card - 2 | OxidVideos | https://pixabay.com/sound-effects/film-special-effects-taking-playing-card-2-522516/ |
+| `chip.mp3` | Placing poker chips | OxidVideos | https://pixabay.com/sound-effects/film-special-effects-placing-poker-chips-522521/ |
+| `call.mp3` | Placing poker chips | OxidVideos | https://pixabay.com/sound-effects/film-special-effects-placing-poker-chips-522515/ |
+| `raise.mp3` | Poker chips | OxidVideos | https://pixabay.com/sound-effects/film-special-effects-poker-chips-522517/ |
+| `allin.mp3` | AllInPushChips | freesound_community | https://pixabay.com/sound-effects/film-special-effects-allinpushchips-96121/ |
+| `fold.mp3` | Playing Cards Throw | freesound_community | https://pixabay.com/sound-effects/household-playing-cards-throw-94502/ |
+| `win.mp3` | Handfull of Poker Chips | freesound_community | https://pixabay.com/sound-effects/film-special-effects-handfull-of-poker-chips-95810/ |
 
 ## Fonts
 
