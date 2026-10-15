@@ -397,8 +397,8 @@ describe('table invites', () => {
     expect(priv.status).toBe(201);
     expect(JSON.stringify(priv.body)).not.toMatch(/invite-42|joinCode|code/i);
     const noCode = await TableSocket.open(b.client, 'it-invite-priv');
-    expect(noCode.state!.you.canSit).toBe(false);
-    expect(await noCode.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'forbidden' });
+    expect(noCode.state!.you).toMatchObject({ canSit: false, needsCode: true });
+    expect(await noCode.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'join_code_required' });
     noCode.close();
     const withCode = await TableSocket.open(b.client, 'it-invite-priv', { code: 'invite-42' });
     expect(withCode.state!.you.canSit).toBe(true);

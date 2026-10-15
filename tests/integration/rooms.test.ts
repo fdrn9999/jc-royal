@@ -67,8 +67,9 @@ describe('member rooms', () => {
     expect((await host.client.get(`/api/tables/${id}`)).body).toMatchObject({ name: '비밀 방', isPrivate: true });
     // The room checks the code: a wrong one cannot sit, the right one can.
     const wrong = await TableSocket.open(other.client, id, { code: 'wrong-code' });
-    expect(wrong.state!.you.canSit).toBe(false);
-    expect(await wrong.request({ t: 'sit', seatIndex: 0, buyIn: 400 })).toMatchObject({ t: 'error', code: 'forbidden' });
+    expect(wrong.access).toBe(403);
+    expect(wrong.state!.you).toMatchObject({ canSit: false, needsCode: true });
+    expect(await wrong.request({ t: 'sit', seatIndex: 0, buyIn: 400 })).toMatchObject({ t: 'error', code: 'join_code_required' });
     wrong.close();
     const right = await TableSocket.open(other.client, id, { code: 'open-sesame' });
     expect(right.state!.you.canSit).toBe(true);

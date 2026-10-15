@@ -7,6 +7,7 @@ import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { HandRankingChart } from '../academy/HandChart';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
+import { JoinCodeModal } from '../components/JoinCode';
 import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
@@ -14,6 +15,7 @@ import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
+import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -39,7 +41,6 @@ export function TableRoute() {
 export function TablePage() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
-  const code = params.get('code');
   // Sent here by quick play: if the seat is gone on arrival, offer the next table instead of a dead end.
   const quick = useMemo(() => parseQuick(params.get('quick')), [params]);
   const quickPlay = useQuickPlay();
@@ -48,8 +49,10 @@ export function TablePage() {
   const { me, refresh } = useAuth();
   const nav = useNavigate();
   const prefs = usePrefs();
-  const sock = useTableSocket(id, code);
+  const sock = useTableSocket(id);
+  const { reopen } = sock;
   const s = sock.state;
+  const [codeOpen, setCodeOpen] = useState(false);
   const [buySeat, setBuySeat] = useState<number | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
   const [buyErr, setBuyErr] = useState<string | null>(null);
@@ -97,9 +100,42 @@ export function TablePage() {
     return () => clearTimeout(h);
   }, [sock.lastNotice, t, refresh]);
 
-  // ?sit=1 from the lobby: open the buy-in dialog on the first free seat.
+  // An older link or bookmark with the join code in its address: take the code out of the address at once, then trade
+  // it for a ticket like the code dialog does.
+  const legacyCode = useRef(params.get('code'));
   useEffect(() => {
-    if (!s || params.get('sit') !== '1') return;
+    const code = legacyCode.current;
+    if (!code) return;
+    legacyCode.current = null;
+    setParams(
+      (p) => {
+        p.delete('code');
+        return p;
+      },
+      { replace: true },
+    );
+    api(`/api/tables/${encodeURIComponent(id)}/access`, { body: { code } }).then(
+      () => reopen(),
+      (e) => setToast(err(e instanceof ApiError ? e.code : null)),
+    );
+  }, [id, setParams, reopen, err]);
+
+  // After the code dialog on this page: the new connection carries the ticket, then ?sit / ?wait below go on.
+  const codeThen = s && s.seats.every((x) => x.state !== 'empty') ? 'wait' : 'sit';
+  const onCodeGranted = useCallback(() => {
+    setParams(
+      (p) => {
+        p.set(codeThen, '1');
+        return p;
+      },
+      { replace: true },
+    );
+    reopen();
+  }, [codeThen, setParams, reopen]);
+
+  // ?sit=1 from the lobby: open the buy-in dialog on the first free seat. A private table waits for the join code.
+  useEffect(() => {
+    if (!s || params.get('sit') !== '1' || s.you.needsCode) return;
     if (s.you.seatIndex === null && s.you.canSit) {
       const free = s.seats.find((x) => x.state === 'empty');
       if (free) setBuySeat(free.seatIndex);
@@ -116,7 +152,7 @@ export function TablePage() {
 
   // ?wait=1 from a full table in the lobby: join the waitlist, or take the seat if one opened up meanwhile.
   useEffect(() => {
-    if (!s || params.get('wait') !== '1') return;
+    if (!s || params.get('wait') !== '1' || s.you.needsCode) return;
     if (s.you.seatIndex === null) {
       const free = s.you.canSit ? s.seats.find((x) => x.state === 'empty') : undefined;
       if (free) setBuySeat(free.seatIndex);
@@ -205,15 +241,17 @@ export function TablePage() {
   }
 
   const banner =
-    sock.status === 'replaced'
-      ? t('table.replaced')
-      : sock.status === 'closed'
-        ? t('table.closed')
-        : sock.status === 'reconnecting'
-          ? t('table.reconnecting')
-          : sock.status === 'connecting' || !s
-            ? t('table.connecting')
-            : null;
+    sock.status === 'locked'
+      ? t('table.locked')
+      : sock.status === 'replaced'
+        ? t('table.replaced')
+        : sock.status === 'closed'
+          ? t('table.closed')
+          : sock.status === 'reconnecting'
+            ? t('table.reconnecting')
+            : sock.status === 'connecting' || !s
+              ? t('table.connecting')
+              : null;
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
@@ -282,6 +320,11 @@ export function TablePage() {
           {sock.status === 'reconnecting' && (
             <button className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" onClick={sock.reconnect}>
               {t('table.reconnectNow')}
+            </button>
+          )}
+          {sock.status === 'locked' && (
+            <button className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" onClick={() => setCodeOpen(true)} data-testid="enter-code">
+              {t('table.enterCode')}
             </button>
           )}
         </div>
@@ -386,12 +429,19 @@ export function TablePage() {
                   </span>
                 )}
                 {!seated && s.reservation && <span className="text-gold-300">{t('table.reserved', { name: s.reservation.nickname })}</span>}
-                {!seated && !s.you.canSit && s.seats.every((x) => x.state !== 'empty') && (
+                {!seated && !s.you.canSit && !s.you.needsCode && s.seats.every((x) => x.state !== 'empty') && (
                   <Button size="sm" variant="outline" onClick={() => sock.send({ t: 'waitlist', join: !s.you.inWaitlist })}>
                     {s.you.inWaitlist ? t('table.leaveWaitlist') : t('table.joinWaitlist')} ({s.waitlist.length})
                   </Button>
                 )}
-                {!seated && s.table.isPrivate && !s.you.canSit && !code && <span className="text-ink-400">{t('table.privateSeatLocked')}</span>}
+                {!seated && s.you.needsCode && (
+                  <>
+                    <span className="text-ink-400">{t('table.privateSeatLocked')}</span>
+                    <Button size="sm" variant="outline" onClick={() => setCodeOpen(true)} data-testid="enter-code">
+                      {t('table.enterCode')}
+                    </Button>
+                  </>
+                )}
                 {seated && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
                 {seated && s.you.topUpQueued !== null && (
                   <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
@@ -481,6 +531,7 @@ export function TablePage() {
           onDone={() => void refresh()}
         />
       )}
+      <JoinCodeModal table={codeOpen ? { id, name: s?.table.name ?? t('lobby.private') } : null} then={codeThen} onClose={() => setCodeOpen(false)} onGranted={onCodeGranted} />
       <SettingsModal open={settings} onClose={() => setSettings(false)} />
       {s && isHost && <HostRoomModal open={hosting} onClose={() => setHosting(false)} table={s.table} />}
       {/* The 1:1 chat opens in a new tab so the game connection stays. */}

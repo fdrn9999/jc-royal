@@ -52,7 +52,8 @@ interface Identity {
   nickname: string;
   avatarUrl: string | null;
   role: string;
-  codeOk: boolean;
+  /** Join code hash of the ticket this connection brought (verified by the api), or null. */
+  codeHash: string | null;
 }
 
 interface Attachment extends Identity {
@@ -93,7 +94,8 @@ interface RoomState {
   seats: (SeatState | null)[];
   buttonSeat: number | null;
   handNumber: number;
-  waitlist: { userId: string; nickname: string }[];
+  /** `codeHash`: the join code the player held when joining a private table (absent on entries from older builds). */
+  waitlist: { userId: string; nickname: string; codeHash?: string | null }[];
   reservation: { userId: string; nickname: string; seatIndex: number; until: number } | null;
   nextHandAt: number | null;
   closing: boolean;
@@ -109,6 +111,11 @@ interface RoomState {
   closedAt?: number | null;
   /** Shorter empty-room timeout for local test runs (never in production). */
   idleCloseMs?: number;
+  /**
+   * The join code hash (null: public) the waitlist was last checked against. When the table's code or privacy changes,
+   * waitlist entries made with another code are dropped. Undefined until a room first loads under this build.
+   */
+  accessHash?: string | null;
 }
 
 const BETWEEN_HANDS_MS = 4_000;
@@ -201,6 +208,8 @@ export class TableRoom extends DurableObject<Env> {
         await this.save();
       }
       this.loaded = true;
+      // A code change this room was not told about (or slept through) still takes effect.
+      await this.enforceAccess();
       // Seats a restart left half way (and a close not yet finished) are settled here; if D1 fails, play goes on and
       // the retry alarm `schedule` arms finishes them.
       try {
@@ -245,6 +254,61 @@ export class TableRoom extends DurableObject<Env> {
   private seatIndexOf(userId: string): number | null {
     const i = this.room.seats.findIndex((s) => s?.userId === userId);
     return i === -1 ? null : i;
+  }
+
+  // ------------------------------------------------------------------ private tables
+
+  /** Whether a join code hash lets `userId` in: public table, the member room's own host, or the current code. */
+  private mayEnter(userId: string, codeHash: string | null | undefined): boolean {
+    const t = this.table!;
+    if (!t.isPrivate) return true;
+    if (t.roomType === 'member' && t.createdBy === userId) return true;
+    return !!codeHash && codeHash === t.joinCodeHash;
+  }
+
+  /**
+   * May this connection sit or join the waitlist? A waitlist place counts as well: it was taken with the code, and a
+   * code change drops places taken with the old one (enforceAccess).
+   */
+  private hasAccess(a: Identity): boolean {
+    return this.mayEnter(a.userId, a.codeHash ?? null) || this.room.waitlist.some((w) => w.userId === a.userId);
+  }
+
+  /** Private tables without spectators admit only people with the code, besides those already seated. */
+  private mustRefuse(a: Identity): boolean {
+    const t = this.table!;
+    return t.isPrivate && !t.allowSpectators && this.seatIndexOf(a.userId) === null && !this.hasAccess(a);
+  }
+
+  private refuse(ws: WebSocket) {
+    this.send(ws, { t: 'error', code: 'join_code_required', message: 'join code required' });
+    try {
+      ws.close(4003, 'join code required');
+    } catch {
+      /* already closing */
+    }
+  }
+
+  /**
+   * Applies the table's current code, privacy and spectator settings to people already here. Seated players keep their
+   * seats whatever changed. When the code or privacy changed, waitlist places taken without the current code are
+   * dropped (with a reservation they held); connections without the code are closed where spectators are not allowed,
+   * and otherwise stay as spectators who can no longer sit.
+   */
+  private async enforceAccess() {
+    const t = this.table!;
+    const current = t.isPrivate ? t.joinCodeHash : null;
+    if (this.room.accessHash === undefined) {
+      // First load under this build: nothing to compare with yet.
+      this.room.accessHash = current;
+      await this.ctx.storage.put('room', this.room);
+    } else if (this.room.accessHash !== current) {
+      this.room.accessHash = current;
+      this.room.waitlist = this.room.waitlist.filter((w) => this.mayEnter(w.userId, w.codeHash));
+      if (this.room.reservation && !this.room.waitlist.some((w) => w.userId === this.room.reservation!.userId)) this.room.reservation = null;
+      await this.save();
+    }
+    for (const ws of this.sockets()) if (this.mustRefuse(this.att(ws))) this.refuse(ws);
   }
 
   private broadcast(cues: TableCue[] = [], exclude?: WebSocket) {
@@ -317,6 +381,8 @@ export class TableRoom extends DurableObject<Env> {
               if (t.status === 'closing' && !this.room.closed) await this.beginClose();
               // A room an older build closed before telling D1.
               else if (this.room.closed && t.status !== 'closed') await markTableClosed(this.env.DB, tableId);
+              // A new join code, privacy or spectator setting applies to people already here.
+              await this.enforceAccess();
             }
             this.broadcast();
             await this.schedule();
@@ -340,6 +406,13 @@ export class TableRoom extends DurableObject<Env> {
   private openSocket(identity: Identity): Response {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
+    if (this.mustRefuse(identity)) {
+      // Accepted only to tell the client why (close 4003), so it asks for the code instead of reconnecting. Not
+      // hibernatable and never counted as a connection; another tab of the same user is left alone.
+      server.accept();
+      this.refuse(server);
+      return new Response(null, { status: 101, webSocket: client });
+    }
     // One live connection per user: a new tab replaces the old one.
     for (const ws of this.sockets()) {
       if (this.att(ws).userId === identity.userId) {
@@ -501,8 +574,10 @@ export class TableRoom extends DurableObject<Env> {
         const w = this.room.waitlist.filter((x) => x.userId !== a.userId);
         if (msg.join) {
           if (this.seatIndexOf(a.userId) !== null) throw new CommandError('already_seated', 'already seated');
-          if (!a.codeOk) throw new CommandError('forbidden', 'join code required');
-          w.push({ userId: a.userId, nickname: a.nickname });
+          if (!this.hasAccess(a)) throw new CommandError('join_code_required', 'join code required');
+          // A place kept from before (re-joining) keeps the code it was taken with.
+          const kept = this.room.waitlist.find((x) => x.userId === a.userId)?.codeHash;
+          w.push({ userId: a.userId, nickname: a.nickname, codeHash: this.mayEnter(a.userId, a.codeHash) ? a.codeHash : kept });
         }
         this.room.waitlist = w;
         await this.save();
@@ -524,7 +599,7 @@ export class TableRoom extends DurableObject<Env> {
     const t = this.table!;
     if (this.room.closing || this.room.closed || t.status !== 'open') throw new CommandError('table_closed', 'table is closed');
     if (t.entryBlocked) throw new CommandError('entry_blocked', 'new entries are blocked');
-    if (!codeOk) throw new CommandError('forbidden', 'join code required');
+    if (!codeOk) throw new CommandError('join_code_required', 'join code required');
     if (seatIndex < 0 || seatIndex >= t.maxSeats) throw new CommandError('bad_request', 'invalid seat');
     if (this.seatIndexOf(userId) !== null) throw new CommandError('already_seated', 'already seated');
     if (this.room.seats[seatIndex]) throw new CommandError('seat_taken', 'seat taken');
@@ -558,7 +633,7 @@ export class TableRoom extends DurableObject<Env> {
 
   private async sit(a: Attachment, seatIndex: number, amount: number, reqId: string) {
     const t = this.table!;
-    this.assertSeatFree(a.userId, a.codeOk, seatIndex);
+    this.assertSeatFree(a.userId, this.hasAccess(a), seatIndex);
     if (!Number.isSafeInteger(amount) || amount < t.minBuyIn || amount > t.maxBuyIn) throw new CommandError('buyin_out_of_range', 'buy-in out of range');
     this.assertNoWaitlistPriority(a.userId);
 
@@ -1237,9 +1312,10 @@ export class TableRoom extends DurableObject<Env> {
     const myLegal = h && isSeated && !h.isSettled && h.actorId() === a.userId && !h.isStalled() ? h.legalOptions(a.userId) : [];
     const res = this.room.reservation;
     const reservationLive = res && res.until > Date.now() ? res : null;
+    const access = this.hasAccess(a);
     const canSit =
       !isSeated &&
-      a.codeOk &&
+      access &&
       t.status === 'open' &&
       !t.entryBlocked &&
       !this.room.closing &&
@@ -1277,6 +1353,7 @@ export class TableRoom extends DurableObject<Env> {
         leaving: isSeated ? this.room.seats[mySeat]!.leaveAfterHand : false,
         inWaitlist: this.room.waitlist.some((w) => w.userId === a.userId),
         canSit,
+        needsCode: !isSeated && !access,
         topUpQueued: isSeated && this.room.seats[mySeat]!.topUp?.state === 'queued' ? this.room.seats[mySeat]!.topUp!.amount : null,
         autoRebuy: isSeated ? (this.room.seats[mySeat]!.autoRebuy ?? null) : null,
       },

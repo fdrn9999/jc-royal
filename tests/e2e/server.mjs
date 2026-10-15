@@ -31,8 +31,9 @@ writeFileSync(
    ('e2e-rebuy', 'E2E Rebuy', 2, 5, 10, 100, 1000, 30), ('e2e-stats', 'E2E Stats', 2, 5, 10, 100, 1000, 30), ('e2e-stats-m', 'E2E Stats Mobile', 2, 5, 10, 100, 1000, 30);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, allow_spectators) VALUES
    ('e2e-lobby-full', 'E2E Lobby Hidden', 2, 3, 6, 60, 600, 30, 0), ('e2e-lobby-fav', 'E2E Lobby Fav', 6, 3, 6, 60, 600, 30, 1), ('e2e-lobby-m', 'E2E Lobby Mobile', 2, 3, 6, 60, 600, 30, 0);
-   INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash) VALUES
-   ('e2e-secret', 'E2E Secret', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-secret:secret-77').digest('base64url')}');`,
+   INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators) VALUES
+   ('e2e-secret', 'E2E Secret', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-secret:secret-77').digest('base64url')}', 1),
+   ('e2e-vault', 'E2E Vault', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-vault:vault-88').digest('base64url')}', 0);`,
 );
 run(['d1', 'execute', 'jc-royal-db', '--local', '--persist-to', state, '-c', 'apps/api/wrangler.jsonc', '--file', seed]);
 const child = spawn(

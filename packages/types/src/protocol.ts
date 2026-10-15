@@ -71,6 +71,8 @@ export type ErrorCode =
   | 'stale_version'
   | 'duplicate'
   | 'spectators_disabled'
+  /** A private table this connection has no valid join code for (the socket closes with 4003 if it may not watch). */
+  | 'join_code_required'
   | 'internal';
 
 /**

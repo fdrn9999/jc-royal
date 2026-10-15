@@ -259,12 +259,14 @@ describe('table room over WebSocket (real workerd + Durable Objects)', () => {
 
   it('private table: join code required to sit; spectating allowed', async () => {
     const noCode = await player('it-private');
-    expect(noCode.ws.state!.you.canSit).toBe(false);
-    expect(await noCode.ws.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'forbidden' });
+    expect(noCode.ws.state!.you).toMatchObject({ canSit: false, needsCode: true });
+    expect(await noCode.ws.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'join_code_required' });
     const bad = await player('it-private', { code: 'wrong-code' });
-    expect(await bad.ws.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'forbidden' });
+    expect(bad.ws.access).toBe(403);
+    expect(await bad.ws.request({ t: 'sit', seatIndex: 0, buyIn: 200 })).toMatchObject({ t: 'error', code: 'join_code_required' });
     const good = await player('it-private', { code: 'royal-777' });
-    expect(good.ws.state!.you.canSit).toBe(true);
+    expect(good.ws.access).toBe(200);
+    expect(good.ws.state!.you).toMatchObject({ canSit: true, needsCode: false });
     await sit(good, 0, 200);
   });
 

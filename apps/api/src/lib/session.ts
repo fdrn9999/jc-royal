@@ -22,7 +22,7 @@ function cookieName(kind: 'user' | 'admin') {
   return kind === 'admin' ? ADMIN_COOKIE : USER_COOKIE;
 }
 
-function isSecure(c: Context<AppEnv>) {
+export function isSecure(c: Context<AppEnv>) {
   return new URL(c.req.url).protocol === 'https:';
 }
 

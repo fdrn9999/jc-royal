@@ -104,6 +104,8 @@ export interface TableView {
     leaving: boolean;
     inWaitlist: boolean;
     canSit: boolean;
+    /** A private table this connection has no valid join code for: sitting and the waitlist need one first. */
+    needsCode: boolean;
     /** A top-up waiting for the current hand to end; nothing is taken from the wallet until then. */
     topUpQueued: number | null;
     /** Automatic rebuy for this seat (off unless the player turned it on): chips per rebuy, total limit, used so far. */

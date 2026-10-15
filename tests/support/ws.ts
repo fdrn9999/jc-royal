@@ -7,12 +7,20 @@ export class TableSocket {
   messages: ServerMessage[] = [];
   state: TableView | null = null;
   closed: { code: number; reason: string } | null = null;
+  /** Status of the /access call when open was given a join code. */
+  access: number | null = null;
+  private onClose: (() => void)[] = [];
   private waiters: { pred: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void }[] = [];
 
-  static async open(client: Client, tableId: string, opts: { code?: string; base?: string } = {}) {
+  /**
+   * `code`: trade a private table's join code for its ticket cookie first, as the web client does (the code never goes
+   * in the socket URL). `noState`: do not wait for a first state, for a socket the room refuses (see waitClose).
+   */
+  static async open(client: Client, tableId: string, opts: { code?: string; base?: string; noState?: boolean; query?: string } = {}) {
     const s = new TableSocket();
+    if (opts.code) s.access = (await client.post(`/api/tables/${tableId}/access`, { code: opts.code })).status;
     const base = (opts.base ?? BASE()).replace(/^http/, 'ws');
-    const url = `${base}/ws/tables/${tableId}${opts.code ? `?code=${encodeURIComponent(opts.code)}` : ''}`;
+    const url = `${base}/ws/tables/${tableId}${opts.query ?? ''}`;
     // undici's WebSocket accepts headers as a (non-standard) init option.
     s.ws = new (WebSocket as unknown as new (u: string, init: unknown) => WebSocket)(url, { headers: { Cookie: client.cookieHeader(), Origin: WEB_ORIGIN } });
     s.ws.addEventListener('message', (ev) => {
@@ -26,13 +34,28 @@ export class TableSocket {
         }
       }
     });
-    s.ws.addEventListener('close', (ev) => (s.closed = { code: ev.code, reason: ev.reason }));
+    s.ws.addEventListener('close', (ev) => {
+      s.closed = { code: ev.code, reason: ev.reason };
+      for (const f of s.onClose.splice(0)) f();
+    });
     await new Promise<void>((res, rej) => {
       s.ws.addEventListener('open', () => res(), { once: true });
       s.ws.addEventListener('error', () => rej(new Error('ws error')), { once: true });
     });
-    await s.waitState(() => true);
+    if (!opts.noState) await s.waitState(() => true);
     return s;
+  }
+
+  /** Resolves with the close code once the server closes this socket. */
+  waitClose(ms = 15_000): Promise<number> {
+    if (this.closed) return Promise.resolve(this.closed.code);
+    return new Promise((resolve, reject) => {
+      const h = setTimeout(() => reject(new Error('timeout waiting for close')), ms);
+      this.onClose.push(() => {
+        clearTimeout(h);
+        resolve(this.closed!.code);
+      });
+    });
   }
 
   send(msg: unknown) {

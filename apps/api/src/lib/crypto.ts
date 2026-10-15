@@ -23,6 +23,26 @@ export async function sha256(input: string): Promise<string> {
   return b64url(await crypto.subtle.digest('SHA-256', enc.encode(input)));
 }
 
+function hmacKey(secret: string) {
+  return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+/** HMAC-SHA-256 of `message`, base64url. */
+export async function hmacSign(secret: string, message: string): Promise<string> {
+  return b64url(await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(message)));
+}
+
+/** Checks a signature from hmacSign (the comparison is constant-time). */
+export async function hmacVerify(secret: string, message: string, signature: string): Promise<boolean> {
+  let sig: Uint8Array<ArrayBuffer>;
+  try {
+    sig = fromB64url(signature);
+  } catch {
+    return false;
+  }
+  return crypto.subtle.verify('HMAC', await hmacKey(secret), sig, enc.encode(message));
+}
+
 /** Constant-time comparison of equal-length byte arrays. */
 function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;

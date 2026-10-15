@@ -1,13 +1,18 @@
 # WebSocket 프로토콜
 
-- **연결**: `wss://<site>/ws/tables/:tableId[?code=<참가코드>]`.
+- **연결**: `wss://<site>/ws/tables/:tableId`. 주소에는 참가 코드를 넣지 않습니다(예전 `?code=`는 무시합니다).
   - 세션 쿠키가 필요합니다. 없으면 401입니다.
   - 허용된 Origin이어야 합니다. 아니면 403입니다.
   - 존재하는 테이블이어야 합니다. 아니면 404입니다.
+- **비공개 테이블**: 먼저 `POST /api/tables/:id/access {code}`로 참가 티켓을 받습니다(`docs/API.md`).
+  - 티켓은 `jc_room_<tableId>` 쿠키(HttpOnly, SameSite=Strict, Path=`/ws/tables/<tableId>`, 12시간)로, 테이블·회원·현재 참가 코드에 서명되어 있습니다. 코드가 바뀌면 이전 티켓은 모두 무효입니다.
+  - 착석한 플레이어는 티켓 없이도 자기 자리로 돌아옵니다. 회원 방의 방장은 티켓이 필요 없습니다.
+  - 티켓이 없으면: 관전이 허용된 테이블은 관전만 되고(`you.needsCode: true`, 착석·대기 등록은 `join_code_required`), 관전이 꺼진 테이블은 `error join_code_required`를 보낸 뒤 **4003**으로 닫습니다. 클라이언트는 4003에서 재연결하지 않고 코드를 묻습니다.
+  - 방장이 코드나 공개 여부를 바꾸면 이미 열린 연결에도 적용됩니다: 이전 코드로 들어온 대기 명단은 빠지고, 관전이 꺼진 방에서는 코드 없는 미착석 연결을 4003으로 닫습니다. 착석한 플레이어는 그대로입니다.
 - **메시지 형식**: JSON 텍스트, 최대 2,000바이트.
 - **검증**: 모든 클라이언트 메시지는 zod `ClientMessageSchema`로 검증하고, 실패하면 `bad_request`를 보냅니다.
 - **속도 제한**: 소켓당 토큰 버킷(용량 20, 초당 10)이고, 채팅은 1초에 1회입니다.
-- **중복 접속**: 사용자당 연결 1개만 유지합니다. 새 탭이 연결되면 기존 연결에 `replaced`를 보내고 4001로 닫습니다.
+- **중복 접속**: 사용자당 연결 1개만 유지합니다. 새 탭이 연결되면 기존 연결에 `replaced`를 보내고 4001로 닫습니다. 4003으로 거절되는 연결은 다른 탭을 밀어내지 않습니다.
 
 ## 클라이언트 → 서버
 
@@ -43,7 +48,7 @@
 - **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`.
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
-- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null).
+- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
 - **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`.
 
@@ -62,4 +67,4 @@
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, internal`

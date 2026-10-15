@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import { NEWCOMER_HANDS, QuickPlaySchema, type LobbyTableDto, type QuickPlayDto } from '@jc/types';
+import { NEWCOMER_HANDS, QuickPlaySchema, TableAccessSchema, type LobbyTableDto, type QuickPlayDto } from '@jc/types';
 import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import { Hono, type Context, type Handler } from 'hono';
 import type { AppEnv } from '../env';
@@ -8,6 +8,7 @@ import { sha256 } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
 import { roomCall } from '../lib/room';
+import { hasRoomAccess, issueRoomAccess } from '../lib/room-access';
 import { resolveSession } from '../lib/session';
 
 type TableRow = typeof schema.tables.$inferSelect;
@@ -47,8 +48,11 @@ export interface RoomIdentity {
   nickname: string;
   avatarUrl: string | null;
   role: string;
-  /** Holds a valid join code (or the table is public). */
-  codeOk: boolean;
+  /**
+   * The join code hash this connection holds a valid ticket for, or null. The room compares it with the table's current
+   * hash, so a later code change takes the right away from connections that are already open.
+   */
+  codeHash: string | null;
 }
 
 /** Tables with the nickname of the member who opened them. */
@@ -126,6 +130,23 @@ export const tableRoutes = new Hono<AppEnv>()
     const [r] = await withHost(c).where(eq(schema.tables.id, c.req.param('id')));
     if (!r) fail(404, 'not_found', 'table not found');
     return c.json(toLobbyDto(r.t, r.host));
+  })
+  /**
+   * Exchanges a private table's join code for a short-lived ticket cookie (see room-access.ts). Public tables and the
+   * host of a member room need none and get `{ ok: true }` without a cookie.
+   */
+  .post('/:id/access', async (c) => {
+    const body = await parseBody(c, TableAccessSchema);
+    const me = c.var.user!;
+    // Every attempt counts, per account and per address, so codes cannot be guessed by trying.
+    await rateLimit(c, `join-code:${me.id}`, 10, 10 * 60_000);
+    await rateLimit(c, `join-code-ip:${clientIp(c)}`, 30, 10 * 60_000, { perIp: true });
+    const t = await c.var.db.query.tables.findFirst({ where: and(eq(schema.tables.id, c.req.param('id')), ne(schema.tables.status, 'closed')) });
+    if (!t) fail(404, 'not_found', 'table not found');
+    if (!t.isPrivate || (t.roomType === 'member' && t.createdBy === me.id)) return c.json({ ok: true });
+    if (!t.joinCodeHash || (await sha256(`${t.id}:${body.code}`)) !== t.joinCodeHash) fail(403, 'bad_join_code', 'wrong join code');
+    await issueRoomAccess(c, t.id, me.id, t.joinCodeHash);
+    return c.json({ ok: true });
   });
 
 /**
@@ -144,17 +165,16 @@ export const tableSocket: Handler<AppEnv> = async (c) => {
   const tableId = c.req.param('id')!;
   const t = await c.var.db.query.tables.findFirst({ where: and(eq(schema.tables.id, tableId), ne(schema.tables.status, 'closed')) });
   if (!t) fail(404, 'not_found', 'table not found');
-  let codeOk = !t.isPrivate;
-  const code = c.req.query('code');
-  if (t.isPrivate && code && t.joinCodeHash) codeOk = (await sha256(`${t.id}:${code}`)) === t.joinCodeHash;
-  if (t.isPrivate && !codeOk && !t.allowSpectators) fail(403, 'forbidden', 'join code required');
+  // The room decides what a connection without a ticket may do: seated players always get back to their seat, and
+  // others are turned away (close 4003) only when the private table does not allow spectators.
+  const ticket = t.isPrivate && (await hasRoomAccess(c, t.id, resolved.user.id, t.joinCodeHash));
 
   const identity: RoomIdentity = {
     userId: resolved.user.id,
     nickname: resolved.user.nickname,
     avatarUrl: resolved.user.avatarUrl,
     role: resolved.user.role,
-    codeOk,
+    codeHash: ticket ? t.joinCodeHash : null,
   };
   const headers = new Headers(c.req.raw.headers);
   headers.set(INTERNAL_HEADER, c.env.INTERNAL_SECRET);

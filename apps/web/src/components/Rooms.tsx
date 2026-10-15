@@ -73,7 +73,8 @@ export function CreateRoomModal({ open, onClose }: { open: boolean; onClose: () 
         body: { name: name.trim(), maxSeats, bigBlind, minBuyIn: minBb * bigBlind, maxBuyIn: maxBb * bigBlind, allowSpectators, isPrivate, ...(isPrivate ? { joinCode: code.trim() } : {}) },
       });
       onClose();
-      nav(`/table/${id}?sit=1${isPrivate ? `&code=${encodeURIComponent(code.trim())}` : ''}`);
+      // The host needs no join code for their own room, so none goes in the address.
+      nav(`/table/${id}?sit=1`);
     } catch (e) {
       setError(err(e instanceof ApiError ? e.code : null));
     } finally {

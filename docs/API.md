@@ -47,7 +47,8 @@
 | GET | `/api/tables` | 로비(종료된 테이블 제외, 실시간 착석·진행·대기·관전 수, `beginner` 입문 테이블 여부) |
 | GET | `/api/tables/:id` | 단일 테이블 |
 | POST | `/api/tables/quick` | 빠른 참가 `{maxSeats?: 2\|6\|9, bigBlind?, exclude?: string[]}` → `{table, seatIndex}`. 칩은 쓰지 않음(바이인은 테이블에서 착석 요청으로) |
-| GET(upgrade) | `/ws/tables/:id?code=` | WebSocket. 세션 쿠키와 Origin 필수. 비공개 테이블은 참가 코드가 있어야 착석 가능 → `docs/WEBSOCKET_PROTOCOL.md` |
+| POST | `/api/tables/:id/access` | 비공개 테이블 참가 코드 확인 `{code(1–64자)}` → `{ok:true}`와 참가 티켓 쿠키 `jc_room_<id>`(HttpOnly, SameSite=Strict, Path=`/ws/tables/<id>`, 12시간). 공개 테이블과 회원 방의 방장은 쿠키 없이 `{ok:true}`. 틀린 코드 403 `bad_join_code`, 없거나 종료된 테이블 404. 맞든 틀리든 시도마다 회원당 10분에 10회, IP당 10분에 30회(429 `rate_limited`) |
+| GET(upgrade) | `/ws/tables/:id` | WebSocket. 세션 쿠키와 Origin 필수. 비공개 테이블은 참가 티켓이 있어야 착석·대기 등록 가능(관전이 꺼진 방은 티켓 없으면 4003) → `docs/WEBSOCKET_PROTOCOL.md` |
 
 로비 응답의 각 테이블에는 `roomType`(`official`/`member`)과 `host`(회원 방이면 `{id,nickname}`, 공식 테이블이면 `null`)가 있습니다. 공식 테이블이 먼저, 회원 방이 뒤에 나옵니다.
 

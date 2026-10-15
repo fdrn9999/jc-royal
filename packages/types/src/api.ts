@@ -139,6 +139,9 @@ export const RoomPatchSchema = z.object({
   joinCode: RoomCodeSchema.nullable().optional(),
 });
 
+/** A private table's join code, exchanged for a short-lived access cookie (the code never goes in a URL). */
+export const TableAccessSchema = z.object({ code: z.string().trim().min(1).max(64) });
+
 export const TablePatchSchema = z.object({
   name: z.string().trim().min(2).max(40).optional(),
   smallBlind: z.number().int().min(1).optional(),
