@@ -229,6 +229,61 @@ describe('table room over WebSocket (real workerd + Durable Objects)', () => {
     expect(tab2.state!.you.seatIndex).toBe(1);
   });
 
+  it('leaving mid-hand: the leaver is folded when their turn comes (or at once when it is theirs), keeps nothing in that hand, is paid their stack once after it, and the others play on', async () => {
+    const [a, b, c] = [await player('it-leave-0'), await player('it-leave-0'), await player('it-leave-0')];
+    await sit(a, 0, 500);
+    await sit(b, 1, 400);
+    await sit(c, 2, 300);
+    const all = [a, b, c];
+    const balance = async (p: (typeof all)[number]) => (await p.client.get('/api/auth/me')).body.balance as number;
+    const ledger = async (p: (typeof all)[number]) => (await p.client.get('/api/me/ledger?limit=100')).body as { type: string; amount: number }[];
+    const first = await a.ws.waitState(handLive, 20_000, 'first hand');
+    for (const p of [b, c]) await p.ws.waitState((s) => s.hand?.id === first.hand!.id);
+
+    // One who is not to act leaves: still seated (marked as leaving) until the hand ends, nothing paid yet, no top-up.
+    const leaver = all.find((p) => p.ws.state!.you.seatIndex !== first.hand!.actorSeat)!;
+    const seat = leaver.ws.state!.you.seatIndex!;
+    const stack = leaver.ws.state!.seats[seat]!.stack;
+    const wallet = await balance(leaver);
+    expect(await leaver.ws.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+    expect((await leaver.ws.waitState((s) => s.you.leaving)).you.seatIndex).toBe(seat);
+    expect((await ledger(leaver)).filter((l) => l.type === 'cash_out')).toEqual([]);
+    expect(await leaver.ws.request({ t: 'topUp', amount: 100 })).toMatchObject({ t: 'error', code: 'forbidden' });
+    const others = all.filter((p) => p !== leaver);
+    await playOutCheckCall(others);
+    await leaver.ws.waitState((s) => s.you.seatIndex === null, 20_000, 'leaver stood up');
+    // What they had put in stays in the pot; the rest comes back once.
+    expect(await balance(leaver)).toBe(wallet + stack);
+    expect((await ledger(leaver)).filter((l) => l.type === 'cash_out')).toEqual([expect.objectContaining({ amount: stack })]);
+
+    // The other two go on heads-up. Now the one to act leaves: folded at once, the hand ends, they stand up paid.
+    const next = await others[0]!.ws.waitState((s) => handLive(s) && s.hand!.id !== first.hand!.id, 20_000, 'next hand');
+    expect(next.seats.filter((s) => s?.userId).length).toBe(2);
+    let actor: (typeof all)[number] | undefined;
+    for (let i = 0; i < 100 && !actor; i++) {
+      actor = others.find((p) => p.ws.state?.hand?.id === next.hand!.id && isMyTurn(p.ws.state));
+      if (!actor) await new Promise((r) => setTimeout(r, 100));
+    }
+    const actorSeat = actor!.ws.state!.you.seatIndex!;
+    const actorStack = actor!.ws.state!.seats[actorSeat]!.stack;
+    const actorWallet = await balance(actor!);
+    expect(await actor!.ws.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+    await actor!.ws.waitState((s) => s.you.seatIndex === null, 20_000, 'actor stood up');
+    expect(await balance(actor!)).toBe(actorWallet + actorStack);
+    const stayer = others.find((p) => p !== actor)!;
+    await stayer.ws.waitState((s) => !s.hand || s.hand.id !== next.hand!.id || s.hand.stage === 'settled');
+
+    // The last one leaves too: every chip is back in a wallet, each paid out once, every wallet equals its ledger.
+    expect(await stayer.ws.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+    await stayer.ws.waitState((s) => s.you.seatIndex === null, 20_000, 'last one stood up');
+    expect((await balance(a)) + (await balance(b)) + (await balance(c))).toBe(30_000);
+    for (const p of all) {
+      const rows = await ledger(p);
+      expect(rows.filter((l) => l.type === 'cash_out')).toHaveLength(1);
+      expect(rows.reduce((s, l) => s + l.amount, 0)).toBe(await balance(p));
+    }
+  });
+
   it('leaving cashes the stack out to the wallet exactly once', async () => {
     const a = await player('it-six-3');
     await sit(a, 0, 700);

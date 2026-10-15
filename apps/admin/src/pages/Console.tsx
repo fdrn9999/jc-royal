@@ -410,6 +410,8 @@ export function UserDetailPage() {
   const [chipKey, setChipKey] = useState<{ key: string; amount: number; memo: string } | null>(null);
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
+  // Another administrator suspended the member after this page loaded: show the member as they are now.
+  const outdated = (e: unknown) => e instanceof ApiError && e.code === 'already_suspended';
   const run = async (fn: () => Promise<unknown>) => {
     setNote(null);
     setReset(null);
@@ -421,6 +423,7 @@ export function UserDetailPage() {
       await reload();
     } catch (e) {
       setNote({ ok: false, text: errText(e, t) });
+      if (outdated(e)) await reload();
     }
   };
   // The dialog shows what the server says the change would do; the password is asked only when it is confirmed.
@@ -441,7 +444,11 @@ export function UserDetailPage() {
               : { preview: true };
     api<unknown>(`/api/admin/users/${id}/${p.kind}`, { body }).then(
       (data) => seq === previewSeq.current && setPv({ data }),
-      (e: unknown) => seq === previewSeq.current && setPv({ error: e }),
+      (e: unknown) => {
+        if (seq !== previewSeq.current) return;
+        setPv({ error: e });
+        if (outdated(e)) void reload();
+      },
     );
   };
   const dismiss = () => {

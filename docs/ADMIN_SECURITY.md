@@ -18,7 +18,7 @@
 
 다음 작업은 최근 5분 안에 비밀번호를 다시 입력해야 한다(`POST /api/admin/auth/reauth`). 콘솔이 자동으로 비밀번호 창을 띄운다.
 
-- 회원 정지·해제, 권한 변경(슈퍼관리자만). 해제와 권한 변경도 사유(2–200자)가 필요하다. 콘솔은 실행 전에 변경 전 → 후(상태·권한)와 현재 정지 사유를 보여 주고, 감사 기록에 사유와 변경 전후를 남긴다(`user.suspend` `{reason, from, to, previousReason}`, `user.unsuspend` `{reason, from, to, suspendedReason}`, `user.role` `{from, to, reason}`)
+- 회원 정지·해제, 권한 변경(슈퍼관리자만). 해제와 권한 변경도 사유(2–200자)가 필요하다. 콘솔은 실행 전에 변경 전 → 후(상태·권한)와 현재 정지 사유를 보여 주고, 감사 기록에 사유와 변경 전후를 남긴다(`user.suspend` `{reason, from, to, previousReason}`, `user.unsuspend` `{reason, from, to, suspendedReason}`, `user.role` `{from, to, reason}`). 정지는 활성 회원에만 한 번 적용된다: 이미 정지된 회원은 409 `already_suspended`로 거절해 사유를 덮어쓰거나 제재 쪽지를 다시 보내지 않고, 두 관리자가 동시에 눌러도 조건부 갱신이라 하나만 반영된다. 탈퇴한 계정은 404로, 정지 뒤 해제로 `active`가 되살아나는 경로를 막았다(PART C 전에는 탈퇴 계정도 정지·해제되어 `active`로 돌아갔다)
 - 회원 강제 연결 종료(로그인 세션 삭제와 테이블 연결 종료, `user.disconnect` 감사 기록에 사유·결과)
 - 가상 칩 지급·차감(멱등 키, 음수 잔액 불가, 절대값 100,000 이상은 슈퍼관리자만: 아래 "가상 칩 조정과 정합성 정정")
 - 비밀번호 재설정 링크 발급(자기 계정은 불가, 비밀번호 변경 사용)

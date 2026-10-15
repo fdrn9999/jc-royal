@@ -78,6 +78,7 @@ const BY_CODE: Record<string, Key> = {
   large_adjustment: 'errLargeAdjustment',
   reconcile_stale: 'errReconcileStale',
   already_resolved: 'errAlreadyResolved',
+  already_suspended: 'errAlreadySuspended',
   maintenance: 'errMaintenance',
 };
 

@@ -9,11 +9,11 @@
 | 엔진 규칙·속성·평가기 | `pnpm --filter @jc/poker-engine test` | **56 / 56 통과** | `test-logs/engine.txt` |
 | 웹 단위 | `pnpm --filter @jc/web test` | **104 / 104 통과** | `test-logs/web-unit.txt` |
 | API 단위 | `pnpm --filter @jc/api test` | **34 / 34 통과** | `test-logs/api-unit.txt` |
-| 통합(실제 workerd) | `pnpm test:integration` | **190 / 190 통과**(28개 파일) | `test-logs/integration.txt` |
+| 통합(실제 workerd) | `pnpm test:integration` | **205 / 205 통과**(30개 파일) | `test-logs/integration.txt` |
 | E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e` | **69 / 69 통과**(데스크톱 49, 모바일 20) | `test-logs/e2e.txt` |
-| 부하(로컬) | `pnpm test:load` | 통과(기본 10테이블, 50핸드, 오류 0, 칩 보존 일치. 핸드 통계 추가 후 2회, 충전 멱등 수정 후 1회, PART A 회귀로 기본·지속 각 1회 재실행도 오류 0·칩 보존 일치. B1 뒤 기본 1회도 오류 0·400,000=400,000, 부하 중 쓴 운영 카운터 행 0. B2 뒤 기본 1회도 오류 0·400,000=400,000·정합성 불일치 0. B4 뒤 기본 3회, B5 뒤 기본 1회도 같음) | `test-logs/load-*.json` |
+| 부하(로컬) | `pnpm test:load` | 통과(기본 10테이블, 50핸드, 오류 0, 칩 보존 일치. 핸드 통계 추가 후 2회, 충전 멱등 수정 후 1회, PART A 회귀로 기본·지속 각 1회 재실행도 오류 0·칩 보존 일치. B1 뒤 기본 1회도 오류 0·400,000=400,000, 부하 중 쓴 운영 카운터 행 0. B2 뒤 기본 1회도 오류 0·400,000=400,000·정합성 불일치 0. B4 뒤 기본 3회, B5 뒤 기본 1회, PART C 뒤 기본 1회도 같음) | `test-logs/load-*.json` |
 | 타입 검사 | `pnpm typecheck`, `tsc --noEmit -p tests/tsconfig.json` | 오류 0 | — |
-| 번들 가드 | `pnpm check:bundle` | 엔진은 지연 청크에만, 첫 화면에 받는 JS(진입 파일 + 미리 받는 공용 청크) 649KB(한도 650KB). 관리자 콘솔은 한도 없음, 729.0KB(gzip 213.8KB) | `test-logs/bundle.txt` |
+| 번들 가드 | `pnpm check:bundle` | 엔진은 지연 청크에만, 첫 화면에 받는 JS(진입 파일 + 미리 받는 공용 청크) 649KB(한도 650KB). 관리자 콘솔은 한도 없음, 729.2KB(gzip 213.9KB) | `test-logs/bundle.txt` |
 
 > 이 PC에서는 Playwright 전용 Chromium 다운로드가 네트워크 오류(ECONNRESET)로 실패해, 설치된 Chrome을 `channel: 'chrome'`으로 사용했다. CI(ubuntu)에서는 Playwright Chromium을 쓴다.
 
@@ -909,3 +909,75 @@ D1 호출은 목록 batch 1회(목록·전체 건수·미처리 수) + 제재 �
 - 배포 중간 상태(새 admin과 이전 api).
 - iOS Safari·Android Chrome 실기기(Chrome 모바일 에뮬레이션만).
 - 화면 낭독기의 실제 낭독(접근성 이름은 Playwright의 역할·이름 조회로만 확인).
+
+## PART C 종합 검증 (2026-10-16)
+
+지시서 PART C의 12개 시나리오를 기존 테스트로 확인하고, 테스트가 없던 시나리오(진행 중 핸드 퇴장, 중단 중 재시작, 종료 도중 재시작, 관리자 2명 동시 조치, 모든 관리자 라우트의 권한 거절, 대량 목록)는 새 테스트를 더했다. 새 테스트에서 찾은 문제 1건(같은 회원을 두 번 정지하면 두 번 적용)과 그 연장(탈퇴한 계정이 정지·해제로 `active`가 됨), 화면 확인에서 찾은 콘솔 표시 1건(그 409 뒤 옛 상태가 남음)을 고쳤다. 게임 서버·지갑·원장 코드는 바꾸지 않았다. 운영 배포는 하지 않았다.
+
+### 시나리오와 테스트
+
+| # | 시나리오 | 테스트 | 결과 |
+|---|---|---|---|
+| 1 | 정지된 회원이 열려 있던 WebSocket으로 권한 있는 액션을 못 함 | 통합 `emergency.test.ts` "a suspension ends the open socket…"·"the wallet refuses a buy-in or top-up for a suspended account, even from a socket opened before", **새** `admin-concurrency.test.ts` "suspend the same member…"(소켓이 한 번 닫히고 자리는 한 번 정산), E2E `emergency.spec.ts` | ✅ |
+| 2 | 진행 중 핸드에서 안전한 퇴장 | **새** `multiplayer.test.ts` "leaving mid-hand…": 3인 핸드에서 차례가 아닌 회원이 나가면 핸드가 끝날 때까지 자리(나가는 중 표시)를 지키고 환급·충전은 없으며(충전 요청 `forbidden`), 차례가 오면 룸이 폴드하고 정산 뒤 남은 스택을 한 번 환급. 이어 헤즈업에서 차례인 회원이 나가면 바로 폴드·환급. 마지막 회원까지 나간 뒤 지갑 합 30,000, 회원마다 `cash_out` 1행, 원장 합 = 잔액. 기존 `restart.test.ts` "a hand that ends while D1 is down…", `emergency.test.ts`(핸드 중 정지) | ✅ |
+| 3 | 테이블 중단·재개 후 칩 보존 | 기존 `emergency.test.ts` "pause lets the running hand finish…", **새** `restart.test.ts` "a table paused mid-hand keeps every stack across a restart…": 핸드 중 중단 → 핸드 종료 → 프로세스 강제 종료·재시작 뒤 스택 그대로, 6초 동안 새 핸드 없음, 관리자 상세 `handsPaused`·문제 없음, 재개하면 다음 번호의 핸드 | ✅ |
+| 4 | 테이블 종료 도중 서버 재시작 | 기존 `restart.test.ts` "a close the room never heard about…"·"cash-outs and the hand record D1 refuses while a room closes…", **새** "an administrator closes a table mid-hand and the server dies before the hand ends…": 재시작 뒤 같은 핸드가 끝나고 좌석마다 환급 1회(합 900), 지갑 합 20,000, `table.close` 감사 1행, 다시 닫으면 404, 한 번 더 재시작하고 일일 cron을 돌려도 그대로 | ✅ |
+| 5 | 관리자 2명이 같은 조치를 동시에 | **새** `admin-concurrency.test.ts` 8건: 같은 회원 정지, 이미 정지된·탈퇴한 회원 정지, 핸드 중 같은 테이블 닫기, 한 명은 정지·한 명은 그 테이블 닫기, 빈 테이블을 시차를 두고 닫기, 같은 정합성 차이 되돌리기, 같은 멱등 키 칩 지급, 점검 예약·중지. 기존 `reports-workflow.test.ts` "…two admins cannot both take it" | ✅ 1건 수정 |
+| 6 | 잘못된 권한으로 관리자 API 호출 | **새** `admin-permissions.test.ts` "every admin route refuses the wrong caller…": 권한 표의 60개 라우트 전부에 세션 없음 401, 회원(플레이어) 세션 401, 플레이어 사이트에서 온 관리자 세션 403, 일반 관리자의 슈퍼관리자 전용 라우트 403, 비밀번호 재확인 없는 민감 라우트 401 `reauth_required`. 회원 상태·잔액 그대로, 일반 관리자의 감사 행은 거절된 슈퍼관리자 호출 2건뿐. 기존 `admin.test.ts` 3건, `admin-permissions.test.ts` "refuses super-admin-only actions…", 단위 `permissions.test.ts`(라우트와 규칙 1:1) | ✅ |
+| 7 | 관리자 권한 변경 후 기존 세션 차단 | `admin.test.ts` "…demotion ends existing admin sessions immediately", `admin-permissions.test.ts` "a member whose role was taken away in the database is refused and recorded; demotion and suspension end the session", E2E `security.spec.ts` | ✅ |
+| 8 | 원장 이상 탐지와 중복 복구 방지 | `economy.test.ts` 13건(열린 차이는 한 번만 기록, 확인한 차이 재기록 없음, 거절·반복된 조정, 기록·되돌리기, 실패한 환급은 재시도 때 한 번만 지급), **새** `admin-concurrency.test.ts` "two super admins revert the same mismatch: one correction, one refusal, one notice", `restart.test.ts`(재시작 뒤 충전·환급 1회) | ✅ |
+| 9 | 긴급 공지와 점검 모드 전환 | `service.test.ts` 4건, E2E `service.spec.ts`, **새** `admin-concurrency.test.ts` "plan maintenance at once…" | ✅ |
+| 10 | 대량 회원·원장·감사 로그 페이지 | **새** `admin-bulk.test.ts` 3건(자체 상태·포트 8813): 회원 5,000명, 원장 53,090행, 감사 25,000행을 D1 파일에 직접 넣고 끝까지 넘기며 각 행이 한 번씩, 순서대로 나오는지, 합계·필터 건수가 D1과 같은지 확인 | ✅ 로컬 |
+| 11 | 신고 처리 기록과 통계 | `reports-workflow.test.ts` 5건, `admin-analytics.test.ts` "rolls days up from the records…"(날짜별 신고 접수·처리 수와 처리 시간), E2E `reports.spec.ts` | ✅ |
+| 12 | 관리자 UI 모바일·데스크톱 회귀 | E2E 전체 69/69(데스크톱 49, 모바일 20), 아래 콘솔 수정 뒤 관리자 관련 11개 파일 15/15, 실제 Chrome 화면 확인 68개(한·영 × 1440·390px, 페이지 오류 0, 가로 넘침 0, 고정폭 한글 배지 0), 이미 정지된 회원 안내 확인(아래) | ✅ 1건 수정 |
+
+### 찾아 고친 문제
+
+- **같은 회원 정지가 두 번 적용됨**(시나리오 5): 수정 전 코드에서 두 관리자가 같은 회원을 동시에 정지하면 둘 다 200을 받고, `user.suspend` 감사 2행과 제재 쪽지 2통이 생기고, 계정에는 늦게 온 요청의 사유가 남았다(`admin-concurrency.test.ts` 첫 실행에서 실패). 차례로 다시 정지해도 200으로 사유를 덮어쓰고 쪽지를 다시 보냈다(새 테스트가 수정 전 `admin.ts`에서 "expected 200 to be 409"로 실패). 원인: 정지 라우트가 대상의 상태를 보지 않고 `UPDATE users SET status = 'suspended'`를 조건 없이 썼다. 수정: `active`일 때만 바꾸는 조건부 갱신으로 바꾸고, 바뀐 행이 없으면 409 `already_suspended`(미리보기도 409). 쪽지·감사·신고 처리 기록은 실제로 바꾼 요청만 남긴다. 수정 뒤 8/8.
+- **탈퇴한 계정이 되살아남**: 수정 전 코드에서 탈퇴한 계정을 정지하면 200으로 `suspended`가 되고 제재 쪽지가 쓰였으며, 이어서 해제하면 `active`가 됐다(이메일은 익명화된 채). 수정 뒤 정지는 404, 상태는 `deleted` 그대로, 쪽지 없음(새 테스트).
+- 기각한 가설: D1이 쓰기를 직렬화해 막아 준다(두 쓰기 모두 조건이 없어 둘 다 성공), 멱등·중복 제거 계층이 있다(없음), 콘솔이 정지된 회원의 버튼을 숨긴다(화면만, API는 그대로), 다른 정지 경로가 있다(정지 쓰기는 `admin.ts` 한 곳).
+- **409 뒤에도 콘솔이 옛 상태를 보임**(화면 확인에서 발견): 다른 관리자가 먼저 정지한 회원을 정지하면 안내(`이미 정지된 회원입니다.`)는 떴지만, 상세 화면은 실패한 요청 뒤 다시 불러오지 않아 '정상' 배지와 정지 칸이 그대로였다(실제 Chrome, 1440px). 수정: 미리보기나 확인이 `already_suspended`로 거절되면 회원 정보를 다시 불러온다. 수정 뒤 한국어 1440px·영어 390px에서 미리보기 거절(확인 버튼 비활성)과 확인 뒤 거절 모두 안내가 뜨고 배지가 '정지됨'·'Suspended', 정지 버튼 0개, 정지 해제 버튼 표시, 사유는 먼저 정지한 쪽 그대로, 가로 넘침 0(임시 스크립트, 실행 뒤 삭제).
+- **재현되지 않은 가설**: 빈 테이블을 두 관리자가 거의 동시에 닫을 때, 늦은 요청이 'closed'가 되기 전의 행을 읽고 조건 없는 `status = 'closing'` 쓰기로 이미 닫힌 테이블을 'closing'으로 되돌릴 수 있다는 가설. 두 번째 요청을 0–119 ms 늦추며 120회(앞서 8회 더) 시도했다. 매번 첫 요청 200(57–77 ms), 두 번째 404, 최종 'closed', 'closing'에 남은 테이블 0. 재현되지 않아 코드를 바꾸지 않았다(테스트는 'closed'로 끝나는지만 확인한다).
+
+### 새 테스트가 실제로 잡는지 확인
+
+- 정지: 새 정지 테스트를 수정 전 `admin.ts`에 돌려 실패(동시 정지 200·200, 다시 정지 200), 수정 뒤 통과.
+- 권한 전수: `requirePermission`이 GET 라우트의 비밀번호 재확인을 건너뛰도록 일부러 바꾸자 "plain admin GET /hands/:id: 404"로 실패했고, 되돌린 뒤 통과(파일 해시 원래와 같음).
+
+### 대량 목록 측정(로컬 workerd·sqlite, 운영 D1 아님, 전체 통합 실행 2회)
+
+| 목록 | 쪽 수 | 중앙값 ms(1차 / 2차) | 최대 ms(1차 / 2차) |
+|---|---|---|---|
+| 회원 가입 순(5,000명, 200개씩) | 25 | 27.6 / 27.6 | 51.9 / 32.7 |
+| 회원 잔액 순(전원 같은 잔액) | 25 | 27.6 / 26.4 | 30.8 / 31.1 |
+| 회원 정지 필터(500명) | 3 | 24.7 / 22.0 | 25.3 / 22.4 |
+| 회원 영어 필터(1,666명) | 1 | 26.7 / 23.5 | 26.7 / 23.5 |
+| 원장 전체(53,091행, 커서) | 266 | 17.4 / 17.2 | 62.4 / 38.3 |
+| 원장 한 회원(3,000행) | 15 | 19.9 / 21.6 | 23.0 / 23.0 |
+| 원장 드문 종류(`admin_adjust` 100행) | 1 | 23.0 / 22.8 | 23.0 / 22.8 |
+| 감사 전체(25,000행, 100개씩) | 250 | 13.8 / 15.1 | 21.8 / 143.7 |
+| 감사 한 조치(6,250행) | 63 | 14.1 / 13.9 | 22.9 / 21.1 |
+| 감사 조치 묶음 `user.*`(12,500행) | 125 | 16.1 / 15.6 | 24.7 / 25.4 |
+| 감사 실패만(1,250행) | 13 | 16.5 / 15.8 | 20.0 / 19.4 |
+| 감사 본문 검색(25행) | 1 | 23.3 / 24.7 | 23.3 / 24.7 |
+| 감사 대상 회원(4행) | 1 | 17.7 / 15.5 | 17.7 / 15.5 |
+
+뒤 쪽도 첫 쪽과 비슷한 시간이 걸렸다(커서 페이지). 2차 감사 전체의 최대 143.7 ms는 250쪽 중 한 쪽이며 원인은 확인하지 않았다(같은 실행에서 다른 테스트 파일이 함께 돈다; 1차 최대 21.8 ms). 일치 건수는 10,000에서 멈춘다(감사 전체·`user.*`). 원장 조회는 쪽마다 `ledger.view` 감사 1행을 남긴다(테스트가 쪽 수와 같은지 확인).
+
+### 전체 회귀
+
+- 타입 검사 오류 0(`pnpm typecheck`, `tests/tsconfig.json`, api·admin `tsc --noEmit`).
+- 단위: 엔진 56/56, 웹 104/104, API 34/34(이번 단계는 해당 패키지 코드를 바꾸지 않았고, 마지막에 다시 돌려 같은 수로 통과). 로그 `docs/test-logs/engine.txt`·`web-unit.txt`·`api-unit.txt`.
+- 통합: 205/205(30개 파일, 855.2초; 새 테스트 15건 — `admin-concurrency` 8, `admin-bulk` 3, `restart` 2, `multiplayer` 1, `admin-permissions` 1). 권한 전수 테스트를 더하기 전 실행도 204/204(853.9초). 로그 `docs/test-logs/integration.txt`(205건 실행).
+- E2E: 69/69(데스크톱 49·모바일 20, 13.7분, 콘솔 409 수정 전). 수정 뒤 관리자 화면을 쓰는 11개 파일(`admin`·`console-ux`·`console-ux-mobile`·`economy`·`emergency`·`members`·`reports`·`security`·`service`·`analytics`·`analytics-mobile`)을 다시 돌려 15/15(3.5분). 로그 `docs/test-logs/e2e.txt`(전체 실행), `e2e-c-admin.txt`(수정 뒤 11개 파일).
+- 번들: 웹 649/650KB(변경 없음), 관리자 729.0 → 729.2KB(gzip 213.8 → 213.9KB; 안내 문구와 다시 불러오기). 로그 `docs/test-logs/bundle.txt`.
+- 부하(`pnpm test:load`, 기본 시나리오, 54.7초): 오류 0, 지갑+테이블 합 400,000 = 400,000, 정합성 불일치 0, 놓친 전달 0, 남은 테이블 세션 0, 액션 왕복 p50/p95/p99/최대 28/64/81/109 ms, 50핸드·1,052액션(2.06핸드/초), 워커 로그 오류 0줄. 게임 서버 코드는 바꾸지 않았고 회귀 확인으로 돌렸다. 보고서 `docs/test-logs/load-c-default.json`.
+- 화면 확인(실제 Chrome, `tests/visual/capture-admin-i18n.mjs`, 콘솔 수정 전): 68개, 페이지 오류 0, 가로 넘침 0, 고정폭 글꼴 한글 배지 0. 콘솔 수정 뒤 이미 정지된 회원 화면을 따로 확인했다(위 "찾아 고친 문제").
+
+### 테스트하지 않은 것
+
+- 운영 D1의 대량 목록 응답 시간과 읽은 행 수(로컬 workerd·sqlite만).
+- 빈 테이블 동시 닫기 경쟁(재현되지 않음, 위).
+- 관리자 요청이 처리되는 도중의 서버 재시작(요청이 끝난 뒤 프로세스를 죽였다).
+- 신고에서 준 정지의 신고 처리 기록(`sanction`)은 이제 정지가 반영된 뒤 따로 쓴다. 그 사이에 실패하면 정지는 되고 기록만 빠질 수 있다(감사 로그에는 `reportId`가 남는다).
+- iOS Safari·Android Chrome 실기기.

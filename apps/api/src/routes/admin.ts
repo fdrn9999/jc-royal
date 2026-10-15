@@ -590,24 +590,33 @@ const admin = new Hono<AppEnv>()
     const body = await parseBody(c, preview ? SuspendSchema.partial({ reason: true }) : SuspendSchema);
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot suspend yourself');
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
-    if (!target) fail(404, 'not_found', 'user not found');
+    // A withdrawn account is gone (its notices went with it); it is not suspended back into existence.
+    if (!target || target.status === 'deleted') fail(404, 'not_found', 'user not found');
     if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can suspend administrators');
     if (body.reportId) {
       const rep = await c.var.db.query.reports.findFirst({ where: eq(schema.reports.id, body.reportId), columns: { targetUserId: true } });
       if (rep?.targetUserId !== id) fail(400, 'bad_request', 'the report is not about this member');
     }
+    if (target.status !== 'active') fail(409, 'already_suspended', 'this member is already suspended');
     if (preview) {
       return c.json({ preview: true, member: { nickname: target.nickname, role: target.role, status: target.status }, ...(await sanctionPreview(c.env.DB, id)) });
     }
     const { reason } = SuspendSchema.parse(body);
     const at = Date.now();
-    await c.var.db.batch([
-      c.var.db.update(schema.users).set({ status: 'suspended', suspendedReason: reason, updatedAt: at }).where(eq(schema.users.id, id)),
+    // Only an active account changes, so of two administrators suspending at once one does it (one reason, one notice,
+    // one record) and the other is told it was already done.
+    const [changed] = await c.var.db.batch([
+      c.var.db
+        .update(schema.users)
+        .set({ status: 'suspended', suspendedReason: reason, updatedAt: at })
+        .where(and(eq(schema.users.id, id), eq(schema.users.status, 'active')))
+        .returning({ id: schema.users.id }),
       c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
-      ...(body.reportId
-        ? [c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: reason, createdAt: at })]
-        : []),
     ]);
+    if (!changed[0]) fail(409, 'already_suspended', 'this member is already suspended');
+    if (body.reportId) {
+      await c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: reason, createdAt: at });
+    }
     // Deleting the sessions does not reach table connections already open: each room ends them and the member leaves
     // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
     const kick = await kickEverywhere(c.env, id, 'suspended', true);

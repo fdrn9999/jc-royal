@@ -1,9 +1,12 @@
 // Administrator permissions and the audit trail: the permission table's refusals, failed attempts on the audit log, the
 // audit log's search and pages, console sessions, role and status changes applied on the next request, and previews
 // that write nothing.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
+import { root } from '../support/worker';
 import { TableSocket } from '../support/ws';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
@@ -67,6 +70,52 @@ describe('permission table', () => {
     expect(table.features.find((f: { feature: string }) => f.feature === 'roles')).toMatchObject({ admin: 'none', reauth: 'all' });
     expect(table.features.find((f: { feature: string }) => f.feature === 'dashboard')).toMatchObject({ admin: 'all', reauth: 'none' });
     expect((await admin.get('/api/admin/auth/me')).body.permissions).toEqual(expect.arrayContaining(['members.export', 'audit.all', 'sessions.all']));
+  });
+
+  it('every admin route refuses the wrong caller: no session, a member session, the player site, a plain admin on super-admin routes, and no fresh password', async () => {
+    // The permission table lists every admin route (a unit test holds the two together), so walking it walks them all.
+    const source = readFileSync(resolve(root, 'apps/api/src/lib/permissions.ts'), 'utf8');
+    const routes = [...source.matchAll(/^\s+'(GET|POST|PATCH|DELETE) (\/[^']*)': r\('[^']+', '[^']+'(.*)\),?\r?$/gm)].map((m) => ({
+      method: m[1]!,
+      path: m[2]!,
+      superOnly: /role: CAPABILITIES/.test(m[3]!),
+      reauth: /\breauth\b/.test(m[3]!),
+    }));
+    expect(routes.length).toBe(source.match(/^\s+'(GET|POST|PATCH|DELETE) /gm)!.length);
+    expect(routes.length).toBeGreaterThan(55);
+    expect(routes.filter((r) => r.superOnly).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['POST /users/:id/role', 'POST /users/export']);
+
+    const member = await newUser();
+    const staff = await plainAdmin();
+    // A valid console session, but from the player site.
+    const fromWeb = new Client('http://localhost:5173');
+    fromWeb.cookies = admin.cookies;
+    // A member's own (player) session, presented to the console.
+    const memberAtConsole = new Client(ADMIN_ORIGIN);
+    memberAtConsole.cookies = member.client.cookies;
+    const nobody = new Client(ADMIN_ORIGIN);
+    const call = (c: Client, r: (typeof routes)[number]) => {
+      const path = `/api/admin${r.path.replace(':noteId', 'sweep-note').replace(':id', r.path.startsWith('/users/') ? member.me.id : 'sweep-missing')}`;
+      return c.req(r.method, path, r.method === 'GET' ? undefined : {});
+    };
+    const wrong: string[] = [];
+    const expectStatus = (who: string, r: (typeof routes)[number], got: { status: number; body: any }, status: number, code?: string) => {
+      if (got.status !== status || (code && got.body?.error?.code !== code)) wrong.push(`${who} ${r.method} ${r.path}: ${got.status} ${JSON.stringify(got.body?.error ?? null)}`);
+    };
+    for (const r of routes) {
+      expectStatus('nobody', r, await call(nobody, r), 401);
+      expectStatus('member', r, await call(memberAtConsole, r), 401);
+      expectStatus('player site', r, await call(fromWeb, r), 403);
+      // A plain administrator who has not confirmed the password: super-admin routes first, then the password.
+      if (r.superOnly) expectStatus('plain admin', r, await call(staff.c, r), 403, 'forbidden');
+      else if (r.reauth) expectStatus('plain admin', r, await call(staff.c, r), 401, 'reauth_required');
+    }
+    expect(wrong).toEqual([]);
+
+    // None of it changed the member, and the plain administrator's only records are the two refused super-admin calls.
+    expect(await d1(`SELECT status, role, balance, suspended_reason AS reason FROM users WHERE id = '${member.me.id}'`)).toEqual([{ status: 'active', role: 'user', balance: member.me.balance, reason: null }]);
+    expect((await member.client.get('/api/auth/me')).status).toBe(200);
+    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['user.export.failed failed', 'user.role.failed failed']);
   });
 
   it('records failed changes and refusals, but not a missing password confirmation or a read that found nothing', async () => {

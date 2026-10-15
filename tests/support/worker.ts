@@ -70,6 +70,10 @@ export const TABLES: TestTable[] = [
   // Service maintenance: tables that stop dealing and seating while it runs, and one with a waitlist.
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-mt-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-mt-wl', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Two administrators doing the same thing at once (a suspension, a close) while a hand runs.
+  ...Array.from({ length: 3 }, (_, i) => ({ id: `it-conc-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Leaving mid-hand: three players, long turns so only the players (and the room's fold for a leaver) act.
+  { id: 'it-leave-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {
