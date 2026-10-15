@@ -6,7 +6,7 @@
  */
 import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
 import { ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
-import { and, desc, eq, gt, inArray, isNull, like, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, like, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -27,6 +27,23 @@ import { kickEverywhere, roomCall } from '../lib/room';
 const ONLINE_MS = 5 * 60_000;
 
 const ReasonSchema = z.string().trim().min(2).max(200);
+
+/** Audit actions on a member shown on their timeline (views, lists and the note.create twin of each note are left out). */
+const SANCTION_ACTIONS = ['user.suspend', 'user.unsuspend', 'user.disconnect'];
+const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', 'user.chips', 'user.reset_link', 'note.delete'];
+
+/**
+ * Admin notes are for handover, not for collecting data about the member: refuse what looks like an e-mail address, a
+ * phone number (Korean or international), a card number or a resident registration number. Chip amounts and dates pass.
+ */
+const PERSONAL = [
+  /[^\s@]+@[^\s@]+\.[a-z]{2,}/i,
+  /(^|[^\d])0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)/,
+  /\+\d{1,3}[-.\s]?\d{1,4}[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)/,
+  /(^|[^\d])\d{6}[-\s]?[1-8]\d{6}(?!\d)/,
+  /(^|[^\d])\d{4}([-\s]?\d{4}){3}(?!\d)/,
+];
+const looksPersonal = (s: string) => PERSONAL.some((re) => re.test(s));
 
 /** Emergency table controls: `pause` lets the running hand finish and deals no new one until `resume`. */
 const TableControlSchema = z.object({ action: z.enum(['pause', 'resume', 'block', 'unblock']), reason: ReasonSchema });
@@ -105,35 +122,48 @@ const admin = new Hono<AppEnv>()
     const status = c.req.query('status');
     const locale = c.req.query('locale');
     const onlineOnly = c.req.query('online') === '1';
+    const role = c.req.query('role');
+    const sortKey = c.req.query('sort') ?? 'created';
+    const dir = c.req.query('dir') === 'asc' ? asc : desc;
+    const U = schema.users;
     // The outer column is written out: in a select without joins drizzle drops the table name from columns in a
     // selected expression, and a bare "id" inside this subquery would mean sessions.id.
     const online = sql<number>`EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = "users"."id" AND s.kind = 'user' AND s.last_seen_at > ${Date.now() - ONLINE_MS})`;
     const where = and(
-      q ? or(like(schema.users.email, `%${q}%`), like(schema.users.nickname, `%${q}%`), eq(schema.users.id, q)) : undefined,
-      status === 'active' || status === 'suspended' || status === 'deleted' ? eq(schema.users.status, status) : undefined,
-      locale === 'ko' || locale === 'en' ? eq(schema.users.locale, locale) : undefined,
+      q ? or(like(U.email, `%${q}%`), like(U.nickname, `%${q}%`), eq(U.id, q)) : undefined,
+      status === 'active' || status === 'suspended' || status === 'deleted' ? eq(U.status, status) : undefined,
+      locale === 'ko' || locale === 'en' ? eq(U.locale, locale) : undefined,
+      role === 'user' || role === 'admin' || role === 'super_admin' ? eq(U.role, role) : undefined,
       onlineOnly ? online : undefined,
     );
+    // Members with no recorded sign-in sort last in both directions; ties keep the newest member first.
+    const order =
+      sortKey === 'balance' ? [dir(U.balance)] : sortKey === 'nickname' ? [dir(sql`lower(${U.nickname})`)] : sortKey === 'login' ? [sql`${U.lastLoginAt} IS NULL`, dir(U.lastLoginAt)] : [dir(U.createdAt)];
     const rows = await c.var.db
       .select({
-        id: schema.users.id,
-        email: schema.users.email,
-        nickname: schema.users.nickname,
-        locale: schema.users.locale,
-        role: schema.users.role,
-        status: schema.users.status,
-        balance: schema.users.balance,
-        createdAt: schema.users.createdAt,
+        id: U.id,
+        email: U.email,
+        nickname: U.nickname,
+        locale: U.locale,
+        role: U.role,
+        status: U.status,
+        balance: U.balance,
+        createdAt: U.createdAt,
+        lastLoginAt: U.lastLoginAt,
         online,
       })
-      .from(schema.users)
+      .from(U)
       .where(where)
-      .orderBy(desc(schema.users.createdAt))
+      .orderBy(...order, desc(U.createdAt), U.id)
       .limit(limit)
       .offset(offset);
     // The list shows email addresses, so every look is recorded (search terms and how many members it showed).
-    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, online: onlineOnly, offset, count: rows.length });
-    return c.json(rows.map((r) => ({ ...r, online: !!r.online })));
+    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, role: role ?? null, online: onlineOnly, sort: sortKey, offset, count: rows.length });
+    const items = rows.map((r) => ({ ...r, online: !!r.online }));
+    // `paged=1` adds the number of matching members for page controls; without it the plain array, as before.
+    if (c.req.query('paged') !== '1') return c.json(items);
+    const [count] = await c.var.db.select({ n: sql<number>`COUNT(*)` }).from(U).where(where);
+    return c.json({ items, total: count?.n ?? 0, limit, offset });
   })
   /** Member data export for the selected members. The notice members accept at signup covers this use. */
   .post('/users/export', requireRecentReauth, async (c) => {
@@ -176,10 +206,11 @@ const admin = new Hono<AppEnv>()
     const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!u) fail(404, 'not_found', 'user not found');
     const S = schema.sessions;
-    const [ledger, seats, hands, sessions] = await Promise.all([
+    const DB = c.env.DB;
+    const [ledger, seats, hands, sessions, history] = await Promise.all([
       c.var.db.select().from(schema.chipLedger).where(eq(schema.chipLedger.userId, id)).orderBy(desc(schema.chipLedger.createdAt)).limit(50),
       c.var.db.select().from(schema.tableSessions).where(and(eq(schema.tableSessions.userId, id), eq(schema.tableSessions.status, 'seated'))),
-      c.env.DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
+      DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
       // Sign-ins only: no token, address or browser string.
       c.var.db
         .select({ kind: S.kind, createdAt: S.createdAt, lastSeenAt: S.lastSeenAt, expiresAt: S.expiresAt })
@@ -187,13 +218,163 @@ const admin = new Hono<AppEnv>()
         .where(and(eq(S.userId, id), gt(S.expiresAt, Date.now())))
         .orderBy(desc(S.lastSeenAt))
         .limit(20),
+      // Recent tables, and reports by and about the member: counts and the latest few (no evidence or free text, which
+      // the reports page shows and records the look at).
+      DB.batch([
+        DB.prepare(
+          `SELECT s.id, s.table_id AS tableId, t.name AS tableName, t.room_type AS roomType, s.seat_index AS seatIndex, s.buy_in AS buyIn,
+                  s.cash_out AS cashOut, s.status, s.created_at AS createdAt, s.closed_at AS closedAt
+             FROM table_sessions s LEFT JOIN tables t ON t.id = s.table_id WHERE s.user_id = ?1 ORDER BY s.created_at DESC LIMIT 10`,
+        ).bind(id),
+        DB.prepare(`SELECT status, COUNT(*) AS n FROM reports WHERE reporter_id = ?1 GROUP BY status`).bind(id),
+        DB.prepare(`SELECT status, COUNT(*) AS n FROM reports WHERE target_user_id = ?1 GROUP BY status`).bind(id),
+        DB.prepare(
+          `SELECT r.id, r.target_type AS targetType, r.reason, r.status, r.created_at AS createdAt, u.nickname AS otherNickname
+             FROM reports r JOIN users u ON u.id = r.target_user_id WHERE r.reporter_id = ?1 ORDER BY r.created_at DESC LIMIT 5`,
+        ).bind(id),
+        DB.prepare(
+          `SELECT r.id, r.target_type AS targetType, r.reason, r.status, r.created_at AS createdAt, u.nickname AS otherNickname
+             FROM reports r JOIN users u ON u.id = r.reporter_id WHERE r.target_user_id = ?1 ORDER BY r.created_at DESC LIMIT 5`,
+        ).bind(id),
+      ]),
     ]);
-    const ledgerSum = await c.env.DB.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM chip_ledger WHERE user_id = ?1`).bind(id).first<{ s: number }>();
+    const ledgerSum = await DB.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM chip_ledger WHERE user_id = ?1`).bind(id).first<{ s: number }>();
     // Full profile incl. birth date and consent record.
     await audit(c, 'user.view', { type: 'user', id });
     const { passwordHash: _ph, ...safe } = u;
     const online = sessions.some((s) => s.kind === 'user' && s.lastSeenAt > Date.now() - ONLINE_MS);
-    return c.json({ user: safe, ledger, openSeats: seats, hands: hands ?? { n: 0, net: 0 }, ledgerConsistent: (ledgerSum?.s ?? 0) === u.balance, sessions, online });
+    const [recentTables, filed, against, recentFiled, recentAgainst] = history;
+    const counts = (r: D1Result | undefined) => {
+      const by = Object.fromEntries(((r?.results ?? []) as { status: string; n: number }[]).map((x) => [x.status, x.n]));
+      return { open: by.open ?? 0, resolved: by.resolved ?? 0, dismissed: by.dismissed ?? 0, total: (by.open ?? 0) + (by.resolved ?? 0) + (by.dismissed ?? 0) };
+    };
+    return c.json({
+      user: safe,
+      ledger,
+      openSeats: seats,
+      hands: hands ?? { n: 0, net: 0 },
+      ledgerConsistent: (ledgerSum?.s ?? 0) === u.balance,
+      sessions,
+      online,
+      recentTables: recentTables?.results ?? [],
+      reports: { filed: counts(filed), against: counts(against), recentFiled: recentFiled?.results ?? [], recentAgainst: recentAgainst?.results ?? [] },
+    });
+  })
+  /**
+   * Hands played per day over the last 7, 30 or 90 days. Days are cut at the viewer's midnight: `tz` is the minutes
+   * their clock is ahead of UTC (540 in Korea). Days without hands are listed with zeros.
+   */
+  .get('/users/:id/activity', async (c) => {
+    const id = c.req.param('id');
+    const days = [7, 30, 90].includes(Number(c.req.query('days'))) ? Number(c.req.query('days')) : 7;
+    const tz = Math.min(Math.max(Math.trunc(Number(c.req.query('tz') ?? 0)) || 0, -840), 840);
+    const DAY = 86_400_000;
+    const shift = tz * 60_000;
+    const today = Math.floor((Date.now() + shift) / DAY);
+    const since = (today - days + 1) * DAY - shift;
+    const DB = c.env.DB;
+    const [perDay, seated] = await DB.batch([
+      DB.prepare(
+        `SELECT CAST((ended_at + ?2) / 86400000 AS INTEGER) AS day, COUNT(*) AS hands, COALESCE(SUM(net), 0) AS net,
+                SUM(CASE WHEN net > 0 THEN 1 ELSE 0 END) AS wins, SUM(CASE WHEN went_to_showdown THEN 1 ELSE 0 END) AS showdowns
+           FROM hand_players WHERE user_id = ?1 AND ended_at >= ?3 GROUP BY day`,
+      ).bind(id, shift, since),
+      DB.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT table_id) AS tables, COALESCE(SUM(buy_in), 0) AS buyIn FROM table_sessions WHERE user_id = ?1 AND created_at >= ?2`).bind(id, since),
+    ]);
+    type Day = { day: number; hands: number; net: number; wins: number; showdowns: number };
+    const byDay = new Map(((perDay?.results ?? []) as Day[]).map((d) => [d.day, d]));
+    const series = Array.from({ length: days }, (_, i) => {
+      const day = today - days + 1 + i;
+      const d = byDay.get(day);
+      return { date: new Date(day * DAY).toISOString().slice(0, 10), hands: d?.hands ?? 0, net: d?.net ?? 0, wins: d?.wins ?? 0, showdowns: d?.showdowns ?? 0 };
+    });
+    const sum = (k: 'hands' | 'net' | 'wins' | 'showdowns') => series.reduce((a, d) => a + d[k], 0);
+    const s = (seated?.results[0] ?? {}) as { n?: number; tables?: number; buyIn?: number };
+    return c.json({
+      days,
+      since,
+      series,
+      totals: { hands: sum('hands'), net: sum('net'), wins: sum('wins'), showdowns: sum('showdowns'), activeDays: series.filter((d) => d.hands > 0).length, seatings: s.n ?? 0, tables: s.tables ?? 0, buyIn: s.buyIn ?? 0 },
+    });
+  })
+  /**
+   * What administrators did to this member, newest first: sanctions, role and chip changes, reset links, decisions on
+   * reports about them, and internal notes. `kind` = all | sanction | chips | note. Pages go back from the last item
+   * shown: `before` (its time, ms) and `beforeId` (its id), so entries written in the same millisecond are not skipped.
+   */
+  .get('/users/:id/timeline', async (c) => {
+    const id = c.req.param('id');
+    const kind = c.req.query('kind') ?? 'all';
+    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 30) || 30, 1), 100);
+    const before = Number(c.req.query('before')) || Number.MAX_SAFE_INTEGER;
+    const beforeId = (c.req.query('beforeId') ?? '').slice(0, 64);
+    const actions = kind === 'sanction' ? SANCTION_ACTIONS : kind === 'chips' ? ['user.chips'] : kind === 'note' ? ['note.delete'] : MEMBER_ACTIONS;
+    const DB = c.env.DB;
+    // Newest first by (time, id); one row past the page tells whether there is more.
+    const page = (t: string) => `(${t}.created_at < ?2 OR (${t}.created_at = ?2 AND ${t}.id < ?4)) ORDER BY ${t}.created_at DESC, ${t}.id DESC LIMIT ?3`;
+    const marks = actions.map((_, i) => `?${i + 5}`).join(', ');
+    const stmts = [
+      DB.prepare(
+        `SELECT a.id, a.action, a.detail, a.created_at AS createdAt, a.actor_id AS actorId, u.nickname AS actorNickname
+           FROM admin_audit_log a LEFT JOIN users u ON u.id = a.actor_id
+          WHERE a.target_type = 'user' AND a.target_id = ?1 AND a.action IN (${marks}) AND ${page('a')}`,
+      ).bind(id, before, limit + 1, beforeId || '￿', ...actions),
+    ];
+    if (kind === 'all' || kind === 'sanction') {
+      stmts.push(
+        DB.prepare(
+          `SELECT a.id, a.action, a.detail, a.created_at AS createdAt, a.actor_id AS actorId, u.nickname AS actorNickname
+             FROM admin_audit_log a LEFT JOIN users u ON u.id = a.actor_id
+            WHERE a.target_type = 'report' AND a.target_id IN (SELECT id FROM reports WHERE target_user_id = ?1) AND ${page('a')}`,
+        ).bind(id, before, limit + 1, beforeId || '￿'),
+      );
+    }
+    if (kind === 'all' || kind === 'note') {
+      stmts.push(
+        DB.prepare(
+          `SELECT n.id, 'note' AS action, n.body, n.created_at AS createdAt, n.author_id AS actorId, u.nickname AS actorNickname
+             FROM admin_notes n LEFT JOIN users u ON u.id = n.author_id WHERE n.user_id = ?1 AND ${page('n')}`,
+        ).bind(id, before, limit + 1, beforeId || '￿'),
+      );
+    }
+    type Row = { id: string; action: string; detail?: string | null; body?: string; createdAt: number; actorId: string; actorNickname: string | null };
+    const rows = (await DB.batch(stmts)).flatMap((r) => r.results as Row[]);
+    rows.sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    const items = rows.slice(0, limit).map((r) => ({
+      id: r.id,
+      action: r.action,
+      createdAt: r.createdAt,
+      actor: { id: r.actorId, nickname: r.actorNickname },
+      detail: r.detail ? (JSON.parse(r.detail) as unknown) : null,
+      body: r.body ?? null,
+    }));
+    const last = rows.length > limit ? items[items.length - 1]! : null;
+    return c.json({ items, nextBefore: last?.createdAt ?? null, nextBeforeId: last?.id ?? null });
+  })
+  /** An internal handover note on a member (admins only, never shown to the member; no personal data). */
+  .post('/users/:id/notes', async (c) => {
+    const id = c.req.param('id');
+    const { body } = await parseBody(c, z.object({ body: z.string().trim().min(2).max(500) }));
+    if (looksPersonal(body)) fail(400, 'note_pii', 'notes must not hold e-mail addresses, phone, card or ID numbers');
+    const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { id: true, status: true } });
+    if (!u || u.status === 'deleted') fail(404, 'not_found', 'user not found');
+    const noteId = crypto.randomUUID();
+    const createdAt = Date.now();
+    await c.var.db.insert(schema.adminNotes).values({ id: noteId, userId: id, authorId: c.var.user!.id, body, createdAt });
+    // The note itself is the record; the audit row says who wrote one and when, not what it says.
+    await audit(c, 'note.create', { type: 'user', id }, { noteId, length: body.length });
+    return c.json({ id: noteId, createdAt });
+  })
+  /** Deleted by its author or a super admin. The text is gone; the audit row keeps who removed whose note. */
+  .delete('/users/:id/notes/:noteId', async (c) => {
+    const id = c.req.param('id');
+    const noteId = c.req.param('noteId');
+    const n = await c.var.db.query.adminNotes.findFirst({ where: and(eq(schema.adminNotes.id, noteId), eq(schema.adminNotes.userId, id)) });
+    if (!n) fail(404, 'not_found', 'note not found');
+    if (n.authorId !== c.var.user!.id && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only the author or a super admin can delete a note');
+    await c.var.db.delete(schema.adminNotes).where(eq(schema.adminNotes.id, noteId));
+    await audit(c, 'note.delete', { type: 'user', id }, { noteId, authorId: n.authorId, createdAt: n.createdAt });
+    return c.json({ ok: true });
   })
   .post('/users/:id/suspend', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
@@ -210,7 +391,7 @@ const admin = new Hono<AppEnv>()
     // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
     const kick = await kickEverywhere(c.env, id, 'suspended', true);
     await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).suspended(body.reason), senderId: c.var.user!.id });
-    await audit(c, 'user.suspend', { type: 'user', id }, { ...body, kick });
+    await audit(c, 'user.suspend', { type: 'user', id }, { ...body, from: target.status, to: 'suspended', previousReason: target.suspendedReason, kick });
     return c.json({ ok: true, kick });
   })
   /**
@@ -231,7 +412,8 @@ const admin = new Hono<AppEnv>()
   })
   .post('/users/:id/unsuspend', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true } });
+    const body = await parseBody(c, z.object({ reason: ReasonSchema }));
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, status: true, suspendedReason: true } });
     if (!target) fail(404, 'not_found', 'user not found');
     if (target.role !== 'user' && c.var.user!.role !== 'super_admin') fail(403, 'forbidden', 'only a super admin can unsuspend administrators');
     const lifted = await c.var.db
@@ -240,19 +422,20 @@ const admin = new Hono<AppEnv>()
       .where(and(eq(schema.users.id, id), eq(schema.users.status, 'suspended')))
       .returning({ id: schema.users.id });
     if (lifted[0]) await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).unsuspended(), senderId: c.var.user!.id });
-    await audit(c, 'user.unsuspend', { type: 'user', id });
+    // The suspension's own reason is cleared from the account, so the record keeps it next to the reason for lifting it.
+    await audit(c, 'user.unsuspend', { type: 'user', id }, { reason: body.reason, from: target.status, to: lifted[0] ? 'active' : target.status, suspendedReason: target.suspendedReason });
     return c.json({ ok: true });
   })
   .post('/users/:id/role', requireSuperAdmin, requireRecentReauth, async (c) => {
     const id = c.req.param('id');
-    const body = await parseBody(c, z.object({ role: z.enum(['user', 'admin', 'super_admin']) }));
+    const body = await parseBody(c, z.object({ role: z.enum(['user', 'admin', 'super_admin']), reason: ReasonSchema }));
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot change your own role');
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!target || target.status !== 'active') fail(404, 'not_found', 'active user not found');
     await c.var.db.update(schema.users).set({ role: body.role, updatedAt: Date.now() }).where(eq(schema.users.id, id));
     // Role changes take effect immediately: drop existing admin sessions of the target.
     await c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
-    await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role });
+    await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     return c.json({ ok: true });
   })
   .post('/users/:id/chips', requireRecentReauth, async (c) => {

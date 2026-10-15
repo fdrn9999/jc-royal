@@ -45,12 +45,15 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await page.getByPlaceholder(/검색|Search/).press('Enter');
   await page.getByRole('link', { name: /상세|Details/ }).first().click();
   await page.getByLabel(/금액|Amount/).fill('777');
-  await page.getByLabel(/메모|Memo/).fill('E2E 이벤트');
+  // The chip memo, not the internal-note box further down.
+  await page.getByLabel(/^메모$|^Memo$/).fill('E2E 이벤트');
   await page.getByRole('button', { name: /^확인$|^Confirm$/ }).first().click();
   await expect(page.getByTestId('reauth-confirm')).toBeVisible();
   await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByTestId('reauth-confirm').click();
-  await expect(page.getByText('+777')).toBeVisible();
+  await expect(page.getByRole('cell', { name: '+777' })).toBeVisible();
+  // The member's history lists the adjustment with its memo.
+  await expect(page.getByTestId('history')).toContainText('+777 · E2E 이벤트');
   // The member's already-open tab picks up the new balance on return, without a reload.
   await member.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await expect(member.page.getByTestId('balance')).toContainText('10,777');

@@ -99,6 +99,13 @@
       "when": 1792050681874,
       "tag": "0013_tables_hands_paused",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792055347918,
+      "tag": "0014_users_admin_notes",
+      "breakpoints": true
     }
   ]
 }

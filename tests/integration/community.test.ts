@@ -51,7 +51,7 @@ describe('messages (one-way, admin → user)', () => {
     expect((await a.client.get('/api/messages')).body[0]).toMatchObject({ category: 'event', title: '가상 칩 지급 안내' });
 
     await admin.post(`/api/admin/users/${b.me.id}/suspend`, { reason: '욕설' });
-    await admin.post(`/api/admin/users/${b.me.id}/unsuspend`, {});
+    await admin.post(`/api/admin/users/${b.me.id}/unsuspend`, { reason: 'appeal accepted' });
     const relog = new Client();
     expect((await relog.post('/api/auth/login', { email: b.email, password: PASSWORD })).status).toBe(200);
     const inbox = (await relog.get('/api/messages')).body as { category: string; title: string; body: string }[];

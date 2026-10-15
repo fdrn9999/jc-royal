@@ -21,6 +21,7 @@ import {
   userStatusLabel,
 } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 const newKey = () => crypto.randomUUID().replace(/-/g, '').slice(0, 24);
@@ -82,9 +83,20 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
 }
 
 // ------------------------------------------------------------------ users
-interface UserRow { id: string; email: string; nickname: string; locale: Locale; role: string; status: string; balance: number; createdAt: number; online?: boolean }
+interface UserRow { id: string; email: string; nickname: string; locale: Locale; role: string; status: string; balance: number; createdAt: number; lastLoginAt?: number | null; online?: boolean }
 
 const EXPORT_MAX = 1000;
+const PAGE = 50;
+const SORTS = [
+  ['created:desc', 'sortCreatedDesc'],
+  ['created:asc', 'sortCreatedAsc'],
+  ['login:desc', 'sortLoginDesc'],
+  ['login:asc', 'sortLoginAsc'],
+  ['balance:desc', 'sortBalanceDesc'],
+  ['balance:asc', 'sortBalanceAsc'],
+  ['nickname:asc', 'sortNickname'],
+] as const;
+const selectCls = 'h-11 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm';
 const checkbox = 'size-4 cursor-pointer accent-gold-500';
 
 export function UsersPage() {
@@ -94,11 +106,27 @@ export function UsersPage() {
   const [query, setQuery] = useState('');
   const [lang, setLang] = useState<'' | Locale>('');
   const [onlineOnly, setOnlineOnly] = useState(false);
+  const [status, setStatus] = useState('');
+  const [role, setRole] = useState('');
+  const [sort, setSort] = useState<(typeof SORTS)[number][0]>('created:desc');
+  const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const { data, error } = useData<UserRow[]>(`/api/admin/users?q=${encodeURIComponent(query)}${lang ? `&locale=${lang}` : ''}${onlineOnly ? '&online=1' : ''}&limit=200`);
-  const shown = data ?? [];
+  const [sortKey, dir] = sort.split(':') as [string, string];
+  const params = new URLSearchParams({ q: query, sort: sortKey, dir, paged: '1', limit: String(PAGE), offset: String(offset) });
+  if (lang) params.set('locale', lang);
+  if (onlineOnly) params.set('online', '1');
+  if (status) params.set('status', status);
+  if (role) params.set('role', role);
+  const { data, error, loading } = useData<{ items: UserRow[]; total: number }>(`/api/admin/users?${params}`);
+  // Any change to what is searched starts again from the first page (the selection for export stays).
+  const filter = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setOffset(0);
+  };
+  const shown = data?.items ?? [];
+  const total = data?.total ?? 0;
   const shownSelected = shown.filter((u) => selected.has(u.id)).length;
   const allShown = shown.length > 0 && shownSelected === shown.length;
   const toggle = (id: string, on: boolean) =>
@@ -133,15 +161,26 @@ export function UsersPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-extrabold">{t('users')}</h1>
-      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setQuery(q); }}>
+      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); filter(setQuery)(q); }}>
         <Input className="min-w-0 flex-1 basis-56" placeholder={t('search')} value={q} onChange={(e) => setQ(e.target.value)} />
-        <select aria-label={t('language')} value={lang} onChange={(e) => setLang(e.target.value as '' | Locale)} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm" data-testid="lang-filter">
+        <select aria-label={t('status')} value={status} onChange={(e) => filter(setStatus)(e.target.value)} className={selectCls} data-testid="status-filter">
+          <option value="">{t('allStatuses')}</option>
+          {(['active', 'suspended', 'deleted'] as const).map((s) => <option key={s} value={s}>{userStatusLabel(t, s)}</option>)}
+        </select>
+        <select aria-label={t('role')} value={role} onChange={(e) => filter(setRole)(e.target.value)} className={selectCls} data-testid="role-filter">
+          <option value="">{t('allRoles')}</option>
+          {(['user', 'admin', 'super_admin'] as const).map((r) => <option key={r} value={r}>{roleLabel(t, r)}</option>)}
+        </select>
+        <select aria-label={t('language')} value={lang} onChange={(e) => filter(setLang)(e.target.value as '' | Locale)} className={selectCls} data-testid="lang-filter">
           <option value="">{t('allLanguages')}</option>
           <option value="ko">{t('langKo')}</option>
           <option value="en">{t('langEn')}</option>
         </select>
+        <select aria-label={t('sortLabel')} value={sort} onChange={(e) => filter(setSort)(e.target.value as typeof sort)} className={selectCls} data-testid="sort-select">
+          {SORTS.map(([v, k]) => <option key={v} value={v}>{t(k)}</option>)}
+        </select>
         <label className="flex h-11 items-center gap-2 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm" title={t('onlineBasis')}>
-          <input type="checkbox" className={checkbox} checked={onlineOnly} onChange={(e) => setOnlineOnly(e.target.checked)} data-testid="online-filter" />
+          <input type="checkbox" className={checkbox} checked={onlineOnly} onChange={(e) => filter(setOnlineOnly)(e.target.checked)} data-testid="online-filter" />
           {t('onlineOnly')}
         </label>
         <Button type="submit" variant="subtle">{t('searchBtn')}</Button>
@@ -156,7 +195,7 @@ export function UsersPage() {
       </div>
       {msg && <p className="text-sm text-gold-300" role="status">{msg}</p>}
       {error && <Empty>{error}</Empty>}
-      <Panel>
+      <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <Table
           head={[
             <input
@@ -172,10 +211,10 @@ export function UsersPage() {
               disabled={shown.length === 0}
               data-testid="select-all"
             />,
-            t('nickname'), t('email'), t('language'), t('role'), t('status'), t('balance'), t('createdAt'), '',
+            t('nickname'), t('email'), t('language'), t('role'), t('status'), t('balance'), t('lastLogin'), t('createdAt'), '',
           ]}
         >
-          {data?.map((u) => (
+          {shown.map((u) => (
             <tr key={u.id} className={selected.has(u.id) ? 'bg-gold-500/5' : undefined}>
               <td className="w-8 px-2 py-2">
                 <input type="checkbox" className={checkbox} aria-label={t('selectUser', { name: u.nickname })} checked={selected.has(u.id)} onChange={(e) => toggle(u.id, e.target.checked)} />
@@ -189,11 +228,20 @@ export function UsersPage() {
                 {u.online && <Badge tone="blue" className="ml-1">{t('online')}</Badge>}
               </td>
               <td className="px-2 py-2 font-mono">{formatChips(u.balance)}</td>
+              <td className="px-2 py-2 text-xs text-ink-300">{u.lastLoginAt ? formatDate(u.lastLoginAt, locale) : <span className="text-ink-400">{t('notRecorded')}</span>}</td>
               <td className="px-2 py-2 text-xs text-ink-400">{formatDate(u.createdAt, locale)}</td>
               <td className="px-2 py-2"><Link to={`/users/${u.id}`} className="text-gold-300">{t('detail')}</Link></td>
             </tr>
           ))}
         </Table>
+        {data && shown.length === 0 && <p className="py-8 text-center text-sm text-ink-400" data-testid="no-members">{t('noMembers')}</p>}
+        {total > 0 && (
+          <nav className="mt-3 flex flex-wrap items-center justify-end gap-2" aria-label={t('users')} data-testid="users-pager">
+            <span className="mr-auto text-xs text-ink-400" aria-live="polite">{t('pageRange', { from: offset + 1, to: offset + shown.length, total })}</span>
+            <Button size="sm" variant="outline" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))} data-testid="page-prev">{t('prevPage')}</Button>
+            <Button size="sm" variant="outline" disabled={offset + shown.length >= total || loading} onClick={() => setOffset(offset + PAGE)} data-testid="page-next">{t('nextPage')}</Button>
+          </nav>
+        )}
       </Panel>
     </div>
   );
@@ -215,7 +263,14 @@ interface UserDetail {
   /** Valid sign-in sessions, most recent first (no tokens or addresses). Absent from older APIs. */
   sessions?: { kind: 'user' | 'admin'; createdAt: number; lastSeenAt: number; expiresAt: number }[];
   online?: boolean;
+  /** Latest seatings with their tables, and reports by and about the member. Absent from older APIs. */
+  recentTables?: RecentTable[];
+  reports?: MemberReports;
 }
+
+type Role = 'user' | 'admin' | 'super_admin';
+/** What the confirmation dialog is about to do; lifting a suspension and changing a role ask for a reason there. */
+type Pending = null | { kind: 'suspend' } | { kind: 'disconnect' } | { kind: 'unsuspend' } | { kind: 'role'; role: Role };
 
 /** What ending a member's table connections did (the api's kickEverywhere). */
 interface KickReport { tables: number; reached: number; unreached: string[]; truncated: boolean; sockets: number; seats: { tableId: string; seat: string }[] }
@@ -258,10 +313,13 @@ export function UserDetailPage() {
   const [memo, setMemo] = useState('');
   const [reason, setReason] = useState('');
   const [reset, setReset] = useState<ResetLink | null>(null);
-  const [confirm, setConfirm] = useState<null | 'suspend' | 'disconnect'>(null);
+  const [confirm, setConfirm] = useState<Pending>(null);
+  const [cReason, setCReason] = useState('');
   const [dReason, setDReason] = useState('');
   const [removeSeat, setRemoveSeat] = useState(false);
   const [kick, setKick] = useState<{ kick: KickReport; sessions?: number } | null>(null);
+  // Bumped after every change so the history panel reloads with the new entry.
+  const [rev, setRev] = useState(0);
   const run = async (fn: () => Promise<unknown>) => {
     setMsg(null);
     setReset(null);
@@ -269,10 +327,15 @@ export function UserDetailPage() {
     try {
       await fn();
       setMsg(t('saved'));
+      setRev((n) => n + 1);
       await reload();
     } catch (e) {
       setMsg(errText(e, t));
     }
+  };
+  const ask = (p: Exclude<Pending, null>) => {
+    setCReason('');
+    setConfirm(p);
   };
   const issueReset = async () => {
     setMsg(null);
@@ -292,12 +355,37 @@ export function UserDetailPage() {
           ? await api<{ kick: KickReport }>(`/api/admin/users/${id}/suspend`, { body: { reason } })
           : await api<{ kick: KickReport; sessions: number }>(`/api/admin/users/${id}/disconnect`, { body: { reason: dReason, removeFromTable: removeSeat } }),
       );
+      // A used reason is not offered again for the next action.
+      if (kind === 'suspend') setReason('');
+      else setDReason('');
     });
+  };
+  const apply = () => {
+    const p = confirm;
+    if (!p) return;
+    if (p.kind === 'suspend' || p.kind === 'disconnect') return endConnections(p.kind);
+    setConfirm(null);
+    const why = cReason.trim();
+    void run(() =>
+      p.kind === 'unsuspend'
+        ? api(`/api/admin/users/${id}/unsuspend`, { body: { reason: why } })
+        : api(`/api/admin/users/${id}/role`, { body: { role: p.role, reason: why } }),
+    );
   };
   if (error) return <Empty>{error}</Empty>;
   if (!data) return <Empty>{t('loading')}</Empty>;
   const u = data.user;
   const canModerate = me?.user.id !== u.id && (u.role === 'user' || me?.user.role === 'super_admin');
+  // Before → after, shown in the confirmation so the admin sees exactly what changes.
+  const change =
+    confirm?.kind === 'suspend'
+      ? t('histChange', { from: userStatusLabel(t, u.status), to: userStatusLabel(t, 'suspended') })
+      : confirm?.kind === 'unsuspend'
+        ? t('histChange', { from: userStatusLabel(t, u.status), to: userStatusLabel(t, 'active') })
+        : confirm?.kind === 'role'
+          ? t('histChange', { from: roleLabel(t, u.role), to: roleLabel(t, confirm.role) })
+          : null;
+  const needsReason = confirm?.kind === 'unsuspend' || confirm?.kind === 'role';
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -311,11 +399,12 @@ export function UserDetailPage() {
       {msg && <p className="break-all rounded-lg border border-gold-500/30 bg-gold-500/5 px-3 py-2 text-sm text-gold-300" role="status">{msg}</p>}
       {kick && <KickResult r={kick} />}
       {reset && <ResetLinkResult reset={reset} />}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Stat label={t('balance')} value={formatChips(u.balance)} />
         <Stat label={t('handsPlayed')} value={formatChips(data.hands.n)} sub={t('netN', { n: formatChips(data.hands.net) })} />
         <Stat label={t('openSeats')} value={data.openSeats.length} />
-        <Stat label={t('createdAt')} value={<span className="text-sm">{formatDate(u.createdAt, locale)}</span>} sub={u.email} />
+        <Stat label={t('lastLogin')} value={<span className="text-sm break-keep" data-testid="last-login">{u.lastLoginAt ? formatDate(u.lastLoginAt, locale) : t('notRecorded')}</span>} sub={data.online ? t('online') : undefined} />
+        <Stat label={t('createdAt')} value={<span className="text-sm break-keep">{formatDate(u.createdAt, locale)}</span>} sub={<span className="break-all">{u.email}</span>} />
       </div>
       <Panel title={t('memberInfo')}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4" data-testid="member-info">
@@ -348,19 +437,19 @@ export function UserDetailPage() {
         <Panel title={t('status')}>
           <div className="flex flex-col gap-3">
             {u.status === 'active' && me?.user.id !== u.id ? (
-              <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); setConfirm('suspend'); }}>
+              <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'suspend' }); }}>
                 <Input placeholder={t('reason')} aria-label={t('reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
                 <Button type="submit" variant="danger" disabled={reason.trim().length < 2} data-testid="suspend">{t('suspend')}</Button>
               </form>
             ) : u.status === 'suspended' ? (
-              <Button variant="outline" onClick={() => run(() => api(`/api/admin/users/${id}/unsuspend`, { body: {} }))}>{t('unsuspend')} ({u.suspendedReason})</Button>
+              <Button variant="outline" onClick={() => ask({ kind: 'unsuspend' })} data-testid="unsuspend">{t('unsuspend')} ({u.suspendedReason})</Button>
             ) : null}
             <Button variant="subtle" onClick={issueReset} data-testid="reset-link">{t('resetLink')}</Button>
             {me?.user.role === 'super_admin' && me.user.id !== u.id && (
               <div className="flex flex-wrap gap-2">
                 <span className="self-center text-sm text-ink-300">{t('setRole')}:</span>
                 {(['user', 'admin', 'super_admin'] as const).map((r) => (
-                  <Button key={r} size="sm" variant={u.role === r ? 'gold' : 'outline'} disabled={u.role === r} onClick={() => run(() => api(`/api/admin/users/${id}/role`, { body: { role: r } }))}>{roleLabel(t, r)}</Button>
+                  <Button key={r} size="sm" variant={u.role === r ? 'gold' : 'outline'} disabled={u.role === r} onClick={() => ask({ kind: 'role', role: r })} data-testid={`role-${r}`}>{roleLabel(t, r)}</Button>
                 ))}
               </div>
             )}
@@ -395,7 +484,7 @@ export function UserDetailPage() {
             <p className="text-xs text-ink-400">{t('onlineBasis')}</p>
           </div>
           {canModerate && (
-            <form className="flex min-w-0 flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); setConfirm('disconnect'); }} data-testid="disconnect-form">
+            <form className="flex min-w-0 flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'disconnect' }); }} data-testid="disconnect-form">
               <p className="text-xs text-ink-300">{t('disconnectHint')}</p>
               <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={dReason} onChange={(e) => setDReason(e.target.value)} />}</Field>
               <label className="flex items-start gap-2 text-sm">
@@ -411,15 +500,42 @@ export function UserDetailPage() {
       <Modal
         open={confirm !== null}
         onClose={() => setConfirm(null)}
-        title={confirm === 'suspend' ? t('suspend') : t('disconnect')}
-        footer={<><Button variant="ghost" onClick={() => setConfirm(null)}>{t('cancel')}</Button><Button variant="danger" onClick={() => confirm && endConnections(confirm)} data-testid="confirm-end">{t('confirm')}</Button></>}
+        title={confirm?.kind === 'suspend' ? t('suspend') : confirm?.kind === 'unsuspend' ? t('unsuspend') : confirm?.kind === 'role' ? t('setRole') : t('disconnect')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirm(null)}>{t('cancel')}</Button>
+            <Button variant={confirm?.kind === 'unsuspend' ? 'gold' : 'danger'} onClick={apply} disabled={needsReason && cReason.trim().length < 2} data-testid="confirm-end">{t('confirm')}</Button>
+          </>
+        }
       >
         <div className="flex flex-col gap-2 text-sm">
-          <p>{confirm === 'suspend' ? t('suspendConfirm', { name: u.nickname }) : t('disconnectConfirm', { name: u.nickname })}</p>
-          <p className="break-all text-ink-300">{t('reason')}: {confirm === 'suspend' ? reason : dReason}</p>
-          {(confirm === 'suspend' || removeSeat) && <p className="text-xs text-ink-400">{t('seatPolicy')}</p>}
+          <p>
+            {confirm?.kind === 'suspend'
+              ? t('suspendConfirm', { name: u.nickname })
+              : confirm?.kind === 'unsuspend'
+                ? t('unsuspendConfirm', { name: u.nickname })
+                : confirm?.kind === 'role'
+                  ? t('roleConfirm', { name: u.nickname })
+                  : t('disconnectConfirm', { name: u.nickname })}
+          </p>
+          {change && (
+            <p className="font-semibold" data-testid="confirm-change">
+              <span className="font-normal text-ink-400">{t('changeLine')}:</span> {change}
+            </p>
+          )}
+          {confirm?.kind === 'unsuspend' && u.suspendedReason && <p className="break-all text-ink-300">{t('currentSuspendReason', { r: u.suspendedReason })}</p>}
+          {needsReason ? (
+            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={cReason} maxLength={200} onChange={(e) => setCReason(e.target.value)} data-testid="confirm-reason" />}</Field>
+          ) : (
+            <p className="break-all text-ink-300">{t('reason')}: {confirm?.kind === 'suspend' ? reason : dReason}</p>
+          )}
+          {(confirm?.kind === 'suspend' || (confirm?.kind === 'disconnect' && removeSeat)) && <p className="text-xs text-ink-400">{t('seatPolicy')}</p>}
         </div>
       </Modal>
+      <MemberActivityPanel userId={u.id} />
+      {data.recentTables && <RecentTablesPanel rows={data.recentTables} />}
+      {data.reports && <MemberReportsPanel userId={u.id} reports={data.reports} />}
+      <MemberHistoryPanel key={rev} userId={u.id} />
       <Panel title={t('ledger')}>
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (

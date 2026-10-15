@@ -47,7 +47,7 @@ export async function createSession(c: Context<AppEnv>, userId: string, kind: 'u
   const now = Date.now();
   const expiresAt = now + (kind === 'admin' ? ADMIN_IDLE_TTL : userTtl(remember));
   const id = crypto.randomUUID();
-  await c.var.db.insert(schema.sessions).values({
+  const insert = c.var.db.insert(schema.sessions).values({
     id,
     userId,
     tokenHash: await sha256(token),
@@ -59,6 +59,9 @@ export async function createSession(c: Context<AppEnv>, userId: string, kind: 'u
     userAgent: c.req.header('user-agent')?.slice(0, 300) ?? null,
     remember: kind === 'user' && remember,
   });
+  // A member sign-in is remembered on the account (the admin console shows it after the session itself is gone).
+  if (kind === 'user') await c.var.db.batch([insert, c.var.db.update(schema.users).set({ lastLoginAt: now }).where(eq(schema.users.id, userId))]);
+  else await insert;
   setSessionCookie(c, kind, token, remember);
   return id;
 }

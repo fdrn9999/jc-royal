@@ -43,6 +43,7 @@ const BY_MESSAGE: Record<string, Key> = {
   'only posts and comments can be hidden': 'errHideKind',
   'saved, but the table did not confirm; try again': 'errSavedUnconfirmed',
   'password is incorrect': 'errPassword',
+  'only the author or a super admin can delete a note': 'errNoteAuthor',
 };
 const BY_CODE: Record<string, Key> = {
   forbidden: 'errForbidden',
@@ -58,6 +59,7 @@ const BY_CODE: Record<string, Key> = {
   reauth_cancelled: 'errReauthCancelled',
   rate_limited: 'errRateLimited',
   internal: 'errServer',
+  note_pii: 'errNotePii',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */
@@ -178,18 +180,23 @@ export function useData<T>(path: string | null) {
   const { t } = useT();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
   const reload = useCallback(async () => {
     if (!path) return;
+    setLoading(true);
     try {
       setData(await api<T>(path));
       setError(null);
     } catch (e) {
       setError(e);
+    } finally {
+      setLoading(false);
     }
   }, [api, path]);
   useEffect(() => {
     void reload();
   }, [reload]);
   // Worded at render time, so it follows a language switch.
-  return { data, error: error == null ? null : errText(error, t), reload, setData };
+  // loading is true while a request is out (the previous data stays shown meanwhile).
+  return { data, error: error == null ? null : errText(error, t), reload, setData, loading };
 }

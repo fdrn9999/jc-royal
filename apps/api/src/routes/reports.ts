@@ -209,10 +209,14 @@ const REPORT_SELECT = `SELECT r.id, r.target_type AS targetType, r.target_id AS 
 
 /** Mounted inside the admin router (requireAdmin already applied). */
 export const adminReportRoutes = new Hono<AppEnv>()
-  /** ?status=open|resolved|dismissed (default open, 'all' for every report); ?userId= narrows to one reported member. */
+  /**
+   * ?status=open|resolved|dismissed (default open, 'all' for every report); ?userId= narrows to one reported member,
+   * ?reporterId= to what one member reported.
+   */
   .get('/reports', async (c) => {
     const status = c.req.query('status') ?? 'open';
     const userId = c.req.query('userId');
+    const reporterId = c.req.query('reporterId');
     const where: string[] = [];
     const args: unknown[] = [];
     if (status !== 'all') {
@@ -224,11 +228,15 @@ export const adminReportRoutes = new Hono<AppEnv>()
       args.push(userId);
       where.push(`r.target_user_id = ?${args.length}`);
     }
+    if (reporterId) {
+      args.push(reporterId);
+      where.push(`r.reporter_id = ?${args.length}`);
+    }
     const sql = `${REPORT_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY r.created_at DESC LIMIT 200`;
     const [list, open] = await c.env.DB.batch([c.env.DB.prepare(sql).bind(...args), c.env.DB.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status = 'open'`)]);
     const items = (list!.results as ReportRow[]).map(toReport);
     // Evidence can quote 1:1 messages and table chat, so every look is recorded with what it showed.
-    await audit(c, 'report.view', undefined, { status, userId: userId ?? null, count: items.length, dm: items.filter((r) => r.targetType === 'dm').map((r) => r.id) });
+    await audit(c, 'report.view', undefined, { status, userId: userId ?? null, reporterId: reporterId ?? null, count: items.length, dm: items.filter((r) => r.targetType === 'dm').map((r) => r.id) });
     return c.json({ items, openCount: (open!.results[0] as { n: number }).n });
   })
   /**

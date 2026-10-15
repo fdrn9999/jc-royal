@@ -325,7 +325,7 @@ export const authRoutes = new Hono<AppEnv>()
     await db.batch([
       db
         .update(schema.users)
-        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, updatedAt: Date.now() })
+        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, lastLoginAt: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
       // Friends, pending requests and blocks (made by or against the account) go with it.
@@ -338,6 +338,8 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.academyProgress).where(eq(schema.academyProgress.userId, me.id)),
       db.delete(schema.userBadges).where(eq(schema.userBadges.userId, me.id)),
       db.delete(schema.passwordResets).where(eq(schema.passwordResets.userId, me.id)),
+      // Administrators' internal notes about the member (sanction reasons stay in the audit log).
+      db.delete(schema.adminNotes).where(eq(schema.adminNotes.userId, me.id)),
       // Kept, under the pseudonymous id only: chip ledger, hands and seats (integrity), posts and comments (shown as
       // a withdrawn member), and reports. See docs/PRIVACY_OPERATIONS.md.
     ]);

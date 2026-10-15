@@ -7,9 +7,9 @@ import { contentStatusLabel, userStatusLabel } from '../labels';
 import { errText, useAdmin, useData } from '../lib';
 
 
-const REASON: Record<ReportReason, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
+export const REASON: Record<ReportReason, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
 const TARGET: Record<ReportTarget, Key> = { post: 'targetPost', comment: 'targetComment', player: 'targetPlayer', dm: 'targetDm' };
-const STATUS: Record<ReportStatus, Key> = { open: 'statusOpen', resolved: 'statusResolved', dismissed: 'statusDismissed' };
+export const STATUS: Record<ReportStatus, Key> = { open: 'statusOpen', resolved: 'statusResolved', dismissed: 'statusDismissed' };
 
 /** What the server captured when the report was filed. */
 function Evidence({ r }: { r: ReportDto }) {
@@ -176,7 +176,8 @@ export function ReportsPage() {
   const [params, setParams] = useSearchParams();
   const status = params.get('status') ?? 'open';
   const userId = params.get('userId');
-  const q = new URLSearchParams({ status, ...(userId ? { userId } : {}) });
+  const reporterId = params.get('reporterId');
+  const q = new URLSearchParams({ status, ...(userId ? { userId } : {}), ...(reporterId ? { reporterId } : {}) });
   const { data, error, reload } = useData<{ items: ReportDto[]; openCount: number }>(`/api/admin/reports?${q}`);
   const [msg, setMsg] = useState<string | null>(null);
   const set = (k: string, v: string | null) => {
@@ -194,6 +195,11 @@ export function ReportsPage() {
           {userId && (
             <button className="rounded-full bg-gold-500/15 px-3 py-1 text-xs font-semibold text-gold-300" onClick={() => set('userId', null)} data-testid="report-user-filter">
               {t('reportedUser')}: {data?.items[0]?.target.nickname ?? userId} ✕
+            </button>
+          )}
+          {reporterId && (
+            <button className="rounded-full bg-gold-500/15 px-3 py-1 text-xs font-semibold text-gold-300" onClick={() => set('reporterId', null)} data-testid="report-reporter-filter">
+              {t('reporterFilter')}: {data?.items[0]?.reporter.nickname ?? reporterId} ✕
             </button>
           )}
           <select value={status} onChange={(e) => set('status', e.target.value)} className="h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm" aria-label={t('status')} data-testid="report-status">

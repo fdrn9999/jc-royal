@@ -28,6 +28,8 @@ export const users = sqliteTable(
     friendRequests: text('friend_requests', { enum: ['everyone', 'nobody'] }).notNull().default('everyone'),
     /** Whether unread 1:1 messages count toward the header badge. */
     dmNotifications: integer('dm_notifications', { mode: 'boolean' }).notNull().default(true),
+    /** Last member sign-in (signup or login), kept after the session itself ends. Null before it was recorded. */
+    lastLoginAt: integer('last_login_at'),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -233,7 +235,28 @@ export const adminAuditLog = sqliteTable(
     ip: text('ip'),
     createdAt: integer('created_at').notNull().default(now),
   },
-  (t) => [index('audit_created_idx').on(t.createdAt)],
+  (t) => [
+    index('audit_created_idx').on(t.createdAt),
+    // A member's (or table's) action history on its detail page.
+    index('audit_target_idx').on(t.targetType, t.targetId, t.createdAt),
+  ],
+);
+
+/**
+ * Internal notes administrators leave on a member for handover (why a sanction was given, what to watch). Never shown
+ * to the member. Not a place for personal data: the API refuses e-mail addresses and phone or ID numbers. Deleted with
+ * the account, and by their author or a super admin (the audit log keeps who deleted which note, not its text).
+ */
+export const adminNotes = sqliteTable(
+  'admin_notes',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id),
+    authorId: text('author_id').notNull(),
+    body: text('body').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('admin_notes_user_idx').on(t.userId, t.createdAt)],
 );
 
 export const reconciliationEvents = sqliteTable('reconciliation_events', {
@@ -445,6 +468,8 @@ export const reports = sqliteTable(
   (t) => [
     index('reports_status_idx').on(t.status, t.createdAt),
     index('reports_target_user_idx').on(t.targetUserId, t.createdAt),
+    // What a member has reported, on their admin detail page.
+    index('reports_reporter_idx').on(t.reporterId, t.createdAt),
     // One open report per reporter and target; a new one is possible after review.
     uniqueIndex('reports_open_uq').on(t.reporterId, t.targetType, t.targetId).where(sql`status = 'open'`),
   ],
