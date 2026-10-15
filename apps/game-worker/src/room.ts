@@ -11,7 +11,7 @@
  * identity forwarded by the API worker in its attachment.
  */
 import { DurableObject } from 'cloudflare:workers';
-import { HandEngine, nextButtonSeat, type PersistedHand } from '@jc/poker-engine';
+import { HandEngine, nextButtonSeat, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
   AUTO_REBUY_MAX_TIMES,
   ClientMessageSchema,
@@ -118,6 +118,16 @@ const SIT_OUT_STAND_UP_MS = 10 * 60_000;
 const TIMEOUTS_BEFORE_SIT_OUT = 2;
 const CHAT_HISTORY = 50;
 const MSG_RATE = { capacity: 20, refillPerSec: 10 };
+/** How soon the room retries work a failed D1 call left unfinished (a cash-out, a close, a hand record). */
+const RETRY_MS = 15_000;
+const UNRECORDED_PREFIX = 'unrecorded:';
+
+/** A finished hand kept in room storage until its D1 record is written. */
+interface UnrecordedHand {
+  handNumber: number;
+  record: HandRecord;
+  log: PersistedHand;
+}
 
 class CommandError extends Error {
   constructor(
@@ -138,19 +148,23 @@ export class TableRoom extends DurableObject<Env> {
   private queue: Promise<unknown> = Promise.resolve();
   private buckets = new Map<string, { tokens: number; at: number; lastChat: number }>();
   private lastStats = '';
+  /** Storage keys of finished hands D1 does not have yet (see `retryUnrecorded`). */
+  private unrecorded = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      const [room, hand, chat, tableId] = await Promise.all([
+      const [room, hand, chat, tableId, unrecorded] = await Promise.all([
         ctx.storage.get<RoomState>('room'),
         ctx.storage.get<PersistedHand>('hand'),
         ctx.storage.get<ChatMessage[]>('chat'),
         ctx.storage.get<string>('tableId'),
+        ctx.storage.list({ prefix: UNRECORDED_PREFIX }),
       ]);
       this.tableId = tableId ?? null;
       this.room = room ?? emptyRoom(9);
       this.chat = chat ?? [];
+      this.unrecorded = new Set(unrecorded.keys());
       if (hand) this.hand = HandEngine.restore(hand, Date.now());
     });
   }
@@ -179,16 +193,32 @@ export class TableRoom extends DurableObject<Env> {
         const seats: (SeatState | null)[] = Array.from({ length: t.maxSeats }, (_, i) => this.room.seats[i] ?? null);
         this.room.seats = seats;
       }
-      if (t.status === 'closing') this.room.closing = true;
+      // A close that D1 holds but this room never took on (the call did not reach it) is resumed below.
+      if (t.status === 'closing' && !this.room.closing) {
+        this.room.closing = true;
+        this.room.waitlist = [];
+        this.room.reservation = null;
+        await this.save();
+      }
       this.loaded = true;
-      await this.recoverPendingSeats();
+      // Seats a restart left half way (and a close not yet finished) are settled here; if D1 fails, play goes on and
+      // the retry alarm `schedule` arms finishes them.
+      try {
+        await this.recoverPendingSeats();
+      } catch (e) {
+        console.error('recovery failed; will retry', (e as Error).message);
+      }
       if (this.hand?.isSettled && this.room.settledHandId !== this.hand.handId) await this.settle([]);
+      if (this.unfinishedWork()) {
+        await this.finishWorkSafely();
+        await this.schedule();
+      }
     }
   }
 
-  private async save() {
+  private async save(extra: Record<string, unknown> = {}) {
     this.room.version += 1;
-    await this.ctx.storage.put({ room: this.room, hand: this.hand ? this.hand.persist() : null });
+    await this.ctx.storage.put({ ...extra, room: this.room, hand: this.hand ? this.hand.persist() : null });
   }
 
   /** Open sockets, optionally excluding one that is in the middle of closing. */
@@ -284,7 +314,9 @@ export class TableRoom extends DurableObject<Env> {
             const t = await loadTable(this.env.DB, tableId);
             if (t) {
               this.table = t;
-              if (t.status === 'closing' && !this.room.closing) await this.beginClose();
+              if (t.status === 'closing' && !this.room.closed) await this.beginClose();
+              // A room an older build closed before telling D1.
+              else if (this.room.closed && t.status !== 'closed') await markTableClosed(this.env.DB, tableId);
             }
             this.broadcast();
             await this.schedule();
@@ -364,6 +396,8 @@ export class TableRoom extends DurableObject<Env> {
         else {
           console.error('command failed', (e as Error).message);
           this.send(ws, { t: 'error', code: 'internal', message: 'internal error', ...(reqId ? { reqId } : {}) });
+          // A D1 call that failed half way (a cash-out, a buy-in) is retried by the alarm.
+          await this.schedule().catch(() => undefined);
         }
       }
     });
@@ -546,6 +580,8 @@ export class TableRoom extends DurableObject<Env> {
     // Reserve the seat durably before touching the wallet (crash safety).
     this.room.seats[seatIndex] = seat;
     await this.save();
+    // If this throws, the outcome is unknown: the seat stays pending and the retry alarm asks the ledger
+    // (recoverPendingSeats).
     const r = await buyIn(this.env.DB, { userId: a.userId, tableId: t.id, tableSessionId, seatIndex, amount });
     if (!r.ok) {
       this.room.seats[seatIndex] = null;
@@ -615,6 +651,8 @@ export class TableRoom extends DurableObject<Env> {
       return;
     }
     await this.standUp(i);
+    // The last player leaving a closing room closes it.
+    if (this.room.closing) await this.continueCloseSafely();
     this.broadcast([{ kind: 'leave', seatIndex: i }]);
     await this.afterChange();
   }
@@ -861,13 +899,13 @@ export class TableRoom extends DurableObject<Env> {
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
       this.room.nextHandAt = now + BETWEEN_HANDS_MS;
-      await this.save();
+      // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
+      const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
+      const entry: UnrecordedHand = { handNumber: this.room.handNumber, record: h.record(now), log: h.persist() };
+      await this.save({ [key]: entry });
+      this.unrecorded.add(key);
     }
-    try {
-      await recordHand(this.env.DB, this.tableId!, this.room.handNumber, h.record(now), h.persist());
-    } catch (e) {
-      console.error('recordHand failed', (e as Error).message);
-    }
+    await this.retryUnrecorded();
     // Results stay visible until the next hand starts.
     this.broadcast(cues);
     // Top-ups that waited for this hand and automatic rebuys happen before busted players stand up.
@@ -877,13 +915,18 @@ export class TableRoom extends DurableObject<Env> {
       const s = this.room.seats[i];
       if (!s || s.phase !== 'seated') continue;
       if (s.leaveAfterHand || s.stack === 0 || this.room.closing) {
-        await this.standUp(i);
-        left.push({ kind: 'leave', seatIndex: i });
+        try {
+          await this.standUp(i);
+          left.push({ kind: 'leave', seatIndex: i });
+        } catch (e) {
+          // The seat stays 'cashing' and the alarm finishes the cash-out (its ledger key makes a repeat a no-op).
+          console.error('cash-out failed; will retry', (e as Error).message);
+        }
       }
     }
     if (left.length || notices.length) this.broadcast(left);
     this.notify(notices);
-    if (this.room.closing) await this.finishCloseIfIdle();
+    if (this.room.closing) await this.continueCloseSafely();
     await this.schedule();
   }
 
@@ -958,6 +1001,7 @@ export class TableRoom extends DurableObject<Env> {
     if (this.room.nextHandAt) times.push(this.room.nextHandAt);
     if (this.room.reservation) times.push(this.room.reservation.until);
     for (const s of this.room.seats) if (s?.sittingOut && s.sitOutSince) times.push(s.sitOutSince + SIT_OUT_STAND_UP_MS);
+    if (!this.loaded || this.unfinishedWork()) times.push(Date.now() + RETRY_MS);
     if (times.length === 0) {
       await this.ctx.storage.deleteAlarm();
       return;
@@ -968,7 +1012,16 @@ export class TableRoom extends DurableObject<Env> {
   override async alarm() {
     await this.run(async () => {
       if (!this.tableId) return;
-      await this.ensureLoaded();
+      try {
+        await this.ensureLoaded();
+      } catch (e) {
+        if (e instanceof CommandError) return; // the table row is gone
+        // D1 unreachable: keep retrying here rather than rely on the runtime's few alarm retries.
+        console.error('alarm: load failed; will retry', (e as Error).message);
+        await this.ctx.storage.setAlarm(Date.now() + RETRY_MS);
+        return;
+      }
+      if (this.unfinishedWork()) await this.finishWorkSafely();
       const now = Date.now();
       // Turn timer.
       if (this.hand && !this.hand.isSettled) {
@@ -1000,9 +1053,14 @@ export class TableRoom extends DurableObject<Env> {
       // Long sit-outs stand up.
       for (let i = 0; i < this.room.seats.length; i++) {
         const s = this.room.seats[i];
-        if (s?.sittingOut && s.sitOutSince && s.sitOutSince + SIT_OUT_STAND_UP_MS <= now && !this.handHasPlayer(s.userId)) {
-          await this.standUp(i);
-          this.broadcast([{ kind: 'leave', seatIndex: i }]);
+        if (s?.sittingOut && s.sitOutSince && s.sitOutSince + SIT_OUT_STAND_UP_MS <= now && s.phase === 'seated' && !this.handHasPlayer(s.userId)) {
+          try {
+            await this.standUp(i);
+            this.broadcast([{ kind: 'leave', seatIndex: i }]);
+          } catch (e) {
+            // Left 'cashing' for the retry; the rest of the alarm (turn timers, the next hand) still runs.
+            console.error('cash-out failed; will retry', (e as Error).message);
+          }
         }
       }
       // Next hand.
@@ -1025,27 +1083,81 @@ export class TableRoom extends DurableObject<Env> {
 
   // ------------------------------------------------------------------ admin
 
+  /** Stops entries and new hands; once no hand is running everyone is cashed out and the table closes. Safe to repeat. */
   private async beginClose() {
-    this.room.closing = true;
-    this.room.waitlist = [];
-    this.room.reservation = null;
-    await this.save();
-    if (!this.hand || this.hand.isSettled) {
-      for (let i = 0; i < this.room.seats.length; i++) if (this.room.seats[i]?.phase === 'seated') await this.standUp(i);
-      await this.finishCloseIfIdle();
+    if (!this.room.closing) {
+      this.room.closing = true;
+      this.room.waitlist = [];
+      this.room.reservation = null;
+      await this.save();
     }
+    await this.continueCloseSafely();
     this.broadcast();
     await this.schedule();
   }
 
+  /**
+   * With no hand running: settle seats whose buy-in or cash-out was cut short, cash out the rest and close. Each
+   * cash-out is keyed by its table session in the ledger, so repeating this after a failure or a restart pays once.
+   */
+  private async continueClose() {
+    if (this.room.closed || (this.hand && !this.hand.isSettled)) return;
+    await this.recoverPendingSeats();
+    for (let i = 0; i < this.room.seats.length; i++) if (this.room.seats[i]?.phase === 'seated') await this.standUp(i);
+    await this.finishCloseIfIdle();
+  }
+
+  /** A failure (D1 unreachable) leaves the rest to the retry alarm `schedule` arms while the close is unfinished. */
+  private async continueCloseSafely() {
+    try {
+      await this.continueClose();
+    } catch (e) {
+      console.error('close unfinished; will retry', (e as Error).message);
+    }
+  }
+
+  /** Work a failed D1 call left behind: a buy-in or cash-out cut short, a close, a finished hand not yet recorded. */
+  private unfinishedWork(): boolean {
+    if (this.unrecorded.size > 0) return true;
+    if (this.room.closing && !this.room.closed && !(this.hand && !this.hand.isSettled)) return true;
+    return this.room.seats.some((s) => s && (s.phase === 'pending' || (s.phase === 'cashing' && !this.handHasPlayer(s.userId))));
+  }
+
+  private async finishWorkSafely() {
+    try {
+      await this.recoverPendingSeats();
+      await this.retryUnrecorded();
+      if (this.room.closing && !this.room.closed) await this.continueClose();
+      this.broadcast();
+    } catch (e) {
+      console.error('retry failed; will retry', (e as Error).message);
+    }
+  }
+
+  /** Writes the finished hands D1 does not have yet, oldest first; each stays in storage until its write succeeds. */
+  private async retryUnrecorded() {
+    for (const key of [...this.unrecorded].sort()) {
+      const u = await this.ctx.storage.get<UnrecordedHand>(key);
+      try {
+        if (u) await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log);
+      } catch (e) {
+        console.error('recordHand failed; will retry', (e as Error).message);
+        return;
+      }
+      await this.ctx.storage.delete(key);
+      this.unrecorded.delete(key);
+    }
+  }
+
   private async finishCloseIfIdle() {
     if (this.room.seats.some((s) => s)) return;
+    // D1 first: a room that counts itself closed retries nothing, so D1 must not be left saying 'closing'.
+    await markTableClosed(this.env.DB, this.tableId!);
     this.room.closed = true;
     this.room.closedAt = Date.now();
     this.room.nextHandAt = null;
     this.hand = null;
     await this.save();
-    await markTableClosed(this.env.DB, this.tableId!);
     for (const ws of this.sockets()) {
       this.send(ws, { t: 'error', code: 'table_closed', message: 'table closed' });
       try {

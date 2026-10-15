@@ -2,6 +2,7 @@ import { createDb } from '@jc/db';
 import { Hono } from 'hono';
 import type { AppEnv, Env } from './env';
 import { housekeeping } from './lib/housekeeping';
+import { sweepRooms } from './lib/room';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
 import { academyRoutes } from './routes/academy';
 import { adminRoutes } from './routes/admin';
@@ -56,8 +57,12 @@ app.onError((err, c) => {
 
 export default {
   fetch: app.fetch,
-  /** Cron trigger (wrangler.jsonc `triggers`): deletes expired short-lived rows. Awaited, so a failure shows as a failed run. */
+  /**
+   * Cron trigger (wrangler.jsonc `triggers`): deletes expired short-lived rows, then wakes rooms whose close or idle
+   * close stalled. Awaited, so a failure shows as a failed run.
+   */
   async scheduled(_event, env) {
     console.log('housekeeping', JSON.stringify(await housekeeping(env.DB)));
+    console.log('room sweep', JSON.stringify(await sweepRooms(env)));
   },
 } satisfies ExportedHandler<Env>;

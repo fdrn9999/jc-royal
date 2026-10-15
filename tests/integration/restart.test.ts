@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Client, signupBody, WEB_ORIGIN } from '../support/client';
+import { d1, holdD1WriteLock } from '../support/d1';
 import { prepareState, root, startWorker, type RunningWorker } from '../support/worker';
 import { isMyTurn, TableSocket } from '../support/ws';
 
@@ -9,6 +10,22 @@ import { isMyTurn, TableSocket } from '../support/ws';
  * persisted state (D1 + Durable Object storage). The hand must resume from the
  * event log: same hand id, same sequence, same private cards, chips conserved.
  */
+async function until<T>(read: () => Promise<T>, ok: (v: T) => boolean, label: string, ms = 30_000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await read();
+    if (ok(v)) return v;
+    if (Date.now() > end) throw new Error(`timeout waiting for ${label}; last: ${JSON.stringify(v).slice(-300)}`);
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+/** Runs the api worker's daily cron handler (housekeeping, then the room sweep) through wrangler dev and waits for it. */
+async function runCron(base: string) {
+  const r = await fetch(`${base}/cdn-cgi/local/scheduled?cron=${encodeURIComponent('30 18 * * *')}`);
+  expect(await r.text()).toBe('ok');
+}
+
 describe('server restart recovery', () => {
   const state = resolve(root, 'tests/.state/restart');
   const port = 8811;
@@ -141,4 +158,109 @@ describe('server restart recovery', () => {
     a.close();
     b.close();
   }, 300_000);
+
+  const balanceOf = async (c: Client) => (await c.get('/api/auth/me')).body.balance as number;
+  const cashOuts = async (c: Client) => ((await c.get('/api/me/ledger?limit=100')).body as { type: string; amount: number }[]).filter((l) => l.type === 'cash_out');
+  const tableRow = async (id: string) =>
+    (await d1<{ status: string; hands_played: number; hands: number }>(`SELECT status, hands_played, (SELECT COUNT(*) FROM hands WHERE table_id = '${id}') AS hands FROM tables WHERE id = '${id}'`, state))[0]!;
+
+  it('a close the room never heard about is finished when the room next loads, or by the daily sweep, paying each player once', async () => {
+    if (!worker) {
+      await prepareState(state);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const ca = await user('ca', base);
+    const cb = await user('cb', base);
+    // Each sits alone at a table of its own, so no hand starts.
+    const a = await TableSocket.open(ca, 'it-restart-2', { base });
+    const b = await TableSocket.open(cb, 'it-restart-3', { base });
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 500 })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    a.close();
+    b.close();
+
+    // D1 says closing, but the rooms never got the call (the request died between the two), and the server restarts.
+    // updated_at is set long ago so the sweep counts the close as stalled.
+    await worker.stop();
+    await d1(`UPDATE tables SET status = 'closing', entry_blocked = 1, updated_at = 0 WHERE id IN ('it-restart-2', 'it-restart-3')`, state);
+    worker = await startWorker(port, state);
+
+    // A player coming back wakes the room: it finishes the close, paying the stack back, and refuses the connection.
+    await expect(TableSocket.open(ca, 'it-restart-2', { base })).rejects.toThrow();
+    expect((await tableRow('it-restart-2')).status).toBe('closed');
+    expect(await cashOuts(ca)).toEqual([expect.objectContaining({ amount: 500 })]);
+    expect(await balanceOf(ca)).toBe(10_000);
+
+    // Nobody comes back to the other one: the daily cron's sweep wakes it.
+    expect((await tableRow('it-restart-3')).status).toBe('closing');
+    await runCron(base);
+    await until(() => tableRow('it-restart-3'), (t) => t.status === 'closed', 'the sweep closes the room');
+    expect(await cashOuts(cb)).toEqual([expect.objectContaining({ amount: 400 })]);
+    expect(await balanceOf(cb)).toBe(10_000);
+
+    // Restarting and sweeping again pays no one twice.
+    await worker.stop();
+    worker = await startWorker(port, state);
+    await runCron(base);
+    await expect(TableSocket.open(ca, 'it-restart-2', { base })).rejects.toThrow();
+    expect(await cashOuts(ca)).toHaveLength(1);
+    expect(await cashOuts(cb)).toHaveLength(1);
+    expect((await balanceOf(ca)) + (await balanceOf(cb))).toBe(20_000);
+  }, 300_000);
+
+  it('cash-outs and the hand record D1 refuses while a room closes are retried by the room until they land, once', async () => {
+    if (!worker) {
+      await prepareState(state);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const ca = await user('da', base);
+    const cb = await user('db', base);
+    const created = await ca.post('/api/rooms', { name: '복구 방', maxSeats: 6, bigBlind: 20, minBuyIn: 400, maxBuyIn: 2000 });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    const a = await TableSocket.open(ca, id, { base });
+    const b = await TableSocket.open(cb, id, { base });
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 500 })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    const live = (s: NonNullable<typeof a.state>) => !!s.hand && s.hand.stage !== 'settled' && s.hand.actorSeat !== null;
+    await a.waitState(live, 15_000, 'hand start');
+    await b.waitState(live);
+    // The host closes it mid-hand: the hand plays out first.
+    expect((await ca.post(`/api/rooms/${id}/close`, {})).body).toMatchObject({ ok: true, closed: false });
+
+    // D1 is unreachable when the hand ends: the record, the cash-outs and the close all fail.
+    const logFrom = worker.log().length;
+    const release = holdD1WriteLock(state);
+    try {
+      const actor = [a, b].find((x) => isMyTurn(x.state!))!;
+      await actor.act('fold');
+      await until(async () => worker!.log().slice(logFrom), (l) => l.includes('close unfinished; will retry'), 'the close to fail', 90_000);
+      expect(worker.log().slice(logFrom)).toContain('cash-out failed; will retry');
+      expect(worker.log().slice(logFrom)).toContain('recordHand failed; will retry');
+    } finally {
+      release();
+    }
+
+    // Nobody does anything: the room's retry finishes the close.
+    await a.wait((m) => m.t === 'error' && m.code === 'table_closed', 60_000, 'table closed');
+    const row = await tableRow(id);
+    expect(row).toMatchObject({ status: 'closed', hands: 1, hands_played: 1 });
+    const paid = [...(await cashOuts(ca)), ...(await cashOuts(cb))];
+    expect(paid).toHaveLength(2);
+    expect(paid.reduce((s, l) => s + l.amount, 0)).toBe(900);
+    expect((await balanceOf(ca)) + (await balanceOf(cb))).toBe(20_000);
+    a.close();
+    b.close();
+
+    // A restart and a sweep change nothing.
+    await worker.stop();
+    worker = await startWorker(port, state);
+    await runCron(base);
+    await expect(TableSocket.open(ca, id, { base })).rejects.toThrow();
+    expect(await tableRow(id)).toMatchObject({ status: 'closed', hands: 1, hands_played: 1 });
+    expect([...(await cashOuts(ca)), ...(await cashOuts(cb))]).toHaveLength(2);
+    expect((await balanceOf(ca)) + (await balanceOf(cb))).toBe(20_000);
+  }, 360_000);
 });

@@ -5,6 +5,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { root } from './worker';
 
+/** The state the shared test worker uses; tests that start their own worker pass theirs. */
+const MAIN_STATE = resolve(root, 'tests/.state/main');
+
 /**
  * Runs SQL against the local D1 the test worker uses (outside the application, like an operator console).
  * Asynchronous on purpose: a blocking spawnSync of a few seconds keeps the HTTP client from noticing that the dev
@@ -14,9 +17,9 @@ import { root } from './worker';
  * earlier test files keep playing) it can get SQLITE_BUSY. A batch that fails that way leaves nothing behind, so it is
  * retried; any other error fails at once.
  */
-export async function d1<T = Record<string, unknown>>(sql: string): Promise<T[]> {
+export async function d1<T = Record<string, unknown>>(sql: string, state = MAIN_STATE): Promise<T[]> {
   const wrangler = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
-  const args = [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', resolve(root, 'tests/.state/main'), '-c', 'apps/api/wrangler.jsonc', '--json', '--command', sql];
+  const args = [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', state, '-c', 'apps/api/wrangler.jsonc', '--json', '--command', sql];
   for (let attempt = 1; ; attempt++) {
     try {
       const { stdout } = await promisify(execFile)(process.execPath, args, { cwd: root, encoding: 'utf8' });
@@ -37,8 +40,8 @@ export async function d1<T = Record<string, unknown>>(sql: string): Promise<T[]>
  * fail meanwhile, reads included (local D1 takes a commit token for every query): a stand-in for D1 being unreachable.
  * Taking the lock waits for a write the worker has under way.
  */
-export function holdD1WriteLock(): () => void {
-  const dir = resolve(root, 'tests/.state/main/v3/d1/miniflare-D1DatabaseObject');
+export function holdD1WriteLock(state = MAIN_STATE): () => void {
+  const dir = resolve(state, 'v3/d1/miniflare-D1DatabaseObject');
   const files = readdirSync(dir).filter((f) => f.endsWith('.sqlite') && f !== 'metadata.sqlite');
   if (files.length !== 1) throw new Error(`expected one local D1 file, found ${files.join(', ') || 'none'}`);
   const db = new DatabaseSync(resolve(dir, files[0]!), { timeout: 10_000 });

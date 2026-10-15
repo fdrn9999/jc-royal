@@ -292,10 +292,12 @@ const admin = new Hono<AppEnv>()
         updatedAt: Date.now(),
       })
       .where(eq(schema.tables.id, id));
-    // Blind changes apply from the next hand; the running hand keeps its config.
-    const live = await roomCall(c, id, 'reload');
-    await audit(c, 'table.update', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : body.joinCode });
-    return c.json({ ok: true, appliesFrom: live?.appliesFrom ?? 'next hand' });
+    // Blind changes apply from the next hand; the running hand keeps its config. A room that does not confirm keeps
+    // its old settings (entry blocking included) until it reloads, so the admin is told to send the change again.
+    const live = (await roomCall(c, id, 'reload')) ?? (await roomCall(c, id, 'reload'));
+    await audit(c, 'table.update', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : body.joinCode, roomConfirmed: !!live });
+    if (!live) fail(503, 'room_unavailable', 'saved, but the table did not confirm; try again', { saved: true });
+    return c.json({ ok: true, appliesFrom: live.appliesFrom ?? 'next hand' });
   })
   .post('/tables/:id/close', requireRecentReauth, async (c) => {
     const id = c.req.param('id');
@@ -303,8 +305,11 @@ const admin = new Hono<AppEnv>()
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
     // Stop new hands; the room finishes the current hand, cashes everyone out, then marks the table closed.
     await c.var.db.update(schema.tables).set({ status: 'closing', entryBlocked: true, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
-    const live = await roomCall(c, id, 'close');
-    await audit(c, 'table.close', { type: 'table', id }, live);
+    // If the room cannot be reached the table stays 'closing' (no one can join) and the room finishes the close when it
+    // next loads; the admin is told to retry, which is safe.
+    const live = (await roomCall(c, id, 'close')) ?? (await roomCall(c, id, 'close'));
+    await audit(c, 'table.close', { type: 'table', id }, live ?? { roomConfirmed: false });
+    if (!live) fail(503, 'room_unavailable', 'the table did not confirm the close; try again');
     return c.json({ ok: true, live });
   })
   // ---------------------------------------------------------------- audit: hands, ledger, actions

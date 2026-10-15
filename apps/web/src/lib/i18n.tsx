@@ -572,6 +572,7 @@ const ko = {
   'room.closeConfirm': '방을 닫으면 진행 중인 핸드가 끝난 뒤 앉아 있는 모든 플레이어의 칩이 각자의 지갑으로 돌아갑니다.',
   'err.room_limit': '방은 한 번에 2개까지 열 수 있습니다. 열린 방을 닫은 뒤 다시 만들어 주세요.',
   'err.table_unavailable': '이 테이블은 지금 입장할 수 없습니다.',
+  'err.room_unavailable': '방이 응답하지 않습니다. 잠시 후 다시 시도해 주세요. 다시 시도해도 칩이 중복 처리되지 않습니다.',
   'notFound': '페이지를 찾을 수 없습니다.',
 } as const;
 
@@ -1148,6 +1149,7 @@ const en: Dict = {
   'room.closeConfirm': 'When the room closes, the current hand finishes and everyone seated gets their chips back in their wallet.',
   'err.room_limit': 'You can have at most 2 rooms open. Close one and try again.',
   'err.table_unavailable': 'This table is not taking players right now.',
+  'err.room_unavailable': 'The room did not respond. Please try again in a moment; retrying never moves chips twice.',
   'notFound': 'Page not found.',
 };
 

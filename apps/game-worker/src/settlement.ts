@@ -172,6 +172,10 @@ async function gzipBase64(text: string): Promise<string> {
 export async function recordHand(d1: D1Database, tableId: string, handNumber: number, rec: HandRecord, engineLog: unknown): Promise<void> {
   const eventLog = JSON.stringify({ actions: rec.actions, engine: await gzipBase64(JSON.stringify(engineLog)) });
   const stmts: D1PreparedStatement[] = [
+    // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
+    d1
+      .prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM hands WHERE id = ?2)`)
+      .bind(tableId, rec.handId),
     d1
       .prepare(
         `INSERT OR IGNORE INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log)
@@ -200,7 +204,6 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
           rec.endedAt,
         ),
     ),
-    d1.prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1`).bind(tableId),
   ];
   await d1.batch(stmts);
   // Per-player statistics for this hand (and any rows still without them). The hand is recorded either way.
