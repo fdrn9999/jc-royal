@@ -13,6 +13,7 @@ import { HostRoomModal } from '../components/Rooms';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
+import { PreActions } from '../game/PreActions';
 import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { api, ApiError } from '../lib/api';
@@ -92,10 +93,11 @@ export function TablePage() {
   }, [sock.lastError, err]);
 
   // What happened to my top-up or automatic rebuy after a hand; the wallet changed (or a request ended), so refresh it.
+  // A cancelled pre-action is only shown.
   useEffect(() => {
     if (!sock.lastNotice) return;
     setNotice(t(`notice.${sock.lastNotice.code}` as MsgKey, { amount: formatChips(sock.lastNotice.amount ?? 0) }));
-    void refresh();
+    if (sock.lastNotice.code !== 'preaction_cancelled') void refresh();
     const h = setTimeout(() => setNotice(null), 6_000);
     return () => clearTimeout(h);
   }, [sock.lastNotice, t, refresh]);
@@ -379,13 +381,14 @@ export function TablePage() {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
             {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert">{toast}</div>}
             {notice && (
-              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-2 text-sm text-gold-300" role="status" data-testid="table-notice">
+              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-1 text-xs text-gold-300 sm:py-2 sm:text-sm" role="status" data-testid="table-notice">
                 {notice}
               </div>
             )}
             {s && prefs.beginner && hand && (
               <div className="flex flex-col items-center gap-1.5 sm:items-end">
-                <StageNote s={s} />
+                {/* A notice takes the street note's place (the header names the street), so the stack stays below my seat. */}
+                {!notice && <StageNote s={s} />}
                 {seated && <CurrentHandPill s={s} />}
               </div>
             )}
@@ -415,6 +418,7 @@ export function TablePage() {
                 <ActionBar state={s} onAct={onAct} busy={sock.acting} />
               </>
             )}
+            {s && !myTurn && seated && <PreActions s={s} onPick={sock.preAct} />}
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
                 {s.you.leaving && <span className="text-gold-300">{t('table.leavingAfterHand')}</span>}

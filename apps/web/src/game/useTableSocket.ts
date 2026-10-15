@@ -1,6 +1,7 @@
-import type { ActionType, ChatMessage, ClientMessage, ErrorCode, NoticeCode, ServerMessage, TableCue, TableView } from '@jc/types';
+import type { ActionType, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ServerMessage, TableCue, TableView } from '@jc/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Heartbeat, Outbox, type Outgoing } from './link';
+import { preActionSpot } from './preAction';
 
 /** `locked`: a private table that needs the join code first (the room closed the socket with 4003). */
 export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'closed' | 'unauthorized' | 'locked';
@@ -37,6 +38,11 @@ export interface TableSocketApi {
   /** Like request, without a result: a refusal shows in `lastError`. */
   send: (msg: { t: 'sitOut' } | { t: 'sitIn' } | { t: 'waitlist'; join: boolean } | { t: 'chat'; text: string } | { t: 'sync' } | { t: 'cancelTopUp' }) => void;
   act: (type: ActionType, amount?: number) => boolean;
+  /**
+   * Chooses (or with null clears) a pre-action for this street, against the hand, street and amount to call shown now.
+   * The room keeps it only if those still hold when it arrives; `you.preAction` in the next state says what it kept.
+   */
+  preAct: (kind: PreActionKind | null) => void;
   /** True while an action is in flight (until the next state arrives). */
   acting: boolean;
   /** Skip the backoff wait and reconnect now (no-op while connected). */
@@ -343,9 +349,21 @@ export function useTableSocket(tableId: string): TableSocketApi {
     [box],
   );
 
+  const preAct = useCallback(
+    (kind: PreActionKind | null) => {
+      const s = stateRef.current;
+      const spot = s && preActionSpot(s);
+      if (!spot) return;
+      const reqId = rid();
+      const msg: ClientMessage = { t: 'preAction', reqId, handId: spot.handId, stage: spot.stage, toCall: spot.toCall, kind };
+      if (raw(msg)) box.add(reqId, msg, {}, Date.now());
+    },
+    [box],
+  );
+
   const consumeCues = useCallback((upToId: number) => setCues((q) => q.filter((c) => c.id > upToId)), []);
   const reconnect = useCallback(() => kick.current(), []);
   const reopen = useCallback(() => fresh.current(), []);
 
-  return { status, state, chat, cues, consumeCues, lastError, lastNotice, request, send, act, acting, reconnect, reopen };
+  return { status, state, chat, cues, consumeCues, lastError, lastNotice, request, send, act, preAct, acting, reconnect, reopen };
 }

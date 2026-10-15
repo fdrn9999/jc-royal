@@ -8,6 +8,13 @@ export type HandStage = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown' | 'se
 
 export type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'allin';
 
+/**
+ * What a player chose to do on their next turn of the current street while waiting for others. The room carries it
+ * out only while it still fits: `check` only as a check (a bet in the meantime cancels it), `checkFold` checks or else
+ * folds, `fold` folds a bet but never a free check. Calls, raises and all-ins are never chosen in advance.
+ */
+export type PreActionKind = 'check' | 'checkFold' | 'fold';
+
 /** Legal option for the viewer, already normalised for the UI. */
 export type LegalOption =
   | { type: 'fold' }
@@ -110,6 +117,8 @@ export interface TableView {
     topUpQueued: number | null;
     /** Automatic rebuy for this seat (off unless the player turned it on): chips per rebuy, total limit, used so far. */
     autoRebuy: { amount: number; cap: number; spent: number } | null;
+    /** The viewer's own pre-action for this street (nobody else is ever shown it). Absent from older rooms. */
+    preAction?: PreActionKind | null;
   };
 }
 

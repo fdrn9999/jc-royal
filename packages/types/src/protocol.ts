@@ -46,6 +46,18 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
     /** For bet/raise: the street total ("raise to"). Ignored otherwise. */
     amount: z.number().int().nonnegative().optional(),
   }),
+  /**
+   * Choose (`kind`) or clear (`kind: null`) a pre-action for this street while another player is to act. `stage` and
+   * `toCall` are what the player saw: if the table has moved on since, nothing is kept and the player gets a notice.
+   */
+  z.object({
+    t: z.literal('preAction'),
+    reqId: ReqId,
+    handId: z.string().min(1).max(128),
+    stage: z.enum(['preflop', 'flop', 'turn', 'river']),
+    toCall: z.number().int().nonnegative(),
+    kind: z.enum(['check', 'checkFold', 'fold']).nullable(),
+  }),
   z.object({ t: z.literal('chat'), text: z.string().trim().min(1).max(200), reqId: ReqId.optional() }),
   z.object({ t: z.literal('ping') }),
 ]);
@@ -93,7 +105,9 @@ export type NoticeCode =
   | 'rebuy_applied'
   /** Automatic rebuy turned itself off: the wallet was short, or the next rebuy would pass the limit. */
   | 'rebuy_insufficient'
-  | 'rebuy_cap';
+  | 'rebuy_cap'
+  /** A pre-action was dropped because the table changed (a bet came in, or it arrived too late): the player decides. */
+  | 'preaction_cancelled';
 
 /** Server → client WebSocket messages. */
 export type ServerMessage =

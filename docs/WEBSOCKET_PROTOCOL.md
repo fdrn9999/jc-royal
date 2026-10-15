@@ -27,6 +27,7 @@
 | `sitOut` / `sitIn` | `reqId?` | 자리 비움과 복귀. `reqId` 재전송은 멱등 처리 |
 | `waitlist` | `join, reqId?` | 대기열 등록·취소. `reqId` 재전송은 멱등 처리 |
 | `action` | `intentId, handId, seq, type, amount?` | `type`: fold/check/call/bet/raise/allin. bet·raise의 `amount`는 이번 스트리트 총액("to"). `seq`는 현재 `hand.seq`와 같아야 함. 적용되면 `intentId`로 `ack` |
+| `preAction` | `reqId, handId, stage, toCall, kind` | 사전 액션: 다른 사람 차례 동안 이번 스트리트의 내 다음 액션을 예약. `kind`: `check`·`checkFold`·`fold`, `null`이면 취소. `handId`·`stage`·`toCall`은 고를 때 본 화면 값. 아래 '사전 액션' 참고 |
 | `chat` | `text(1-200), reqId?` | 채팅. 같은 `reqId`로 다시 보내면 한 번만 게시 |
 | `ping` | — | → `pong`. 정확히 `{"t":"ping"}`이면 런타임이 룸을 깨우지 않고 답함 |
 
@@ -40,7 +41,7 @@
 | `chatHistory` / `chat` | 최근 채팅 50개, 새 메시지 |
 | `ack` | `{reqId}`: `reqId`를 단 명령의 성공(대기열에 들어간 충전 포함). 액션은 `reqId` 자리에 `intentId`. 이미 처리한 명령을 다시 받아도 `ack`만 다시 보냄 |
 | `error` | `{code, message, reqId?}` |
-| `notice` | `{code, amount?}`: 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과. 해당 플레이어에게만 보냄. `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐) |
+| `notice` | `{code, amount?}`: 해당 플레이어에게만 보냄. 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과: `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐). 사전 액션을 지키지 못했을 때: `preaction_cancelled` |
 | `replaced` | 다른 탭에서 접속함 |
 | `pong` | 자동 응답은 `{"t":"pong"}` 그대로. 다른 모양의 `ping`을 룸이 직접 받으면 `{at}`이 붙음 |
 
@@ -50,7 +51,7 @@
 - **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`.
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
-- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null).
+- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
 - **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`.
 
@@ -69,6 +70,15 @@
 - 재접속하면 서버가 즉시 `state`와 `chatHistory`를 보냅니다. 화면은 항상 서버 상태로 복구됩니다.
 - 충전·자동 리바이는 원장 `idempotency_key`(`topup:<세션>:<reqId>`, `rebuy:<세션>:<handId>`)로 한 번만 차감됩니다. 룸은 D1 호출 전에 시도를 기록하고, 재시작하거나 호출이 실패하면 원장을 조회해 원장이 실제로 차감한 만큼만 한 번 반영합니다. 원장에 이미 있는 키는 기록하지도 다시 쓰지도 않으므로, 룸이 기억하는 최근 `reqId` 200개 밖의 오래된 요청을 다시 보내도 `ack`만 오고 칩은 늘지 않습니다. 응답을 받지 못한 클라이언트는 같은 `reqId`로 다시 보냅니다.
 - 핸드 중에는 스택이 늘지 않습니다. 대기 중인 충전과 자동 리바이는 정산 직후(또는 다음 핸드 시작 직전)에 적용되며, 금액은 요청액과 `최대 바이인 − 스택` 중 작은 값입니다.
+
+## 사전 액션 (`preAction`)
+
+- **고를 수 있는 것**: 낼 칩이 없으면 `checkFold`(체크, 그 사이 누가 베팅하면 폴드)와 `check`, 낼 칩이 있으면 `fold`만. 콜·벳·레이즈·올인은 예약할 수 없습니다. 낼 칩이 있는데 `check`, 없는데 `fold`를 보내면 `bad_request`입니다.
+- **룸이 지키는 조건**: 착석한 플레이어만 보낼 수 있고(아니면 `forbidden`), 핸드·스트리트가 같고, 내 차례가 아니고, 룸이 계산한 내 `toCall`이 보낸 값과 같을 때만 지킵니다. 하나라도 다르면 아무것도 지키지 않고 `ack`와 함께 `preaction_cancelled`를 보냅니다.
+- **실행**: 내 차례가 오면 룸이 엔진의 합법 액션을 다시 보고 실행합니다. 체크할 수 있으면 `check`·`checkFold`는 체크하고 `fold`는 실행하지 않습니다(공짜 체크를 폴드하지 않음). 체크할 수 없으면 `checkFold`·`fold`만 폴드합니다. 실행하지 못하면 `preaction_cancelled`를 보내고 차례는 그대로 플레이어에게 남습니다. 실행된 액션도 다른 액션과 같이 엔진을 거쳐 기록됩니다.
+- **취소**: 예약은 그 스트리트에서만 유효합니다. 스트리트나 핸드가 바뀌면 조용히 지웁니다. 고른 뒤 베팅이 들어와 `check`가 맞지 않게 되면 지우고 `preaction_cancelled`를 보냅니다(`checkFold`·`fold`는 더 큰 베팅에도 그대로 둠). 폴드·올인으로 핸드에서 빠져도 지웁니다.
+- 같은 `reqId`를 다시 받으면(좌석당 최근 16개) 다시 적용하지 않고 `ack`만 보냅니다. 나중 선택이 늦게 온 이전 사본으로 되돌아가지 않습니다.
+- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `preAction`을 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보내므로, 새 웹이 먼저 나가면 사전 액션을 누를 때 오류가 뜨고 아무것도 예약되지 않습니다(자동 액션은 일어나지 않음).
 
 ## 웹 클라이언트의 전달 규칙 (`apps/web/src/game/link.ts`, `useTableSocket.ts`)
 

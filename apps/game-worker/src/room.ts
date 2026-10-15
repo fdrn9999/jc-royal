@@ -20,8 +20,11 @@ import {
   type ChatMessage,
   type ClientMessage,
   type ErrorCode,
+  type HandStage,
+  type LegalOption,
   type MaxSeats,
   type NoticeCode,
+  type PreActionKind,
   type SeatView,
   type ServerMessage,
   type TableCue,
@@ -84,6 +87,13 @@ interface SeatState {
   topUp?: { key: string; amount: number; state: 'queued' | 'debiting'; auto?: boolean } | null;
   /** Automatic rebuy after busting, turned on by the player for this seat only: chips per rebuy, total limit, used. */
   autoRebuy?: { amount: number; cap: number; spent: number } | null;
+  /**
+   * What the player chose for their next turn of this street, with the amount they faced when choosing. `progress`
+   * carries it out when the turn comes, only as a check or a fold the engine still allows.
+   */
+  preAction?: { handId: string; stage: HandStage; kind: PreActionKind; toCall: number } | null;
+  /** Ids of the player's recent pre-action requests: one sent again is answered, not applied again. */
+  preReqs?: string[];
 }
 
 /** A word for one player about a top-up or rebuy the room carried out on its own. */
@@ -252,6 +262,15 @@ export class TableRoom extends DurableObject<Env> {
       ws.send(JSON.stringify(msg));
     } catch {
       /* socket already closing */
+    }
+  }
+
+  /** A fresh view for one player's connections only: for a change nobody else is shown. */
+  private sendView(userId: string) {
+    const connected = this.connectedUsers();
+    for (const ws of this.sockets()) {
+      const a = this.att(ws);
+      if (a.userId === userId) this.send(ws, { t: 'state', state: this.view(a, connected), cues: [] });
     }
   }
 
@@ -603,6 +622,9 @@ export class TableRoom extends DurableObject<Env> {
       }
       case 'action':
         await this.action(ws, a.userId, msg);
+        return;
+      case 'preAction':
+        await this.preAction(ws, a.userId, msg);
         return;
     }
   }
@@ -956,11 +978,62 @@ export class TableRoom extends DurableObject<Env> {
     await this.progress(r.cues);
   }
 
+  /**
+   * Keeps (or clears) a player's pre-action for this street. It is kept only while someone else is to act and the hand,
+   * street and amount to call are still what the player saw; otherwise nothing is kept and the player is told. Only
+   * the player's own view changes, so only their connections get it.
+   */
+  private async preAction(ws: WebSocket, userId: string, msg: Extract<ClientMessage, { t: 'preAction' }>) {
+    const seat = this.seatedSeat(userId);
+    if (seat.preReqs?.includes(msg.reqId)) return this.ack(ws, msg.reqId);
+    if (msg.kind === 'check' && msg.toCall > 0) throw new CommandError('bad_request', 'a check cannot be kept against a bet');
+    if (msg.kind === 'fold' && msg.toCall === 0) throw new CommandError('bad_request', 'a fold is kept only against a bet');
+    seat.preReqs = [...(seat.preReqs ?? []), msg.reqId].slice(-16);
+    const h = this.hand;
+    let kept: SeatState['preAction'] = null;
+    if (msg.kind && h && !h.isSettled && h.handId === msg.handId && h.stage === msg.stage && !h.isStalled() && h.actorId() !== userId) {
+      const me = this.facing(h, userId);
+      if (me && me.toCall === msg.toCall) kept = { handId: h.handId, stage: h.stage, kind: msg.kind, toCall: me.toCall };
+    }
+    seat.preAction = kept;
+    await this.save();
+    this.ack(ws, msg.reqId);
+    this.sendView(userId);
+    if (msg.kind && !kept) this.notify([{ userId, code: 'preaction_cancelled' }]);
+  }
+
+  /** What `userId` must add to stay in on this street, or null when they are not in the hand with chips to act. */
+  private facing(h: HandEngine, userId: string): { toCall: number } | null {
+    const info = h.seatInfo(null);
+    const i = h.seatOf(userId);
+    const me = i === null ? undefined : info.get(i);
+    if (!me?.inHand || me.folded || me.allIn) return null;
+    return { toCall: Math.max(0, ...[...info.values()].map((x) => x.streetBet)) - me.streetBet };
+  }
+
+  /**
+   * Drops pre-actions that no longer apply: from an earlier hand or street, of a player out of the hand or all in, or
+   * a check a bet has since overtaken (that player is told, to decide on the turn). A fold or a check/fold still fits a
+   * bigger bet, so those stay.
+   */
+  private dropStalePreActions(h: HandEngine, notices: Notice[]) {
+    for (const s of this.room.seats) {
+      const pre = s?.preAction;
+      if (!s || !pre) continue;
+      const me = !h.isSettled && pre.handId === h.handId && pre.stage === h.stage ? this.facing(h, s.userId) : null;
+      if (me && !(pre.kind === 'check' && me.toCall > pre.toCall)) continue;
+      s.preAction = null;
+      if (me) notices.push({ userId: s.userId, code: 'preaction_cancelled' });
+    }
+  }
+
   /** After any engine event: resolve stalls/auto-actions, persist, broadcast, settle. */
   private async progress(cues: TableCue[]) {
     const h = this.hand!;
     const now = Date.now();
-    for (let guard = 0; guard < 20 && !h.isSettled; guard++) {
+    const notices: Notice[] = [];
+    // (Room for a pre-action and a leave-fold of every seat on top of the street changes.)
+    for (let guard = 0; guard < 40 && !h.isSettled; guard++) {
       if (h.isStalled()) {
         cues.push(...(await h.resolveStall(now)));
         continue;
@@ -974,14 +1047,31 @@ export class TableRoom extends DurableObject<Env> {
         else break;
         continue;
       }
+      // A pre-action chosen while waiting: carried out if the engine still allows it, else the player decides.
+      const pre = seat?.preAction;
+      if (actor && seat && pre && pre.handId === h.handId && pre.stage === h.stage) {
+        seat.preAction = null;
+        const type = preActionMove(h.legalOptions(actor), pre.kind);
+        const r = type ? await h.act(actor, { type }, `pre-${h.version}`, now) : null;
+        if (!r?.ok) {
+          notices.push({ userId: actor, code: 'preaction_cancelled' });
+          break;
+        }
+        seat.timeouts = 0;
+        cues.push(...r.cues);
+        continue;
+      }
       break;
     }
+    this.dropStalePreActions(h, notices);
     if (h.isSettled) {
       await this.settle(cues);
+      this.notify(notices);
       return;
     }
     await this.save();
     this.broadcast(cues);
+    this.notify(notices);
     await this.schedule();
   }
 
@@ -1336,6 +1426,7 @@ export class TableRoom extends DurableObject<Env> {
     });
     const hv = h && showHand ? { ...h.handView(), number: this.room.handNumber } : null;
     const myLegal = h && isSeated && !h.isSettled && h.actorId() === a.userId && !h.isStalled() ? h.legalOptions(a.userId) : [];
+    const myPre = isSeated ? this.room.seats[mySeat]!.preAction : null;
     const res = this.room.reservation;
     const reservationLive = res && res.until > Date.now() ? res : null;
     const access = this.hasAccess(a);
@@ -1382,9 +1473,18 @@ export class TableRoom extends DurableObject<Env> {
         needsCode: !isSeated && !access,
         topUpQueued: isSeated && this.room.seats[mySeat]!.topUp?.state === 'queued' ? this.room.seats[mySeat]!.topUp!.amount : null,
         autoRebuy: isSeated ? (this.room.seats[mySeat]!.autoRebuy ?? null) : null,
+        preAction: myPre && h && !h.isSettled && myPre.handId === h.handId && myPre.stage === h.stage ? myPre.kind : null,
       },
     };
   }
+}
+
+/** The move a pre-action makes given the legal options, or null when it no longer fits. Never a call, bet or raise. */
+function preActionMove(legal: LegalOption[], kind: PreActionKind): 'check' | 'fold' | null {
+  const can = (t: 'check' | 'fold') => legal.some((o) => o.type === t);
+  // A fold is never made while checking is free.
+  if (can('check')) return kind === 'fold' ? null : 'check';
+  return kind !== 'check' && can('fold') ? 'fold' : null;
 }
 
 function emptyRoom(maxSeats: number): RoomState {
