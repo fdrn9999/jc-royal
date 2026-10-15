@@ -1,14 +1,15 @@
 # 인수인계 (다음 세션용)
 
-> 새 기기 또는 새 Claude 세션은 이 파일부터 읽는다. 마지막 갱신: 2026-10-14 (가입 개편 운영 반영, 최초 관리자 생성)
+> 새 기기 또는 새 Claude 세션은 이 파일부터 읽는다. 마지막 갱신: 2026-10-15 (운영 도메인 jc-royal.site, 메일 발신 주소)
 
 ## 현재 상태
 
 - `docs/DIRECTIVE.md` Phase 1~9와 포커 아카데미를 구현했다.
 - 검증 결과는 `docs/TEST_REPORT.md`와 `docs/STATUS.md`에 있다.
 - **운영 배포 완료**(2026-10-14, Workers Paid. 첫 배포는 로컬 wrangler, 이후 GitHub Actions):
-  - 사용자 사이트: https://play.jcroyal.workers.dev
-  - 관리자 콘솔: https://admin.jcroyal.workers.dev
+  - 사용자 사이트: https://jc-royal.site
+  - 관리자 콘솔: https://admin.jc-royal.site
+  - 두 도메인은 대시보드에서 커스텀 도메인으로 붙였다. workers.dev 주소(https://play.jcroyal.workers.dev, https://admin.jcroyal.workers.dev)는 개발·미리보기용으로 남겼고, 관리자 로그인은 새 도메인에서만 된다(`docs/DEPLOYMENT.md` 운영 주소, 4절).
   - Worker: `jc-royal-game-prod` → `play` → `admin`
   - D1: `jc-royal-db-prod`(APAC), 마이그레이션 `0000`~`0004` 적용
   - 시크릿: 두 Worker에 `INTERNAL_SECRET`, `play`에 `RESEND_API_KEY`
@@ -26,8 +27,9 @@
 
 ## 남은 일 (오너가 새 세션에서 진행 예정)
 
-1. **메일 켜기(가입 이메일 인증 + 재설정 메일)**: 코드, 한/영 템플릿, `RESEND_API_KEY`는 준비되어 있다.
-   - 남은 일: Resend에서 발신 도메인을 인증하고, `MAIL_FROM`을 넣은 뒤 다시 배포한다(`docs/DEPLOYMENT.md` 2절). 넣는 순간 가입에 이메일 인증이 필수가 된다.
+1. **메일 켜기(가입 이메일 인증 + 재설정 메일)**: 코드, 한/영 템플릿, `RESEND_API_KEY`가 준비되어 있고, Resend에서 `jc-royal.site`를 인증했다.
+   - `MAIL_FROM`(`JC ROYAL <noreply@jc-royal.site>`)과 `APP_ORIGIN`(https://jc-royal.site)을 운영 설정에 넣었다. 남은 일은 배포다(`docs/DEPLOYMENT.md` 2절). 배포하는 순간 가입에 이메일 인증이 필수가 된다.
+   - 배포 뒤 가입 인증번호 메일과 재설정 메일이 실제로 오는지, 재설정 링크가 https://jc-royal.site/reset 으로 열리는지 확인한다.
    - 그 전까지 운영 가입은 이메일 인증 없이 진행되고, 비밀번호 재설정은 관리자가 링크를 발급한다.
    - 관련 코드: `apps/api/src/lib/mail.ts`, `apps/api/src/routes/auth.ts`의 `/email-verification/*`, `/password-reset/request`
 2. **봇**(빈 테이블용). 제안 설계:
@@ -37,7 +39,7 @@
    - 관리자가 테이블별로 켜고 끈다.
    - 사람이 1명만 앉아 있을 때만 채우고, 사람이 오면 핸드가 끝난 뒤 자리를 비킨다.
    - 관련 코드: `apps/game-worker/src/room.ts`
-3. **커스텀 도메인**(선택): 도메인을 사면 `docs/DEPLOYMENT.md` 4절대로 옮긴다. Resend 발신 도메인도 같은 도메인으로 인증할 수 있다.
+3. **커스텀 도메인**: `jc-royal.site`, `admin.jc-royal.site`를 붙였고 운영 설정도 옮겼다(2026-10-15). 대시보드에서 관리하며, wrangler 설정으로 옮길 때의 주의점은 `docs/DEPLOYMENT.md` 4절에 있다.
 
 ## 새 기기에서 시작하기
 

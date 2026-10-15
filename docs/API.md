@@ -27,7 +27,7 @@
 | POST | `/password-reset/request` | `{email}` → 항상 200(IP당 5회, 이메일당 3회/시간 초과 시 429). 메일 설정 시 재설정 메일 발송. 개발 환경에서만 `devToken` 반환 |
 | POST | `/password-reset/confirm` | `{token,newPassword}`(가입과 같은 비밀번호 규칙) → 1회용. 모든 세션 폐기 |
 
-이메일 인증은 `MAIL_FROM`과 `RESEND_API_KEY`가 설정되면 켜집니다. 운영에서 메일이 꺼져 있으면 인증 단계 없이 가입되고 `emailVerifiedAt`은 비어 있습니다. 개발·테스트 환경에서는 항상 켜져 있고 인증번호는 `devCode`로 돌려줍니다.
+이메일 인증은 `MAIL_FROM`, `RESEND_API_KEY`, `APP_ORIGIN`이 모두 설정되면 켜집니다(운영 발신 주소 `JC ROYAL <noreply@jc-royal.site>`, 메일 속 링크는 https://jc-royal.site). 운영에서 메일이 꺼져 있으면 인증 단계 없이 가입되고 `emailVerifiedAt`은 비어 있습니다. 개발·테스트 환경에서는 항상 켜져 있고 인증번호는 `devCode`로 돌려줍니다.
 
 ## 내 정보 `/api/me`
 

@@ -5,7 +5,7 @@
 ```
                        ┌──────────────── Cloudflare ─────────────────────────────────────┐
  Player browser ──────►│ jc-royal-api (Worker)                                            │
-  jcroyal.example      │  • Static assets: apps/web (React SPA, _headers CSP)            │
+  jc-royal.site        │  • Static assets: apps/web (React SPA, _headers CSP)            │
                        │  • /api/*  Hono REST  ── D1 (jc-royal-db)                        │
                        │  • /ws/tables/:id  session cookie check → TableRoom DO           │
                        │                                   │ (DO binding, script_name)   │
@@ -14,7 +14,7 @@
                        │      WebSocket Hibernation · alarms · poker-engine-ts · D1      │
                        │                                                                  │
  Admin browser ───────►│ jc-royal-admin (Worker)                                          │
-  admin.jcroyal.example│  • Static assets: apps/admin   • /api/admin/* → API (service)    │
+  admin.jc-royal.site  │  • Static assets: apps/admin   • /api/admin/* → API (service)    │
                        └──────────────────────────────────────────────────────────────────┘
 ```
 
