@@ -27,6 +27,8 @@
 | `reports` | 신고자·대상 회원 ID, 사유, 상세, **증거(`context` JSON)**, 처리자·처리 메모 | 4절 |
 | `academy_progress`, `user_badges` | 회원 ID, 진도, 배지 | `academy_stats`에는 회원 ID가 없다(익명 집계) |
 | `admin_audit_log` | 운영자 ID, 조치, 대상, 상세, **운영자 IP** | 5절 |
+| `ops_metrics` | 없음. 1분 단위 시각, 지표 이름(`ws_retry`·`ws_drop`·`room_error`·`api_error`), 횟수만 | 관리자 대시보드의 오류·연결 추이. 회원 ID·IP·테이블 ID를 넣지 않는다 |
+| `tables.last_issue` | 없음. 테이블 룸의 최근 오류(시각, 작업 이름, 오류 메시지 300자) | 관리자 대시보드·테이블 상세에 표시 |
 | 게임 서버(Durable Object 저장소) | 테이블 채팅 최근 50줄(작성자 ID·닉네임·본문), 좌석·핸드 진행 상태 | 닫힌 뒤 24시간에 채팅 삭제 |
 | 브라우저 `localStorage` | `jc.locale`, `jc.prefs`(화면·게임 표시 설정), 자동 로그인 선택, `jc.mute:<id>`(채팅 음소거), `jc.academy:<id>`(아카데미 진도) | 아카데미 진도만 서버와 동기화 |
 | Cloudflare Workers 로그 | `observability.enabled`. 요청 메타데이터와 `console.log` 출력 | 보관 기간은 Cloudflare 요금제가 정한다 |
@@ -48,6 +50,7 @@
 | 칩 원장·핸드·좌석 기록 | **기한 없음**(검토 필요) | 탈퇴 후에도 회원 ID로 보관 | — |
 | 신고·증거 | **기한 없음**(검토 필요) | 4절 | — |
 | 관리자 감사 기록 | **기한 없음**(검토 필요) | 5절 | — |
+| 운영 지표(`ops_metrics`, 개인정보 없음) | 14일 | 정리 크론이 14일 지난 분 단위 행을 삭제 | `lib/housekeeping.ts` |
 
 ### 정리 크론
 

@@ -2,6 +2,7 @@ import { createDb } from '@jc/db';
 import { Hono } from 'hono';
 import type { AppEnv, Env } from './env';
 import { housekeeping } from './lib/housekeeping';
+import { countOps } from './lib/ops';
 import { sweepRooms } from './lib/room';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
 import { academyRoutes } from './routes/academy';
@@ -49,9 +50,12 @@ app.notFound(async (c) => {
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {
+    // A table that did not answer, mail that could not be sent: server-side failures the admin dashboard counts.
+    if (err.status >= 500) countOps(c, 'api_error');
     return c.json({ error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) } }, err.status);
   }
   console.error('unhandled', err instanceof Error ? err.message : String(err));
+  countOps(c, 'api_error');
   return c.json({ error: { code: 'internal', message: 'internal error' } }, 500);
 });
 

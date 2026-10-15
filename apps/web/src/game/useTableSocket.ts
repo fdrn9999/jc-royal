@@ -124,10 +124,11 @@ export function useTableSocket(tableId: string): TableSocketApi {
       }
     };
 
-    const connect = () => {
+    /** `retry`: the previous connection was lost; the room counts these for the admin dashboard (`?r=1`). */
+    const connect = (retry = false) => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       // A private table's join code is never in this URL: the api checks the ticket cookie set by /access.
-      const url = `${proto}://${location.host}/ws/tables/${encodeURIComponent(tableId)}`;
+      const url = `${proto}://${location.host}/ws/tables/${encodeURIComponent(tableId)}${retry ? '?r=1' : ''}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
       let opened = false;
@@ -232,7 +233,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
         }
         setStatus('reconnecting');
         const delay = Math.min(10_000, 800 * 2 ** attempt++);
-        timer = setTimeout(() => !stop.current && connect(), delay);
+        timer = setTimeout(() => !stop.current && connect(true), delay);
       };
       ws.onclose = (ev) => {
         if (wsRef.current !== ws) return; // superseded by a manual reconnect
@@ -252,7 +253,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
       if (stop.current || rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
       clearTimeout(timer);
       attempt = 0;
-      connect();
+      connect(true);
     };
     fresh.current = () => {
       clearTimeout(timer);

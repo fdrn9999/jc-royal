@@ -8,12 +8,12 @@
 |---|---|---|---|
 | 엔진 규칙·속성·평가기 | `pnpm --filter @jc/poker-engine test` | **56 / 56 통과** | `test-logs/engine.txt` |
 | 웹 단위 | `pnpm --filter @jc/web test` | **99 / 99 통과** | `test-logs/web-unit.txt` |
-| API 단위 | `pnpm --filter @jc/api test` | **13 / 13 통과** | `test-logs/api-unit.txt` |
-| 통합(실제 workerd) | `pnpm test:integration` | **131 / 131 통과**(19개 파일) | `test-logs/integration.txt` |
+| API 단위 | `pnpm --filter @jc/api test` | **18 / 18 통과** | `test-logs/api-unit.txt` |
+| 통합(실제 workerd) | `pnpm test:integration` | **136 / 136 통과**(20개 파일) | `test-logs/integration.txt` |
 | E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e` | **55 / 55 통과**(데스크톱 37, 모바일 18) | `test-logs/e2e.txt` |
-| 부하(로컬) | `pnpm test:load` | 통과(기본 10테이블, 50핸드, 오류 0, 칩 보존 일치. 핸드 통계 추가 후 2회, 충전 멱등 수정 후 1회, PART A 회귀로 기본·지속 각 1회 재실행도 오류 0·칩 보존 일치) | `test-logs/load-*.json` |
+| 부하(로컬) | `pnpm test:load` | 통과(기본 10테이블, 50핸드, 오류 0, 칩 보존 일치. 핸드 통계 추가 후 2회, 충전 멱등 수정 후 1회, PART A 회귀로 기본·지속 각 1회 재실행도 오류 0·칩 보존 일치. B1 뒤 기본 1회도 오류 0·400,000=400,000, 부하 중 쓴 운영 카운터 행 0) | `test-logs/load-*.json` |
 | 타입 검사 | `pnpm typecheck`, `tsc --noEmit -p tests/tsconfig.json` | 오류 0 | — |
-| 번들 가드 | `pnpm check:bundle` | 엔진은 지연 청크에만, 첫 화면에 받는 JS(진입 파일 + 미리 받는 공용 청크) 645KB(한도 650KB) | `test-logs/bundle.txt` |
+| 번들 가드 | `pnpm check:bundle` | 엔진은 지연 청크에만, 첫 화면에 받는 JS(진입 파일 + 미리 받는 공용 청크) 645KB(한도 650KB). 관리자 콘솔은 한도 없음, 497.7KB(gzip 150.7KB) | `test-logs/bundle.txt` |
 
 > 이 PC에서는 Playwright 전용 Chromium 다운로드가 네트워크 오류(ECONNRESET)로 실패해, 설치된 Chrome을 `channel: 'chrome'`으로 사용했다. CI(ubuntu)에서는 Playwright Chromium을 쓴다.
 
@@ -342,3 +342,56 @@ PART A(A1 방 생성·종료, A2 비공개 방, A3 WebSocket, A4 성능, A5 게�
 - 운영 규모의 핸드 통계 읽기량(저장된 `hand_players` 100만 행일 때 상시 테이블 1개가 월 약 1,730억 → 약 1,100만 행), DO 저장소·D1 쓰기 비용: 로컬 측정 기울기와 코드로 계산한 값이다(`docs/DEPLOYMENT.md` 5절).
 - 앱 ping을 런타임 자동 응답으로 옮긴 데 따른 DO 실행 시간 절감: Cloudflare에서 재지 않았다.
 - **재지 않은 것**: 운영·엣지 지연, 운영 D1 읽기량, 실제 과금, Hibernation 후 깨우기 비용. 지속 실행에서 테이블이 끝나며 일어서는 구간의 멈춤(A4 분석에서 최대 1,052 ms)과, 트레이스를 끈 PART A 회귀 실행에서 다시 나온 게임 도중 멈춤(최대 479 ms)은 원인을 찾지 못했다.
+
+## B1 운영 대시보드 (2026-10-15)
+
+기존 대시보드(회원·테이블·핸드 총계, 테이블 최근 문제)는 그대로 두고, 위에 서버가 집계하는 실시간 현황(`GET /api/admin/ops/live`)을 더했다. 수치마다 출처를 화면에 적고(룸이 마지막으로 보고한 값, 최근 5분 요청, 서버가 센 사건 수), 서버가 갖고 있지 않은 값은 보내지 않는다.
+
+### 요구와 테스트
+
+| 요구 | 서버에서 얻는 곳 | 테스트 | 결과 |
+|---|---|---|---|
+| 현재 온라인 회원 수 | 최근 5분 안에 API를 부른 회원(`sessions.last_seen_at`) | `ops.test.ts` `is admin-only and reports live figures …` | ✅ |
+| 활성 WebSocket 연결, 진행 중 핸드, 대기 플레이어, 테이블당 평균 인원·관전자 | 각 룸이 바뀔 때 `tables.live_*`에 쓰는 값(기존 로비 현황 열) | 같은 테스트(실제 착석 → 연결·착석 수, 갱신 시각) | ✅ |
+| 공식 테이블 / 회원 생성 방 | `tables.room_type`별 집계 | 같은 테스트 | ✅ |
+| 최근 5분·1시간 오류 | 새 분 단위 카운터 `ops_metrics`: `room_error`(룸 명령·D1 기록 실패), `api_error`(API 5xx) | `counts a failed room operation …`(D1 쓰기 잠금으로 충전을 실제로 실패시킴 → 카운터와 테이블 최근 문제) | ✅ |
+| 연결 재시도·끊김 추이(5분 단위 12칸) | `ws_retry`(웹 클라이언트가 재연결에 `?r=1`), `ws_drop`(close frame 없는 1006·1011, 연결당 1회) | `counts reconnects (?r=1) …`, `counts a connection that ended without a close frame …`(TCP를 그냥 끊음) | ✅ |
+| 정합성 이상 경고 | 미해결 정합성 이벤트, 15분 넘게 '종료 중'인 테이블, 닫힌 테이블에 남은 착석 세션 | `warns about open mismatches …` | ✅ |
+| 열린 신고·처리 대기 | 열린 신고의 사유별 수와 가장 오래된 시각 | 같은 테스트 | ✅ |
+| 관리자 전용 | 관리자 세션 + 관리자 Origin | 같은 첫 테스트(회원 401, 다른 Origin 403) | ✅ |
+| 자동 갱신, 과한 폴링 방지 | 화면이 보이고 5분 안에 조작했을 때만 30초마다, 아니면 '멈춤' 표시 | E2E `admin.spec.ts`(갱신 상태, 읽은 행 표시, 오류 패널, 총계) | ✅ |
+| 카운터 버킷·upsert·상한 | `packages/db/src/ops.ts` | API 단위 `ops.test.ts` 5건 | ✅ |
+
+### 찾아 고친 문제
+
+- 첫 전체 통합 실행이 135/136이었다. `warns about …`에서 '종료 중' 테스트 테이블이 바쁜 테이블 목록(12개)에 없었다.
+  - 가설 1(행이 안 들어감): 같은 테스트의 '오래 종료 중' 경고 검사가 통과해 기각.
+  - 가설 2(상태 조건이 '종료 중'을 뺌): 문장의 `WHERE status IN ('open','closing')`로 기각.
+  - 가설 3(목록이 이미 참): 실행 끝의 테스트 DB에 사람·연결이 있는 열린 테이블이 36개였고, 정렬이 연결 수 → 착석 수뿐이라 '종료 중' 테이블(연결 0)이 밀려남. 확인.
+  - 고침: 종료 중 테이블을 먼저 정렬(`ORDER BY status = 'closing' DESC, …`). 바쁜 열린 테이블 13개를 넣는 검사를 더해, 예전 정렬에서 실패(`expected -1 to be greater than or equal to 0`)하고 고친 뒤 통과함을 확인했다. 전체 통합 136/136.
+- 닫힌 테이블에 남은 착석 세션을 찾는 문장의 실행 계획이 닫힌 테이블(계속 늘어남)부터 훑었다. `CROSS JOIN`으로 착석 세션 부분 인덱스에서 시작하게 했다(`SCAN ts USING COVERING INDEX tsess_open_user_uq` → `SEARCH t USING sqlite_autoindex_tables_1`).
+
+### 비용 측정(로컬, 운영 아님)
+
+| 항목 | 값 |
+|---|---|
+| 실시간 현황 1회 D1 읽기(시각 확인 DB: 테이블 30, 세션 6/17/23, 카운터 22/67/89행, 신고 1/3/4, 착석 0/3/3) | 128행·5 ms / 195행·7 ms / 226행·5 ms |
+| 통합 테스트 도중(DB 크기 미기록) | 455행·D1 7 ms(첫 실행), 547행·8 ms(재실행) |
+| 갱신 횟수 | 관리자 1명 시간당 최대 120회, 숨긴 탭·5분 무입력은 0회(코드) |
+| 카운터 쓰기 | 사건이 있는 분·종류마다 1행, 룸은 기존 점유 현황 batch에 붙여 최대 10초에 한 번(코드) |
+
+세션 전체를 읽는 접속자 수 문장의 운영 규모 비용은 추정이다(`docs/DEPLOYMENT.md` 5절 "관리자 대시보드").
+
+### 화면 확인(실제 Chrome)
+
+`tests/visual/capture-dashboard.mjs`로 E2E 서버에 회원 3명을 6인 테이블에 앉히고 관전 연결 1개, 신고, 최근 1시간 카운터, 미해결 정합성 이벤트를 만든 뒤 한국어·영어, 1440·768·390px로 찍었다.
+
+- 착석 3/6, 진행 중 핸드 1('진행 중'), 관전 4, 접속자, 오류 5분·1시간(테이블·API 구분), 끊김·재연결 막대, 정합성 경고 2건, 처리 대기 신고(사유별), 총계가 서버 값 그대로 보였다.
+- 가로 넘침: 390px 한국어·영어, 768px 모두 0px. 테이블 목록은 기존 표처럼 패널 안에서 가로로 스크롤된다.
+- 페이지 오류 없음. 콘솔 오류는 로그인 전 `/api/admin/auth/me`의 401 한 건(기존 로그인 확인 동작)뿐이었다.
+- 고친 것: 영어 문구가 '1 tables', 'mismatch(es)'처럼 보여 수와 상관없는 문장으로 바꿨다(`Seated 3 · tables 1`, `Unresolved reconciliation mismatches: 4 …`).
+- 남은 것: 휴대폰 영어 화면에서 머리글의 '한국어' 버튼이 두 줄로 접히고 역할이 `super_admin` 그대로 보인다. 관리자 콘솔 전체 i18n 정리에서 고친다.
+
+### 부하 회귀(로컬 기본, `test-logs/load-b1-default.json`)
+
+룸이 카운터를 점유 현황 batch에 붙이고 오류를 세도록 바뀌어 기본 시나리오(10테이블·50핸드)를 다시 돌렸다. 오류 0, 끊김 0, 칩 보존 400,000 = 400,000, 정합성 불일치 0. 액션 왕복 p50/p95/p99/최대 29/67/101/125 ms(PART A 회귀 때 같은 설정 23/64/93/99 ms). 두 값 모두 1회 측정이라 차이를 B1 때문이라고 결론 내리지 않는다. 부하 실행 뒤 `ops_metrics`는 0행이었다(재연결·비정상 끊김·오류가 없으면 쓰지 않음).

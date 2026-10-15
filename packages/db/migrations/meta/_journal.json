@@ -85,6 +85,13 @@
       "when": 1792037703418,
       "tag": "0011_hand_shown",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792045310805,
+      "tag": "0012_ops_metrics",
+      "breakpoints": true
     }
   ]
 }

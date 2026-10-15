@@ -447,3 +447,19 @@ export const reports = sqliteTable(
     uniqueIndex('reports_open_uq').on(t.reporterId, t.targetType, t.targetId).where(sql`status = 'open'`),
   ],
 );
+
+// ------------------------------------------------------------------ operations
+
+/**
+ * Per-minute counters of rare events for the admin dashboard (see ops.ts): `bucket` is the minute (epoch ms) and
+ * every room and request adds to the same row. Kept for OPS_RETENTION_MS by the daily housekeeping.
+ */
+export const opsMetrics = sqliteTable(
+  'ops_metrics',
+  {
+    bucket: integer('bucket').notNull(),
+    metric: text('metric').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.bucket, t.metric] })],
+);

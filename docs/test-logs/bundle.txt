@@ -2,5 +2,5 @@
 > jc-royal@ check:bundle <repo>
 > node tests/bundle-check.mjs
 
-entry index-BHOjAXcH.js + auth-zYoBv9ue.js: 645 KB; engine in: routes-DWpbo95W.js
+entry index-BSH2uXmB.js + auth-zYoBv9ue.js: 645 KB; engine in: routes-CDq3yRho.js
 ✓ bundle guard passed

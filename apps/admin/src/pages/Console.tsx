@@ -52,7 +52,7 @@ function downloadCsv(filename: string, csv: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
+export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-sm">
@@ -61,49 +61,6 @@ function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
         </thead>
         <tbody className="divide-y divide-white/5">{children}</tbody>
       </table>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ dashboard
-interface Dash {
-  users: number;
-  onlineUsers: number;
-  tables: { total: number; active: number; playing: number; seatedPlayers: number };
-  websocketConnections: number;
-  handsCompleted: number;
-  handsLast24h: number;
-  openTableSessions: number;
-  issues: { id: string; name: string; issue: string }[];
-  server: { env: string; d1LatencyMs: number; at: number };
-}
-
-export function DashboardPage() {
-  const { t, locale } = useT();
-  const { data, error, reload } = useData<Dash>('/api/admin/dashboard');
-  if (error) return <Empty>{error}</Empty>;
-  if (!data) return <Empty>…</Empty>;
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-extrabold">{t('dashboard')}</h1>
-        <Button size="sm" variant="subtle" onClick={reload}>↻</Button>
-      </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="dashboard">
-        <Stat label={t('totalUsers')} value={formatChips(data.users)} />
-        <Stat label={t('onlineUsers')} value={formatChips(data.onlineUsers)} />
-        <Stat label={t('activeTables')} value={`${data.tables.active} / ${data.tables.total}`} />
-        <Stat label={t('playingTables')} value={formatChips(data.tables.playing)} sub={`${data.tables.seatedPlayers} seated`} />
-        <Stat label={t('wsConnections')} value={formatChips(data.websocketConnections)} />
-        <Stat label={t('handsCompleted')} value={formatChips(data.handsCompleted)} sub={`${t('hands24h')} ${data.handsLast24h}`} />
-        <Stat label={t('openSeats')} value={formatChips(data.openTableSessions)} />
-        <Stat label={t('serverStatus')} value={<span className="text-success">OK</span>} sub={`${data.server.env} · D1 ${data.server.d1LatencyMs}ms · ${formatDate(data.server.at, locale)}`} />
-      </div>
-      <Panel title={t('issues')}>
-        {data.issues.length === 0 ? <Empty>—</Empty> : (
-          <ul className="flex flex-col gap-2 text-sm">{data.issues.map((i) => <li key={i.id}><Link className="text-gold-300" to={`/tables/${i.id}`}>{i.name}</Link> — {i.issue}</li>)}</ul>
-        )}
-      </Panel>
     </div>
   );
 }

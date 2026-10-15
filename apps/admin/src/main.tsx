@@ -8,7 +8,8 @@ import { AdminProvider, useAdmin } from './lib';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
-import { AcademyStatsPage, AuditPage, DashboardPage, HandDetailPage, HandsPage, LedgerPage, ReconcilePage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
+import { DashboardPage } from './pages/Dashboard';
+import { AcademyStatsPage, AuditPage, HandDetailPage, HandsPage, LedgerPage, ReconcilePage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
 const NAV: [string, Key][] = [
   ['/', 'dashboard'],

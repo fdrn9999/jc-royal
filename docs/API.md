@@ -173,7 +173,8 @@
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/dashboard` | 회원 수, 접속자, 테이블·진행 게임, WS 연결, 핸드 수, 서버 상태, 문제 상황 |
+| GET | `/dashboard` | 누적 현황: 회원 수, 접속자, 테이블·진행 게임, WS 연결, 핸드 수, 서버 상태, 문제 상황. 전체 핸드 수를 세므로 대시보드는 열 때와 수동 새로고침 때만 부른다 |
+| GET | `/ops/live` | 실시간 운영 지표(D1 batch 1회, 쿼리 8개). `tables.{official,member}`(테이블 수·종료 중·입장 차단·사람 있는 테이블·진행 중 핸드·착석·대기·관전·WS 연결: 각 룸이 바뀔 때 기록한 마지막 값), `top`(연결·착석이 많은 테이블 12개와 종료 중 테이블, `liveUpdatedAt`·`lastIssue`), `onlineUsers`(5분 안에 API를 쓴 회원 세션 수), `ops`(`ops_metrics`: 5분 × 12칸 `trend`, `last5m`, `lastHour`의 `ws_retry`·`ws_drop`·`room_error`·`api_error`), `reports`(열린 신고 수·가장 오래된 시각·사유별), `warnings`(미해결 정합성 이상, 15분 넘게 종료 중인 테이블, 닫힌 테이블에 남은 착석), `rowsRead`(이 호출이 읽은 D1 행 수), `server.{d1LatencyMs,at}` |
 | GET | `/users?q&status&locale&limit(≤200)` · `/users/:id` | 검색(계정 언어 `locale` 포함·필터)과 상세(언어, 생년월일, 이메일 인증 시각, 개인정보 동의 버전·시각, 원장, 착석, 원장 정합성). 조회마다 감사 로그 `user.list`·`user.view` |
 | POST | `/users/export` 🔒 | `{userIds(1-1000)}` → `{filename, count, csv}`. 열: id, email, nickname, language, role, status, balance, joined_at_utc, birth_date, email_verified_at_utc, privacy_notice_version, privacy_agreed_at_utc, suspended_reason. `=`·`+`·`-`·`@`로 시작하는 칸은 `'`를 붙여 수식 실행 방지. 감사 로그 `user.export`(대상 ID, 건수) |
 | POST | `/users/:id/suspend` 🔒 · `/unsuspend` 🔒 | 정지·해제(세션 폐기, 회원 계정 언어로 제재 쪽지 자동 발송) |

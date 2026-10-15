@@ -146,6 +146,8 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 | 로그인한 회원의 요청 | 세션 만료 갱신 최대 1분에 1행 | 코드(`apps/api/src/lib/session.ts`) |
 | 로비 목록 1회 | Workers 요청 1 + D1 읽기: 열린·닫는 중 테이블 전부(`tables_status_idx` 검색, + 방장 조인) + 세션·회원 조회. 로비 화면은 보이는 동안만 다시 부른다. 쓰는 동안 5초마다, 1분 동안 입력(포인터·키·휠)이 없으면 30초마다. 숨긴 탭은 멈추고, 요청이 겹치지 않는다 | 코드(`apps/web/src/pages/Lobby.tsx`, `apps/web/src/lib/lobby.ts`), 횟수는 단위 테스트(`apps/web/test/lobby.test.ts`) |
 | 앱 핑 | 웹 클라이언트는 서버 메시지가 25초 동안 하나도 없을 때만 `{t:'ping'}`을 보낸다(핸드 진행 중에는 상태가 계속 와서 0회, 조용한 테이블에서 소켓당 10분에 약 23회). 런타임 자동 응답이 `{t:'pong'}`으로 답하고 DO를 깨우지 않는다 | 코드(`apps/web/src/game/link.ts`, `room.ts`), 횟수는 단위 테스트(`apps/web/test/link.test.ts`), 자동 응답은 통합 테스트(`tests/integration/ws-reliability.test.ts`) |
+| 관리자 대시보드 실시간 현황 1회 | Workers 요청 1 + D1 batch 1(문장 8개). 읽는 행: 열린·닫는 중 테이블 약 3번(`tables_status_idx`), **세션 전부**(접속자 수, 아래), 최근 1시간 `ops_metrics`(최대 60분 × 4종), 열린 신고, 미해결 정합성 이벤트, 착석 세션. 화면이 보이고 관리자가 5분 안에 조작했을 때만 30초마다 다시 부른다 → 관리자 1명이 시간당 최대 120회. 숨긴 탭·자리 비움은 0회 | 코드(`apps/api/src/lib/ops.ts`, `apps/admin/src/pages/Dashboard.tsx`). 응답의 `rowsRead`(D1 `meta.rows_read` 합)를 화면에 그대로 보인다. 로컬 측정은 아래 "관리자 대시보드" |
+| 운영 카운터(`ops_metrics`) | 분·종류마다 1행을 upsert(`ON CONFLICT … n = n + excluded.n`). 룸은 기존 점유 현황 UPDATE와 같은 batch로 보내고, 그 밖에는 최대 10초에 한 번만 쓴다(새 Workers 요청·DO 요청 없음). API는 5xx 응답 1건마다 1행. 사건이 없으면 0행. 14일 지난 행은 매일 정리 | 코드(`packages/db/src/ops.ts`, `apps/game-worker/src/room.ts`의 `publishStats`, `apps/api/src/index.ts`) |
 
 ### 대략적인 환산
 
@@ -171,6 +173,8 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 
 **핸드 통계 읽기**: 핸드가 끝날 때마다 통계 문장(`packages/db/src/handStats.ts`)이 돈다. 예전 문장은 SQLite가 `hand_players` 전체를 훑는 순서로 실행해, 로컬 D1 측정에서 읽은 행이 약 235 + 4 × (저장된 `hand_players` 행 수)였다. 지금은 남은 핸드부터 찾아 그 핸드의 행만 읽는다(같은 핸드에서 2,000행 DB 기준 8,235 → 255행, 결과 동일). 아래는 이 측정 기울기로 운영 규모를 **추정**한 것이다: 저장된 `hand_players`가 100만 행(약 18만 핸드)일 때 예전 문장은 핸드 1개에 약 400만 행을 읽고, 시간당 60핸드인 상시 테이블 1개가 월 약 1,730억 행을 읽는다(포함 250억 초과분 월 약 $148). 지금 문장은 같은 테이블이 월 약 1,100만 행이다. 운영 D1에서 측정하지 않았다.
 
+**관리자 대시보드**: 실시간 현황은 서버가 D1 batch 1개로 집계한다. 읽는 행은 대략 3 × (열린·닫는 중 테이블) + 세션 행 수 + 최근 1시간 카운터 행(최대 240) + 열린 신고 + 착석 세션이다. 접속자 수(최근 5분 안에 요청한 회원)는 `sessions`를 모두 읽는다. `last_seen_at` 인덱스를 두면 세션이 갱신될 때마다(최대 1분에 1번) 인덱스 쓰기가 1행씩 늘어 쓰기 비용이 커지므로 두지 않았다. 세션은 만료되면 매일 지워져, 행 수는 살아 있는 로그인 수와 같다. 닫힌 테이블에 남은 착석 세션을 찾는 문장은 닫힌 테이블(계속 늘어남)이 아니라 착석 세션 부분 인덱스에서 시작하도록 `CROSS JOIN`으로 순서를 고정했다(`EXPLAIN QUERY PLAN`: `SCAN ts USING COVERING INDEX tsess_open_user_uq` → `SEARCH t USING sqlite_autoindex_tables_1`). 측정(로컬, 시각 확인용 E2E DB): 테이블 30개에 세션·카운터·신고·착석이 6·22·1·0행일 때 128행, 17·67·3·3행일 때 195행, 23·89·4·3행일 때 226행을 읽었고 D1 응답은 5~7 ms였다(위 식으로 계산하면 119·180·209행). 통합 테스트 DB에서는 455·547행, 7·8 ms였다. **추정**: 로그인 세션 1만 행, 테이블 50개, 착석 100명이면 1회 약 1만 500행이다. 관리자 1명이 하루 8시간 보고 조작하면 월 2만 8,800회, D1 읽기 약 3억 행(Paid 포함 월 250억의 약 1.2%), Workers 요청은 포함량(월 1,000만)의 0.3%다. 화면을 띄워 두기만 하면 5분 뒤 갱신이 멈춘다.
+
 **정리**
 - 운영은 Workers Paid를 쓴다. PBKDF2 10만 회 해싱이 무료 플랜의 호출당 CPU 10 ms를 넘을 수 있고, 무료 한도를 넘으면 요청이 실패한다.
 - 상시 진행 테이블이 늘면 **DO 실행 시간과 DO 저장소 쓰기**가 먼저 포함량을 넘는다(위 추정 기준, 테이블당 월 약 $8). 대시보드의 Durable Objects 사용량으로 실제 값을 확인한다.
@@ -190,7 +194,7 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 
 ## 6. 운영 점검표
 
-- [ ] D1 `database_id` 입력, 마이그레이션 적용(`0000_init`, `0001_community`, `0002_comment_replies`, `0003_academy`, `0004_signup_profile`, `0005_social`, `0006_social_safety`, `0007_social_play`, `0008_session_remember`, `0009_dm_seq`, `0010_hand_stats`, `0011_hand_shown`). GitHub Actions 배포는 배포 전에 자동 적용한다. `0011_hand_shown`은 `hand_players`에 null 허용 열 `shown` 하나를 더한다(기존 행은 NULL = 쇼다운에 간 패를 공개로 봄). 새 game-worker는 이 열에 기록하므로 마이그레이션을 game-worker보다 먼저 적용해야 한다. `0010_hand_stats`는 `hand_players`에 통계 열 5개와 부분 인덱스를 더하고, 같은 파일 안에서 기존 핸드 전체의 통계를 한 번 채운다(이후는 게임 워커가 핸드 기록 직후 채움). 기록 수에 비례해 실행 시간이 늘어나므로 운영 적용 전 `SELECT COUNT(*) FROM hand_players`로 규모를 확인한다
+- [ ] D1 `database_id` 입력, 마이그레이션 적용(`0000_init`, `0001_community`, `0002_comment_replies`, `0003_academy`, `0004_signup_profile`, `0005_social`, `0006_social_safety`, `0007_social_play`, `0008_session_remember`, `0009_dm_seq`, `0010_hand_stats`, `0011_hand_shown`, `0012_ops_metrics`). GitHub Actions 배포는 배포 전에 자동 적용한다. `0012_ops_metrics`는 관리자 대시보드의 분 단위 운영 카운터 테이블 `ops_metrics`를 새로 만든다(기존 테이블 변경 없음). 새 game-worker와 api가 이 테이블에 기록하므로 마이그레이션 → game-worker → api → web·admin 순서로 배포한다. 마이그레이션 없이 새 game-worker가 먼저 나가면 카운터가 들어간 룸의 통계 batch가 계속 실패해, 그 룸의 로비 점유 현황이 갱신되지 않고 10초마다 재시도한다(게임 진행과 칩에는 영향 없음). `0011_hand_shown`은 `hand_players`에 null 허용 열 `shown` 하나를 더한다(기존 행은 NULL = 쇼다운에 간 패를 공개로 봄). 새 game-worker는 이 열에 기록하므로 마이그레이션을 game-worker보다 먼저 적용해야 한다. `0010_hand_stats`는 `hand_players`에 통계 열 5개와 부분 인덱스를 더하고, 같은 파일 안에서 기존 핸드 전체의 통계를 한 번 채운다(이후는 게임 워커가 핸드 기록 직후 채움). 기록 수에 비례해 실행 시간이 늘어나므로 운영 적용 전 `SELECT COUNT(*) FROM hand_players`로 규모를 확인한다
 - [ ] 두 Worker에 같은 `INTERNAL_SECRET`, 최초 관리자 생성 후 `ADMIN_BOOTSTRAP_TOKEN` 삭제
 - [ ] `ALLOWED_ORIGINS`·`ADMIN_ORIGIN`·`APP_ORIGIN`이 실제 운영 주소(https://jc-royal.site, https://admin.jc-royal.site)와 일치
 - [ ] 배포 후 가입 인증번호 메일과 비밀번호 재설정 메일이 `noreply@jc-royal.site`에서 오고, 재설정 링크가 https://jc-royal.site/reset 으로 열리는지 확인

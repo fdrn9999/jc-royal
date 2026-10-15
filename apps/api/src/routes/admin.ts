@@ -20,6 +20,7 @@ import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
+import { liveOps } from '../lib/ops';
 import { roomCall } from '../lib/room';
 
 const page = (c: Context<AppEnv>) => ({
@@ -56,6 +57,12 @@ const admin = new Hono<AppEnv>()
       issues: issues?.results ?? [],
       server: { env: c.env.ENVIRONMENT, d1LatencyMs: Date.now() - t0, at: Date.now() },
     });
+  })
+  // The dashboard's auto-refreshed part (lib/ops.ts): one bounded D1 batch, polled only while an admin watches the page.
+  .get('/ops/live', async (c) => {
+    const t0 = Date.now();
+    const live = await liveOps(c.env.DB, t0);
+    return c.json({ ...live, server: { d1LatencyMs: Date.now() - t0, at: t0 } });
   })
   // ---------------------------------------------------------------- users
   .get('/users', async (c) => {

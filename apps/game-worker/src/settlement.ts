@@ -5,7 +5,7 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD } from '@jc/db';
+import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD, opsUpserts, type OpsCount } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
 
 export interface TableRow {
@@ -228,15 +228,18 @@ export interface LiveStats {
   connections: number;
 }
 
-export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveStats, issue?: string | null): Promise<void> {
-  await d1
-    .prepare(
-      `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
-              live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue)
-       WHERE id = ?1`,
-    )
-    .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue ?? null)
-    .run();
+/** Writes the room's live occupancy, its latest problem (if any) and its pending operations counters in one D1 batch. */
+export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveStats, issue: string | null = null, ops: OpsCount[] = []): Promise<void> {
+  await d1.batch([
+    d1
+      .prepare(
+        `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
+                live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue)
+         WHERE id = ?1`,
+      )
+      .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue),
+    ...opsUpserts(d1, ops),
+  ]);
 }
 
 export async function markTableClosed(d1: D1Database, tableId: string): Promise<void> {

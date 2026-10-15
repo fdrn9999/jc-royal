@@ -18,6 +18,11 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
+  // The live part refreshes itself while watched; errors and connections come from the server's counters.
+  await expect(page.getByTestId('live-state')).toContainText('30초마다 자동 갱신');
+  await expect(page.getByTestId('live-meta')).toContainText('읽은 행');
+  await expect(page.getByTestId('ops-stats')).toContainText('최근 5분 오류');
+  await expect(page.getByTestId('totals')).toBeVisible();
 
   // Create a table → visible in the player lobby.
   await page.getByRole('link', { name: /^테이블$|^Tables$/ }).click();

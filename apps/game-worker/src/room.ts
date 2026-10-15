@@ -11,6 +11,7 @@
  * identity forwarded by the API worker in its attachment.
  */
 import { DurableObject } from 'cloudflare:workers';
+import { OpsCounter } from '@jc/db';
 import { HandEngine, nextButtonSeat, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
   AUTO_REBUY_MAX_TIMES,
@@ -145,6 +146,11 @@ const MSG_RATE = { capacity: 20, refillPerSec: 10 };
 /** How soon the room retries work a failed D1 call left unfinished (a cash-out, a close, a hand record). */
 const RETRY_MS = 15_000;
 const UNRECORDED_PREFIX = 'unrecorded:';
+/**
+ * Operations counters and the latest problem ride along with the next occupancy write; with nothing else to write they
+ * go out at most this often, so a failing D1 is not called on every error.
+ */
+const OPS_FLUSH_MS = 10_000;
 
 /** A finished hand kept in room storage until its D1 record is written. */
 interface UnrecordedHand {
@@ -178,6 +184,13 @@ export class TableRoom extends DurableObject<Env> {
   private queue: Promise<unknown> = Promise.resolve();
   private buckets = new Map<string, { tokens: number; at: number; lastChat: number }>();
   private lastStats = '';
+  /** Operations counters (packages/db/src/ops.ts) and the latest problem, not written yet (see `publishStats`). */
+  private ops = new OpsCounter();
+  private pendingIssue: string | null = null;
+  private lastOpsFlush = 0;
+  private opsTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Connections already counted as dropped (an error may be followed by its close). */
+  private dropped = new Set<string>();
   /** Storage keys of finished hands D1 does not have yet (see `retryUnrecorded`). */
   private unrecorded = new Set<string>();
 
@@ -240,7 +253,7 @@ export class TableRoom extends DurableObject<Env> {
       try {
         await this.recoverPendingSeats();
       } catch (e) {
-        console.error('recovery failed; will retry', (e as Error).message);
+        this.fault('recovery failed; will retry', e);
       }
       if (this.hand?.isSettled && this.room.settledHandId !== this.hand.handId) await this.settle([]);
       if (this.unfinishedWork()) {
@@ -354,6 +367,12 @@ export class TableRoom extends DurableObject<Env> {
     void this.publishStats();
   }
 
+  /**
+   * Mirrors occupancy to D1 when it changed, in the same batch as the pending operations counters and latest problem;
+   * those (with the occupancy) are otherwise written at most every OPS_FLUSH_MS. A failed write keeps the counters and
+   * the problem, and counts itself, so the next of those writes also brings the occupancy up to date. Pending counters
+   * in a room where nothing else happens are written by a timer, so they reach the dashboard within OPS_FLUSH_MS.
+   */
   private async publishStats() {
     if (!this.tableId) return;
     const seated = this.room.seats.filter((s) => s && s.phase !== 'pending').length;
@@ -361,13 +380,65 @@ export class TableRoom extends DurableObject<Env> {
     const spectators = new Set(conns.filter((u) => this.seatIndexOf(u) === null)).size;
     const stats = { seated, playing: !!this.hand, waitlist: this.room.waitlist.length, spectators, connections: conns.length };
     const key = JSON.stringify(stats);
-    if (key === this.lastStats) return;
-    this.lastStats = key;
-    try {
-      await publishLiveStats(this.env.DB, this.tableId, stats);
-    } catch (e) {
-      console.error('live stats', (e as Error).message);
+    const changed = key !== this.lastStats;
+    const now = Date.now();
+    const extra = this.ops.size > 0 || this.pendingIssue !== null;
+    if (!changed && !(extra && now - this.lastOpsFlush >= OPS_FLUSH_MS)) {
+      if (extra) this.flushOpsIn(OPS_FLUSH_MS - (now - this.lastOpsFlush));
+      return;
     }
+    this.lastStats = key;
+    const ops = this.ops.take();
+    const issue = this.pendingIssue;
+    this.pendingIssue = null;
+    if (extra) this.lastOpsFlush = now;
+    try {
+      await publishLiveStats(this.env.DB, this.tableId, stats, issue, ops);
+    } catch (e) {
+      this.ops.restore(ops);
+      this.pendingIssue ??= issue;
+      this.ops.add('room_error');
+      // The occupancy was not written either: the retry writes it whatever changes meanwhile.
+      this.lastStats = '';
+      console.error('live stats', (e as Error).message);
+      this.flushOpsIn(OPS_FLUSH_MS);
+    }
+  }
+
+  private flushOpsIn(ms: number) {
+    if (this.opsTimer) return;
+    this.opsTimer = setTimeout(() => {
+      this.opsTimer = null;
+      void this.publishStats();
+    }, Math.max(ms, 0));
+  }
+
+  /**
+   * An operation that failed unexpectedly (anything but a refused command): logged, counted for the admin dashboard
+   * and kept as the table's latest problem.
+   */
+  private fault(what: string, e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(what, message);
+    this.ops.add('room_error');
+    this.pendingIssue = `${new Date().toISOString()} ${what}: ${message}`.slice(0, 300);
+    void this.publishStats();
+  }
+
+  /** A connection that ended without the client closing it (the link died) or with a socket error, counted once. */
+  private countDrop(ws: WebSocket) {
+    let connId: string | undefined;
+    try {
+      connId = this.att(ws)?.connId;
+    } catch {
+      /* no attachment */
+    }
+    if (connId) {
+      if (this.dropped.has(connId)) return;
+      if (this.dropped.size >= 500) this.dropped.clear();
+      this.dropped.add(connId);
+    }
+    this.ops.add('ws_drop');
   }
 
   // ------------------------------------------------------------------ HTTP / sockets
@@ -389,10 +460,12 @@ export class TableRoom extends DurableObject<Env> {
         return new Response('bad identity', { status: 400 });
       }
       if (!identity.userId) return new Response('bad identity', { status: 400 });
+      // The web client marks a connection it opens again after losing one (useTableSocket).
+      const retry = url.searchParams.get('r') === '1';
       return this.run(async () => {
         await this.ensureLoaded(tableId);
         if (this.room.closed) return new Response('table closed', { status: 410 });
-        return this.openSocket(identity);
+        return this.openSocket(identity, retry);
       });
     }
 
@@ -437,7 +510,7 @@ export class TableRoom extends DurableObject<Env> {
     return new Response('not found', { status: 404 });
   }
 
-  private openSocket(identity: Identity): Response {
+  private openSocket(identity: Identity, retry = false): Response {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     if (this.mustRefuse(identity)) {
@@ -461,6 +534,8 @@ export class TableRoom extends DurableObject<Env> {
     const attachment: Attachment = { ...identity, connId: crypto.randomUUID(), connectedAt: Date.now() };
     this.ctx.acceptWebSocket(server, [identity.userId]);
     server.serializeAttachment(attachment);
+    // Written with the occupancy the broadcast below publishes.
+    if (retry) this.ops.add('ws_retry');
     const connected = this.connectedUsers();
     connected.add(identity.userId);
     this.send(server, { t: 'state', state: this.view(attachment, connected), cues: [] });
@@ -501,7 +576,7 @@ export class TableRoom extends DurableObject<Env> {
         const reqId = 'reqId' in msg ? msg.reqId : 'intentId' in msg ? msg.intentId : undefined;
         if (e instanceof CommandError) this.send(ws, { t: 'error', code: e.code, message: e.message, ...(reqId ? { reqId } : {}) });
         else {
-          console.error('command failed', (e as Error).message);
+          this.fault('command failed', e);
           this.send(ws, { t: 'error', code: 'internal', message: 'internal error', ...(reqId ? { reqId } : {}) });
           // A D1 call that failed half way (a cash-out, a buy-in) is retried by the alarm.
           await this.schedule().catch(() => undefined);
@@ -511,6 +586,7 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   override async webSocketClose(ws: WebSocket, code: number) {
+    if (code === 1006 || code === 1011) this.countDrop(ws);
     try {
       ws.close(code === 1005 ? 1000 : code, 'closing');
     } catch {
@@ -961,7 +1037,7 @@ export class TableRoom extends DurableObject<Env> {
           }
         }
       } catch (e) {
-        console.error('top-up failed', (e as Error).message);
+        this.fault('top-up failed', e);
       }
     }
     return notices;
@@ -1129,7 +1205,7 @@ export class TableRoom extends DurableObject<Env> {
           left.push({ kind: 'leave', seatIndex: i });
         } catch (e) {
           // The seat stays 'cashing' and the alarm finishes the cash-out (its ledger key makes a repeat a no-op).
-          console.error('cash-out failed; will retry', (e as Error).message);
+          this.fault('cash-out failed; will retry', e);
         }
       }
     }
@@ -1226,7 +1302,7 @@ export class TableRoom extends DurableObject<Env> {
       } catch (e) {
         if (e instanceof CommandError) return; // the table row is gone
         // D1 unreachable: keep retrying here rather than rely on the runtime's few alarm retries.
-        console.error('alarm: load failed; will retry', (e as Error).message);
+        this.fault('alarm: load failed; will retry', e);
         await this.ctx.storage.setAlarm(Date.now() + RETRY_MS);
         return;
       }
@@ -1268,7 +1344,7 @@ export class TableRoom extends DurableObject<Env> {
             this.broadcast([{ kind: 'leave', seatIndex: i }]);
           } catch (e) {
             // Left 'cashing' for the retry; the rest of the alarm (turn timers, the next hand) still runs.
-            console.error('cash-out failed; will retry', (e as Error).message);
+            this.fault('cash-out failed; will retry', e);
           }
         }
       }
@@ -1321,7 +1397,7 @@ export class TableRoom extends DurableObject<Env> {
     try {
       await this.continueClose();
     } catch (e) {
-      console.error('close unfinished; will retry', (e as Error).message);
+      this.fault('close unfinished; will retry', e);
     }
   }
 
@@ -1339,7 +1415,7 @@ export class TableRoom extends DurableObject<Env> {
       if (this.room.closing && !this.room.closed) await this.continueClose();
       this.broadcast();
     } catch (e) {
-      console.error('retry failed; will retry', (e as Error).message);
+      this.fault('retry failed; will retry', e);
     }
   }
 
@@ -1350,7 +1426,7 @@ export class TableRoom extends DurableObject<Env> {
       try {
         if (u) await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log);
       } catch (e) {
-        console.error('recordHand failed; will retry', (e as Error).message);
+        this.fault('recordHand failed; will retry', e);
         return;
       }
       await this.ctx.storage.delete(key);
