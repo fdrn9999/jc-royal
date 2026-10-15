@@ -142,6 +142,39 @@ describe('two administrators at once', () => {
     expect(await messages(gone.me.id)).toEqual([]);
   });
 
+  it('a suspension that committed but never reached the tables is finished by asking again: the seat is left, the socket ends', async () => {
+    const [x] = await both();
+    const m = await newUser();
+    const w = await sock(m.client, 'it-conc-3');
+    expect(await w.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
+    // The status change committed, then the request ended before the rooms were told (a timeout, a crash).
+    await d1(`UPDATE users SET status = 'suspended', suspended_reason = 'half done' WHERE id = '${m.me.id}'`);
+    // A preview changes nothing, not even the connection.
+    expect((await x.post(`/api/admin/users/${m.me.id}/suspend`, { preview: true })).status).toBe(409);
+    await sleep(500);
+    expect(w.closed).toBeNull();
+
+    // Suspending again is still refused (nothing to change), but the tables are told now and the console sees what they did.
+    const again = await x.post(`/api/admin/users/${m.me.id}/suspend`, { reason: 'finish it' });
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    expect(again.body.error.code).toBe('already_suspended');
+    expect(again.body.error.details?.kick).toMatchObject({ sockets: 1, unreached: [], seats: [{ tableId: 'it-conc-3', seat: 'left' }] });
+    expect(await w.waitClose()).toBe(4004);
+    // The seat went back to the wallet once; the account and its notices are as they were.
+    expect((await settled(m.me.id, 'it-conc-3')).map((l) => [l.type, l.amount])).toEqual([
+      ['buy_in', -300],
+      ['cash_out', 300],
+    ]);
+    expect(await balance(m.me.id)).toBe(m.me.balance);
+    expect(await d1(`SELECT status, suspended_reason FROM users WHERE id = '${m.me.id}'`)).toEqual([{ status: 'suspended', suspended_reason: 'half done' }]);
+    expect((await messages(m.me.id)).filter((n) => n.category === 'sanction')).toEqual([]);
+    // Both refusals are on the record: the preview's plainly, the request's with what the tables did.
+    const failed = (await audits('user.suspend.failed', m.me.id)).map((r) => JSON.parse(r.detail));
+    expect(failed).toHaveLength(2);
+    expect(failed).toContainEqual(expect.objectContaining({ status: 409, code: 'already_suspended', preview: true }));
+    expect(failed).toContainEqual(expect.objectContaining({ status: 409, code: 'already_suspended', kick: expect.objectContaining({ sockets: 1 }) }));
+  });
+
   it('close the same table during a hand: the hand plays out, each seat is paid once, the table closes once', async () => {
     const [x, y] = await both();
     const { a, b, wa, wb } = await seatTwo('it-conc-1', [500, 400]);

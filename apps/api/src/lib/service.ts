@@ -8,10 +8,21 @@ import { roomCallEnv } from './room';
 const MAINTENANCE_SQL = `SELECT id, starts_at AS startsAt, ends_at AS endsAt, block_login AS blockLogin, message_ko AS messageKo, message_en AS messageEn
   FROM maintenance_windows WHERE ended_at IS NULL AND cancelled_at IS NULL AND ends_at > ?1 ORDER BY starts_at LIMIT 1`;
 
-/** Notices still to be shown (now or later), soonest first. */
+/** Most notices a page is sent. */
+const NOTICE_LIMIT = 20;
+
+/**
+ * Notices still to be shown: those showing now first (urgent, then maintenance, then general; the newest first within
+ * each), then those yet to start, soonest first. One more than the limit is read to tell whether the list was cut;
+ * `edge` (the same on every row) is the next time any of them starts or ends.
+ */
 const NOTICES_SQL = `SELECT id, kind, title_ko AS titleKo, title_en AS titleEn, body_ko AS bodyKo, body_en AS bodyEn,
-         starts_at AS startsAt, ends_at AS endsAt, post_id AS postId
-  FROM service_notices WHERE deleted_at IS NULL AND (ends_at IS NULL OR ends_at > ?1) ORDER BY starts_at, created_at LIMIT 20`;
+         starts_at AS startsAt, ends_at AS endsAt, post_id AS postId,
+         MIN(CASE WHEN starts_at > ?1 THEN starts_at ELSE ends_at END) OVER () AS edge
+  FROM service_notices WHERE deleted_at IS NULL AND (ends_at IS NULL OR ends_at > ?1)
+  ORDER BY starts_at > ?1, CASE kind WHEN 'urgent' THEN 0 WHEN 'maintenance' THEN 1 ELSE 2 END,
+    CASE WHEN starts_at > ?1 THEN starts_at ELSE -starts_at END, created_at DESC
+  LIMIT ${NOTICE_LIMIT + 1}`;
 
 /** A scalar that changes with every admin edit of a notice or a window (both write updated_at). */
 export const SERVICE_REV_SQL = `(SELECT COALESCE(MAX(r), 0) FROM (SELECT MAX(updated_at) AS r FROM service_notices UNION ALL SELECT MAX(updated_at) FROM maintenance_windows))`;
@@ -41,10 +52,17 @@ export async function serviceStatus(d1: D1Database, now = Date.now()): Promise<S
     d1.prepare(MAINTENANCE_SQL).bind(now),
     d1.prepare(`SELECT ${SERVICE_REV_SQL} AS rev`),
   ]);
+  const rows = (notices?.results ?? []) as unknown as (ServiceNoticeDto & { edge?: number | null })[];
+  // A page holding the whole list starts and ends notices itself; one holding a cut list asks again at the next edge,
+  // when a notice may come into it.
+  const cut = rows.length > NOTICE_LIMIT;
+  const refreshAt = cut ? (rows[0]!.edge ?? null) : null;
+  for (const r of rows) delete r.edge;
   return {
     now,
     rev: Number(rev?.results[0]?.rev ?? 0),
-    notices: (notices?.results ?? []) as unknown as ServiceNoticeDto[],
+    notices: rows.slice(0, NOTICE_LIMIT),
+    refreshAt,
     maintenance: toMaintenance(maintenance?.results[0] as MaintenanceRow | undefined, now),
   };
 }

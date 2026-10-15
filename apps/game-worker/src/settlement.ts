@@ -213,10 +213,14 @@ async function gzipBase64(text: string): Promise<string> {
  * (for replays) are stored in clear; the full engine log (hole cards, deck order)
  * is gzip-compressed for audits of finished hands only. Records queued before the
  * button and pots existed have neither.
+ *
+ * The same batch reads the maintenance window back, so a dealing room that was never told of one (the admin's
+ * fan-out did not reach it, and its occupancy did not change) learns of it before its next hand.
  */
-export async function recordHand(d1: D1Database, tableId: string, handNumber: number, rec: HandRecord, engineLog: unknown): Promise<void> {
+export async function recordHand(d1: D1Database, tableId: string, handNumber: number, rec: HandRecord, engineLog: unknown): Promise<Maintenance | null> {
   const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
   const stmts: D1PreparedStatement[] = [
+    maintenanceQuery(d1, Date.now()),
     // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
     d1
       .prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM hands WHERE id = ?2)`)
@@ -252,13 +256,14 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
         ),
     ),
   ];
-  await d1.batch(stmts);
+  const results = await d1.batch(stmts);
   // Per-player statistics for this hand (and any rows still without them). The hand is recorded either way.
   try {
     await d1.prepare(HAND_STATS_SQL).run();
   } catch (e) {
     console.error('hand stats failed', tableId, rec.handId, e);
   }
+  return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
 }
 
 export interface LiveStats {

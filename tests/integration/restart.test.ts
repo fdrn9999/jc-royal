@@ -26,10 +26,10 @@ async function runCron(base: string) {
   expect(await r.text()).toBe('ok');
 }
 
-/** An administrator closes or pauses these (heads-up, long turns so the clock never acts). */
+/** An administrator closes or pauses these; at the last a buy-in's outcome is unknown (heads-up, long turns so the clock never acts). */
 const tables = [
   ...TABLES,
-  ...['it-restart-close', 'it-restart-pause'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  ...['it-restart-close', 'it-restart-pause', 'it-restart-pending'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
 ];
 
 describe('server restart recovery', () => {
@@ -525,4 +525,65 @@ describe('server restart recovery', () => {
     a.close();
     b.close();
   }, 360_000);
+
+  it('a player who leaves while the buy-in outcome is still unknown is paid back once the ledger shows it landed, not kept seated', async () => {
+    if (!worker) {
+      await prepareState(state, tables);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const id = 'it-restart-pending';
+    const admin = await adminOn(base);
+    const ca = await user('ua', base);
+    const uid = (await ca.get('/api/auth/me')).body.id as string;
+    const a = await TableSocket.open(ca, id, { base });
+    const seatOf = async () => (await admin.get(`/api/admin/tables/${id}`)).body.live.seats[0] as { userId: string; phase: string; tableSessionId: string } | null;
+
+    // D1 is unreachable as A sits: the buy-in's outcome is unknown, so the seat is held as pending.
+    const sitLock = holdD1WriteLock(state);
+    try {
+      expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 500 })).toMatchObject({ t: 'error', code: 'internal' });
+    } finally {
+      sitLock();
+    }
+    const pending = await seatOf();
+    expect(pending).toMatchObject({ userId: uid, phase: 'pending' });
+    const tsid = pending!.tableSessionId;
+
+    // A leaves while D1 is still down, before the retry: the room cannot tell whether to pay A back yet. The buy-in
+    // had in fact landed (only its reply was lost): the ledger row, the wallet debit and the table session.
+    const landed = `INSERT INTO chip_ledger (id, user_id, type, amount, balance_after, table_id, ref_id, idempotency_key, memo)
+        SELECT '${crypto.randomUUID()}', id, 'buy_in', -500, balance - 500, '${id}', '${tsid}', 'buyin:${tsid}', 'seat 1' FROM users WHERE id = '${uid}';
+      UPDATE users SET balance = balance - 500 WHERE id = '${uid}';
+      INSERT INTO table_sessions (id, table_id, user_id, seat_index, buy_in, status) VALUES ('${tsid}', '${id}', '${uid}', 0, 500, 'seated');`;
+    const leaveLock = holdD1WriteLock(state);
+    let asked = false;
+    try {
+      expect(await a.request({ t: 'leave' })).toMatchObject({ t: 'error', code: 'internal' });
+      asked = true;
+    } finally {
+      leaveLock(asked ? landed : undefined);
+    }
+    expect(await balanceOf(ca)).toBe(9_500);
+
+    // The retry finds the buy-in in the ledger. A asked to leave, so the chips go back to the wallet: the seat is not
+    // kept with a player who left it.
+    const settled = await until(seatOf, (s) => !s || s.phase === 'seated', 'the retry to settle the seat', 60_000);
+    expect(settled).toBeNull();
+    await until(() => seatsAt(id), (s) => s.length === 1 && s[0]!.status === 'closed', 'the table session to close');
+    expect((await cashOuts(ca)).map((l) => l.amount)).toEqual([500]);
+    expect(await balanceOf(ca)).toBe(10_000);
+    expect(await ledgerMatches(ca)).toBe(true);
+    await a.waitState((s) => s.you.seatIndex === null && s.seats[0]!.state === 'empty', 15_000, 'the seat freed');
+    a.close();
+
+    // A restart pays nothing twice.
+    await worker.stop();
+    worker = await startWorker(port, state);
+    const again = await TableSocket.open(ca, id, { base });
+    expect(again.state!.seats[0]!.state).toBe('empty');
+    expect(await cashOuts(ca)).toHaveLength(1);
+    expect(await balanceOf(ca)).toBe(10_000);
+    again.close();
+  }, 240_000);
 });

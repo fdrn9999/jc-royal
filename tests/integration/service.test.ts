@@ -141,6 +141,31 @@ describe('service notices', () => {
     expect(await audits('service.notice.end', urgent.id)).toHaveLength(1);
     expect(await audits('service.notice.delete', later.id)).toHaveLength(1);
   });
+
+  it('a new urgent notice is never crowded out by older ones; when the list is cut, the page is told when to ask again', async () => {
+    // Twenty general notices already showing (the first ends in an hour), then an urgent one.
+    const endsAt = Date.now() + HOUR;
+    const old: string[] = [];
+    for (let i = 0; i < 20; i++) old.push((await notice({ kind: 'general', titleKo: `지난 공지 ${i}`, titleEn: `Older notice ${i}`, ...(i === 0 ? { endsAt } : {}) })).id);
+    const urgent = await notice({ kind: 'urgent', titleKo: '새 긴급 공지', titleEn: 'New urgent notice' });
+
+    const st = await status();
+    const ids = st.notices.map((n: { id: string }) => n.id);
+    expect(ids).toHaveLength(20);
+    // Urgent first; then the newest general ones, so the one cut is the oldest.
+    expect(ids[0]).toBe(urgent.id);
+    expect(ids.slice(1, 4)).toEqual([old[19], old[18], old[17]]);
+    expect(ids).not.toContain(old[0]);
+    // The list changes when the oldest ends, with no admin edit to bump the revision: the page asks again by then.
+    expect(st.refreshAt).toBeGreaterThan(st.now);
+    expect(st.refreshAt).toBeLessThanOrEqual(endsAt);
+
+    // Fewer than the limit: nothing cut, nothing to ask again for.
+    for (const id of [urgent.id, ...old.slice(1)]) expect((await admin.req('DELETE', `${N}/${id}`)).status).toBe(200);
+    const rest = await status();
+    expect(rest.notices.map((n: { id: string }) => n.id)).toContain(old[0]);
+    expect(rest.refreshAt).toBeNull();
+  });
 });
 
 describe('maintenance', () => {
@@ -351,6 +376,39 @@ describe('maintenance', () => {
     expect(after.hand!.stage).toBe('preflop');
     expect(Date.now()).toBeGreaterThanOrEqual(endsAt - 500);
     expect((await admin.get(M)).body.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: made.body.id, state: 'finished' })]));
+    await ledgerMatches([a.me.id, b.me.id]);
+  });
+
+  it('a table the start was never sent to learns of it when it records its hand, and deals no more until it ends', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    const wa = await sock(a.client, 'it-mt-4');
+    const wb = await sock(b.client, 'it-mt-4');
+    expect(await wa.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
+    expect(await wb.request({ t: 'sit', seatIndex: 1, buyIn: 300 })).toMatchObject({ t: 'ack' });
+    const first = (await wa.waitState((s) => s.hand?.stage === 'preflop', 20_000, 'first hand')).hand!.number;
+
+    // Under way, but no room was told: more tables in use than one change asks, or a room that did not answer.
+    await reauth();
+    const by = (await admin.get('/api/admin/auth/me')).body.user.id as string;
+    const id = uniq('mt');
+    const [startsAt, endsAt] = [Date.now() - 1_000, Date.now() + 120_000];
+    await d1(`INSERT INTO maintenance_windows (id, starts_at, ends_at, block_login, created_by) VALUES ('${id}', ${startsAt}, ${endsAt}, 0, '${by}')`);
+    try {
+      expect(wa.state!.maintenance).toBeNull();
+      await foldOut([wa, wb]);
+      expect((await wa.waitState((s) => s.maintenance?.active === true, 15_000, 'maintenance learned')).maintenance).toEqual({ startsAt, endsAt, active: true });
+      await wa.waitState((s) => s.hand === null, 15_000, 'no hand during maintenance');
+      await pause(3_500);
+      expect(wa.state).toMatchObject({ hand: null, nextHandAt: null });
+    } finally {
+      const stop = await admin.post(`${M}/${id}/stop`, { reason: 'unreached table' });
+      expect(stop.status, JSON.stringify(stop.body)).toBe(200);
+    }
+    const next = await wa.waitState((s) => !s.maintenance && !!s.hand && s.hand.number > first, 20_000, 'hand after maintenance');
+    expect(next.hand!.number).toBe(first + 1);
+    await foldOut([wa, wb]);
+    for (const w of [wa, wb]) expect(await w.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
     await ledgerMatches([a.me.id, b.me.id]);
   });
 });

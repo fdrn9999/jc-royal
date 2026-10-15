@@ -11,11 +11,11 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { audit, auditFailures, searchAudit, AUDIT_COUNT_CAP } from '../lib/audit';
-import { requireAdmin } from '../lib/auth';
+import { assertRecentReauth, requireAdmin } from '../lib/auth';
 import { randomToken, sha256 } from '../lib/crypto';
 import { toCsv } from '../lib/csv';
 import { fail, isPreview, parseBody } from '../lib/http';
-import { can, capabilitiesOf, requirePermission } from '../lib/permissions';
+import { can, capabilitiesOf, matchedRoute, requirePermission } from '../lib/permissions';
 import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
@@ -147,6 +147,22 @@ async function sanctionPreview(DB: D1Database, id: string) {
   const by = Object.fromEntries(((sessions?.results ?? []) as { kind: string; n: number }[]).map((r) => [r.kind, r.n]));
   const open = (seats?.results ?? []) as { tableId: string; tableName: string | null; seatIndex: number; buyIn: number }[];
   return { sessions: { user: by.user ?? 0, admin: by.admin ?? 0 }, seats: open, buyIns: open.reduce((a, s) => a + s.buyIn, 0) };
+}
+
+/**
+ * Refuses a suspension of a member who is already suspended (409 already_suspended), after asking their tables once
+ * more to end their connections and seats: the request that suspended them may have stopped before every table did.
+ * `details.kick` says what each table did; the refusal is recorded with it (in place of the plain failure row).
+ */
+async function alreadySuspended(c: Context<AppEnv>, id: string): Promise<never> {
+  const kick = await kickEverywhere(c.env, id, 'suspended', true);
+  const message = 'this member is already suspended';
+  try {
+    await audit(c, 'user.suspend.failed', { type: 'user', id }, { status: 409, code: 'already_suspended', message, route: matchedRoute(c)?.key, kick }, 'failed');
+  } catch (e) {
+    console.error('failure audit not written', e);
+  }
+  return fail(409, 'already_suspended', message, { kick });
 }
 
 const page = (c: Context<AppEnv>) => ({
@@ -597,7 +613,13 @@ const admin = new Hono<AppEnv>()
       const rep = await c.var.db.query.reports.findFirst({ where: eq(schema.reports.id, body.reportId), columns: { targetUserId: true } });
       if (rep?.targetUserId !== id) fail(400, 'bad_request', 'the report is not about this member');
     }
-    if (target.status !== 'active') fail(409, 'already_suspended', 'this member is already suspended');
+    if (target.status !== 'active') {
+      // Asked again for a member already suspended (after a request that failed half way, or by a second administrator):
+      // the tables are asked once more, since only they end the connections and seats a suspension leaves open. The
+      // rest (status, notice, record) is not repeated.
+      if (preview) fail(409, 'already_suspended', 'this member is already suspended');
+      await alreadySuspended(c, id);
+    }
     if (preview) {
       return c.json({ preview: true, member: { nickname: target.nickname, role: target.role, status: target.status }, ...(await sanctionPreview(c.env.DB, id)) });
     }
@@ -613,13 +635,14 @@ const admin = new Hono<AppEnv>()
         .returning({ id: schema.users.id }),
       c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
     ]);
-    if (!changed[0]) fail(409, 'already_suspended', 'this member is already suspended');
+    if (!changed[0]) await alreadySuspended(c, id);
+    // Deleting the sessions does not reach table connections already open: each room ends them and the member leaves
+    // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
+    // First of what follows the commit, so a later step that fails cannot leave the member playing.
+    const kick = await kickEverywhere(c.env, id, 'suspended', true);
     if (body.reportId) {
       await c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: reason, createdAt: at });
     }
-    // Deleting the sessions does not reach table connections already open: each room ends them and the member leaves
-    // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
-    const kick = await kickEverywhere(c.env, id, 'suspended', true);
     await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).suspended(reason), senderId: c.var.user!.id });
     await audit(c, 'user.suspend', { type: 'user', id }, { ...body, from: target.status, to: 'suspended', previousReason: target.suspendedReason, kick });
     return c.json({ ok: true, kick });
@@ -850,6 +873,9 @@ const admin = new Hono<AppEnv>()
   .patch('/tables/:id', async (c) => {
     const id = c.req.param('id');
     const body = await parseBody(c, TablePatchSchema);
+    // Blocking entry is a table control (POST /tables/:id/control asks for the password again); this route does not
+    // become a way around that. Other settings do not need it.
+    if (body.entryBlocked !== undefined) assertRecentReauth(c);
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
     const merged = { sb: body.smallBlind ?? t.smallBlind, bb: body.bigBlind ?? t.bigBlind, min: body.minBuyIn ?? t.minBuyIn, max: body.maxBuyIn ?? t.maxBuyIn };

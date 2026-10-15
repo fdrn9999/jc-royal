@@ -411,7 +411,7 @@ export function UserDetailPage() {
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
   // Another administrator suspended the member after this page loaded: show the member as they are now.
-  const outdated = (e: unknown) => e instanceof ApiError && e.code === 'already_suspended';
+  const outdated = (e: unknown): e is ApiError => e instanceof ApiError && e.code === 'already_suspended';
   const run = async (fn: () => Promise<unknown>) => {
     setNote(null);
     setReset(null);
@@ -423,7 +423,12 @@ export function UserDetailPage() {
       await reload();
     } catch (e) {
       setNote({ ok: false, text: errText(e, t) });
-      if (outdated(e)) await reload();
+      if (outdated(e)) {
+        // The suspension was already there, but the tables were asked again: show what they did.
+        const k = (e.details as { kick?: KickReport } | undefined)?.kick;
+        if (k) setKick({ kick: k });
+        await reload();
+      }
     }
   };
   // The dialog shows what the server says the change would do; the password is asked only when it is confirmed.

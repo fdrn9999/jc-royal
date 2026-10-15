@@ -874,24 +874,35 @@ export class TableRoom extends DurableObject<Env> {
     return this.room.seats.filter((s) => !s).length;
   }
 
-  /** On restart: confirm or roll back seats whose buy-in or top-up outcome is unknown, finish cash-outs. */
+  /**
+   * On restart and on the retry alarm: confirm or roll back seats whose buy-in or top-up outcome is unknown, and finish
+   * the leaves and cash-outs a failed D1 call cut short.
+   */
   private async recoverPendingSeats() {
+    // On load this runs before a settled hand's stacks reach the seats (`settle`): a leaver waits for that.
+    const unsettled = !!this.hand?.isSettled && this.room.settledHandId !== this.hand.handId;
     let changed = false;
     for (let i = 0; i < this.room.seats.length; i++) {
       const s = this.room.seats[i];
       if (!s) continue;
       if (s.phase === 'pending') {
-        const ok = await buyInCommitted(this.env.DB, s.tableSessionId);
-        if (ok) s.phase = 'seated';
-        else this.room.seats[i] = null;
         changed = true;
-      } else if (!this.handHasPlayer(s.userId)) {
-        if (await this.resolveTopUp(s)) changed = true;
-        if (s.phase === 'cashing') {
-          await this.cashOutSeat(s);
+        if (!(await buyInCommitted(this.env.DB, s.tableSessionId))) {
           this.room.seats[i] = null;
-          changed = true;
+          continue;
         }
+        s.phase = 'seated';
+      }
+      if (this.handHasPlayer(s.userId)) continue;
+      if (await this.resolveTopUp(s)) changed = true;
+      if (s.phase === 'cashing') {
+        await this.cashOutSeat(s);
+        this.room.seats[i] = null;
+        changed = true;
+      } else if (s.leaveAfterHand && !unsettled) {
+        // A player who left while D1 could not answer, or whose stand-up after a hand stopped before its cash-out began.
+        await this.standUp(i);
+        changed = true;
       }
     }
     if (changed) await this.save();
@@ -933,6 +944,12 @@ export class TableRoom extends DurableObject<Env> {
       }
       return;
     }
+    seat.leaveAfterHand = true;
+    seat.sittingOut = true;
+    // standUp asks D1 before it saves anything for a seat whose buy-in or top-up outcome is unknown. If that read fails,
+    // the saved seat still says the player left, so recovery pays them back (when the ledger shows the chips landed)
+    // instead of seating them. Other seats are saved as 'cashing' before any D1 call.
+    if (seat.phase === 'pending' || seat.topUp?.state === 'debiting') await this.save();
     await this.standUp(i);
     // The last player leaving a closing room closes it.
     if (this.room.closing) await this.continueCloseSafely();
@@ -1552,11 +1569,15 @@ export class TableRoom extends DurableObject<Env> {
     }
   }
 
-  /** Work a failed D1 call left behind: a buy-in or cash-out cut short, a close, a finished hand not yet recorded. */
+  /**
+   * Work a failed D1 call left behind: a buy-in, leave or cash-out cut short, a close, a finished hand not yet recorded.
+   */
   private unfinishedWork(): boolean {
     if (this.unrecorded.size > 0) return true;
     if (this.room.closing && !this.room.closed && !(this.hand && !this.hand.isSettled)) return true;
-    return this.room.seats.some((s) => s && (s.phase === 'pending' || (s.phase === 'cashing' && !this.handHasPlayer(s.userId))));
+    return this.room.seats.some(
+      (s) => s && (s.phase === 'pending' || ((s.phase === 'cashing' || (s.phase === 'seated' && s.leaveAfterHand)) && !this.handHasPlayer(s.userId))),
+    );
   }
 
   private async finishWorkSafely() {
@@ -1570,12 +1591,17 @@ export class TableRoom extends DurableObject<Env> {
     }
   }
 
-  /** Writes the finished hands D1 does not have yet, oldest first; each stays in storage until its write succeeds. */
+  /**
+   * Writes the finished hands D1 does not have yet, oldest first; each stays in storage until its write succeeds. The
+   * write reads the maintenance window back, so a room the admin's fan-out missed deals no hand after one starts.
+   */
   private async retryUnrecorded() {
     for (const key of [...this.unrecorded].sort()) {
       const u = await this.ctx.storage.get<UnrecordedHand>(key);
+      const read = ++this.maintReads;
       try {
-        if (u) await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log);
+        const m = u ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log) : undefined;
+        if (m !== undefined && this.takeMaint(m, read)) void this.run(() => this.maintenanceChanged());
       } catch (e) {
         this.fault('recordHand failed; will retry', e);
         return;
@@ -1669,7 +1695,8 @@ export class TableRoom extends DurableObject<Env> {
           await this.leave(userId);
           seat = this.seatIndexOf(userId) === null ? 'left' : inHand ? 'after_hand' : 'retrying';
         } catch (e) {
-          // A cash-out cut short stays 'cashing' (a buy-in not confirmed stays 'pending'): the retry alarm finishes it.
+          // A cash-out cut short stays 'cashing' (a buy-in or top-up not confirmed stays as it was, marked as leaving):
+          // the retry alarm finishes it.
           this.fault('disconnect: leave unfinished; will retry', e);
           seat = 'retrying';
         }

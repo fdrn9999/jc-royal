@@ -39,7 +39,15 @@ export interface ServiceStatusDto {
   now: number;
   /** Changes whenever an admin changes a notice or a maintenance window (the inbox poll carries it too). */
   rev: number;
-  /** Notices showing now, and those starting within a day. */
+  /**
+   * Notices showing now (urgent, then maintenance, then general; the newest first within each), then those yet to
+   * start (soonest first): 20 at most.
+   */
   notices: ServiceNoticeDto[];
+  /**
+   * Set only when the list was cut at 20: the next time a notice starts or ends, when one left out may come in, so the
+   * page fetches again then. Null when every notice is listed (the page starts and ends them on its own).
+   */
+  refreshAt: number | null;
   maintenance: MaintenanceDto | null;
 }

@@ -1,0 +1,509 @@
+[WebServer] (node:40692) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:30520) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:27848) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:43820) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] [plugin builtin:vite-reporter] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[WebServer] ▲ [WARNING] Scheduled Workers are not automatically triggered during local development.
+[WebServer] 
+[WebServer]   To manually trigger a scheduled event, run:
+[WebServer]     curl "http://127.0.0.1:8798/cdn-cgi/local/scheduled"
+[WebServer]   For more details, see https://developers.cloudflare.com/workers/configuration/cron-triggers/#test-cron-triggers-locally
+[WebServer] 
+[WebServer] 
+[WebServer] (node:45164) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 70 tests using 1 worker
+
+(node:43092) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [desktop] › tests\e2e\academy-followups.spec.ts:16:1 › academy sync: progress and badges follow the account to another device (8.6s)
+  ✓   2 [desktop] › tests\e2e\academy-followups.spec.ts:32:1 › academy badges: progress edited in the browser is kept but earns nothing; real study after a restart does (9.0s)
+  ✓   3 [desktop] › tests\e2e\academy-followups.spec.ts:70:1 › compare quiz explains a wrong pick with the deciding cards; review page targets the weak topic (3.4s)
+  ✓   4 [desktop] › tests\e2e\academy-followups.spec.ts:87:1 › free practice: rule-based bots, any legal action, several hands, still offline (24.3s)
+  ✓   5 [desktop] › tests\e2e\academy-followups.spec.ts:120:1 › real game links: beginner table tag + filter, first-hands coaching after a lesson (11.3s)
+  ✓   6 [desktop] › tests\e2e\academy.spec.ts:8:1 › academy: onboarding, card lesson with wrong-then-right answers, progress restored per account (9.5s)
+  ✓   7 [desktop] › tests\e2e\academy.spec.ts:49:1 › academy: hand comparison (engine-judged), drag sorting, hold’em streets, action demo (6.9s)
+  ✓   8 [desktop] › tests\e2e\academy.spec.ts:87:1 › academy practice: real table UI offline — no socket, wallet unchanged, scenario completes (17.3s)
+  ✓   9 [desktop] › tests\e2e\academy.spec.ts:125:1 › real table: hand chart opens without dropping the game; beginner mode shows the current hand (9.8s)
+  ✓  10 [desktop] › tests\e2e\action-keys.spec.ts:39:1 › keyboard shortcuts: same two-press confirmation as a tap, no repeats, nothing from chat or dialogs, one action per turn (15.5s)
+  ✘  11 [desktop] › tests\e2e\admin.spec.ts:7:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified (10.0s)
+(node:43648) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  12 [desktop] › tests\e2e\analytics.spec.ts:5:1 › operations stats: empty until a day is rolled up, then totals, trends and a table by day, week and month in Korean and English (12.1s)
+  ✓  13 [desktop] › tests\e2e\board.spec.ts:4:1 › board: write, comment, edit own content; others cannot edit (10.2s)
+  ✓  14 [desktop] › tests\e2e\console-ux.spec.ts:5:1 › a slow answer for an earlier filter does not replace the list for the filter now chosen (8.1s)
+  ✘  15 [desktop] › tests\e2e\console-ux.spec.ts:38:1 › ledger, hands and tables: filters in the URL, page by page, and each ledger look in the audit log (3.0m)
+(node:2440) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  16 [desktop] › tests\e2e\console-ux.spec.ts:124:1 › a post is deleted and a message sent only after a confirmation that says what will happen (8.3s)
+  ✓  17 [desktop] › tests\e2e\console-ux.spec.ts:161:1 › a list that cannot load says so with a retry, and the console says when the network or the server is away (4.7s)
+  ✓  18 [desktop] › tests\e2e\economy.spec.ts:29:1 › chip economy: the page shows where chips are, and a wallet mismatch is reverted only after its evidence and a confirmed before → after (10.7s)
+  ✓  19 [desktop] › tests\e2e\emergency.spec.ts:20:1 › emergency controls: an admin ends a seated member’s connections, the page stops reconnecting, and pausing new hands shows at the table (18.7s)
+  ✓  20 [desktop] › tests\e2e\game.spec.ts:4:1 › two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund (20.3s)
+  ✓  21 [desktop] › tests\e2e\legal.spec.ts:4:1 › privacy policy and terms are public drafts in Korean and English, linked from the footers and sign-up (3.5s)
+  ✓  22 [desktop] › tests\e2e\legal.spec.ts:45:1 › account deletion explains what is removed, and the board shows the author as a withdrawn member (7.3s)
+  ✓  23 [desktop] › tests\e2e\lobby.spec.ts:13:1 › lobby: a full table without spectating offers the waitlist, and the table says where you stand (7.2s)
+  ✓  24 [desktop] › tests\e2e\lobby.spec.ts:48:1 › lobby: favourites stay after a reload and come first; recent lists the tables opened, newest first (2.9s)
+  ✓  25 [desktop] › tests\e2e\lobby.spec.ts:89:1 › lobby: the size and blind filters narrow the list as well as quick play (2.0s)
+  ✓  26 [desktop] › tests\e2e\lobby.spec.ts:114:1 › lobby: polls only while visible, never overlaps, and refreshes on coming back (3.5s)
+  ✓  27 [desktop] › tests\e2e\lobby.spec.ts:159:1 › lobby: slows to every 30 seconds after a minute without input, and the next input refreshes at once (7.1s)
+  ✓  28 [desktop] › tests\e2e\members.spec.ts:29:1 › member management: list filters, sign-in time, activity, notes without personal data, and sanctions with before → after and a reason (15.6s)
+  ✓  29 [desktop] › tests\e2e\private-access.spec.ts:15:1 › private table: the join code is traded for a ticket and never appears in a page or socket address (8.2s)
+  ✓  30 [desktop] › tests\e2e\quickplay.spec.ts:7:1 › quick play: filters find a free seat, nothing is paid before the buy-in, and a lost seat offers the next table (8.1s)
+  ✓  31 [desktop] › tests\e2e\reconnect.spec.ts:50:1 › game reconnect: after the network drops, the seat, stack and own cards come back and the hand plays on (20.0s)
+  ✓  32 [desktop] › tests\e2e\register-view.spec.ts:3:1 › register: email = local part + domain picker with direct input (933ms)
+  ✓  33 [desktop] › tests\e2e\reports.spec.ts:32:1 › report workflow: severity, assignment, internal notes, a suspension given from the report, outcome messages, and reference statistics (13.9s)
+  ✓  34 [desktop] › tests\e2e\resend.spec.ts:4:1 › a buy-in whose answer was lost with the connection is sent again and applied once (3.3s)
+  ✓  35 [desktop] › tests\e2e\rooms.spec.ts:6:1 › rooms: a member opens a private room from the lobby, is marked as host, renames and shares it, then closes it and gets the chips back (7.1s)
+  ✓  36 [desktop] › tests\e2e\security.spec.ts:52:1 › permissions and audit: a plain admin is refused super-admin work and sees only their own log; a super admin searches, filters and pages every entry, refusals included (13.7s)
+  ✓  37 [desktop] › tests\e2e\security.spec.ts:154:1 › previews and sessions: suspending and closing a table show what will happen first; ending a session or changing a role signs that console out on its next request (18.1s)
+  ✓  38 [desktop] › tests\e2e\service.spec.ts:28:1 › service notices and maintenance: an admin posts a bilingual notice and plans maintenance; members and visitors see them in their language; maintenance under way pauses seating and sign-in until it ends (23.6s)
+  ✓  39 [desktop] › tests\e2e\service.spec.ts:210:1 › a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent (6.7s)
+  ✓  40 [desktop] › tests\e2e\signup-form.spec.ts:6:1 › sign-up form: email code, live password rules, eye toggle, birth date, consents (2.6s)
+  ✓  41 [desktop] › tests\e2e\social-play.spec.ts:21:1 › play together: invite from the friends list; the card opens the table, says when it filled up, and asks for a private code (10.5s)
+  ✓  42 [desktop] › tests\e2e\social-safety.spec.ts:16:1 › 1:1 chat: report one message, block with a confirmation, the other side sees only that messaging is off; unblock in settings (5.4s)
+  ✓  43 [desktop] › tests\e2e\social-safety.spec.ts:75:1 › table: mute hides one player’s chat for me only; after the hand, report them from the hand record (19.1s)
+  ✓  44 [desktop] › tests\e2e\social.spec.ts:15:1 › friends: request by nickname, accept, 1:1 chat with read receipt, unfriend (21.1s)
+  ✓  45 [desktop] › tests\e2e\social.spec.ts:82:1 › reports: a post, a comment and a player at the table; the author card offers a friend request (9.5s)
+  ✓  46 [desktop] › tests\e2e\social.spec.ts:152:1 › 1:1 chat sync: no polling while the tab is hidden; coming back or reconnecting catches up at once (4.9s)
+  ✓  47 [desktop] › tests\e2e\stats.spec.ts:4:1 › my statistics: VPIP, PFR, showdowns, positions and the daily trend from a hand played, nothing for a spectator (26.8s)
+  ✓  48 [desktop] › tests\e2e\topup.spec.ts:4:1 › top-up: between hands it applies at once; during a hand it waits, can be cancelled, and arrives after the hand (15.1s)
+  ✓  49 [desktop] › tests\e2e\topup.spec.ts:62:1 › top-up: the dialog opens with its suggested amount already in place, so an amount picked at once is the one sent (2.9s)
+  ✓  50 [desktop] › tests\e2e\topup.spec.ts:84:1 › auto rebuy: off by default, needs explicit consent with an amount and a limit, and can be turned off (3.8s)
+(node:38652) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  51 [mobile] › tests\e2e\academy-mobile.spec.ts:7:1 › mobile academy: bottom nav, touch quiz (tap select + tap-to-swap sort), no overflow, no page scroll on card taps (12.7s)
+  ✓  52 [mobile] › tests\e2e\academy-mobile.spec.ts:40:1 › mobile practice: raise with presets by touch, hand chart as a bottom sheet, actions stay on screen (10.4s)
+  ✓  53 [mobile] › tests\e2e\academy-mobile.spec.ts:60:1 › mobile: review, free practice and progress pages fit the phone; free-play action bar stays on screen (5.1s)
+  ✓  54 [mobile] › tests\e2e\account-mobile.spec.ts:13:1 › mobile: my page fits the phone, the header gear opens settings with logout, and 자동 로그인 decides how long the sign-in lasts (7.2s)
+  ✓  55 [mobile] › tests\e2e\action-mobile.spec.ts:14:1 › mobile: a big call needs a second tap, and moving the bet amount cancels an armed all-in (14.5s)
+  ✓  56 [mobile] › tests\e2e\analytics-mobile.spec.ts:5:1 › operations stats on a phone: the page fits the screen, the wide table scrolls inside its panel, and the period buttons work by touch (6.5s)
+  ✓  57 [mobile] › tests\e2e\console-ux-mobile.spec.ts:15:1 › on a phone: a member’s ledger, a report decided through its confirmation, and a post deleted after one, without sideways scrolling (9.8s)
+  ✓  58 [mobile] › tests\e2e\legal-mobile.spec.ts:4:1 › mobile: privacy policy, terms and the sign-up agreements fit the phone (5.0s)
+  ✓  59 [mobile] › tests\e2e\lobby-mobile.spec.ts:4:1 › mobile lobby: one create button, a full table card that fits, and the waitlist from a tap (7.8s)
+  ✓  60 [mobile] › tests\e2e\mobile.spec.ts:4:1 › mobile: lobby → seat → playable action bar, no horizontal overflow (8.2s)
+  ✓  61 [mobile] › tests\e2e\mobile.spec.ts:30:1 › mobile: touch guards — no-zoom game surface, 16px inputs, two-tap risky fold, BB stepper (15.8s)
+  ✓  62 [mobile] › tests\e2e\muck-mobile.spec.ts:38:1 › mobile: auto-muck set in the table settings keeps a losing showdown hand face down for the other player only (21.3s)
+  ✘  63 [mobile] › tests\e2e\pre-action-mobile.spec.ts:30:1 › mobile: a check chosen while the other player acts is made on the turn, and a bet cancels it with a notice (2.7m)
+(node:41448) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  64 [mobile] › tests\e2e\quickplay-mobile.spec.ts:4:1 › mobile: quick play seats players at the table, then explains a full table and what to do instead (515ms)
+(node:4172) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  65 [mobile] › tests\e2e\replay-mobile.spec.ts:44:1 › mobile: a finished hand replays action by action on the table, hiding the other hand until the showdown (500ms)
+(node:27140) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  66 [mobile] › tests\e2e\rooms-mobile.spec.ts:4:1 › mobile: open a room by touch; the create dialog, the table header with the host button and the host dialog fit a 360px phone (510ms)
+(node:13092) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  67 [mobile] › tests\e2e\social-mobile.spec.ts:4:1 › mobile: play together from the friends list; the table picker fits and every row is a full-width tap target (508ms)
+(node:41308) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  68 [mobile] › tests\e2e\social-mobile.spec.ts:49:1 › mobile: report a 1:1 message and block by touch; dialogs fit the screen (515ms)
+(node:43648) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  69 [mobile] › tests\e2e\stats-mobile.spec.ts:4:1 › mobile: my statistics, positions and the daily trend fit the phone in Korean and English (496ms)
+(node:14832) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  70 [mobile] › tests\e2e\topup-mobile.spec.ts:4:1 › mobile: top-up and auto rebuy fit the phone, and an empty wallet is explained instead of offered (549ms)
+
+
+  1) [desktop] › tests\e2e\admin.spec.ts:7:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified 
+
+    Error: page.evaluate: TypeError: Failed to fetch
+        at eval (eval at evaluate (:370:30), <anonymous>:2:21)
+        at UtilityScript.evaluate (<anonymous>:372:16)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at eval (eval at evaluate (:370:30), <anonymous>:2:21)
+        at UtilityScript.evaluate (<anonymous>:372:16)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at <repo>\tests\e2e\admin.spec.ts:100:36
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\admin-admin-console-bootst-a62b2-irmation-member-is-notified-desktop\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\admin-admin-console-bootst-a62b2-irmation-member-is-notified-desktop\test-failed-3.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #3: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\admin-admin-console-bootst-a62b2-irmation-member-is-notified-desktop\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\admin-admin-console-bootst-a62b2-irmation-member-is-notified-desktop\error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\admin-admin-console-bootst-a62b2-irmation-member-is-notified-desktop\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\admin-admin-console-bootst-a62b2-irmation-member-is-notified-desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [desktop] › tests\e2e\console-ux.spec.ts:38:1 › ledger, hands and tables: filters in the URL, page by page, and each ledger look in the audit log 
+
+    Test timeout of 90000ms exceeded.
+
+    Error: locator.click: Target page, context or browser has been closed
+    Call log:
+      - waiting for getByRole('button', { name: /로그인|Log in/ })
+        - locator resolved to <button type="submit" class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition-all duration-150 disabled:opacity-45 disabled:cursor-not-allowed active:translate-y-px bg-gradient-to-b from-gold-400 to-gold-600 text-ink-950 shadow-[0_6px_18px_-8px_rgba(212,175,55,0.8)] hover:from-gold-300 hover:to-gold-500 h-12 px-6 text-base">로그인</button>
+      - attempting click action
+        - waiting for element to be visible, enabled and stable
+
+
+       at analytics-helpers.ts:53
+
+      51 |   await page.getByLabel(/이메일|Email/).fill(email);
+      52 |   await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+    > 53 |   await page.getByRole('button', { name: /로그인|Log in/ }).click();
+         |                                                          ^
+      54 |   await expect(page.getByTestId('dashboard')).toBeVisible();
+      55 |   return page;
+      56 | }
+        at adminLogin (<repo>\tests\e2e\analytics-helpers.ts:53:58)
+        at <repo>\tests\e2e\console-ux.spec.ts:58:16
+
+    Tearing down "closeContexts" exceeded the test timeout of 90000ms.
+
+    Error: browserContext.close: Test ended.
+    Browser logs:
+
+    <launching> C:\Program Files\Google\Chrome\Application\chrome.exe --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=<tmp>\playwright_chromiumdev_profile-ncEXxh --remote-debugging-pipe --no-startup-window
+    <launched> pid=33704
+    [pid=33704][err] [33704:19328:1016/065559.313:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+    [pid=33704][err] [33704:19328:1016/065624.151:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+    [pid=33704][err] [33704:19328:1016/065712.304:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+    [pid=33704][err] [33704:41064:1016/065758.404:ERROR:ui\compositor\compositor_animation_observer.cc:65] CompositorAnimationObserver is active for too long (76.6494s) location=Button@ui\views\controls\button\button.cc:669
+    [pid=33704][err] [33704:41064:1016/065758.404:ERROR:ui\compositor\compositor_animation_observer.cc:65] CompositorAnimationObserver is active for too long (76.6494s) location=Button@ui\views\controls\button\button.cc:669
+    [pid=33704][err] [33704:41064:1016/065758.404:ERROR:ui\compositor\compositor_animation_observer.cc:65] CompositorAnimationObserver is active for too long (76.6494s) location=Button@ui\views\controls\button\button.cc:669
+    [pid=33704][err] [33704:41064:1016/065758.404:ERROR:ui\compositor\compositor_animation_observer.cc:65] CompositorAnimationObserver is active for too long (76.5923s) location=TabIcon@chrome\browser\ui\views\tabs\tab\tab_icon.cc:128
+    [pid=33704] <gracefully close start>
+    [pid=33704] <kill>
+    [pid=33704] <will force kill>
+
+       at helpers.ts:12
+
+      10 |     async ({ browser }, use) => {
+      11 |       const before = new Set(browser.contexts());      await use();
+    > 12 |       await Promise.all(browser.contexts().filter((c) => !before.has(c)).map((c) => c.close()));
+         |       ^
+      13 |     },
+      14 |     { auto: true },
+      15 |   ],
+        at Object.base.extend.closeContexts.auto (<repo>\tests\e2e\helpers.ts:12:7)
+
+    Error Context: test-results\console-ux-ledger-hands-an-f8937-edger-look-in-the-audit-log-desktop\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\console-ux-ledger-hands-an-f8937-edger-look-in-the-audit-log-desktop\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\console-ux-ledger-hands-an-f8937-edger-look-in-the-audit-log-desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [mobile] › tests\e2e\pre-action-mobile.spec.ts:30:1 › mobile: a check chosen while the other player acts is made on the turn, and a bet cancels it with a notice 
+
+    Error: Timeout 60000ms exceeded while waiting on the predicate
+
+      54 |       (await checkOrCall(a.page)) || (await checkOrCall(b.page));
+      55 |       expect(await atSpot()).toBe(true);
+    > 56 |     }).toPass({ timeout: 60_000 });
+         |        ^
+      57 |
+      58 |   await reachSpot();
+      59 |   await a.page.waitForTimeout(300);
+        at reachSpot (<repo>\tests\e2e\pre-action-mobile.spec.ts:56:8)
+        at <repo>\tests\e2e\pre-action-mobile.spec.ts:84:9
+
+    Tearing down "closeContexts" exceeded the test timeout of 90000ms.
+
+    Error: browserContext.close: Test ended.
+    Browser logs:
+
+    <launching> C:\Program Files\Google\Chrome\Application\chrome.exe --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=<tmp>\playwright_chromiumdev_profile-1STMFS --remote-debugging-pipe --no-startup-window
+    <launched> pid=40076
+    [pid=40076][err] [40076:27812:1016/070604.756:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+    [pid=40076][err] [40076:27812:1016/070630.551:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+    [pid=40076][err] [40076:27812:1016/070725.407:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+    [pid=40076][err] [40076:24696:1016/070803.715:ERROR:chrome\browser\ui\views\user_education\impl\browser_user_education_interface_impl.cc:186] Attempting to show IPH IPH_ExtensionsZeroStatePromo before browser initialization complete; IPH will not be shown.
+    [pid=40076][err] [40076:27812:1016/070913.091:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+    [pid=40076] <gracefully close start>
+    [pid=40076] <kill>
+    [pid=40076] <will force kill>
+
+       at helpers.ts:12
+
+      10 |     async ({ browser }, use) => {
+      11 |       const before = new Set(browser.contexts());      await use();
+    > 12 |       await Promise.all(browser.contexts().filter((c) => !before.has(c)).map((c) => c.close()));
+         |       ^
+      13 |     },
+      14 |     { auto: true },
+      15 |   ],
+        at Object.base.extend.closeContexts.auto (<repo>\tests\e2e\helpers.ts:12:7)
+
+    Error Context: test-results\pre-action-mobile-mobile-a-e3c31-et-cancels-it-with-a-notice-mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\pre-action-mobile-mobile-a-e3c31-et-cancels-it-with-a-notice-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\pre-action-mobile-mobile-a-e3c31-et-cancels-it-with-a-notice-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [mobile] › tests\e2e\quickplay-mobile.spec.ts:4:1 › mobile: quick play seats players at the table, then explains a full table and what to do instead 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:8798/register
+    Call log:
+      - navigating to "http://127.0.0.1:8798/register", waiting until "load"
+
+
+       at helpers.ts:42
+
+      40 |   const nickname = uid('p');
+      41 |   const email = `${nickname}@e2e.dev`;
+    > 42 |   await page.goto('/register');
+         |              ^
+      43 |   // Split email field: local part + domain picker ("직접입력" for other domains).
+      44 |   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+      45 |   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
+        at signUp (<repo>\tests\e2e\helpers.ts:42:14)
+        at <repo>\tests\e2e\quickplay-mobile.spec.ts:6:17
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\quickplay-mobile-mobile-qu-f4905-able-and-what-to-do-instead-mobile\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\quickplay-mobile-mobile-qu-f4905-able-and-what-to-do-instead-mobile\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\quickplay-mobile-mobile-qu-f4905-able-and-what-to-do-instead-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\quickplay-mobile-mobile-qu-f4905-able-and-what-to-do-instead-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) [mobile] › tests\e2e\replay-mobile.spec.ts:44:1 › mobile: a finished hand replays action by action on the table, hiding the other hand until the showdown 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:8798/register
+    Call log:
+      - navigating to "http://127.0.0.1:8798/register", waiting until "load"
+
+
+       at helpers.ts:42
+
+      40 |   const nickname = uid('p');
+      41 |   const email = `${nickname}@e2e.dev`;
+    > 42 |   await page.goto('/register');
+         |              ^
+      43 |   // Split email field: local part + domain picker ("직접입력" for other domains).
+      44 |   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+      45 |   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
+        at signUp (<repo>\tests\e2e\helpers.ts:42:14)
+        at <repo>\tests\e2e\replay-mobile.spec.ts:45:13
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\replay-mobile-mobile-a-fin-8238e-her-hand-until-the-showdown-mobile\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\replay-mobile-mobile-a-fin-8238e-her-hand-until-the-showdown-mobile\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\replay-mobile-mobile-a-fin-8238e-her-hand-until-the-showdown-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\replay-mobile-mobile-a-fin-8238e-her-hand-until-the-showdown-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6) [mobile] › tests\e2e\rooms-mobile.spec.ts:4:1 › mobile: open a room by touch; the create dialog, the table header with the host button and the host dialog fit a 360px phone 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:8798/register
+    Call log:
+      - navigating to "http://127.0.0.1:8798/register", waiting until "load"
+
+
+       at helpers.ts:42
+
+      40 |   const nickname = uid('p');
+      41 |   const email = `${nickname}@e2e.dev`;
+    > 42 |   await page.goto('/register');
+         |              ^
+      43 |   // Split email field: local part + domain picker ("직접입력" for other domains).
+      44 |   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+      45 |   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
+        at signUp (<repo>\tests\e2e\helpers.ts:42:14)
+        at <repo>\tests\e2e\rooms-mobile.spec.ts:5:30
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\rooms-mobile-mobile-open-a-efd5e-st-dialog-fit-a-360px-phone-mobile\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\rooms-mobile-mobile-open-a-efd5e-st-dialog-fit-a-360px-phone-mobile\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\rooms-mobile-mobile-open-a-efd5e-st-dialog-fit-a-360px-phone-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\rooms-mobile-mobile-open-a-efd5e-st-dialog-fit-a-360px-phone-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  7) [mobile] › tests\e2e\social-mobile.spec.ts:4:1 › mobile: play together from the friends list; the table picker fits and every row is a full-width tap target 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:8798/register
+    Call log:
+      - navigating to "http://127.0.0.1:8798/register", waiting until "load"
+
+
+       at helpers.ts:42
+
+      40 |   const nickname = uid('p');
+      41 |   const email = `${nickname}@e2e.dev`;
+    > 42 |   await page.goto('/register');
+         |              ^
+      43 |   // Split email field: local part + domain picker ("직접입력" for other domains).
+      44 |   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+      45 |   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
+        at signUp (<repo>\tests\e2e\helpers.ts:42:14)
+        at <repo>\tests\e2e\social-mobile.spec.ts:5:13
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\social-mobile-mobile-play--b173b--is-a-full-width-tap-target-mobile\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\social-mobile-mobile-play--b173b--is-a-full-width-tap-target-mobile\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\social-mobile-mobile-play--b173b--is-a-full-width-tap-target-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\social-mobile-mobile-play--b173b--is-a-full-width-tap-target-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  8) [mobile] › tests\e2e\social-mobile.spec.ts:49:1 › mobile: report a 1:1 message and block by touch; dialogs fit the screen 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:8798/register
+    Call log:
+      - navigating to "http://127.0.0.1:8798/register", waiting until "load"
+
+
+       at helpers.ts:42
+
+      40 |   const nickname = uid('p');
+      41 |   const email = `${nickname}@e2e.dev`;
+    > 42 |   await page.goto('/register');
+         |              ^
+      43 |   // Split email field: local part + domain picker ("직접입력" for other domains).
+      44 |   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+      45 |   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
+        at signUp (<repo>\tests\e2e\helpers.ts:42:14)
+        at <repo>\tests\e2e\social-mobile.spec.ts:50:13
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\social-mobile-mobile-repor-42d11-ouch-dialogs-fit-the-screen-mobile\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\social-mobile-mobile-repor-42d11-ouch-dialogs-fit-the-screen-mobile\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\social-mobile-mobile-repor-42d11-ouch-dialogs-fit-the-screen-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\social-mobile-mobile-repor-42d11-ouch-dialogs-fit-the-screen-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  9) [mobile] › tests\e2e\stats-mobile.spec.ts:4:1 › mobile: my statistics, positions and the daily trend fit the phone in Korean and English 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:8798/register
+    Call log:
+      - navigating to "http://127.0.0.1:8798/register", waiting until "load"
+
+
+       at helpers.ts:42
+
+      40 |   const nickname = uid('p');
+      41 |   const email = `${nickname}@e2e.dev`;
+    > 42 |   await page.goto('/register');
+         |              ^
+      43 |   // Split email field: local part + domain picker ("직접입력" for other domains).
+      44 |   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+      45 |   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
+        at signUp (<repo>\tests\e2e\helpers.ts:42:14)
+        at <repo>\tests\e2e\stats-mobile.spec.ts:5:13
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\stats-mobile-mobile-my-sta-7ceca-phone-in-Korean-and-English-mobile\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\stats-mobile-mobile-my-sta-7ceca-phone-in-Korean-and-English-mobile\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\stats-mobile-mobile-my-sta-7ceca-phone-in-Korean-and-English-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\stats-mobile-mobile-my-sta-7ceca-phone-in-Korean-and-English-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  10) [mobile] › tests\e2e\topup-mobile.spec.ts:4:1 › mobile: top-up and auto rebuy fit the phone, and an empty wallet is explained instead of offered 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:8798/register
+    Call log:
+      - navigating to "http://127.0.0.1:8798/register", waiting until "load"
+
+
+       at helpers.ts:42
+
+      40 |   const nickname = uid('p');
+      41 |   const email = `${nickname}@e2e.dev`;
+    > 42 |   await page.goto('/register');
+         |              ^
+      43 |   // Split email field: local part + domain picker ("직접입력" for other domains).
+      44 |   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+      45 |   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
+        at signUp (<repo>\tests\e2e\helpers.ts:42:14)
+        at <repo>\tests\e2e\topup-mobile.spec.ts:5:13
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\topup-mobile-mobile-top-up-32461-xplained-instead-of-offered-mobile\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\topup-mobile-mobile-top-up-32461-xplained-instead-of-offered-mobile\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\topup-mobile-mobile-top-up-32461-xplained-instead-of-offered-mobile\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\topup-mobile-mobile-top-up-32461-xplained-instead-of-offered-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  10 failed
+    [desktop] › tests\e2e\admin.spec.ts:7:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified 
+    [desktop] › tests\e2e\console-ux.spec.ts:38:1 › ledger, hands and tables: filters in the URL, page by page, and each ledger look in the audit log 
+    [mobile] › tests\e2e\pre-action-mobile.spec.ts:30:1 › mobile: a check chosen while the other player acts is made on the turn, and a bet cancels it with a notice 
+    [mobile] › tests\e2e\quickplay-mobile.spec.ts:4:1 › mobile: quick play seats players at the table, then explains a full table and what to do instead 
+    [mobile] › tests\e2e\replay-mobile.spec.ts:44:1 › mobile: a finished hand replays action by action on the table, hiding the other hand until the showdown 
+    [mobile] › tests\e2e\rooms-mobile.spec.ts:4:1 › mobile: open a room by touch; the create dialog, the table header with the host button and the host dialog fit a 360px phone 
+    [mobile] › tests\e2e\social-mobile.spec.ts:4:1 › mobile: play together from the friends list; the table picker fits and every row is a full-width tap target 
+    [mobile] › tests\e2e\social-mobile.spec.ts:49:1 › mobile: report a 1:1 message and block by touch; dialogs fit the screen 
+    [mobile] › tests\e2e\stats-mobile.spec.ts:4:1 › mobile: my statistics, positions and the daily trend fit the phone in Korean and English 
+    [mobile] › tests\e2e\topup-mobile.spec.ts:4:1 › mobile: top-up and auto rebuy fit the phone, and an empty wallet is explained instead of offered 
+  60 passed (18.2m)

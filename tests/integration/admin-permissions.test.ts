@@ -147,6 +147,24 @@ describe('permission table', () => {
     const chips = await rows(`actor_id = '${staff.me.id}' AND target_id = '${member.me.id}'`);
     expect(chips.map((r) => [r.action, r.outcome])).toEqual([['user.chips_refused', 'failed']]);
   });
+
+  it('blocking entry through the settings route asks for the password like the table control does; other settings do not', async () => {
+    const staff = await plainAdmin();
+    const table = 'it-perm-0';
+    const blocked = async () => (await d1<{ b: number }>(`SELECT entry_blocked AS b FROM tables WHERE id = '${table}'`))[0]!.b;
+    const refused = await staff.c.patch(`/api/admin/tables/${table}`, { entryBlocked: true });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(401);
+    expect(refused.body.error.code).toBe('reauth_required');
+    expect(await blocked()).toBe(0);
+    // A setting that is not an emergency control: no password.
+    expect((await staff.c.patch(`/api/admin/tables/${table}`, { name: 'it-perm-0 renamed' })).status).toBe(200);
+    // With the password confirmed, the same change goes through, and is undone the same way.
+    await reauth(staff.c);
+    expect((await staff.c.patch(`/api/admin/tables/${table}`, { entryBlocked: true })).status).toBe(200);
+    expect(await blocked()).toBe(1);
+    expect((await staff.c.patch(`/api/admin/tables/${table}`, { entryBlocked: false, name: table })).status).toBe(200);
+    expect(await blocked()).toBe(0);
+  });
 });
 
 describe('role and status changes apply on the next request', () => {

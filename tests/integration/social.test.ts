@@ -9,6 +9,13 @@ beforeAll(async () => {
   expect((await admin.get('/api/admin/auth/me')).status).toBe(200);
 });
 
+/** Blocking entry is an emergency control: the password is confirmed first (re-confirmation is rate limited per account). */
+async function reauth() {
+  const until = (await admin.get('/api/admin/auth/me')).body?.reauthValidUntil;
+  if (until && until - Date.now() > 60_000) return;
+  expect((await admin.post('/api/admin/auth/reauth', { password: PASSWORD })).status).toBe(200);
+}
+
 const counts = async (c: Client) => (await c.get('/api/messages/unread-count')).body as { unread: number; dmUnread: number; friendRequests: number };
 const ids = (list: { id: string }[]) => list.map((x) => x.id);
 type User = Awaited<ReturnType<typeof newUser>>;
@@ -377,6 +384,7 @@ describe('table invites', () => {
     expect((await invite(a, c, 'it-invite-0')).body.error.code).toBe('not_friends');
     expect((await invite(a, b, 'no-such-table')).body.error.code).toBe('table_unavailable');
     expect((await a.client.post(`/api/friends/${b.me.id}/invite`, {})).status).toBe(400);
+    await reauth();
     expect((await admin.patch('/api/admin/tables/it-invite-1', { entryBlocked: true })).status).toBe(200);
     expect((await invite(a, b, 'it-invite-1')).body.error.code).toBe('table_unavailable');
 
@@ -431,6 +439,7 @@ describe('table invites', () => {
     expect((await b.client.req('PUT', `/api/blocks/${a.me.id}`)).status).toBe(200);
     expect((await invite(a, b, 'it-invite-0')).body.error.code).toBe('not_friends');
     expect((await invite(b, a, 'it-invite-0')).body.error.code).toBe('not_friends');
+    await reauth();
     expect((await admin.patch('/api/admin/tables/it-invite-1', { entryBlocked: false })).status).toBe(200);
   });
 });

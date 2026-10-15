@@ -206,3 +206,47 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
     await stopAll();
   }
 });
+
+test('a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent', async ({ browser }) => {
+  const member = await signUp(browser);
+  const op = await signUp(browser);
+  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await page.goto(ADMIN);
+  await page.getByLabel(/이메일|Email/).fill(op.email);
+  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByRole('button', { name: /로그인|Log in/ }).click();
+  await expect(page.getByTestId('dashboard')).toBeVisible();
+  const call = (method: string, path: string, body?: unknown) =>
+    page.evaluate(
+      async ([m, p, b]) => {
+        const r = await fetch(`/api/admin/service/notices${p}`, { method: m, headers: { 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) });
+        return (await r.json()) as { id?: string };
+      },
+      [method, path, body] as const,
+    );
+  const id = (await call('POST', '', { kind: 'general', titleKo: 'E2E 일반 공지', titleEn: 'E2E general notice' })).id!;
+  /** Loads the home page and waits for its notices, so a missing row means hidden, not not-yet-loaded. */
+  const home = async () => {
+    const loaded = member.page.waitForResponse((r) => r.url().endsWith('/api/service/status'));
+    await member.page.goto('/');
+    await loaded;
+  };
+  try {
+    await home();
+    const row = member.page.getByTestId(`notice-${id}`);
+    await expect(row).toContainText('E2E 일반 공지');
+    await row.getByRole('button', { name: '닫기' }).click();
+    await expect(row).toHaveCount(0);
+    await home();
+    await expect(row).toHaveCount(0);
+
+    // Raised to urgent: an urgent notice cannot be dismissed, and the earlier dismissal no longer hides it.
+    await call('PATCH', `/${id}`, { kind: 'urgent' });
+    await home();
+    await expect(row).toContainText('E2E 일반 공지');
+    await expect(row.getByRole('button', { name: '닫기' })).toHaveCount(0);
+  } finally {
+    await call('DELETE', `/${id}`);
+  }
+});

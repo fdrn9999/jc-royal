@@ -38,16 +38,23 @@ export async function d1<T = Record<string, unknown>>(sql: string, state = MAIN_
 /**
  * Holds the local D1's write lock from this process until the returned function is called, so the worker's D1 calls
  * fail meanwhile, reads included (local D1 takes a commit token for every query): a stand-in for D1 being unreachable.
- * Taking the lock waits for a write the worker has under way.
+ * Taking the lock waits for a write the worker has under way. Releasing it with SQL commits that SQL in the same
+ * transaction: a write that landed although the worker's call failed (its reply was lost).
  */
-export function holdD1WriteLock(state = MAIN_STATE): () => void {
+export function holdD1WriteLock(state = MAIN_STATE): (commitSql?: string) => void {
   const dir = resolve(state, 'v3/d1/miniflare-D1DatabaseObject');
   const files = readdirSync(dir).filter((f) => f.endsWith('.sqlite') && f !== 'metadata.sqlite');
   if (files.length !== 1) throw new Error(`expected one local D1 file, found ${files.join(', ') || 'none'}`);
   const db = new DatabaseSync(resolve(dir, files[0]!), { timeout: 10_000 });
   db.exec('BEGIN IMMEDIATE');
-  return () => {
-    db.exec('ROLLBACK');
-    db.close();
+  return (commitSql?: string) => {
+    try {
+      if (commitSql) {
+        db.exec(commitSql);
+        db.exec('COMMIT');
+      } else db.exec('ROLLBACK');
+    } finally {
+      db.close();
+    }
   };
 }

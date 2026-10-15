@@ -47,7 +47,8 @@ export function ServiceNotices({ compact = false, boardLinks = true }: { compact
     });
   }
   for (const n of [...st.notices].sort((a, b) => ORDER[a.kind] - ORDER[b.kind])) {
-    if (n.startsAt > now || (n.endsAt !== null && n.endsAt <= now) || hidden.includes(n.id) || (compact && n.kind === 'general')) continue;
+    // A dismissal holds only while the notice is general: one raised to urgent or maintenance shows again.
+    if (n.startsAt > now || (n.endsAt !== null && n.endsAt <= now) || (n.kind === 'general' && hidden.includes(n.id)) || (compact && n.kind === 'general')) continue;
     rows.push({ id: n.id, tone: TONE[n.kind], title: en ? n.titleEn : n.titleKo, body: en ? n.bodyEn : n.bodyKo, to: boardLinks && n.postId ? `/board/${n.postId}` : undefined, close: n.kind === 'general' });
   }
   if (!rows.length) return null;

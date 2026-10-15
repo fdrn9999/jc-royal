@@ -34,12 +34,18 @@ export const serverNow = () => Date.now() + skew;
 export const when = (at: number, locale: string) =>
   new Date(at).toLocaleString(locale === 'en' ? 'en-US' : 'ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-/** Fetched once per page load (and when the inbox poll reports a change); re-renders every 30 s so notices start and end on time. */
+/**
+ * Fetched once per page load (and when the inbox poll reports a change); re-renders every 30 s so notices start and end
+ * on time. A list the server cut short is fetched again at its `refreshAt`, when a notice left out may come in.
+ */
 export function useService() {
   const [, tick] = useState(0);
   useEffect(() => {
     if (!status) refreshService();
-    const h = setInterval(() => tick((n) => n + 1), 30_000);
+    const h = setInterval(() => {
+      tick((n) => n + 1);
+      if (status?.refreshAt != null && serverNow() >= status.refreshAt) refreshService();
+    }, 30_000);
     return () => clearInterval(h);
   }, []);
   return useSyncExternalStore(
