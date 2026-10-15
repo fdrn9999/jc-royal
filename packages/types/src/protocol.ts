@@ -58,6 +58,8 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
     toCall: z.number().int().nonnegative(),
     kind: z.enum(['check', 'checkFold', 'fold']).nullable(),
   }),
+  /** The seated player's auto-muck setting: a losing showdown hand stays face down where the rules allow it. */
+  z.object({ t: z.literal('muck'), reqId: ReqId, on: z.boolean() }),
   z.object({ t: z.literal('chat'), text: z.string().trim().min(1).max(200), reqId: ReqId.optional() }),
   z.object({ t: z.literal('ping') }),
 ]);

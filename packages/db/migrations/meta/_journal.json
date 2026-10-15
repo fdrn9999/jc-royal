@@ -78,6 +78,13 @@
       "when": 1792013421414,
       "tag": "0010_hand_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792037703418,
+      "tag": "0011_hand_shown",
+      "breakpoints": true
     }
   ]
 }

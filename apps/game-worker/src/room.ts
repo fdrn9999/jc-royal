@@ -94,6 +94,8 @@ interface SeatState {
   preAction?: { handId: string; stage: HandStage; kind: PreActionKind; toCall: number } | null;
   /** Ids of the player's recent pre-action requests: one sent again is answered, not applied again. */
   preReqs?: string[];
+  /** The player's setting: a losing showdown hand stays face down when the rules allow it (see HandEngine.handView). */
+  autoMuck?: boolean;
 }
 
 /** A word for one player about a top-up or rebuy the room carried out on its own. */
@@ -114,6 +116,11 @@ interface RoomState {
   recentReqs: string[];
   /** Last hand whose result was applied to seats and recorded (idempotent finalisation). */
   settledHandId: string | null;
+  /**
+   * Players of the settled hand who had auto-muck on when it settled. Fixed then, with the record, so the result shown
+   * and the hand history agree and a setting changed afterwards does not turn cards over.
+   */
+  muck?: { handId: string; ids: string[] } | null;
   version: number;
   /** Member rooms: since when nobody has been seated (the room closes itself after MEMBER_IDLE_CLOSE_MS). */
   emptySince?: number | null;
@@ -626,6 +633,16 @@ export class TableRoom extends DurableObject<Env> {
       case 'preAction':
         await this.preAction(ws, a.userId, msg);
         return;
+      case 'muck': {
+        // Setting a flag: a copy sent again changes nothing. Only the player's own view shows it.
+        const i = this.seatIndexOf(a.userId);
+        if (i === null) throw new CommandError('forbidden', 'not seated');
+        this.room.seats[i]!.autoMuck = msg.on;
+        await this.save();
+        this.ack(ws, msg.reqId);
+        this.sendView(a.userId);
+        return;
+      }
     }
   }
 
@@ -1089,9 +1106,10 @@ export class TableRoom extends DurableObject<Env> {
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
       this.room.nextHandAt = now + BETWEEN_HANDS_MS;
+      this.room.muck = { handId: h.handId, ids: this.room.seats.filter((s) => s?.autoMuck && stacks.has(s.userId)).map((s) => s!.userId) };
       // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
       const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
-      const entry: UnrecordedHand = { handNumber: this.room.handNumber, record: h.record(now), log: h.persist() };
+      const entry: UnrecordedHand = { handNumber: this.room.handNumber, record: h.record(now, this.muckOf(h)), log: h.persist() };
       await this.save({ [key]: entry });
       this.unrecorded.add(key);
     }
@@ -1403,7 +1421,8 @@ export class TableRoom extends DurableObject<Env> {
     const mySeat = this.seatIndexOf(a.userId);
     const isSeated = mySeat !== null;
     const showHand = isSeated || t.allowSpectators;
-    const info = h && showHand ? h.seatInfo(isSeated ? a.userId : null) : null;
+    const muck = h ? this.muckOf(h) : undefined;
+    const info = h && showHand ? h.seatInfo(isSeated ? a.userId : null, muck) : null;
     const seats: SeatView[] = this.room.seats.map((s, i) => {
       if (!s) return { seatIndex: i, state: 'empty', stack: 0, streetBet: 0, connected: false, hasCards: false };
       const hi = info?.get(i);
@@ -1424,7 +1443,7 @@ export class TableRoom extends DurableObject<Env> {
         holeCards: hi?.holeCards ?? null,
       };
     });
-    const hv = h && showHand ? { ...h.handView(), number: this.room.handNumber } : null;
+    const hv = h && showHand ? { ...h.handView(muck), number: this.room.handNumber } : null;
     const myLegal = h && isSeated && !h.isSettled && h.actorId() === a.userId && !h.isStalled() ? h.legalOptions(a.userId) : [];
     const myPre = isSeated ? this.room.seats[mySeat]!.preAction : null;
     const res = this.room.reservation;
@@ -1474,8 +1493,15 @@ export class TableRoom extends DurableObject<Env> {
         topUpQueued: isSeated && this.room.seats[mySeat]!.topUp?.state === 'queued' ? this.room.seats[mySeat]!.topUp!.amount : null,
         autoRebuy: isSeated ? (this.room.seats[mySeat]!.autoRebuy ?? null) : null,
         preAction: myPre && h && !h.isSettled && myPre.handId === h.handId && myPre.stage === h.stage ? myPre.kind : null,
+        autoMuck: isSeated ? !!this.room.seats[mySeat]!.autoMuck : null,
       },
     };
+  }
+
+  /** Who mucks in `h`: fixed when it settled (nobody's cards are shown before then). */
+  private muckOf(h: HandEngine): ReadonlySet<string> {
+    const m = this.room.muck;
+    return new Set(m && m.handId === h.handId ? m.ids : []);
   }
 }
 

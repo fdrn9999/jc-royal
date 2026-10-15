@@ -102,6 +102,8 @@ export interface HandPlayerRecord {
   rankValue: number | null;
   bestFive: Card[] | null;
   wentToShowdown: boolean;
+  /** The hole cards were face up for the table at showdown (false for folded hands and mucked losing hands). */
+  shown: boolean;
 }
 
 export interface PublicActionRecord {
@@ -590,12 +592,26 @@ export class HandEngine {
     return out;
   }
 
-  /** Players whose cards are face up for everybody (showdown participants). */
+  /**
+   * Players whose cards are face up for everybody: every showdown participant except a loser in `autoMuck`. Hands
+   * that won chips are always shown, and so are all-in hands. When the betting ended because players were all in (at
+   * most one showdown player still had chips), every hand is shown.
+   */
   private revealedHands(autoMuck: ReadonlySet<string>): Set<string> {
     const sd = this.snapshot.hand.showdown;
     if (!sd || sd.evaluatedHands.length < 2) return new Set();
-    const vis = partitionShowdownByVisibility(sd, this.snapshot.hand.payouts, [...autoMuck]);
+    const allIn = this.allInPlayers();
+    const covered = sd.evaluatedHands.filter((h) => !allIn.has(h.playerId)).length;
+    const muck = covered >= 2 ? [...autoMuck].filter((id) => !allIn.has(id)) : [];
+    const vis = partitionShowdownByVisibility(sd, this.snapshot.hand.payouts, muck);
     return new Set(vis.revealed.map((h) => h.playerId));
+  }
+
+  /** Players who put their whole starting stack in during the hand. */
+  private allInPlayers(): Set<string> {
+    const put = new Map<string, number>();
+    for (const round of this.snapshot.hand.bettingRounds) for (const t of round.turns) put.set(t.actor, (put.get(t.actor) ?? 0) + t.contribution);
+    return new Set(this.meta.seats.filter((s) => s.stack > 0 && (put.get(s.playerId) ?? 0) >= s.stack).map((s) => s.playerId));
   }
 
   handView(autoMuck: ReadonlySet<string> = new Set()): HandView {
@@ -641,10 +657,11 @@ export class HandEngine {
     };
   }
 
-  /** Final per-hand record for persistence/statistics. Only valid once settled. */
-  record(now: number): HandRecord {
+  /** Final per-hand record for persistence/statistics. Only valid once settled. `autoMuck` as for `handView`. */
+  record(now: number, autoMuck: ReadonlySet<string> = new Set()): HandRecord {
     if (!this.isSettled) throw new Error('hand not settled');
     const s = this.snapshot;
+    const revealed = this.revealedHands(autoMuck);
     const payouts = new Map<string, number>();
     for (const e of s.hand.payouts?.entries ?? []) payouts.set(e.playerId, (payouts.get(e.playerId) ?? 0) + e.amount);
     const sd = new Map((s.hand.showdown?.evaluatedHands ?? []).map((h) => [h.playerId, h]));
@@ -664,6 +681,7 @@ export class HandEngine {
         rankValue: ev && showdownCount > 1 ? ev.rankValue : null,
         bestFive: ev && showdownCount > 1 ? ([...ev.bestFive] as Card[]) : null,
         wentToShowdown: !!ev && showdownCount > 1,
+        shown: revealed.has(seat.playerId),
       };
     });
     const actions: PublicActionRecord[] = [];

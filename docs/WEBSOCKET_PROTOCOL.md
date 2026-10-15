@@ -28,6 +28,7 @@
 | `waitlist` | `join, reqId?` | 대기열 등록·취소. `reqId` 재전송은 멱등 처리 |
 | `action` | `intentId, handId, seq, type, amount?` | `type`: fold/check/call/bet/raise/allin. bet·raise의 `amount`는 이번 스트리트 총액("to"). `seq`는 현재 `hand.seq`와 같아야 함. 적용되면 `intentId`로 `ack` |
 | `preAction` | `reqId, handId, stage, toCall, kind` | 사전 액션: 다른 사람 차례 동안 이번 스트리트의 내 다음 액션을 예약. `kind`: `check`·`checkFold`·`fold`, `null`이면 취소. `handId`·`stage`·`toCall`은 고를 때 본 화면 값. 아래 '사전 액션' 참고 |
+| `muck` | `reqId, on` | 패배한 쇼다운 핸드 자동 머크 켜기·끄기. 착석한 플레이어만(아니면 `forbidden`). 같은 값을 다시 보내도 결과가 같음. 아래 '쇼다운 머크' 참고 |
 | `chat` | `text(1-200), reqId?` | 채팅. 같은 `reqId`로 다시 보내면 한 번만 게시 |
 | `ping` | — | → `pong`. 정확히 `{"t":"ping"}`이면 런타임이 룸을 깨우지 않고 답함 |
 
@@ -49,9 +50,9 @@
 
 - **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정, 회원 방이면 `roomType:'member'`와 방장 `hostId`), `status`(waiting/playing/closing/closed).
 - **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`.
-  - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다.
+  - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 자동 머크로 공개되지 않은 패는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
-- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null).
+- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다.
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
 - **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`.
 
@@ -79,6 +80,18 @@
 - **취소**: 예약은 그 스트리트에서만 유효합니다. 스트리트나 핸드가 바뀌면 조용히 지웁니다. 고른 뒤 베팅이 들어와 `check`가 맞지 않게 되면 지우고 `preaction_cancelled`를 보냅니다(`checkFold`·`fold`는 더 큰 베팅에도 그대로 둠). 폴드·올인으로 핸드에서 빠져도 지웁니다.
 - 같은 `reqId`를 다시 받으면(좌석당 최근 16개) 다시 적용하지 않고 `ack`만 보냅니다. 나중 선택이 늦게 온 이전 사본으로 되돌아가지 않습니다.
 - **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `preAction`을 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보내므로, 새 웹이 먼저 나가면 사전 액션을 누를 때 오류가 뜨고 아무것도 예약되지 않습니다(자동 액션은 일어나지 않음).
+
+## 쇼다운 머크 (`muck`)
+
+- **공개 규칙** (`packages/poker-engine/src/hand.ts` `revealedHands`): 폴드한 패와 쇼다운 없이 이긴 패는 누구에게도 공개하지 않습니다. 패를 비교한 쇼다운(2명 이상)에서는
+  - 팟을 하나라도 받은 패(나눈 팟 포함)와 핸드 중 시작 스택 전부를 건(올인한) 패는 항상 공개합니다.
+  - 칩이 남은 쇼다운 참가자가 둘 미만이면(올인으로 베팅이 끝남) 설정과 관계없이 모두 공개합니다.
+  - 그 밖에 진 패는 주인이 자동 머크를 켰으면 다른 사람에게 공개하지 않고, 아니면 공개합니다.
+  - 주인은 언제나 자기 패를 봅니다.
+- **설정 시점**: 룸은 정산 순간의 좌석 설정으로 그 핸드의 머크 대상을 정해 상태에 저장합니다. 정산 뒤에 설정을 바꿔도 이미 끝난 핸드의 공개 여부는 바뀌지 않습니다.
+- **기록**: 같은 결정이 `hand_players.shown`(1 공개, 0 머크)에 들어가고, `/api/me/hands/:id`와 커뮤니티 핸드 리뷰는 본인이 아닌 머크된 패의 `holeCards`·`rankClass`를 null로 줍니다. 이 열이 NULL인 이전 기록은 `went_to_showdown`을 따릅니다. 관리자 감사 화면(종료 핸드 전체)은 그대로 모든 카드를 봅니다.
+- **웹 클라이언트**: 설정은 기기에 저장되고(`jc.prefs`), 착석해 있고 연결이 열려 있을 때 룸의 `you.autoMuck`이 다르면 한 번 보냅니다. 연결이 끊긴 동안 보낸 명령은 남지 않으므로 재연결 뒤에 다시 맞춥니다. 머크된 본인의 패는 결과의 `showdown`에 없어 자리 아래에 족보 이름이 나오지 않습니다(카드는 보임).
+- **배포 순서**: 마이그레이션 `0011_hand_shown` → game-worker → api → web. 열이 없으면 새 game-worker의 핸드 기록 INSERT가 실패합니다. 이전 룸은 `autoMuck`을 보내지 않으므로 새 웹은 아무것도 보내지 않습니다.
 
 ## 웹 클라이언트의 전달 규칙 (`apps/web/src/game/link.ts`, `useTableSocket.ts`)
 

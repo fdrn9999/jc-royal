@@ -4,6 +4,7 @@ import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
+import { shownAtShowdown } from '../lib/community';
 import { fail } from '../lib/http';
 
 function pageParams(q: (k: string) => string | undefined) {
@@ -164,7 +165,7 @@ export const meRoutes = new Hono<AppEnv>()
   })
   /**
    * Replay of a finished hand the user played in. Hole cards of other players
-   * are only included when they were shown down.
+   * are only included when they were face up at showdown (not folded, not mucked).
    */
   .get('/hands/:id', async (c) => {
     const handId = c.req.param('id');
@@ -187,16 +188,19 @@ export const meRoutes = new Hono<AppEnv>()
       potTotal: hand.potTotal,
       endedAt: hand.endedAt,
       actions: log.actions,
-      players: players.map(({ hp, nickname }) => ({
-        userId: hp.userId,
-        seatIndex: hp.seatIndex,
-        nickname,
-        isYou: hp.userId === uid,
-        holeCards: hp.userId === uid || hp.wentToShowdown ? (JSON.parse(hp.holeCards) as string[]) : null,
-        stackStart: hp.stackStart,
-        net: hp.net,
-        won: hp.won,
-        rankClass: hp.wentToShowdown ? hp.rankClass : null,
-      })),
+      players: players.map(({ hp, nickname }) => {
+        const visible = hp.userId === uid || shownAtShowdown(hp);
+        return {
+          userId: hp.userId,
+          seatIndex: hp.seatIndex,
+          nickname,
+          isYou: hp.userId === uid,
+          holeCards: visible ? (JSON.parse(hp.holeCards) as string[]) : null,
+          stackStart: hp.stackStart,
+          net: hp.net,
+          won: hp.won,
+          rankClass: visible && hp.wentToShowdown ? hp.rankClass : null,
+        };
+      }),
     });
   });

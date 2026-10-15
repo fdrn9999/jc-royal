@@ -1,7 +1,7 @@
 import { THEMES, type ThemeId } from '@jc/ui';
 import { useSyncExternalStore } from 'react';
 
-/** Per-device UI preferences (cosmetic only; never sent to the game server as authority). */
+/** Per-device UI preferences (cosmetic, except autoMuck, which the table is asked to apply to the player's seat). */
 export interface Prefs {
   theme: ThemeId;
   fourColor: boolean;
@@ -9,10 +9,12 @@ export interface Prefs {
   confirmRisky: boolean;
   /** Beginner aids at the table: current hand, action help, street notes. Independent of confirmRisky. */
   beginner: boolean;
+  /** Keep a losing showdown hand face down where the rules allow it; sent to the room for the seat (`muck`). */
+  autoMuck: boolean;
 }
 
 const KEY = 'jc.prefs';
-const DEFAULTS: Prefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false };
+const DEFAULTS: Prefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false };
 let current: Prefs = load();
 const listeners = new Set<() => void>();
 

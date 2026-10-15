@@ -188,8 +188,8 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
     ...rec.players.map((p) =>
       d1
         .prepare(
-          `INSERT OR IGNORE INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, rank_class, rank_value, best_five, went_to_showdown, ended_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
+          `INSERT OR IGNORE INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, rank_class, rank_value, best_five, went_to_showdown, ended_at, shown)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
         )
         .bind(
           rec.handId,
@@ -205,6 +205,8 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
           p.bestFive ? JSON.stringify(p.bestFive) : null,
           p.wentToShowdown ? 1 : 0,
           rec.endedAt,
+          // A record kept from before muck existed has no flag: NULL reads as went_to_showdown, which it was.
+          p.shown === undefined ? null : p.shown ? 1 : 0,
         ),
     ),
   ];

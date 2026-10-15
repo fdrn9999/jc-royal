@@ -164,6 +164,14 @@ export function TablePage() {
     setParams(params, { replace: true });
   }, [s, params, setParams, sock]);
 
+  // Auto-muck is a device setting the room applies to my seat: tell it when the two differ. A room that predates muck
+  // reports no setting and is not asked. Re-run on reconnect, since a command sent while offline is not kept.
+  const roomMuck = s?.you.seatIndex != null ? s.you.autoMuck : undefined;
+  const { send, status } = sock;
+  useEffect(() => {
+    if (status === 'open' && typeof roomMuck === 'boolean' && roomMuck !== prefs.autoMuck) send({ t: 'muck', on: prefs.autoMuck });
+  }, [roomMuck, prefs.autoMuck, send, status]);
+
   // The lobby lists tables I opened under "recent".
   const opened = !!s;
   const myId = me?.id;

@@ -119,6 +119,8 @@ export interface TableView {
     autoRebuy: { amount: number; cap: number; spent: number } | null;
     /** The viewer's own pre-action for this street (nobody else is ever shown it). Absent from older rooms. */
     preAction?: PreActionKind | null;
+    /** The seated viewer's auto-muck setting as the room holds it; null when not seated. Absent from older rooms. */
+    autoMuck?: boolean | null;
   };
 }
 

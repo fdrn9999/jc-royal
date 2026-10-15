@@ -3,9 +3,17 @@ import type { HandReviewDto, MessageCategory } from '@jc/types';
 import { and, eq, inArray } from 'drizzle-orm';
 
 /**
+ * Whether a player's hole cards were face up for the table: shown down, not mucked. Rows recorded before muck existed
+ * have no flag and were all shown down.
+ */
+export function shownAtShowdown(hp: { wentToShowdown: boolean; shown: boolean | null }): boolean {
+  return hp.shown ?? hp.wentToShowdown;
+}
+
+/**
  * Finished hands as seen from `perspectiveUserId`: board and actions are public;
- * hole cards are included only for that user and for players who went to
- * showdown. Hands not played by that user are not returned.
+ * hole cards are included only for that user and for players whose cards were
+ * face up at showdown (see shownAtShowdown). Hands not played by that user are not returned.
  */
 export async function handReviews(db: Db, handIds: string[], perspectiveUserId: string): Promise<HandReviewDto[]> {
   if (handIds.length === 0) return [];
@@ -46,7 +54,7 @@ export async function handReviews(db: Db, handIds: string[], perspectiveUserId: 
           .filter((p) => p.hp.handId === h.id)
           .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
           .map(({ hp, nickname }) => {
-            const visible = hp.userId === perspectiveUserId || hp.wentToShowdown;
+            const visible = hp.userId === perspectiveUserId || shownAtShowdown(hp);
             return {
               seatIndex: hp.seatIndex,
               nickname,
@@ -55,7 +63,7 @@ export async function handReviews(db: Db, handIds: string[], perspectiveUserId: 
               stackStart: hp.stackStart,
               net: hp.net,
               won: hp.won,
-              rankClass: hp.wentToShowdown ? hp.rankClass : null,
+              rankClass: visible && hp.wentToShowdown ? hp.rankClass : null,
             };
           }),
       };

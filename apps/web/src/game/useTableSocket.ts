@@ -36,7 +36,9 @@ export interface TableSocketApi {
     reqId?: string,
   ) => Promise<void>;
   /** Like request, without a result: a refusal shows in `lastError`. */
-  send: (msg: { t: 'sitOut' } | { t: 'sitIn' } | { t: 'waitlist'; join: boolean } | { t: 'chat'; text: string } | { t: 'sync' } | { t: 'cancelTopUp' }) => void;
+  send: (
+    msg: { t: 'sitOut' } | { t: 'sitIn' } | { t: 'waitlist'; join: boolean } | { t: 'chat'; text: string } | { t: 'sync' } | { t: 'cancelTopUp' } | { t: 'muck'; on: boolean },
+  ) => void;
   act: (type: ActionType, amount?: number) => boolean;
   /**
    * Chooses (or with null clears) a pre-action for this street, against the hand, street and amount to call shown now.

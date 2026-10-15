@@ -205,6 +205,11 @@ export const handPlayers = sqliteTable(
     sawFlop: integer('saw_flop', { mode: 'boolean' }),
     /** Chips won from the pot, without the player's own uncalled chips handed back. */
     potWon: integer('pot_won'),
+    /**
+     * The hole cards were face up for the table at showdown; false for a mucked losing hand. NULL on rows recorded
+     * before the column existed, which read as `went_to_showdown` (nobody could muck then).
+     */
+    shown: integer('shown', { mode: 'boolean' }),
   },
   (t) => [
     primaryKey({ columns: [t.handId, t.userId] }),
