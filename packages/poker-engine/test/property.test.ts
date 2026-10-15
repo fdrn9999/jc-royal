@@ -82,6 +82,15 @@ async function playRandomHand(t: TableCase, avoidFold: boolean) {
         if ((h.snapshot.hand.payouts?.entries ?? []).some((e) => e.amount > 0 && e.potIds.some((id) => id.includes('side')))) coverage.sidePots++;
         expect(rec.players.reduce((a, p) => a + p.net, 0)).toBe(0);
         expect(rec.players.reduce((a, p) => a + p.won, 0)).toBe(rec.potTotal);
+        // The replay's pot breakdown always exists and pays out exactly what each player won.
+        expect(rec.pots).not.toBeNull();
+        const fromPots = new Map<number, number>();
+        for (const pot of rec.pots!) {
+          expect(pot.winners.reduce((a, w) => a + w.amount, 0)).toBe(pot.amount);
+          for (const w of pot.winners) fromPots.set(w.seatIndex, (fromPots.get(w.seatIndex) ?? 0) + w.amount);
+        }
+        for (const p of rec.players) expect(fromPots.get(p.seatIndex) ?? 0).toBe(p.won);
+        expect(rec.buttonSeat).toBe(t.button);
         const final = [...h.finalStacks().values()].reduce((a, b) => a + b, 0);
         expect(final).toBe(total);
 }

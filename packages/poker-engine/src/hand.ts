@@ -19,7 +19,9 @@ import {
   dealHoleCards,
   deriveRoundComputation,
   partitionShowdownByVisibility,
+  rebuildPotLedger,
   selectDecisionContext,
+  settlePots,
   toSnapshotEnvelope,
   type PlayerAction,
   type PlayerOption,
@@ -116,6 +118,17 @@ export interface PublicActionRecord {
   at: number;
 }
 
+/** One pot as it was paid out. Public: the table saw every pot, who could win it and who was paid. */
+export interface HandPotRecord {
+  amount: number;
+  /** Seats that could win it: contributors who had not folded. */
+  eligibleSeats: number[];
+  /** What each seat took from this pot. */
+  winners: { seatIndex: number; amount: number }[];
+  /** Only one player put chips in: an uncalled bet handed back. */
+  uncalled: boolean;
+}
+
 export interface HandRecord {
   handId: string;
   startedAt: number;
@@ -123,6 +136,9 @@ export interface HandRecord {
   board: Card[];
   potTotal: number;
   engineVersion: string;
+  buttonSeat: number;
+  /** Main pot first, then side pots. Null if the breakdown does not add up to the payouts (never expected). */
+  pots: HandPotRecord[] | null;
   players: HandPlayerRecord[];
   actions: PublicActionRecord[];
 }
@@ -614,6 +630,49 @@ export class HandEngine {
     return new Set(this.meta.seats.filter((s) => s.stack > 0 && (put.get(s.playerId) ?? 0) >= s.stack).map((s) => s.playerId));
   }
 
+  /**
+   * The settled pots one by one. The engine empties its pot ledger when it pays out and only keeps each player's total,
+   * so the ledger is rebuilt from the hand's contributions with the engine's own rebuildPotLedger and each pot is paid
+   * with its settlePots (one pot at a time, same showdown, same odd-chip order). Adjacent pots with the same contenders
+   * are shown as one. Returns null unless the per-pot amounts add up to exactly what each player was paid.
+   */
+  private potBreakdown(payouts: ReadonlyMap<string, number>): HandPotRecord[] | null {
+    const s = this.snapshot;
+    const contributions = new Map<string, number>();
+    for (const round of s.hand.bettingRounds) for (const t of round.turns) contributions.set(t.actor, (contributions.get(t.actor) ?? 0) + t.contribution);
+    const ledger = rebuildPotLedger({ contributions, foldedPlayers: this.foldedSet(), allInPlayers: this.allInPlayers() });
+    const sd = s.hand.showdown;
+    const paid = [...payouts.entries()].filter(([, v]) => v > 0);
+    const seatIdx = (id: string) => this.seatOf(id) ?? -1;
+    const out: HandPotRecord[] = [];
+    const total = new Map<string, number>();
+    for (const bucket of [ledger.main, ...ledger.sides]) {
+      if (bucket.amount <= 0) continue;
+      let entries: { playerId: string; amount: number }[];
+      if (sd && sd.evaluatedHands.length > 1) entries = [...settlePots({ ...s, pots: { main: bucket, sides: [], rake: 0 } }, sd).entries];
+      else if (paid.length === 1) entries = [{ playerId: paid[0]![0], amount: bucket.amount }];
+      else return null;
+      for (const e of entries) if (e.amount > 0) total.set(e.playerId, (total.get(e.playerId) ?? 0) + e.amount);
+      const pot: HandPotRecord = {
+        amount: bucket.amount,
+        eligibleSeats: bucket.eligiblePlayers.map(seatIdx).sort((a, b) => a - b),
+        winners: entries.filter((e) => e.amount > 0).map((e) => ({ seatIndex: seatIdx(e.playerId), amount: e.amount })),
+        uncalled: Object.values(bucket.contributions).filter((v) => v > 0).length === 1,
+      };
+      const prev = out.at(-1);
+      if (prev && !prev.uncalled && !pot.uncalled && prev.eligibleSeats.join() === pot.eligibleSeats.join()) {
+        prev.amount += pot.amount;
+        for (const w of pot.winners) {
+          const same = prev.winners.find((x) => x.seatIndex === w.seatIndex);
+          if (same) same.amount += w.amount;
+          else prev.winners.push({ ...w });
+        }
+      } else out.push(pot);
+    }
+    const matches = total.size === paid.length && paid.every(([id, v]) => total.get(id) === v);
+    return matches ? out : null;
+  }
+
   handView(autoMuck: ReadonlySet<string> = new Set()): HandView {
     const s = this.snapshot;
     const seatIdx = (id: string) => this.seatOf(id);
@@ -701,6 +760,8 @@ export class HandEngine {
       board: boardOf(s),
       potTotal: [...payouts.values()].reduce((a, b) => a + b, 0),
       engineVersion: ENGINE_VERSION,
+      buttonSeat: this.meta.buttonSeat,
+      pots: this.potBreakdown(payouts),
       players,
       actions,
     };

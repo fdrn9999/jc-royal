@@ -1,14 +1,17 @@
 import { handLabelKey, type Card, type HandReviewDto } from '@jc/types';
-import { formatChips, formatDate, PlayingCard } from '@jc/ui';
+import { Button, formatChips, formatDate, PlayingCard } from '@jc/ui';
+import { useState } from 'react';
+import { HandReplay } from '../game/HandReplay';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
 const STAGES = ['preflop', 'flop', 'turn', 'river'] as const;
 /** Board cards revealed on each street. */
 const STREET_CARDS: Record<string, [number, number]> = { preflop: [0, 0], flop: [0, 3], turn: [3, 4], river: [4, 5] };
 
-/** Read-only replay card for a finished hand (board, players, actions by street). */
+/** Read-only review card for a finished hand (board, players, actions by street), with a step-by-step replay. */
 export function HandReview({ hand }: { hand: HandReviewDto }) {
   const { t, locale } = useI18n();
+  const [replaying, setReplaying] = useState(false);
   const name = (seat: number) => hand.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const act = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   return (
@@ -22,6 +25,14 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
           {t('table.pot')} {formatChips(hand.potTotal)} · {formatDate(hand.endedAt, locale)}
         </span>
       </header>
+      <Button variant={replaying ? 'ghost' : 'outline'} size="sm" className="mb-3" onClick={() => setReplaying(!replaying)} aria-expanded={replaying} data-testid="replay-toggle">
+        {replaying ? t('replay.close') : `▶ ${t('replay.open')}`}
+      </Button>
+      {replaying && (
+        <div className="mb-3">
+          <HandReplay hand={hand} heroSeat={hand.players.find((p) => p.isAuthor)?.seatIndex ?? null} />
+        </div>
+      )}
       <div className="mb-3 flex flex-wrap gap-1">
         {hand.board.length ? hand.board.map((c) => <PlayingCard key={c} card={c as Card} size="2.2rem" />) : <span className="text-xs text-ink-400">—</span>}
       </div>

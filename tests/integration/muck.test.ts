@@ -1,4 +1,4 @@
-import type { ServerMessage, TableView } from '@jc/types';
+import type { HandDetailDto, HandPotDto, ServerMessage, TableView } from '@jc/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newUser } from '../support/client';
 import { d1 } from '../support/d1';
@@ -43,10 +43,19 @@ const checkDown = (_: Player, s: TableView) => (s.you.legal.some((o) => o.type =
 async function recorded(p: Player, handId: string) {
   for (let i = 0; i < 50; i++) {
     const r = await p.client.get(`/api/me/hands/${handId}`);
-    if (r.status === 200) return r.body as { players: { userId: string; isYou: boolean; holeCards: string[] | null; rankClass: string | null }[] };
+    if (r.status === 200) return r.body as HandDetailDto;
     await new Promise((res) => setTimeout(res, 200));
   }
   throw new Error(`hand ${handId} was not recorded`);
+}
+
+/** Every pot is paid out in full, and each player's pot winnings add up to what they won. */
+function paidOut(h: HandDetailDto) {
+  const pots = h.pots as HandPotDto[];
+  expect(pots.length).toBeGreaterThan(0);
+  expect(pots.reduce((x, p) => x + p.amount, 0)).toBe(h.potTotal);
+  for (const p of pots) expect(p.winners.reduce((x, w) => x + w.amount, 0)).toBe(p.amount);
+  for (const pl of h.players) expect(pots.flatMap((p) => p.winners).filter((w) => w.seatIndex === pl.seatIndex).reduce((x, w) => x + w.amount, 0)).toBe(pl.won);
 }
 
 const muckOn = async (p: Player, on = true) => {
@@ -118,6 +127,20 @@ describe('showdown muck', () => {
     expect(mine.holeCards).toHaveLength(2);
     expect(mine.rankClass).not.toBeNull();
     expect(forLoser.players.find((p) => p.userId === winner.me.id)!.holeCards).toHaveLength(2);
+    // The replay reads: the button, the table size and each pot with who could win it and who did. Best five only
+    // for the hands the viewer may see.
+    for (const h of [forWinner, forLoser]) {
+      expect(h).toMatchObject({ maxSeats: 2, smallBlind: 5, bigBlind: 10 });
+      expect([ws, ls]).toContain(h.buttonSeat);
+      expect(h.actions.slice(0, 2).map((x) => x.type)).toEqual(['post-sb', 'post-bb']);
+      paidOut(h);
+      expect(h.pots!.filter((p) => !p.uncalled).flatMap((p) => p.winners.map((w) => w.seatIndex))).toEqual([ws]);
+    }
+    expect(forWinner.pots).toEqual(forLoser.pots);
+    expect(forWinner.players.find((p) => p.isYou)!.bestFive).toHaveLength(5);
+    expect(lw.bestFive).toBeNull();
+    expect(mine.bestFive).toHaveLength(5);
+    expect(forLoser.players.find((p) => p.userId === winner.me.id)!.bestFive).toHaveLength(5);
     const rows = await d1<{ user_id: string; shown: number | null; went_to_showdown: number }>(
       `SELECT user_id, shown, went_to_showdown FROM hand_players WHERE hand_id = '${handId}'`,
     );
@@ -131,7 +154,9 @@ describe('showdown muck', () => {
     const lr = review.players.find((p: { isAuthor: boolean }) => !p.isAuthor);
     expect(lr.holeCards).toBeNull();
     expect(lr.rankClass).toBeNull();
+    expect(lr.bestFive).toBeNull();
     expect(JSON.stringify(review)).not.toContain(JSON.stringify(mine.holeCards));
+    expect(review).toMatchObject({ maxSeats: 2, buttonSeat: forWinner.buttonSeat, pots: forWinner.pots, actions: forWinner.actions });
 
     // Rows recorded before muck existed have no flag and read as shown down.
     await d1(`UPDATE hand_players SET shown = NULL WHERE hand_id = '${handId}'`);
@@ -147,14 +172,23 @@ describe('showdown muck', () => {
     for (const p of [a, b]) await p.ws.waitState(live, 20_000, 'hand start');
     // Taken now: a player who busts stands up once the hand is settled.
     const seats = [seatOf(a), seatOf(b)].sort();
-    // The short stack moves in; the covering stack calls (or checks behind once called).
-    const [va] = await playOut([a, b], (p, s) => {
+    const [sa, sb] = [seatOf(a), seatOf(b)];
+    // Both move in; whoever is second only calls if it cannot shove (the covering stack's extra comes back).
+    const [va] = await playOut([a, b], (_, s) => {
       const types = s.you.legal.map((o) => o.type);
-      if (p === a && types.includes('allin')) return 'allin';
+      if (types.includes('allin')) return 'allin';
       return types.includes('call') ? 'call' : 'check';
     });
     const res = va!.hand!.result!;
     expect(res.showdown.map((x) => x.seatIndex).sort()).toEqual(seats);
+    // The replay's pots: 300 each contested by both, and the covering stack's uncalled 700 (if it got that far)
+    // handed back to it, not won.
+    const h = await recorded(a, va!.hand!.id);
+    paidOut(h);
+    expect(h.pots!.filter((p) => !p.uncalled).map((p) => [p.amount, p.eligibleSeats])).toEqual([[600, seats]]);
+    for (const p of h.pots!.filter((x) => x.uncalled)) expect(p).toEqual({ amount: 700, eligibleSeats: [sb], winners: [{ seatIndex: sb, amount: 700 }], uncalled: true });
+    expect(h.players.find((p) => p.seatIndex === sa)!.bestFive).toHaveLength(5);
+    expect(h.players.find((p) => p.seatIndex === sb)!.bestFive).toHaveLength(5);
     const rows = await (async () => {
       for (let i = 0; i < 50; i++) {
         const r = await d1<{ user_id: string; shown: number | null }>(`SELECT user_id, shown FROM hand_players WHERE hand_id = '${va!.hand!.id}'`);

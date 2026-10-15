@@ -1,5 +1,5 @@
 import { schema, type Db } from '@jc/db';
-import type { HandReviewDto, MessageCategory } from '@jc/types';
+import type { HandPotDto, HandReplayFields, HandReplayPlayer, HandReviewDto, MessageCategory } from '@jc/types';
 import { and, eq, inArray } from 'drizzle-orm';
 
 /**
@@ -8,6 +8,38 @@ import { and, eq, inArray } from 'drizzle-orm';
  */
 export function shownAtShowdown(hp: { wentToShowdown: boolean; shown: boolean | null }): boolean {
   return hp.shown ?? hp.wentToShowdown;
+}
+
+/**
+ * The public part of a stored hand log: actions (without player ids or times), button seat and pot payouts. Hands
+ * recorded before the button and pots were stored have null for them. The engine log is never read here.
+ */
+export function replayLog(eventLog: string): Pick<HandReplayFields, 'actions' | 'buttonSeat' | 'pots'> {
+  const log = JSON.parse(eventLog) as { actions: HandReplayFields['actions']; button?: unknown; pots?: unknown };
+  return {
+    actions: log.actions.map((a) => ({ seatIndex: a.seatIndex, stage: a.stage, type: a.type, amount: a.amount })),
+    buttonSeat: typeof log.button === 'number' ? log.button : null,
+    pots: Array.isArray(log.pots) ? (log.pots as HandPotDto[]) : null,
+  };
+}
+
+/**
+ * A player of a finished hand as `viewerId` may see it: hole cards, rank and best five only for the viewer and for
+ * hands that were face up at showdown (see shownAtShowdown).
+ */
+export function replayPlayer(hp: typeof schema.handPlayers.$inferSelect, nickname: string, viewerId: string): HandReplayPlayer {
+  const visible = hp.userId === viewerId || shownAtShowdown(hp);
+  const ranked = visible && hp.wentToShowdown;
+  return {
+    seatIndex: hp.seatIndex,
+    nickname,
+    holeCards: visible ? (JSON.parse(hp.holeCards) as string[]) : null,
+    stackStart: hp.stackStart,
+    net: hp.net,
+    won: hp.won,
+    rankClass: ranked ? hp.rankClass : null,
+    bestFive: ranked && hp.bestFive ? (JSON.parse(hp.bestFive) as string[]) : null,
+  };
 }
 
 /**
@@ -25,7 +57,7 @@ export async function handReviews(db: Db, handIds: string[], perspectiveUserId: 
   const ids = handIds.filter((id) => allowed.has(id));
   if (ids.length === 0) return [];
   const hands = await db
-    .select({ h: schema.hands, t: { name: schema.tables.name, sb: schema.tables.smallBlind, bb: schema.tables.bigBlind } })
+    .select({ h: schema.hands, t: { name: schema.tables.name, sb: schema.tables.smallBlind, bb: schema.tables.bigBlind, maxSeats: schema.tables.maxSeats } })
     .from(schema.hands)
     .innerJoin(schema.tables, eq(schema.tables.id, schema.hands.tableId))
     .where(inArray(schema.hands.id, ids));
@@ -38,36 +70,22 @@ export async function handReviews(db: Db, handIds: string[], perspectiveUserId: 
   return ids
     .map((id) => byId.get(id))
     .filter((x): x is NonNullable<typeof x> => !!x)
-    .map(({ h, t }) => {
-      const log = JSON.parse(h.eventLog) as { actions: HandReviewDto['actions'] };
-      return {
-        id: h.id,
-        tableName: t.name,
-        handNumber: h.handNumber,
-        endedAt: h.endedAt,
-        board: JSON.parse(h.board) as string[],
-        potTotal: h.potTotal,
-        smallBlind: t.sb,
-        bigBlind: t.bb,
-        actions: log.actions.map((a) => ({ seatIndex: a.seatIndex, stage: a.stage, type: a.type, amount: a.amount })),
-        players: players
-          .filter((p) => p.hp.handId === h.id)
-          .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
-          .map(({ hp, nickname }) => {
-            const visible = hp.userId === perspectiveUserId || shownAtShowdown(hp);
-            return {
-              seatIndex: hp.seatIndex,
-              nickname,
-              isAuthor: hp.userId === perspectiveUserId,
-              holeCards: visible ? (JSON.parse(hp.holeCards) as string[]) : null,
-              stackStart: hp.stackStart,
-              net: hp.net,
-              won: hp.won,
-              rankClass: visible && hp.wentToShowdown ? hp.rankClass : null,
-            };
-          }),
-      };
-    });
+    .map(({ h, t }) => ({
+      id: h.id,
+      tableName: t.name,
+      handNumber: h.handNumber,
+      endedAt: h.endedAt,
+      board: JSON.parse(h.board) as string[],
+      potTotal: h.potTotal,
+      smallBlind: t.sb,
+      bigBlind: t.bb,
+      maxSeats: t.maxSeats,
+      ...replayLog(h.eventLog),
+      players: players
+        .filter((p) => p.hp.handId === h.id)
+        .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
+        .map(({ hp, nickname }) => ({ ...replayPlayer(hp, nickname, perspectiveUserId), isAuthor: hp.userId === perspectiveUserId })),
+    }));
 }
 
 /** Writes a one-way message (automatic system notices or admin sends). */

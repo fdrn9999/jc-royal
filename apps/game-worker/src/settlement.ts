@@ -168,12 +168,13 @@ async function gzipBase64(text: string): Promise<string> {
 }
 
 /**
- * Persists a finished hand. The public action list is stored in clear; the full
- * engine log (hole cards, deck order) is gzip-compressed for audits of finished
- * hands only.
+ * Persists a finished hand. The public action list, button seat and pot payouts
+ * (for replays) are stored in clear; the full engine log (hole cards, deck order)
+ * is gzip-compressed for audits of finished hands only. Records queued before the
+ * button and pots existed have neither.
  */
 export async function recordHand(d1: D1Database, tableId: string, handNumber: number, rec: HandRecord, engineLog: unknown): Promise<void> {
-  const eventLog = JSON.stringify({ actions: rec.actions, engine: await gzipBase64(JSON.stringify(engineLog)) });
+  const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
   const stmts: D1PreparedStatement[] = [
     // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
     d1

@@ -42,27 +42,59 @@ export interface PostListItemDto {
   updatedAt: number;
 }
 
-/** A finished hand as shown in a hand review: board, actions and only the cards the author may show. */
-export interface HandReviewDto {
-  id: string;
-  tableName: string;
-  handNumber: number;
-  endedAt: number;
+/** One pot of a finished hand as it was paid out (main pot first). */
+export interface HandPotDto {
+  amount: number;
+  /** Seats that could win it (contributors who had not folded). */
+  eligibleSeats: number[];
+  winners: { seatIndex: number; amount: number }[];
+  /** Only one player put chips in: an uncalled bet handed back. */
+  uncalled: boolean;
+}
+
+/** A player of a finished hand. Hole cards, rank and best five only for the viewer and hands shown at showdown. */
+export interface HandReplayPlayer {
+  seatIndex: number;
+  nickname: string;
+  holeCards: string[] | null;
+  stackStart: number;
+  net: number;
+  won: number;
+  rankClass: string | null;
+  bestFive: string[] | null;
+}
+
+/** What the step-by-step replay of a finished hand reads. Built only from the stored record of the hand. */
+export interface HandReplayFields {
   board: string[];
   potTotal: number;
   smallBlind: number | null;
   bigBlind: number | null;
-  players: {
-    seatIndex: number;
-    nickname: string;
-    isAuthor: boolean;
-    holeCards: string[] | null;
-    stackStart: number;
-    net: number;
-    won: number;
-    rankClass: string | null;
-  }[];
+  maxSeats: number;
+  /** Null for hands recorded before the button seat was stored. */
+  buttonSeat: number | null;
+  /** Null for hands recorded before pot payouts were stored. */
+  pots: HandPotDto[] | null;
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
+}
+
+/** A finished hand as shown in a hand review: board, actions and only the cards the author may show. */
+export interface HandReviewDto extends HandReplayFields {
+  id: string;
+  tableName: string;
+  handNumber: number;
+  endedAt: number;
+  players: (HandReplayPlayer & { isAuthor: boolean })[];
+}
+
+/** GET /api/me/hands/:id — a hand the viewer played, with only the cards the viewer may see. */
+export interface HandDetailDto extends HandReplayFields {
+  id: string;
+  tableId: string;
+  tableName: string;
+  handNumber: number;
+  endedAt: number;
+  players: (HandReplayPlayer & { userId: string; isYou: boolean })[];
 }
 
 export interface CommentDto {

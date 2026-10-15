@@ -37,8 +37,15 @@
 | GET | `/stats` | 본인 것만. 카드를 받은 핸드만 세고 관전은 빠진다. 플레이 핸드, 승리 핸드(`pot_won > 0`: 팟 일부라도 획득, 스플릿 포함, 콜 안 된 베팅만 돌려받은 핸드 제외)와 승률, 총 획득(`pot_won` 합), 순손익, 참여한 최대·평균 팟(`largestPot`, `avgPot`: 내 칩이 들어간 핸드에서 실제로 다툰 팟, 콜 안 된 베팅 반환분 제외), 한 핸드 최대 순이익(`biggestWin`), 최고 핸드, `vpip`·`pfr`(분모: 행동 기록을 읽은 핸드), `raiseShare`(PFR ÷ VPIP 핸드), `wtsd`(쇼다운 ÷ 플랍을 본 핸드), `wsd`(팟 획득 ÷ 쇼다운), `positions`(EP·MP·CO·BTN·SB·BB 순서, 핸드·VPIP·PFR·손익). 비율은 `{ n, of }`이며 `of = 0`이면 화면에 —. 계산 정의는 `packages/db/src/handStats.ts` |
 | GET | `/stats/trend?days=7\|30\|90&tz=<분>` | 기간별 일 순손익. `tz`는 UTC 기준 동쪽으로의 분(−720~840, 한국 540). 그 시간대 날짜로 나눈 `{ day: 'YYYY-MM-DD', hands, net }`를 오래된 순으로 주고, 핸드가 없는 날은 뺀다. 잘못된 값은 400 `bad_request` |
 | GET | `/hands?limit&before` | 최근 핸드 |
-| GET | `/hands/:id` | 핸드 상세(본인 카드와 쇼다운에서 공개된 카드만). 자동 머크로 공개되지 않은 다른 사람의 패는 `holeCards`·`rankClass`가 null(`hand_players.shown = 0`). `shown`이 없는 이전 기록은 쇼다운에 간 패를 공개된 것으로 봄. 커뮤니티 핸드 리뷰도 같은 규칙 |
+| GET | `/hands/:id` | 핸드 상세(본인 카드와 쇼다운에서 공개된 카드만). 자동 머크로 공개되지 않은 다른 사람의 패는 `holeCards`·`rankClass`가 null(`hand_players.shown = 0`). `shown`이 없는 이전 기록은 쇼다운에 간 패를 공개된 것으로 봄. 커뮤니티 핸드 리뷰도 같은 규칙. 단계별 재생에 쓰는 필드는 아래 |
 | GET | `/posts` · `/comments` | 내가 쓴 글과 댓글 |
+
+**핸드 재생 필드(`HandReplayFields`, `packages/types/src/community.ts`):** `/hands/:id`와 게시판 첨부 핸드 리뷰가 같이 준다. 종료 핸드의 저장된 기록만 쓰고, 새 정보를 계산해 내지 않는다.
+- `maxSeats`(테이블 좌석 수), `buttonSeat`(딜러 버튼), `smallBlind`·`bigBlind`, `board`, `potTotal`.
+- `actions`: `{seatIndex, stage, type, amount}`. `amount`는 그 액션으로 **더 낸 칩**(레이즈 총액이 아님). 블라인드는 `post-sb`·`post-bb`.
+- `pots`: 메인 팟부터 `{amount, eligibleSeats, winners: [{seatIndex, amount}], uncalled}`. `uncalled: true`는 콜 받지 못해 돌려준 베팅. 각 팟의 `winners` 합은 `amount`, 모든 팟의 합은 `potTotal`, 플레이어별 합은 `won`.
+- 플레이어별 `stackStart`, `net`, `won`, `holeCards`, `rankClass`, `bestFive`. 카드 세 필드는 본인과 쇼다운에서 공개된 패만 값이 있고 나머지는 null(위 머크 규칙).
+- 이 변경 전에 기록된 핸드는 `buttonSeat`·`pots`가 null이다. 화면은 플레이어별 `won`만 보여 주고, 이때 `won`에는 돌려받은 베팅이 섞일 수 있다.
 
 ## 테이블 `/api/tables`, WebSocket
 
@@ -89,7 +96,7 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/posts?page&q` | `{notices(1쪽만), posts, total, page, pageSize}` |
-| GET | `/posts/:id` | 본문, 첨부 핸드 리뷰(작성자 시점), 댓글과 답글 |
+| GET | `/posts/:id` | 본문, 첨부 핸드 리뷰(작성자 시점, 위 핸드 재생 필드 포함), 댓글과 답글 |
 | POST | `/posts` | `{title(2-100), body(≤10000), handIds(≤3, 본인이 플레이한 종료 핸드)}`, 시간당 10회 |
 | PATCH / DELETE | `/posts/:id` | 작성자만 가능(공지는 회원이 수정 불가) |
 | POST | `/posts/:id/comments` | `{body(≤1000), parentId?}`. 답글의 답글은 같은 묶음에 `@닉네임`으로 붙음 |
