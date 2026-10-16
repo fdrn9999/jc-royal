@@ -15,6 +15,7 @@ import { ServicePage } from './pages/Service';
 import { StatsPage } from './pages/Stats';
 import { DashboardPage } from './pages/Dashboard';
 import { EconomyPage, ReconcilePage } from './pages/Economy';
+import { RefillPage } from './pages/Refill';
 import { AuditPage } from './pages/Audit';
 import { AcademyStatsPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
@@ -124,6 +125,7 @@ const router = createBrowserRouter([
       { path: '/hands/:id', element: <HandDetailPage /> },
       { path: '/ledger', element: <LedgerPage /> },
       { path: '/economy', element: <EconomyPage /> },
+      { path: '/economy/refill', element: <RefillPage /> },
       { path: '/reconcile', element: <ReconcilePage /> },
       { path: '/audit', element: <AuditPage /> },
       { path: '/security', element: <SecurityPage /> },

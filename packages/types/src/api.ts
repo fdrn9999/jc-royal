@@ -171,6 +171,8 @@ export const ChipAdjustSchema = z.object({
   amount: z.number().int().refine((n) => n !== 0, 'amount must be non-zero').refine((n) => Math.abs(n) <= 100_000_000),
   memo: z.string().trim().min(2).max(200),
   idempotencyKey: z.string().min(8).max(64),
+  /** The transaction this adjustment corrects (a free refill paid by mistake, say), shown with both. */
+  refLedgerId: z.string().min(8).max(64).optional(),
 });
 
 export type Role = 'user' | 'admin' | 'super_admin';
@@ -221,6 +223,49 @@ export interface LobbyTableDto {
 export interface QuickPlayDto {
   table: LobbyTableDto;
   seatIndex: number;
+}
+
+/**
+ * Why a free chip refill would not pay now (GET/POST /api/me/refill): the refill is off or paused, the wait since the
+ * last one is not over, wallet and table chips together are not below the line, the account is suspended, or `held`:
+ * the chips on a table could not be confirmed (see `RefillHold`) and the claim waits until they can.
+ */
+export type RefillReason = 'off' | 'paused' | 'cooldown' | 'above' | 'suspended' | 'held';
+/** `busy`: chips are moving between wallet and seat; `unreachable`: a table did not answer; `mismatch`: an open seat the table does not have. */
+export type RefillHold = 'busy' | 'unreachable' | 'mismatch';
+export interface RefillPolicyDto {
+  version: number;
+  enabled: boolean;
+  paused: boolean;
+  /** Paid when wallet + table chips are below this. */
+  below: number;
+  amount: number;
+  cooldownMs: number;
+}
+export interface RefillStatusDto {
+  /** Null when no policy was ever set (the refill is off). */
+  policy: RefillPolicyDto | null;
+  wallet: number;
+  /** Chips at tables (open seats' stacks, a hand's bets included); null when not counted or not confirmed. */
+  tables: number | null;
+  eligible: boolean;
+  reason: RefillReason | null;
+  hold: RefillHold | null;
+  /** When the next refill may be claimed (the wait after the last one), server time. */
+  nextAt: number | null;
+  last: { at: number; amount: number } | null;
+  /** Refills received so far. */
+  received: number;
+  /** Server time of this answer. */
+  now: number;
+}
+export interface RefillClaimDto {
+  amount: number;
+  balance: number;
+  nextAt: number;
+  /** Another request (a second tab, a retry) had already claimed this refill: nothing more was paid. */
+  duplicate: boolean;
+  status: RefillStatusDto;
 }
 
 export interface LedgerEntryDto {

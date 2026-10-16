@@ -10,6 +10,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError } from '../lib/api';
 import { useI18n } from '../lib/i18n';
+import { RefillHintLazy } from './RefillHintLazy';
 import { Choice } from './Rooms';
 
 /** 0 means any. */
@@ -79,6 +80,7 @@ export function QuickMissNote({ miss, filtered, onReset, onRetry, onCreateRoom }
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-gold-500/25 bg-gold-500/10 px-3 py-2.5 text-sm text-ivory" role="status" data-testid="quick-miss" data-code={miss.code}>
       <p>{text}</p>
+      {miss.code === 'insufficient_balance' && <RefillHintLazy />}
       <div className="flex flex-wrap gap-2">
         {filtered && onReset && (
           <Button size="sm" variant="outline" onClick={onReset} data-testid="quick-reset">

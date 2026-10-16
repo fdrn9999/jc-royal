@@ -92,7 +92,7 @@ export const chipLedger = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id),
     type: text('type', {
-      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'],
+      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'free_refill'],
     }).notNull(),
     /** Signed delta applied to users.balance. */
     amount: integer('amount').notNull(),
@@ -611,4 +611,46 @@ export const maintenanceWindows = sqliteTable(
     cancelledAt: integer('cancelled_at'),
   },
   (t) => [index('maintenance_windows_ends_idx').on(t.endsAt)],
+);
+
+/**
+ * Free chip refill policy (apps/api/src/lib/refill.ts), one row per version and never changed: the newest row is the
+ * policy in force. A member whose wallet and table chips together are below `below` may claim `amount` chips once per
+ * `cooldown_ms`. `paused` is the emergency stop (new claims only). No row at all means the refill is off.
+ */
+export const refillPolicies = sqliteTable('refill_policies', {
+  version: integer('version').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  below: integer('below').notNull(),
+  amount: integer('amount').notNull(),
+  cooldownMs: integer('cooldown_ms').notNull(),
+  /** What made this version: the first policy, a policy edit, an emergency pause or a resume. */
+  change: text('change', { enum: ['seed', 'policy', 'pause', 'resume'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * Free chip refills paid, one row per chip_ledger row of type free_refill (same id), written in the same batch and
+ * never changed or deleted: what the member held when it was decided, the policy version applied, and the earliest
+ * next claim (fixed when paid, so a later policy change never shortens or lengthens a wait already running).
+ */
+export const refillClaims = sqliteTable(
+  'refill_claims',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    /** 1, 2, … per member: the claim's idempotency key is `refill:<user>:<seq>`. */
+    seq: integer('seq').notNull(),
+    policyVersion: integer('policy_version').notNull(),
+    amount: integer('amount').notNull(),
+    /** Wallet and chips on tables when the claim was decided. */
+    wallet: integer('wallet').notNull(),
+    tableChips: integer('table_chips').notNull(),
+    nextAt: integer('next_at').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('refill_claims_user_seq_uq').on(t.userId, t.seq), index('refill_claims_created_idx').on(t.createdAt)],
 );

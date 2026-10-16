@@ -75,15 +75,15 @@ describe('permission table', () => {
   it('every admin route refuses the wrong caller: no session, a member session, the player site, a plain admin on super-admin routes, and no fresh password', async () => {
     // The permission table lists every admin route (a unit test holds the two together), so walking it walks them all.
     const source = readFileSync(resolve(root, 'apps/api/src/lib/permissions.ts'), 'utf8');
-    const routes = [...source.matchAll(/^\s+'(GET|POST|PATCH|DELETE) (\/[^']*)': r\('[^']+', '[^']+'(.*)\),?\r?$/gm)].map((m) => ({
+    const routes = [...source.matchAll(/^\s+'(GET|POST|PUT|PATCH|DELETE) (\/[^']*)': r\('[^']+', '[^']+'(.*)\),?\r?$/gm)].map((m) => ({
       method: m[1]!,
       path: m[2]!,
       superOnly: /role: CAPABILITIES/.test(m[3]!),
       reauth: /\breauth\b/.test(m[3]!),
     }));
-    expect(routes.length).toBe(source.match(/^\s+'(GET|POST|PATCH|DELETE) /gm)!.length);
+    expect(routes.length).toBe(source.match(/^\s+'(GET|POST|PUT|PATCH|DELETE) /gm)!.length);
     expect(routes.length).toBeGreaterThan(55);
-    expect(routes.filter((r) => r.superOnly).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['POST /users/:id/role', 'POST /users/export']);
+    expect(routes.filter((r) => r.superOnly).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['POST /refill/resume', 'POST /users/:id/role', 'POST /users/export', 'PUT /refill/policy']);
 
     const member = await newUser();
     const staff = await plainAdmin();
@@ -112,10 +112,10 @@ describe('permission table', () => {
     }
     expect(wrong).toEqual([]);
 
-    // None of it changed the member, and the plain administrator's only records are the two refused super-admin calls.
+    // None of it changed the member, and the plain administrator's only records are the refused super-admin calls.
     expect(await d1(`SELECT status, role, balance, suspended_reason AS reason FROM users WHERE id = '${member.me.id}'`)).toEqual([{ status: 'active', role: 'user', balance: member.me.balance, reason: null }]);
     expect((await member.client.get('/api/auth/me')).status).toBe(200);
-    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['user.export.failed failed', 'user.role.failed failed']);
+    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['refill.policy.failed failed', 'refill.resume.failed failed', 'user.export.failed failed', 'user.role.failed failed']);
   });
 
   it('records failed changes and refusals, but not a missing password confirmation or a read that found nothing', async () => {

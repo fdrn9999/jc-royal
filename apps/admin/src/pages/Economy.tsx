@@ -13,7 +13,7 @@ import { Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
 
 type Flow = { n: number; sum: number; plus: number; minus: number };
-type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile';
+type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill';
 type Scope = 'user_ledger' | 'table';
 interface AdminRow { id: string; userId: string; nickname: string | null; amount: number; memo: string | null; actorId: string | null; actorNickname: string | null; createdAt: number }
 interface Economy {
@@ -24,7 +24,7 @@ interface Economy {
   rowsRead: number;
   wallets: { members: number; accounts: number; balance: number; deleted: number; suspended: number; staff: number };
   tables: { chips: number; openSessions: number; seatedBuyIn: number };
-  issued: { signup: number; admin: number; reconcile: number; total: number };
+  issued: { signup: number; admin: number; reconcile: number; refill: number; total: number };
   ledger: { total: number; byType: Record<LedgerType, Flow> };
   gap: number;
   period: { counts: Record<LedgerType | 'auto_rebuy', Flow>; moved: number; series: { date: string; n: number; moved: number; in: number; out: number }[] };
@@ -46,6 +46,7 @@ const signed = (n: number) => `${n > 0 ? '+' : ''}${formatChips(n)}`;
 /** Period rows: automatic rebuys are top-ups the server made, counted apart from the ones players asked for. */
 const FLOWS: [LedgerType | 'auto_rebuy', Key][] = [
   ['signup_grant', 'ledgerSignupGrant'],
+  ['free_refill', 'ledgerFreeRefill'],
   ['buy_in', 'ledgerBuyIn'],
   ['top_up', 'econTopUpManual'],
   ['auto_rebuy', 'memoAutoRebuy'],
@@ -85,6 +86,7 @@ export function EconomyPage() {
   const header = (
     <div className="flex flex-wrap items-center gap-3">
       <h1 className="text-xl font-extrabold">{t('economy')}</h1>
+      <Link to="/economy/refill" className="text-sm text-gold-300 hover:underline" data-testid="economy-refill-link">{t('refillManage')} →</Link>
       <div className="ml-auto flex flex-wrap gap-1" role="group" aria-label={t('econPeriod')}>
         {PERIODS.map((n) => (
           <Button key={n} size="sm" variant={days === n ? 'gold' : 'outline'} aria-pressed={days === n} onClick={() => setDays(n)} data-testid={`economy-${n}`}>
@@ -108,7 +110,7 @@ export function EconomyPage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5" data-testid="economy-totals">
         <Stat label={t('econWallets')} value={formatChips(d.wallets.balance)} sub={t('econWalletsSub', { n: formatChips(d.wallets.members), suspended: formatChips(d.wallets.suspended), staff: formatChips(d.wallets.staff) })} />
         <Stat label={t('econOnTables')} value={formatChips(d.tables.chips)} sub={t('econOnTablesSub', { n: d.tables.openSessions, buyIn: formatChips(d.tables.seatedBuyIn) })} />
-        <Stat label={t('econIssued')} value={formatChips(d.issued.total)} sub={t('econIssuedSub', { signup: formatChips(d.issued.signup), admin: signed(d.issued.admin), rec: signed(d.issued.reconcile) })} />
+        <Stat label={t('econIssued')} value={formatChips(d.issued.total)} sub={t('econIssuedSub', { signup: formatChips(d.issued.signup), admin: signed(d.issued.admin), rec: signed(d.issued.reconcile), refill: formatChips(d.issued.refill) })} />
         <Stat
           label={t('econGap')}
           value={<span className={d.gap ? 'text-danger' : 'text-success'} data-testid="economy-gap">{signed(d.gap)}</span>}

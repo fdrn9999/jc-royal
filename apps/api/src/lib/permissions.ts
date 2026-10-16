@@ -38,6 +38,8 @@ export const CAPABILITIES = {
   'audit.all': 'super_admin',
   /** See and end other administrators' console sessions (anyone may end their own). */
   'sessions.all': 'super_admin',
+  /** Change the free chip refill policy, or resume refills after an emergency stop (anyone on duty may stop them). */
+  'refill.policy': 'super_admin',
 } as const satisfies Record<string, AdminRole>;
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -68,6 +70,7 @@ export const FEATURES = [
   'economy',
   'stats',
   'reconcile',
+  'refill',
   'audit',
   'reports',
   'board',
@@ -139,6 +142,15 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'GET /reconcile/:id': r('reconcile', 'reconcile.view', { target: 'reconciliation' }),
   'POST /reconcile/:id/resolve': r('reconcile', 'reconcile.resolve', { reauth, target: 'reconciliation' }),
   'GET /academy/stats': r('academy', 'academy.stats'),
+
+  // Free chip refill (routes/admin-refill.ts): the policy and resuming are a super admin's; anyone on duty may pause.
+  'GET /refill': r('refill', 'refill.view'),
+  'PUT /refill/policy': r('refill', 'refill.policy', { role: CAPABILITIES['refill.policy'], reauth, preview }),
+  'POST /refill/pause': r('refill', 'refill.pause', { reauth }),
+  'POST /refill/resume': r('refill', 'refill.resume', { role: CAPABILITIES['refill.policy'], reauth }),
+  'GET /refill/stats': r('refill', 'refill.stats'),
+  'GET /refill/claims': r('refill', 'refill.claims'),
+  'GET /users/:id/refill': r('refill', 'refill.member', { target: 'user' }),
 
   'GET /board/posts': r('board', 'board.list'),
   'GET /board/posts/:id': r('board', 'board.view', { target: 'post' }),

@@ -565,6 +565,8 @@ export class TableRoom extends DurableObject<Env> {
             return Response.json(this.reportContext(url.searchParams.get('target') ?? '', url.searchParams.get('reporter') ?? ''));
           case 'seat-check':
             return Response.json(this.seatCheck(url.searchParams.get('user') ?? ''));
+          case 'holdings':
+            return Response.json(this.holdings(url.searchParams.get('user') ?? ''));
           case 'role':
             // An admin changed this member's role (the api passes the stored value).
             return Response.json({ ok: true, seated: await this.refreshRole(url.searchParams.get('user') ?? '', url.searchParams.get('role') ?? 'user') });
@@ -879,6 +881,18 @@ export class TableRoom extends DurableObject<Env> {
       if (e instanceof CommandError) return { ok: false, code: e.code };
       throw e;
     }
+  }
+
+  /**
+   * The free chip refill (api lib/refill.ts) asks what a member has on this table. During a hand that is the stack the
+   * hand started with, bets included (it changes only when the hand settles). `stable` is false while chips are on
+   * their way between the wallet and the seat (a buy-in, a top-up being taken, a cash-out): the api then holds the claim.
+   */
+  private holdings(userId: string): { seated: false } | { seated: true; tableSessionId: string; stack: number; stable: boolean; inHand: boolean } {
+    const i = this.seatIndexOf(userId);
+    const s = i === null ? null : this.room.seats[i]!;
+    if (!s) return { seated: false };
+    return { seated: true, tableSessionId: s.tableSessionId, stack: s.stack, stable: s.phase === 'seated' && s.topUp?.state !== 'debiting', inHand: this.handHasPlayer(userId) };
   }
 
   private async sit(a: Attachment, seatIndex: number, amount: number, reqId: string) {

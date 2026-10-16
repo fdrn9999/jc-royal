@@ -414,6 +414,7 @@ export const en: Dict = {
   'ledger.cash_out': 'Table cash-out',
   'ledger.admin_adjust': 'Admin adjustment',
   'ledger.reconcile': 'Reconciliation',
+  'ledger.free_refill': 'Free refill',
   'ledger.top_up': 'Table top-up',
   'replay.title': 'Hand #{n}',
   'replay.board': 'Board',

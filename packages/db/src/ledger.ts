@@ -9,8 +9,11 @@
  * the original row, so retries can never grant, debit or refund twice.
  */
 
-/** `top_up` adds chips to an open table session (a player's top-up or automatic rebuy). */
-export type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile';
+/**
+ * `top_up` adds chips to an open table session (a player's top-up or automatic rebuy); `free_refill` is the free chip
+ * refill a member with few chips left claims (apps/api/src/lib/refill.ts).
+ */
+export type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill';
 
 export interface LedgerOp {
   userId: string;
@@ -28,6 +31,12 @@ export interface LedgerOp {
    * a cash-out: chips on the table always go back to the wallet.
    */
   activeOnly?: boolean;
+  /**
+   * More conditions in the same statement, over the member's `users` row (its placeholders numbered from ?10, bound
+   * from `params`): an operation decided from values read earlier is refused, like a short wallet, when any of them
+   * changed meanwhile.
+   */
+  guard?: { sql: string; params: (string | number | null)[] };
 }
 
 export type LedgerResult =
@@ -45,10 +54,10 @@ export async function applyLedger(d1: D1Database, op: LedgerOp, extra?: GuardedS
     .prepare(
       `INSERT INTO chip_ledger (id, user_id, type, amount, balance_after, table_id, ref_id, idempotency_key, actor_id, memo)
        SELECT ?1, id, ?2, ?3, balance + ?3, ?4, ?5, ?6, ?7, ?8 FROM users
-       WHERE id = ?9 AND balance + ?3 >= 0${op.activeOnly ? ` AND status = 'active'` : ''}
+       WHERE id = ?9 AND balance + ?3 >= 0${op.activeOnly ? ` AND status = 'active'` : ''}${op.guard ? ` AND (${op.guard.sql})` : ''}
        ON CONFLICT(idempotency_key) DO NOTHING`,
     )
-    .bind(ledgerId, op.type, op.amount, op.tableId ?? null, op.refId ?? null, op.idempotencyKey, op.actorId ?? null, op.memo ?? null, op.userId);
+    .bind(ledgerId, op.type, op.amount, op.tableId ?? null, op.refId ?? null, op.idempotencyKey, op.actorId ?? null, op.memo ?? null, op.userId, ...(op.guard?.params ?? []));
   const update = d1
     .prepare(
       `UPDATE users SET balance = balance + ?1, updated_at = (unixepoch('subsec') * 1000)

@@ -25,6 +25,7 @@ export const ledgerTypeLabel = labeler({
   cash_out: 'ledgerCashOut',
   admin_adjust: 'ledgerAdminAdjust',
   reconcile: 'ledgerReconcile',
+  free_refill: 'ledgerFreeRefill',
 });
 /** The memos the server writes itself (sign-up grant, buy-in seat, top-ups); a memo an admin typed is shown as it is. */
 const SYSTEM_MEMOS: Record<string, Key> = {
@@ -33,6 +34,7 @@ const SYSTEM_MEMOS: Record<string, Key> = {
   'auto rebuy': 'memoAutoRebuy',
   'recorded difference': 'memoRecorded',
   'balance corrected': 'memoCorrected',
+  'free refill': 'memoFreeRefill',
 };
 export function memoLabel(t: Tr, memo: string | null | undefined): string {
   if (!memo) return '';
@@ -84,6 +86,13 @@ const auditNames = labeler({
   'note.delete': 'auditNoteDelete',
   'reconcile.resolve': 'auditReconcileResolve',
   'reconcile.run': 'auditReconcileRun',
+  'refill.claims': 'auditRefillClaims',
+  'refill.member': 'auditRefillMember',
+  'refill.pause': 'auditRefillPause',
+  'refill.policy': 'auditRefillPolicy',
+  'refill.resume': 'auditRefillResume',
+  'refill.stats': 'auditRefillStats',
+  'refill.view': 'auditRefillView',
   'service.notice.create': 'auditSvcNoticeCreate',
   'service.notice.delete': 'auditSvcNoticeDelete',
   'service.notice.end': 'auditSvcNoticeEnd',
@@ -126,7 +135,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'report', 'board', 'message', 'service', 'maintenance'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -135,6 +144,7 @@ export const auditFamilyLabel = labeler({
   hand: 'famHand',
   ledger: 'famLedger',
   reconcile: 'famReconcile',
+  refill: 'famRefill',
   report: 'famReport',
   board: 'famBoard',
   message: 'famMessage',
@@ -151,6 +161,7 @@ export const capabilityLabel = labeler({
   'notes.delete_any': 'capNotesDeleteAny',
   'audit.all': 'capAuditAll',
   'sessions.all': 'capSessionsAll',
+  'refill.policy': 'capRefillPolicy',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({
@@ -170,6 +181,7 @@ export const featureLabel = labeler({
   economy: 'economy',
   stats: 'featStats',
   reconcile: 'reconcile',
+  refill: 'featRefill',
   audit: 'audit',
   reports: 'reports',
   board: 'board',

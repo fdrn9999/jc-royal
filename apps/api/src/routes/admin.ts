@@ -19,6 +19,7 @@ import { can, capabilitiesOf, matchedRoute, requirePermission } from '../lib/per
 import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
+import { adminRefillRoutes } from './admin-refill';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
 import { adminReportRoutes } from './reports';
@@ -720,6 +721,9 @@ const admin = new Hono<AppEnv>()
    * `preview` (the same body, idempotency key included): the balance before and after, whether it is a large
    * adjustment and whether this key was already applied. Refused the same way, but a refused preview is not listed with
    * the refused adjustments (the attempt is on the audit log as `user.chips.failed`).
+   *
+   * `refLedgerId`: the member's own transaction this adjustment corrects (a free refill paid in error): kept as the
+   * adjustment's `ref_id` and in the audit row, so the original is never edited and the two stay linked.
    */
   .post('/users/:id/chips', async (c) => {
     const id = c.req.param('id');
@@ -734,6 +738,12 @@ const admin = new Hono<AppEnv>()
     };
     if (target && target.role !== 'user' && !can(role, 'admins.manage')) await refuse('forbidden', 403, 'forbidden', 'only a super admin can adjust chips of administrators');
     if (Math.abs(body.amount) >= LARGE_ADJUSTMENT && !can(role, 'chips.large')) await refuse('large_adjustment', 403, 'large_adjustment', `only a super admin can adjust ${LARGE_ADJUSTMENT} chips or more at once`);
+    const ref = body.refLedgerId
+      ? await c.env.DB.prepare(`SELECT id, type, amount, created_at AS createdAt FROM chip_ledger WHERE id = ?1 AND user_id = ?2`)
+          .bind(body.refLedgerId, id)
+          .first<{ id: string; type: string; amount: number; createdAt: number }>()
+      : null;
+    if (body.refLedgerId && !ref) fail(400, 'ref_not_found', 'the linked transaction is not one of this member\'s');
     if (preview) {
       const done = await c.env.DB.prepare(`SELECT 1 AS x FROM chip_ledger WHERE idempotency_key = ?1`).bind(`admin:${body.idempotencyKey}`).first();
       if (!target || (!done && target.balance + body.amount < 0)) await refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
@@ -745,6 +755,7 @@ const admin = new Hono<AppEnv>()
         balanceAfter: done ? target!.balance : target!.balance + body.amount,
         large: Math.abs(body.amount) >= LARGE_ADJUSTMENT,
         duplicate: !!done,
+        ref,
       });
     }
     const r = await applyLedger(c.env.DB, {
@@ -754,10 +765,11 @@ const admin = new Hono<AppEnv>()
       idempotencyKey: `admin:${body.idempotencyKey}`,
       actorId: c.var.user!.id,
       memo: body.memo,
+      refId: ref?.id ?? null,
     });
     if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
     // The same request again (a retry, a double click): nothing changed, and that is on record.
-    if (r.status === 'duplicate') await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
+    if (r.status === 'duplicate') await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
     if (r.status === 'applied') {
       await sendMessages(c.var.db, {
         userIds: [id],
@@ -765,7 +777,7 @@ const admin = new Hono<AppEnv>()
         ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
       });
-      await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
+      await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id, refType: ref.type } : {}) });
     }
     return c.json({ ok: true, duplicate: r.status === 'duplicate', balanceAfter: r.balanceAfter });
   })
@@ -1229,4 +1241,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes));

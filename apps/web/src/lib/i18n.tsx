@@ -414,6 +414,7 @@ const ko = {
   'ledger.cash_out': '테이블 정산',
   'ledger.admin_adjust': '관리자 조정',
   'ledger.reconcile': '정합성 조정',
+  'ledger.free_refill': '무료 칩 보충',
   'ledger.top_up': '스택 충전',
   'replay.title': '핸드 #{n} 기록',
   'replay.board': '보드',

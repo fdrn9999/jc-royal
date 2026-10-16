@@ -11,7 +11,7 @@ export const RAPID_WINDOW_MS = DAY;
 /** A seat held this long is listed. It can be a long session: only sitting out stands a player up (after 10 minutes). */
 export const STALE_SESSION_MS = 12 * 60 * 60_000;
 
-type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile';
+type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill';
 type Flow = { n: number; sum: number; plus: number; minus: number };
 const flow = (): Flow => ({ n: 0, sum: 0, plus: 0, minus: 0 });
 const add = (a: Flow, b: Flow) => {
@@ -99,7 +99,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
   const one = <T>(r: D1Result | undefined) => (r?.results[0] ?? {}) as T;
 
   // Ledger: totals by type, period counts, and the daily movement.
-  const total: Record<LedgerType, Flow> = { signup_grant: flow(), buy_in: flow(), top_up: flow(), cash_out: flow(), admin_adjust: flow(), reconcile: flow() };
+  const total: Record<LedgerType, Flow> = { signup_grant: flow(), buy_in: flow(), top_up: flow(), cash_out: flow(), admin_adjust: flow(), reconcile: flow(), free_refill: flow() };
   const period = { ...structuredClone(total), auto_rebuy: flow() };
   const perDay = new Map<number, Flow>();
   for (const r of rows<Flow & { type: LedgerType; day: number | null; rebuy: number }>(ledger)) {
@@ -123,7 +123,14 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
   // Chips bought in and not paid back yet: what the tables hold. A player who lost everything left no cash-out row,
   // and the chips they lost are in someone else's later cash-out.
   const onTables = -(total.buy_in.sum + total.top_up.sum + total.cash_out.sum);
-  const issued = { signup: total.signup_grant.sum, admin: total.admin_adjust.sum, reconcile: total.reconcile.sum, total: total.signup_grant.sum + total.admin_adjust.sum + total.reconcile.sum };
+  // Free refills (lib/refill.ts) are counted on their own, apart from the sign-up grant and admin adjustments.
+  const issued = {
+    signup: total.signup_grant.sum,
+    admin: total.admin_adjust.sum,
+    reconcile: total.reconcile.sum,
+    refill: total.free_refill.sum,
+    total: total.signup_grant.sum + total.admin_adjust.sum + total.reconcile.sum + total.free_refill.sum,
+  };
 
   // Repeated grants: the most grants (amount > 0) one member got within any RAPID_WINDOW_MS of the period.
   const admins = rows<AdminRow>(adminRows);

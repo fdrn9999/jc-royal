@@ -4,12 +4,25 @@ import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
+import { RefillHintLazy } from '../components/RefillHintLazy';
 import { MemberName, RoleBadge } from '../components/MemberName';
 import { useAmounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { AMOUNT_UNITS, setPrefs, usePrefs } from '../lib/prefs';
 import { RequestError, rid, type TableSocketApi } from './useTableSocket';
+
+/**
+ * Whether chips ran short at any point while a dialog was open: the free refill note then stays until it closes, so
+ * a refill taken from it still shows what it paid once the dialog offers the buy-in or top-up it made possible.
+ */
+function useShortWhileOpen(open: boolean, short: boolean) {
+  const [was, setWas] = useState(false);
+  useEffect(() => {
+    setWas((w) => (open ? w || short : false));
+  }, [open, short]);
+  return open && (was || short);
+}
 
 export function BuyInModal({
   open,
@@ -40,6 +53,7 @@ export function BuyInModal({
     if (open) setAmount(Math.min(cap, Math.max(minBuyIn, bigBlind * 100)));
   }, [open, cap, minBuyIn, bigBlind]);
   const affordable = cap >= minBuyIn;
+  const refill = useShortWhileOpen(open, !affordable);
   return (
     <Modal
       open={open}
@@ -78,7 +92,8 @@ export function BuyInModal({
         ) : (
           <p className="text-sm text-danger">{t('err.insufficient_balance')}</p>
         )}
-        {error && <p className="text-sm text-danger" role="alert">{error}</p>}
+        {refill && <RefillHintLazy />}
+        {error &&<p className="text-sm text-danger" role="alert">{error}</p>}
       </div>
     </Modal>
   );
@@ -118,6 +133,7 @@ export function TopUpModal({
   const lo = Math.max(1, minBuyIn - stack);
   const room = maxBuyIn - stack;
   const hi = Math.min(room, wallet);
+  const refill = useShortWhileOpen(open, room > 0 && wallet < lo);
   const [amount, setAmount] = useState(lo);
   const [busy, setBusy] = useState<'topup' | 'rebuy' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +240,7 @@ export function TopUpModal({
             </Button>
           </div>
         )}
+        {refill && <RefillHintLazy />}
 
         <div className="jc-divider" />
         <section className="flex flex-col gap-3" data-testid="rebuy-section">

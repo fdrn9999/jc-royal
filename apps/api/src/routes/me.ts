@@ -6,6 +6,8 @@ import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { replayLog, replayPlayer, replayUser } from '../lib/community';
 import { fail } from '../lib/http';
+import { rateLimit } from '../lib/rate-limit';
+import { claimRefill, REFILL_RATE, refillSnapshot } from '../lib/refill';
 
 function pageParams(q: (k: string) => string | undefined) {
   const limit = Math.min(Math.max(Number(q('limit') ?? 20) || 20, 1), 100);
@@ -15,6 +17,19 @@ function pageParams(q: (k: string) => string | undefined) {
 
 export const meRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
+  /** The free chip refill: its terms, what the member has, and whether (or when) they may claim one (lib/refill.ts). */
+  .get('/refill', async (c) => c.json((await refillSnapshot(c.env, c.var.user!.id)).status))
+  /**
+   * Claims it. 409 refill_refused (details.status says why, and when the next one comes) or refill_changed (the wallet
+   * or a seat changed while it was decided: nothing was paid, ask again). Repeating a paid claim pays nothing more.
+   */
+  .post('/refill', async (c) => {
+    const uid = c.var.user!.id;
+    await rateLimit(c, `refill:${uid}`, REFILL_RATE.limit, REFILL_RATE.windowMs);
+    const r = await claimRefill(c.env, uid);
+    if (!r.ok) fail(409, r.code, r.code === 'refill_changed' ? 'chips changed while the refill was decided; try again' : 'no refill now', { status: r.status });
+    return c.json(r.claim);
+  })
   .get('/ledger', async (c) => {
     const { limit, before } = pageParams((k) => c.req.query(k));
     const rows = await c.var.db

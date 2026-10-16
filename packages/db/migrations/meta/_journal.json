@@ -141,6 +141,13 @@
       "when": 1792080038471,
       "tag": "0019_daily_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792133462932,
+      "tag": "0020_refill",
+      "breakpoints": true
     }
   ]
 }

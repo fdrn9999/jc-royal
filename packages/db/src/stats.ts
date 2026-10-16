@@ -7,7 +7,8 @@
  *   a new day). Only the day is kept, never a time, page or count, and only for ACTIVE_DAYS_RETENTION days: daily,
  *   weekly and monthly active members are counted from it and kept as numbers in `daily_stats`.
  * - `daily_stats`: one number per day and metric. Most are rolled up once a day from the records the service keeps
- *   anyway (accounts, seats, hands, reports); the Academy counters are added as events arrive. Day 0 holds markers.
+ *   anyway (accounts, seats, hands, reports); the Academy and free refill counters are added as events arrive. Day 0
+ *   holds markers.
  */
 export const STATS_TZ_OFFSET_MS = 9 * 60 * 60_000;
 export const STATS_DAY = 86_400_000;
@@ -23,6 +24,14 @@ export const dayStart = (day: number) => day * STATS_DAY - STATS_TZ_OFFSET_MS;
 export const ACADEMY_METRICS = ['ac_lesson_start', 'ac_lesson_done', 'ac_scenario_start', 'ac_scenario_done', 'ac_answer', 'ac_correct'] as const;
 export type AcademyMetric = (typeof ACADEMY_METRICS)[number];
 
+/**
+ * Free refill claims that paid nothing, per day and reason (apps/api/src/lib/refill.ts): refused (off, paused, still
+ * waiting, enough chips, suspended), held (table chips could not be confirmed) or changed under it (asked again).
+ * Added as they happen, like the Academy counters, and kept by the daily rollup.
+ */
+export const REFILL_METRICS = ['rf_off', 'rf_paused', 'rf_cooldown', 'rf_above', 'rf_suspended', 'rf_held', 'rf_changed'] as const;
+export type RefillMetric = (typeof REFILL_METRICS)[number];
+
 /** Markers on day 0: the first day with activity markers, and the last day rolled up. */
 export const STATS_MARKER_DAY = 0;
 
@@ -32,7 +41,7 @@ export function activeDayInsert(d1: D1Database, userId: string, at: number): D1P
 }
 
 /** One statement per counter: adds `n` to the day's row. */
-export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric, number>>): D1PreparedStatement[] {
+export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric | RefillMetric, number>>): D1PreparedStatement[] {
   return Object.entries(counts)
     .filter(([, n]) => (n ?? 0) > 0)
     .map(([metric, n]) =>

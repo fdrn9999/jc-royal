@@ -82,6 +82,12 @@ const BY_CODE: Record<string, Key> = {
   already_resolved: 'errAlreadyResolved',
   already_suspended: 'errAlreadySuspended',
   maintenance: 'errMaintenance',
+  refill_policy_conflict: 'errRefillConflict',
+  refill_no_change: 'errRefillNoChange',
+  refill_already_paused: 'errRefillAlreadyPaused',
+  refill_not_paused: 'errRefillNotPaused',
+  refill_no_policy: 'errRefillNoPolicy',
+  ref_not_found: 'errRefNotFound',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

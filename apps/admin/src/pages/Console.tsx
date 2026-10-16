@@ -21,6 +21,7 @@ import {
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
 import { dayStart, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
+import { MemberRefillPanel, RefillRefLine, type RefillRef } from './Refill';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 const newKey = () => crypto.randomUUID().replace(/-/g, '').slice(0, 24);
@@ -282,7 +283,7 @@ type Pending =
   | { kind: 'disconnect' }
   | { kind: 'unsuspend' }
   | { kind: 'role'; role: Role }
-  | { kind: 'chips'; amount: number; memo: string; key: string };
+  | { kind: 'chips'; amount: number; memo: string; key: string; ref: RefillRef | null };
 
 /** The API's answer to `preview: true`: what the change would do, computed now; nothing is written. */
 interface SanctionPreview {
@@ -294,7 +295,7 @@ interface SanctionPreview {
 }
 interface UnsuspendPreview { from: string; to: string; suspendedReason: string | null }
 interface RolePreview { from: string; to: string; console: { from: boolean; to: boolean }; adminSessions: number; capabilities: { gained: string[]; lost: string[] } }
-interface ChipPreview { amount: number; balanceBefore: number; balanceAfter: number; large: boolean; duplicate: boolean }
+interface ChipPreview { amount: number; balanceBefore: number; balanceAfter: number; large: boolean; duplicate: boolean; ref: { id: string; type: string; amount: number; createdAt: number } | null }
 
 function ChangePreview({ p, data }: { p: Exclude<Pending, null>; data: unknown }) {
   const { t } = useT();
@@ -350,6 +351,7 @@ function ChangePreview({ p, data }: { p: Exclude<Pending, null>; data: unknown }
           {t('amount')}: <span className="font-mono">{d.amount > 0 ? '+' : ''}{formatChips(d.amount)}</span> {d.large && <Badge tone="gold">{t('pvLarge')}</Badge>}
         </p>
         <p className="break-all text-ink-300">{t('memo')}: {p.memo}</p>
+        {d.ref && <RefillRefLine r={{ ...d.ref, seq: p.ref?.id === d.ref.id ? p.ref.seq : undefined }} />}
         {d.duplicate && <p className="text-danger" role="alert">{t('pvDuplicate')}</p>}
       </div>
     );
@@ -407,7 +409,10 @@ export function UserDetailPage() {
   const [pv, setPv] = useState<{ data: unknown } | { error: unknown } | null>(null);
   const previewSeq = useRef(0);
   // Kept while the same amount and memo are tried again, so a retry after a lost answer cannot pay twice.
-  const [chipKey, setChipKey] = useState<{ key: string; amount: number; memo: string } | null>(null);
+  const [chipKey, setChipKey] = useState<{ key: string; amount: number; memo: string; ref: string | null } | null>(null);
+  // A free refill the adjustment takes back (the member's refill panel), named in the ledger row it writes.
+  const [chipRef, setChipRef] = useState<RefillRef | null>(null);
+  const chipForm = useRef<HTMLDivElement>(null);
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
   // Another administrator suspended the member after this page loaded: show the member as they are now.
@@ -445,7 +450,7 @@ export function UserDetailPage() {
           : p.kind === 'role'
             ? { preview: true, role: p.role }
             : p.kind === 'chips'
-              ? { preview: true, amount: p.amount, memo: p.memo, idempotencyKey: p.key }
+              ? { preview: true, amount: p.amount, memo: p.memo, idempotencyKey: p.key, ...(p.ref ? { refLedgerId: p.ref.id } : {}) }
               : { preview: true };
     api<unknown>(`/api/admin/users/${id}/${p.kind}`, { body }).then(
       (data) => seq === previewSeq.current && setPv({ data }),
@@ -463,14 +468,24 @@ export function UserDetailPage() {
   };
   const askChips = () => {
     const n = Number(amount);
-    const key = chipKey && chipKey.amount === n && chipKey.memo === memo ? chipKey.key : newKey();
-    setChipKey({ key, amount: n, memo });
-    ask({ kind: 'chips', amount: n, memo, key });
+    const ref = chipRef?.id ?? null;
+    const key = chipKey && chipKey.amount === n && chipKey.memo === memo && chipKey.ref === ref ? chipKey.key : newKey();
+    setChipKey({ key, amount: n, memo, ref });
+    ask({ kind: 'chips', amount: n, memo, key, ref: chipRef });
   };
   const clearChips = () => {
     setChipKey(null);
+    setChipRef(null);
     setAmount('');
     setMemo('');
+  };
+  // Taking back a refill: what is left of it, as a negative adjustment linked to it, checked in the dialog like any other.
+  const correctRefill = (r: RefillRef) => {
+    setChipRef(r);
+    setAmount(String(-r.amount));
+    setMemo(t('refillCorrectMemo', { n: r.seq }));
+    chipForm.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    chipForm.current?.querySelector('input')?.focus({ preventScroll: true });
   };
   const issueReset = async () => {
     setNote(null);
@@ -503,7 +518,7 @@ export function UserDetailPage() {
     if (p.kind === 'chips') {
       // The previewed request itself: same amount, memo and key.
       void run(async () => {
-        await api(`/api/admin/users/${id}/chips`, { body: { amount: p.amount, memo: p.memo, idempotencyKey: p.key } });
+        await api(`/api/admin/users/${id}/chips`, { body: { amount: p.amount, memo: p.memo, idempotencyKey: p.key, ...(p.ref ? { refLedgerId: p.ref.id } : {}) } });
         clearChips();
       });
       return;
@@ -587,6 +602,7 @@ export function UserDetailPage() {
       </Panel>
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('adjustChips')}>
+          <div ref={chipForm}>
           <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); askChips(); }}>
             <Field
               label={t('amount')}
@@ -595,10 +611,12 @@ export function UserDetailPage() {
             >
               {(fid) => <Input id={fid} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d-]/g, ''))} data-testid="chip-amount" />}
             </Field>
-            <Field label={t('memo')}>{(fid) => <Input id={fid} value={memo} onChange={(e) => setMemo(e.target.value)} />}</Field>
+            <Field label={t('memo')}>{(fid) => <Input id={fid} value={memo} onChange={(e) => setMemo(e.target.value)} data-testid="chip-memo" />}</Field>
+            {chipRef && <RefillRefLine r={{ type: 'free_refill', amount: chipRef.amount, createdAt: chipRef.at, seq: chipRef.seq }} onClear={() => setChipRef(null)} />}
             <p className="text-xs text-ink-400">{t('chipPreviewHint')}</p>
             <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2} data-testid="chip-submit">{t('confirm')}</Button>
           </form>
+          </div>
         </Panel>
         <Panel title={t('status')}>
           <div className="flex flex-col gap-3">
@@ -728,6 +746,7 @@ export function UserDetailPage() {
       {data.recentTables && <RecentTablesPanel rows={data.recentTables} />}
       {data.reports && <MemberReportsPanel userId={u.id} reports={data.reports} />}
       <MemberHistoryPanel key={rev} userId={u.id} />
+      <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />
       <Panel title={t('ledger')}>
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (
@@ -1359,7 +1378,7 @@ export function HandDetailPage() {
 
 // ------------------------------------------------------------------ ledger, reconcile, audit
 const LEDGER_KEYS = ['member', 'type', 'from', 'to'] as const;
-const LEDGER_TYPES = ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'] as const;
+const LEDGER_TYPES = ['signup_grant', 'free_refill', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'] as const;
 
 /**
  * The chip ledger, newest first, page by page. Every look (with its filters and page) is recorded in the audit log by

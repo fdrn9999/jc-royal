@@ -178,10 +178,10 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
     put(r.day as number, 'mau', r.mau as number);
   }
 
-  // Replaces the span's own rows: every metric of days a..b but the Academy counters (added as events arrive) and the
-  // cohorts (kept on their sign-up day), and the cohorts whose week ended in the span. Only non-zero numbers are kept.
+  // Replaces the span's own rows: every metric of days a..b but the Academy and refill counters (added as events arrive)
+  // and the cohorts (kept on their sign-up day), and the cohorts whose week ended in the span. Only non-zero numbers are kept.
   const write = await db.batch([
-    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
+    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'rf_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
     db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric GLOB 'cohort_*'`).bind(a - COHORT_DAYS, b - COHORT_DAYS),
     db
       .prepare(
