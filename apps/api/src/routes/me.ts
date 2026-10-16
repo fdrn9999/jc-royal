@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import { HAND_RANK_CLASSES, HandListQuerySchema, HandNoteInputSchema, POSITIONS, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
+import { HAND_RANK_CLASSES, HandListQuerySchema, HandNoteInputSchema, POSITIONS, SettingsSaveSchema, type SettingsSaveResult, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
@@ -10,6 +10,8 @@ import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
 import { referralMe } from '../lib/referral';
 import { claimRefill, REFILL_RATE, refillSnapshot } from '../lib/refill';
+import { pushMuckEverywhere } from '../lib/room';
+import { clientFails, countSettings, markSynced, needsSyncMark, readRow, saveFailure, saveSettings, toDto, toState } from '../lib/settings';
 
 function pageParams(q: (k: string) => string | undefined) {
   const limit = Math.min(Math.max(Number(q('limit') ?? 20) || 20, 1), 100);
@@ -243,6 +245,50 @@ export const meRoutes = new Hono<AppEnv>()
       return c.json(r.note);
     } catch (e) {
       await countNote(c.env.DB, [failureMetric(e)]);
+      throw e;
+    }
+  })
+  /**
+   * The member's account settings (lib/settings.ts). One read by key; the sync mark is written at most every ten
+   * minutes, after the answer. `fails`: attempts that failed on the device since its last answer (counted). `for`: the
+   * account the device expects; another one signed in meanwhile is refused (409 settings_account).
+   */
+  .get('/settings', async (c) => {
+    const uid = c.var.user!.id;
+    const now = Date.now();
+    const expect = c.req.query('for');
+    if (expect !== undefined && expect !== uid) fail(409, 'settings_account', 'another account is signed in');
+    try {
+      const row = await readRow(c.env.DB, uid);
+      if (needsSyncMark(row, now)) c.executionCtx.waitUntil(markSynced(c.env.DB, uid, now).run().catch(() => undefined));
+      const fails = clientFails(Number(c.req.query('fails')) || 0);
+      if (fails) c.executionCtx.waitUntil(countSettings(c.env.DB, { ss_client_fail: fails }, now));
+      return c.json(toDto(toState(row)));
+    } catch (e) {
+      await countSettings(c.env.DB, { ss_load_fail: 1 }, now);
+      throw e;
+    }
+  })
+  /**
+   * Saves the settings and favourite tables a device changed: the newest change wins one at a time, and `kept` names what
+   * a newer change made elsewhere kept. 409 settings_reset, with the account's settings in details, when an administrator
+   * reset them since the device's epoch; 409 settings_busy when other saves kept landing in between. When the account's
+   * auto-muck changed, the tables the member sits at take it on.
+   */
+  .put('/settings', async (c) => {
+    const uid = c.var.user!.id;
+    try {
+      await rateLimit(c, `settings:${uid}`, 60, 60_000);
+      const input = await parseBody(c, SettingsSaveSchema);
+      if (input.user !== uid) fail(409, 'settings_account', 'another account is signed in');
+      const r = await saveSettings(c.env.DB, uid, input);
+      if (r.muck !== undefined) c.executionCtx.waitUntil(pushMuckEverywhere(c.env, uid, r.muck).catch(() => undefined));
+      if (r.mark) c.executionCtx.waitUntil(markSynced(c.env.DB, uid, Date.now()).run().catch(() => undefined));
+      const fails = clientFails(input.fails);
+      await countSettings(c.env.DB, fails ? { ...r.metrics, ss_client_fail: fails } : r.metrics);
+      return c.json({ settings: r.settings, kept: r.kept } satisfies SettingsSaveResult);
+    } catch (e) {
+      await countSettings(c.env.DB, { [saveFailure(e)]: 1 });
       throw e;
     }
   });

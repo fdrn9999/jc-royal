@@ -10,7 +10,7 @@ import './index.css';
 import { AuthProvider, useAuth } from './lib/auth';
 import { I18nProvider, initialLocale, loadLocale, useI18n } from './lib/i18n';
 import { startInstallWatch } from './lib/install';
-import { applyInitialTheme } from './lib/prefs';
+import { applyInitialTheme, closeAccount, openAccount, setSyncState } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { LobbyPage } from './pages/Lobby';
 import { TableRoute } from './pages/Table';
@@ -75,6 +75,37 @@ const loadMessages = () => import('./pages/Messages');
 function AcademySync() {
   const { me } = useAuth();
   useEffect(() => (me ? startAcademySync(me.id) : undefined), [me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+/**
+ * The account's settings and favourite tables while someone is signed in (prefs.ts); signed out, or another account,
+ * the previous one's leave the screen. The sync loads on demand: the settings already apply from this device meanwhile.
+ */
+function SettingsSync() {
+  const { me, loading, refresh } = useAuth();
+  const id = me?.id;
+  useEffect(() => {
+    if (loading) return;
+    if (!id) {
+      closeAccount();
+      return;
+    }
+    openAccount(id);
+    let gone = false;
+    let stop: (() => void) | undefined;
+    import('./lib/settings-sync').then(
+      (m) => {
+        if (!gone) stop = m.startSettingsSync(id, () => void refresh().catch(() => {}));
+      },
+      () => setSyncState('error'),
+    );
+    return () => {
+      gone = true;
+      stop?.();
+      closeAccount();
+    };
+  }, [id, loading]); // eslint-disable-line react-hooks/exhaustive-deps
   return null;
 }
 
@@ -151,6 +182,7 @@ const render = () =>
       <I18nProvider>
         <AuthProvider>
           <AcademySync />
+          <SettingsSync />
           <RouterProvider router={router} />
         </AuthProvider>
       </I18nProvider>

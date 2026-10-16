@@ -112,6 +112,9 @@ const auditNames = labeler({
   'refill.resume': 'auditRefillResume',
   'refill.stats': 'auditRefillStats',
   'refill.view': 'auditRefillView',
+  'settings.member': 'auditSettingsMember',
+  'settings.reset': 'auditSettingsReset',
+  'settings.restore': 'auditSettingsRestore',
   'service.notice.create': 'auditSvcNoticeCreate',
   'service.notice.delete': 'auditSvcNoticeDelete',
   'service.notice.end': 'auditSvcNoticeEnd',
@@ -154,7 +157,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'report', 'board', 'message', 'service', 'maintenance'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -166,6 +169,7 @@ export const auditFamilyLabel = labeler({
   refill: 'famRefill',
   bots: 'famBots',
   referral: 'famReferral',
+  settings: 'famSettings',
   report: 'famReport',
   board: 'famBoard',
   message: 'famMessage',
@@ -207,6 +211,7 @@ export const featureLabel = labeler({
   refill: 'featRefill',
   bots: 'featBots',
   referral: 'featReferral',
+  settings: 'featSettings',
   audit: 'audit',
   reports: 'reports',
   board: 'board',

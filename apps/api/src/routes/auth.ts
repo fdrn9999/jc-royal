@@ -379,6 +379,8 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.referralCodes).where(eq(schema.referralCodes.userId, me.id)),
       // The member's own bookmarks, tags and memos on hands (the hands themselves stay, below).
       db.delete(schema.handNotes).where(eq(schema.handNotes.userId, me.id)),
+      // Account settings and favourite tables, with what a reset kept to undo it.
+      db.delete(schema.userSettings).where(eq(schema.userSettings.userId, me.id)),
       db
         .update(schema.referrals)
         .set({

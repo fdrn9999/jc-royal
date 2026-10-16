@@ -13,7 +13,8 @@ import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { entryOf, latest, lobbyPoller, POLL_MS, setFavourite, useTablePrefs, type Latest } from '../lib/lobby';
+import { entryOf, latest, lobbyPoller, POLL_MS, useTablePrefs, type Latest } from '../lib/lobby';
+import { setFavourite, useFavourites } from '../lib/prefs';
 import { useMaintenance } from '../lib/service';
 import { siteUrl } from '../lib/share';
 
@@ -81,7 +82,9 @@ export function LobbyPage() {
   // Maintenance under way: the server refuses new rooms, quick play and seats, so those buttons wait for its end.
   const paused = useMaintenance().games;
 
-  const favs = useMemo(() => new Set(prefs.fav), [prefs.fav]);
+  // Favourite tables are the account's (every device); recently opened ones stay on this device.
+  const favList = useFavourites();
+  const favs = useMemo(() => new Set(favList), [favList]);
   const visited = useMemo(() => new Map(prefs.recent.map((r) => [r.id, r.at])), [prefs.recent]);
   const counts = useMemo(() => ({ fav: (tables ?? []).filter((tb) => favs.has(tb.id)).length, recent: (tables ?? []).filter((tb) => visited.has(tb.id)).length }), [tables, favs, visited]);
 
@@ -290,7 +293,7 @@ export function LobbyPage() {
                     type="button"
                     aria-pressed={fav}
                     aria-label={t(fav ? 'lobby.unfav' : 'lobby.fav', { name: tb.name })}
-                    onClick={() => me && setFavourite(me.id, tb.id, !fav)}
+                    onClick={() => setFavourite(tb.id, !fav)}
                     className={cx('jc-tap -mr-2 -mt-1.5 grid size-10 place-items-center rounded-lg text-xl transition hover:bg-white/5', fav ? 'text-gold-300' : 'text-ink-400 hover:text-ink-200')}
                     data-testid="fav-toggle"
                   >

@@ -61,7 +61,7 @@ test('mobile: auto-muck set in the table settings keeps a losing showdown hand f
   await a.page.getByRole('dialog').getByRole('button', { name: 'close' }).tap();
   await expect(a.page.getByRole('dialog')).toHaveCount(0);
 
-  // A reload keeps the device setting, and the room already has it: nothing is sent again.
+  // A reload keeps the setting (the account's), and the room already has it: nothing is sent again.
   await a.page.reload();
   await expect.poll(() => wa.autoMuck).toBe(true);
   await a.page.waitForTimeout(800);

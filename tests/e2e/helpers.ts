@@ -114,3 +114,18 @@ export async function sitWith(page: Page, tableId: string, buyIn: number) {
 export async function balanceOf(page: Page): Promise<number> {
   return page.evaluate(async () => ((await (await fetch('/api/auth/me')).json()) as { balance: number }).balance);
 }
+
+/**
+ * Sets synced settings of the account signed in on this page, as another device would (they are the account's, not the
+ * device's); the page shows them once it reads the account's settings, on its next load at the latest.
+ */
+export async function setAccountPrefs(page: Page, prefs: Record<string, unknown>) {
+  const status = await page.evaluate(async (p) => {
+    const me = (await (await fetch('/api/auth/me')).json()) as { id: string };
+    const s = (await (await fetch(`/api/me/settings?for=${me.id}`)).json()) as { epoch: number; rev: number };
+    const body = { user: me.id, epoch: s.epoch, base: s.rev, prefs: Object.fromEntries(Object.entries(p).map(([k, v]) => [k, { v, ago: 0 }])) };
+    const r = await fetch('/api/me/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return r.status;
+  }, prefs);
+  expect(status).toBe(200);
+}

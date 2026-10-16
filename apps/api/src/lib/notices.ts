@@ -58,6 +58,17 @@ const NOTICES = {
           : `추천 코드${other ? `('${other}' 님)` : ''}로 가입해 추천 보상을 받았습니다.`) +
         `\n+${n(amount)} 가상 칩이 지급되었습니다. 가입 축하 칩과 별도이며, 현금 가치가 없는 플레이 전용 가상 칩입니다.`,
     }),
+    /** Account settings reset by staff (apps/api/src/routes/admin-settings.ts). Never carries the staff reason. */
+    settingsReset: (): Notice => ({
+      title: '계정 설정 초기화 안내',
+      body:
+        '운영팀이 계정 설정(테마·4색 덱·초보자 모드·위험 액션 확인·자동 머크·금액 단위·빠른 반응·즐겨찾기 테이블)을 기본값으로 초기화했습니다.\n' +
+        '기기마다 다음 동기화 때 반영되며, 소리 등 기기별 설정은 그대로입니다. 설정에서 언제든 다시 바꿀 수 있습니다.',
+    }),
+    settingsRestored: (): Notice => ({
+      title: '계정 설정 복구 안내',
+      body: '운영팀이 초기화했던 계정 설정을 초기화 전 상태로 복구했습니다. 기기마다 다음 동기화 때 반영됩니다.',
+    }),
   },
   en: {
     welcome: (grant: number): Notice => ({
@@ -93,6 +104,16 @@ const NOTICES = {
           ? `${other ? `'${other}'` : 'A new member'} signed up with your referral code, so you received a referral reward.`
           : `You signed up with a referral code${other ? ` from '${other}'` : ''}, so you received a referral reward.`) +
         `\n+${n(amount)} virtual chips were added. They are separate from the welcome chips and are play-only virtual chips with no cash value.`,
+    }),
+    settingsReset: (): Notice => ({
+      title: 'Your account settings were reset',
+      body:
+        'Our team reset your account settings (theme, four-colour deck, beginner mode, risky action confirmation, auto-muck, amount unit, quick reactions and favourite tables) to the defaults.\n' +
+        'Each device picks this up the next time it syncs; settings kept on each device, such as sound, are unchanged. You can change them again in Settings at any time.',
+    }),
+    settingsRestored: (): Notice => ({
+      title: 'Your account settings were restored',
+      body: 'Our team restored the account settings that had been reset to what they were before. Each device picks this up the next time it syncs.',
     }),
   },
 } as const;

@@ -15,6 +15,7 @@ type Unit = 'day' | 'week' | 'month';
 type RoomPlay = { hands: number; tablesAvg: number | null; seats: number; seatMs: number };
 type AcademyKey = 'ac_lesson_start' | 'ac_lesson_done' | 'ac_scenario_start' | 'ac_scenario_done' | 'ac_answer' | 'ac_correct';
 type HandNoteKey = 'hn_bookmark' | 'hn_tag' | 'hn_memo' | 'hn_fail_conflict' | 'hn_fail_invalid' | 'hn_fail_notfound' | 'hn_fail_limit' | 'hn_fail_error';
+type SettingsKey = 'ss_save' | 'ss_legacy' | 'ss_conflict' | 'ss_stale' | 'ss_epoch' | 'ss_fail_invalid' | 'ss_fail_limit' | 'ss_fail_busy' | 'ss_fail_error' | 'ss_load_fail' | 'ss_client_fail' | 'ss_reset' | 'ss_restore';
 interface Period {
   from: string;
   to: string;
@@ -26,6 +27,8 @@ interface Period {
   reports: { created: number; handled: number; avgHandleMs: number | null };
   academy: Record<AcademyKey, number>;
   handNotes: Record<HandNoteKey, number>;
+  /** Account settings sync (absent from an older API). */
+  settings?: Record<SettingsKey, number>;
 }
 interface OpsStats {
   unit: Unit;
@@ -111,6 +114,7 @@ export function StatsPage() {
   const hn = tot.handNotes;
   const hnFailed = hn.hn_fail_conflict + hn.hn_fail_invalid + hn.hn_fail_notfound + hn.hn_fail_limit + hn.hn_fail_error;
   const now = d.handNotesNow;
+  const ss = tot.settings;
   return (
     <div className={`flex flex-col gap-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading} data-testid="stats-page">
       {header}
@@ -227,6 +231,25 @@ export function StatsPage() {
         </div>
         <p className="mt-3 text-xs text-ink-400">{t('osHnHint')}</p>
       </Panel>
+      {ss && (
+        <Panel title={t('osSettings')}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="stats-settings">
+            <Stat label={t('osSsSaved')} value={<span data-testid="stats-ss-saved">{num(ss.ss_save)}</span>} sub={t('osSsSavedSub', { l: num(ss.ss_legacy) })} />
+            <Stat
+              label={t('osSsConflict')}
+              value={<span data-testid="stats-ss-conflict">{num(ss.ss_conflict)}</span>}
+              sub={t('osSsConflictSub', { s: num(ss.ss_stale), e: num(ss.ss_epoch) })}
+            />
+            <Stat
+              label={t('osSsFailed')}
+              value={<span data-testid="stats-ss-failed">{num(ss.ss_fail_invalid + ss.ss_fail_limit + ss.ss_fail_busy + ss.ss_fail_error + ss.ss_load_fail + ss.ss_client_fail)}</span>}
+              sub={t('osSsFailedSub', { i: num(ss.ss_fail_invalid), l: num(ss.ss_fail_limit), b: num(ss.ss_fail_busy), e: num(ss.ss_fail_error), r: num(ss.ss_load_fail), c: num(ss.ss_client_fail) })}
+            />
+            <Stat label={t('osSsReset')} value={<span data-testid="stats-ss-reset">{num(ss.ss_reset)}</span>} sub={t('osSsResetSub', { r: num(ss.ss_restore) })} />
+          </div>
+          <p className="mt-3 text-xs text-ink-400">{t('osSsHint')}</p>
+        </Panel>
+      )}
       <Panel title={t('osHourly')}>
         <figure data-testid="stats-hourly">
           <div

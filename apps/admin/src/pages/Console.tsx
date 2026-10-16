@@ -22,6 +22,7 @@ import {
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
 import { dayStart, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
+import { MemberSettingsPanel } from './MemberSettings';
 import { MemberReferralPanel } from './Referrals';
 import { MemberRefillPanel, RefillRefLine, type RefillRef } from './Refill';
 
@@ -750,6 +751,7 @@ export function UserDetailPage() {
       <MemberHistoryPanel key={rev} userId={u.id} />
       <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />
       <MemberReferralPanel key={`referral${rev}`} userId={u.id} />
+      <MemberSettingsPanel key={`settings${rev}`} userId={u.id} />
       <Panel title={t('ledger')}>
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (

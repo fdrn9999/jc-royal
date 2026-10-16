@@ -10,7 +10,7 @@ import { MemberName, RoleBadge } from '../components/MemberName';
 import { useAmounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { AMOUNT_UNITS, setPrefs, usePrefs } from '../lib/prefs';
+import { AMOUNT_UNITS, pullSettings, setPrefs, usePrefs, useSettingsSync } from '../lib/prefs';
 import { RequestError, rid, type TableSocketApi } from './useTableSocket';
 
 /**
@@ -395,12 +395,44 @@ function useAudioSettings(): AudioSettings {
   );
 }
 
+/**
+ * Where the table look and aids are kept and how saving them goes: the account's, on every device. A failed save still
+ * applies here and is retried; an administrator's reset and a newer change from another device are told once.
+ */
+function SettingsSyncLine() {
+  const { t } = useI18n();
+  const { me } = useAuth();
+  const sync = useSettingsSync();
+  if (!me || sync.state === 'off') return null;
+  const text = { loading: 'settings.sync.loading', saving: 'settings.sync.saving', saved: 'settings.sync.saved', error: 'settings.sync.error' } as const;
+  return (
+    <div className="flex flex-col gap-1 text-xs" data-testid="settings-sync" data-state={sync.state}>
+      <div className="flex items-center justify-between gap-2">
+        <span role="status" className={sync.state === 'error' ? 'text-danger' : 'text-ink-300'}>
+          {t(text[sync.state])}
+        </span>
+        {sync.state === 'error' && (
+          <Button size="sm" variant="ghost" className="shrink-0" onClick={() => pullSettings(true)} data-testid="settings-sync-retry">
+            {t('settings.sync.retry')}
+          </Button>
+        )}
+      </div>
+      {sync.reset && <span className="text-ink-300">{t('settings.sync.reset')}</span>}
+      {sync.kept > 0 && <span className="text-ink-300">{t('settings.sync.kept')}</span>}
+    </div>
+  );
+}
+
 /** Sound, table look and language; from the header it also offers logout (`onLogout`), at a table its invite link (`top`). */
 export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean; onClose: () => void; onLogout?: () => void; top?: ReactNode }) {
   const { t, locale } = useI18n();
   const { chooseLocale } = useAuth();
   const prefs = usePrefs();
   const audio = useAudioSettings();
+  // Opening the settings reads the account's again unless they were a moment ago (another device may have changed them).
+  useEffect(() => {
+    if (open) pullSettings();
+  }, [open]);
   return (
     <Modal open={open} onClose={onClose} title={t('settings.title')}>
       <div className="flex flex-col gap-5">
@@ -412,6 +444,7 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
         )}
         <section className="flex flex-col gap-3">
           <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-ink-300">{t('settings.sound')}</h4>
+          <p className="-mt-1.5 text-xs text-ink-300">{t('settings.deviceOnly')}</p>
           <label className="flex items-center justify-between gap-3 text-sm">
             {t('settings.master')}
             <input type="range" min={0} max={1} step={0.05} value={audio.master} onChange={(e) => sound.update({ master: Number(e.target.value) })} className="w-40" />
@@ -428,6 +461,7 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
         <div className="jc-divider" />
         <section className="flex flex-col gap-3">
           <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-ink-300">{t('settings.theme')}</h4>
+          <SettingsSyncLine />
           <div className="grid grid-cols-2 gap-2">
             {THEMES.map((th) => (
               <button

@@ -105,6 +105,9 @@ const BY_CODE: Record<string, Key> = {
   referral_caps_order: 'errReferralCapsOrder',
   referral_not_in_review: 'errReferralNotInReview',
   referral_final: 'errReferralFinal',
+  settings_changed: 'errSettingsChanged',
+  settings_already_reset: 'errSettingsAlreadyReset',
+  settings_not_restorable: 'errSettingsNotRestorable',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

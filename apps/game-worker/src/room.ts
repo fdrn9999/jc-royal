@@ -602,6 +602,9 @@ export class TableRoom extends DurableObject<Env> {
           case 'role':
             // An admin changed this member's role (the api passes the stored value).
             return Response.json({ ok: true, seated: await this.refreshRole(url.searchParams.get('user') ?? '', url.searchParams.get('role') ?? 'user') });
+          case 'muck':
+            // The member's account auto-muck changed (their save on another device, or an admin's settings reset).
+            return Response.json({ ok: true, seated: await this.setAutoMuck(url.searchParams.get('user') ?? '', url.searchParams.get('on') === '1') });
           default:
             return new Response('not found', { status: 404 });
         }
@@ -2274,6 +2277,23 @@ export class TableRoom extends DurableObject<Env> {
       this.broadcast();
     }
     return this.seatIndexOf(userId) !== null;
+  }
+
+  /**
+   * The member's account auto-muck, pushed by the api when it changed: their seat takes it on for the next showdown, the
+   * same as their own 'muck' command (a hand already settled keeps what it was settled with). Only their view shows it.
+   * Returns whether the member holds a seat here.
+   */
+  private async setAutoMuck(userId: string, on: boolean): Promise<boolean> {
+    const i = userId ? this.seatIndexOf(userId) : null;
+    if (i === null) return false;
+    const seat = this.room.seats[i]!;
+    if (!!seat.autoMuck !== on) {
+      seat.autoMuck = on;
+      await this.save();
+      this.sendView(userId);
+    }
+    return true;
   }
 
   /** Seats whose cards the showdown of the settled hand `h` turned over for everybody. */

@@ -77,6 +77,7 @@ export const FEATURES = [
   'refill',
   'bots',
   'referral',
+  'settings',
   'audit',
   'reports',
   'board',
@@ -177,6 +178,13 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /referrals/:id/reject': r('referral', 'referral.reject', { reauth, target: 'referral' }),
   'POST /referrals/:id/settle': r('referral', 'referral.settle', { target: 'referral' }),
   'GET /users/:id/referral': r('referral', 'referral.member', { target: 'user' }),
+
+  // A member's account settings (routes/admin-settings.ts): what diagnosing a sync problem needs, never the values, and
+  // no editing. Anyone on duty may reset them to the defaults or undo that reset (password and reason; an administrator
+  // as the target needs admins.manage).
+  'GET /users/:id/settings': r('settings', 'settings.member', { target: 'user' }),
+  'POST /users/:id/settings/reset': r('settings', 'settings.reset', { reauth, preview, target: 'user' }),
+  'POST /users/:id/settings/restore': r('settings', 'settings.restore', { reauth, preview, target: 'user' }),
 
   'GET /board/posts': r('board', 'board.list'),
   'GET /board/posts/:id': r('board', 'board.view', { target: 'post' }),

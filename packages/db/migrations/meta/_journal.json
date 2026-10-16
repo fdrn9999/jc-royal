@@ -169,6 +169,13 @@
       "when": 1792171028309,
       "tag": "0023_hand_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792177631620,
+      "tag": "0024_user_settings",
+      "breakpoints": true
     }
   ]
 }

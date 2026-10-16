@@ -7,7 +7,7 @@
  *   a new day). Only the day is kept, never a time, page or count, and only for ACTIVE_DAYS_RETENTION days: daily,
  *   weekly and monthly active members are counted from it and kept as numbers in `daily_stats`.
  * - `daily_stats`: one number per day and metric. Most are rolled up once a day from the records the service keeps
- *   anyway (accounts, seats, hands, reports); the Academy, free refill and hand note counters are added as events arrive. Day 0
+ *   anyway (accounts, seats, hands, reports); the Academy, free refill, hand note and settings counters are added as events arrive. Day 0
  *   holds markers.
  */
 export const STATS_TZ_OFFSET_MS = 9 * 60 * 60_000;
@@ -49,6 +49,30 @@ export const HAND_NOTE_METRICS = [
 ] as const;
 export type HandNoteMetric = (typeof HAND_NOTE_METRICS)[number];
 
+/**
+ * Account settings (GET/PUT /api/me/settings, apps/api/src/lib/settings.ts): saves that changed something, a device's
+ * settings from before sync taken in, saves made over a revision another device had changed (conflict), changes a newer
+ * one kept out (stale), saves refused after a reset (epoch), saves and loads that failed per reason, attempts a device
+ * says failed before it could reach the server, and administrators' resets and restores. Numbers only, never per
+ * member, never a value. Added as they happen and kept by the daily rollup.
+ */
+export const SETTINGS_METRICS = [
+  'ss_save',
+  'ss_legacy',
+  'ss_conflict',
+  'ss_stale',
+  'ss_epoch',
+  'ss_fail_invalid',
+  'ss_fail_limit',
+  'ss_fail_busy',
+  'ss_fail_error',
+  'ss_load_fail',
+  'ss_client_fail',
+  'ss_reset',
+  'ss_restore',
+] as const;
+export type SettingsMetric = (typeof SETTINGS_METRICS)[number];
+
 /** Markers on day 0: the first day with activity markers, and the last day rolled up. */
 export const STATS_MARKER_DAY = 0;
 
@@ -58,7 +82,7 @@ export function activeDayInsert(d1: D1Database, userId: string, at: number): D1P
 }
 
 /** One statement per counter: adds `n` to the day's row. */
-export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric | RefillMetric | HandNoteMetric, number>>): D1PreparedStatement[] {
+export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric | RefillMetric | HandNoteMetric | SettingsMetric, number>>): D1PreparedStatement[] {
   return Object.entries(counts)
     .filter(([, n]) => (n ?? 0) > 0)
     .map(([metric, n]) =>

@@ -1,6 +1,6 @@
 import type { HandDetailDto } from '@jc/types';
 import { expect, type Page } from '@playwright/test';
-import { setRange, signUp, test } from './helpers';
+import { setAccountPrefs, setRange, signUp, test } from './helpers';
 import { build, HAND_6 } from './replay-hands';
 
 /** Heads-up, over before the flop: the big blind raises a limp to 300 and the small blind folds. */
@@ -119,7 +119,7 @@ test('replay timeline: a hand over before the flop has nothing past it; English 
   const { page } = await signUp(browser);
   // A signed-in member's language is the account's: chosen in the header, saved before the page reloads.
   await Promise.all([page.waitForResponse((r) => r.url().endsWith('/api/auth/me') && r.request().method() === 'PATCH'), page.getByRole('button', { name: 'EN', exact: true }).click()]);
-  await page.evaluate(() => localStorage.setItem('jc.prefs', JSON.stringify({ amountUnit: 'bb' })));
+  await setAccountPrefs(page, { amountUnit: 'bb' });
   await open(page, FOLDED);
   const index = page.getByTestId('replay-index');
   const line = page.getByTestId('replay-step');

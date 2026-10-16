@@ -273,6 +273,36 @@ export const handNotes = sqliteTable(
   (t) => [primaryKey({ columns: [t.userId, t.handId] }), index('hand_notes_user_idx').on(t.userId, t.endedAt)],
 );
 
+/**
+ * A member's account settings (apps/api/src/lib/settings.ts): the table look and aids and the favourite tables, the
+ * same on every device. Each value carries when it was changed (by the server's clock) and the revision that changed
+ * it, so the newest change wins one setting or table at a time. An administrator may reset it (never edit it): the
+ * values before are kept in `prev` for SETTINGS_RESTORE_MS, and `epoch` tells devices to drop what they had not saved.
+ * Removed when the member withdraws.
+ */
+export const userSettings = sqliteTable('user_settings', {
+  userId: text('user_id').primaryKey(),
+  /** {setting: [value, changedAt, rev]}: only settings the account has a value for. */
+  prefs: text('prefs').notNull().default('{}'),
+  /** {tableId: [1 on | 0 off, changedAt, rev]}: tables taken off stay a while, so an older device can't add them back. */
+  fav: text('fav').notNull().default('{}'),
+  rev: integer('rev').notNull().default(0),
+  epoch: integer('epoch').notNull().default(0),
+  schemaVersion: integer('schema_version').notNull().default(1),
+  createdAt: integer('created_at').notNull().default(now),
+  updatedAt: integer('updated_at').notNull().default(now),
+  /** The member's devices last loaded or saved them (written at most every SETTINGS_SYNC_MARK_MS). */
+  syncedAt: integer('synced_at'),
+  resetAt: integer('reset_at'),
+  resetBy: text('reset_by'),
+  /** The revision the reset made: it can be undone only while `rev` is still this. */
+  resetRev: integer('reset_rev'),
+  /** {prefs, fav} before the reset, until it is undone or the member changes something. */
+  prev: text('prev'),
+  /** When the last reset was undone (null while it stands). */
+  restoredAt: integer('restored_at'),
+});
+
 export const adminAuditLog = sqliteTable(
   'admin_audit_log',
   {
