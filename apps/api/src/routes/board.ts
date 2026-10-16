@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import { CommentCreateSchema, CommentInputSchema, PostInputSchema, type AuthorDto, type CommentDto, type MyCommentDto, type PostDetailDto, type PostListItemDto, type PostPageDto } from '@jc/types';
+import { CommentCreateSchema, CommentInputSchema, PostInputSchema, publicRole, type AuthorDto, type CommentDto, type MyCommentDto, type PostDetailDto, type PostListItemDto, type PostPageDto } from '@jc/types';
 import { and, count, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { Hono, type Context } from 'hono';
@@ -21,10 +21,11 @@ const author = {
 
 type AuthorRow = { id: string; nickname: string; avatarUrl: string | null; role: string; status: string };
 /** Posts and comments outlive a deleted account; its tombstone nickname is not shown, only "withdrawn member". */
-const toAuthor = (a: AuthorRow): AuthorDto =>
-  a.status === 'deleted'
-    ? { id: a.id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true }
-    : { id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: a.role !== 'user' };
+const toAuthor = (a: AuthorRow): AuthorDto => {
+  if (a.status === 'deleted') return { id: a.id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true };
+  const role = publicRole(a.role);
+  return { id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: a.role !== 'user', ...(role ? { role } : {}) };
+};
 
 export async function listItems(c: Context<AppEnv>, where: ReturnType<typeof and>, limit: number, offset: number): Promise<PostListItemDto[]> {
   const rows = await c.var.db

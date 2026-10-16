@@ -3,6 +3,7 @@ import { Button, formatChips, formatDate, PlayingCard } from '@jc/ui';
 import { useState } from 'react';
 import { HandReplay } from '../game/HandReplay';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { MemberName } from './MemberName';
 
 const STAGES = ['preflop', 'flop', 'turn', 'river'] as const;
 /** Board cards revealed on each street. */
@@ -40,7 +41,9 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
         {hand.players.map((p) => (
           <li key={p.seatIndex} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${p.isAuthor ? 'bg-gold-500/10' : 'bg-white/[0.03]'}`}>
             <span className="flex gap-0.5">{(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.5rem" />)}</span>
-            <span className={`min-w-0 flex-1 truncate ${p.isAuthor ? 'font-semibold text-gold-300' : ''}`}>{p.nickname}</span>
+            <span className="flex min-w-0 flex-1">
+              <MemberName name={p.nickname} role={p.role} className={p.isAuthor ? 'font-semibold text-gold-300' : undefined} />
+            </span>
             {p.rankClass && <span className="text-[11px] text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
             <span className={`font-mono text-xs tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{p.net > 0 ? '+' : ''}{formatChips(p.net)}</span>
           </li>

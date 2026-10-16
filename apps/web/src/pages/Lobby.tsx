@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
 import { JoinCodeModal } from '../components/JoinCode';
+import { HostedBy } from '../components/MemberName';
 import { ANY, QuickPlayPanel, useLobbyFilters } from '../components/QuickPlay';
 import { CreateRoomModal } from '../components/Rooms';
 import { ShareButton } from '../components/Share';
@@ -250,7 +251,7 @@ export function LobbyPage() {
                     {tb.host && (
                       <span data-testid="member-badge" className="min-w-0 max-w-full">
                         <Badge className="max-w-full">
-                          <span className="truncate">👤 {t('room.hostedBy', { name: tb.host.nickname })}</span>
+                          <HostedBy host={tb.host} />
                         </Badge>
                       </span>
                     )}

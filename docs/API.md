@@ -7,6 +7,7 @@
 - **인증**: 사용자 사이트는 `jc_sid` 쿠키, 관리자 콘솔은 `jc_asid` 쿠키를 씁니다. 둘 다 HttpOnly입니다.
 - **CSRF 방어**: 상태를 바꾸는 요청은 허용된 `Origin`과 `Content-Type: application/json`이 있어야 합니다.
 - **입력 검증**: zod 스키마는 `packages/types/src/api.ts`와 `community.ts`에 있습니다.
+- **운영진 표시 `role`**: 다른 회원에게 보이는 회원 정보(친구·친구 요청·차단 목록, 1:1 대화 상대, 게시판 글·댓글 작성자, 로비의 방장 `host`, 핸드 기록·리뷰의 `players[]`)에는 서버가 `users.role`에서 읽은 `role`이 관리자에게만 붙습니다: `'super_admin'` 또는 `'admin'`. 일반 회원은 필드 자체가 없습니다. 요청 본문의 `role`은 어디서도 읽지 않습니다. 역할이 바뀌면 다음 응답부터 바뀐 값이 나가고, 핸드 기록도 기록 당시가 아니라 지금 역할을 보여 줍니다.
 
 ## 인증 `/api/auth`
 
@@ -57,7 +58,7 @@
 | POST | `/api/tables/:id/access` | 비공개 테이블 참가 코드 확인 `{code(1–64자)}` → `{ok:true}`와 참가 티켓 쿠키 `jc_room_<id>`(HttpOnly, SameSite=Strict, Path=`/ws/tables/<id>`, 12시간). 공개 테이블과 회원 방의 방장은 쿠키 없이 `{ok:true}`. 틀린 코드 403 `bad_join_code`, 없거나 종료된 테이블 404. 맞든 틀리든 시도마다 회원당 10분에 10회, IP당 10분에 30회(429 `rate_limited`) |
 | GET(upgrade) | `/ws/tables/:id` | WebSocket. 세션 쿠키와 Origin 필수. 비공개 테이블은 참가 티켓이 있어야 착석·대기 등록 가능(관전이 꺼진 방은 티켓 없으면 4003) → `docs/WEBSOCKET_PROTOCOL.md` |
 
-로비 응답의 각 테이블에는 `roomType`(`official`/`member`)과 `host`(회원 방이면 `{id,nickname}`, 공식 테이블이면 `null`)가 있습니다. 공식 테이블이 먼저, 회원 방이 뒤에 나옵니다.
+로비 응답의 각 테이블에는 `roomType`(`official`/`member`)과 `host`(회원 방이면 `{id,nickname}`, 공식 테이블이면 `null`, 방장이 관리자면 `role`도)가 있습니다. 공식 테이블이 먼저, 회원 방이 뒤에 나옵니다.
 
 빠른 참가는 열린 공개 테이블(비공개·입장 제한 제외, 이미 앉아 있는 테이블과 `exclude` 제외) 가운데 `maxSeats`·`bigBlind`가 일치하는 것만 봅니다. 순서는 로비 수치상 빈자리가 있어 보이는 테이블 → 입문자(완료 핸드 50 미만)에게는 입문 테이블 먼저, 그 밖의 플레이어에게는 입문 테이블을 나중에 → 착석 인원이 많은 순 → 낮은 블라인드 → 공식 테이블 → id 순입니다. 로비 수치는 늦을 수 있으므로 상위 5개 테이블에 차례로 테이블 룸(Durable Object)의 착석 검사(`sit`과 같은 검사, 지갑 제외)를 물어 처음 통과한 테이블을 돌려줍니다. 자리를 잡아 두지는 않으므로 실제 착석은 `sit`이 다시 검사합니다. 실패 코드는 `404 no_table`(조건에 맞는 테이블 없음), `409 insufficient_balance`(`details: {minBuyIn, balance}`, 맞는 테이블 중 가장 낮은 최소 바이인도 지갑보다 큼), `409 tables_full`(검사한 테이블이 모두 찼거나 대기 명단 우선)입니다.
 
@@ -102,7 +103,7 @@
 | POST | `/posts/:id/comments` | `{body(≤1000), parentId?}`. 답글의 답글은 같은 묶음에 `@닉네임`으로 붙음 |
 | PATCH / DELETE | `/comments/:id` | 작성자만 가능. 답글이 있는 댓글을 삭제하면 자리표시로 남음 |
 
-탈퇴한 회원의 글·댓글은 작성자가 `{id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true}`로 오고 화면은 "탈퇴한 회원"으로 표시한다. 탈퇴한 회원에게 단 답글의 `replyTo`는 `null`.
+탈퇴한 회원의 글·댓글은 작성자가 `{id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true}`로 오고(`role` 없음) 화면은 "탈퇴한 회원"으로 표시한다. 탈퇴한 회원에게 단 답글의 `replyTo`는 `null`.
 
 ## 쪽지 `/api/messages` (수신 전용)
 
@@ -196,7 +197,7 @@
 | POST | `/users/export` 🔒 | 슈퍼관리자만(그 밖은 403 `super admin only`). `{userIds(1-1000)}` → `{filename, count, csv}`. 열: id, email, nickname, language, role, status, balance, joined_at_utc, birth_date, email_verified_at_utc, privacy_notice_version, privacy_agreed_at_utc, suspended_reason. `=`·`+`·`-`·`@`로 시작하는 칸은 `'`를 붙여 수식 실행 방지. 감사 로그 `user.export`(대상 ID, 건수) |
 | POST | `/users/:id/suspend` 🔒👁 · `/unsuspend` 🔒👁 | 미리보기: 정지 `{member{nickname,role,status}, sessions{user,admin}, seats[{tableId,tableName,seatIndex,buyIn}], buyIns}`, 해제 `{member{nickname,role}, from, to, suspendedReason}`. 정지 `{reason(2–200자), reportId?}` → `{ok, kick}`(`reportId`: 이 정지를 준 신고. 그 신고의 대상이 이 회원이 아니거나 없는 신고면 400 `the report is not about this member`. 신고 처리 기록에 `sanction`, 감사 로그에 `reportId`를 남긴다. 신고는 열린 채로 둔다): 세션 폐기, 열린 테이블 연결 종료와 자리 정리(아래 `kick`), 회원 계정 언어로 제재 쪽지 자동 발송. 감사 로그 `user.suspend`에 `{reason, from, to, previousReason, kick}`. 정지는 `active` 회원만 바꾼다: 이미 정지된 회원은 409 `already_suspended`(사유·쪽지·정지 기록은 그대로), 탈퇴한 계정은 404 `user not found`. 409여도 미리보기가 아니면 그 회원의 테이블에 한 번 더 연결 종료·자리 정리를 요청하고 결과를 `error.details.kick`으로 돌려준다(앞선 정지 요청이 상태만 바꾸고 테이블에 닿기 전에 끊겼을 때 다시 보내면 마무리된다). 이 거절은 감사 로그 `user.suspend.failed`에 `kick`과 함께 남는다. 상태 변경 직후 가장 먼저 테이블에 알리고, 신고 처리 기록·쪽지·감사는 그다음이다. 두 관리자가 동시에 정지해도 상태 변경·제재 쪽지·감사 기록은 하나이고 늦은 쪽은 409를 받는다. 해제도 `{reason(2–200자)}`가 필요(없으면 400)하고 상태만 되돌림. 감사 로그 `user.unsuspend`에 `{reason, from, to, suspendedReason}`(지워지는 정지 사유를 함께 남김) |
 | POST | `/users/:id/disconnect` 🔒👁 | 미리보기 `{member, removeFromTable, sessions, seats, buyIns}`. 강제 연결 종료(정지 아님) `{reason(2–200자), removeFromTable?(기본 false)}` → `{ok, sessions, kick}`. 회원의 로그인 세션을 모두 지우고 열린 테이블 연결을 닫음(다시 로그인 가능). `removeFromTable`이면 자리·대기 명단에서도 빠짐. 자기 계정 400 `cannot disconnect yourself`, 관리자 대상은 슈퍼관리자만(403). 감사 로그 `user.disconnect`(사유, 세션 수, `kick`) |
-| POST | `/users/:id/role` 🔒👁 | 슈퍼관리자만. `{role, reason(2–200자)}`(사유 없으면 400). 미리보기 `{member{nickname,status}, from, to, console{from,to}, adminSessions, capabilities{gained,lost}}`(콘솔 접속 가능 여부 전후, 지워질 관리자 세션 수). 대상의 관리자 세션 즉시 폐기. 감사 로그 `user.role`에 `{from, to, reason}` |
+| POST | `/users/:id/role` 🔒👁 | 슈퍼관리자만. `{role, reason(2–200자)}`(사유 없으면 400). 미리보기 `{member{nickname,status}, from, to, console{from,to}, adminSessions, capabilities{gained,lost}}`(콘솔 접속 가능 여부 전후, 지워질 관리자 세션 수). 대상의 관리자 세션 즉시 폐기. 저장 응답 `{ok, tables:{tables, reached}}`: 대상이 앉아 있는 테이블 수와 그중 바뀐 표시를 받은 룸 수. 답하지 않은 룸은 대상이 다시 연결할 때 맞춰지므로 변경은 실패하지 않는다. 감사 로그 `user.role`에 `{from, to, reason}` |
 | POST | `/users/:id/chips` 🔒👁 | 미리보기 `{member, amount, balanceBefore, balanceAfter, large, duplicate}`(`duplicate`: 같은 키로 이미 처리됨). 미리보기에서도 거절 조건(관리자 대상·큰 금액·음수 잔액)은 같은 오류로 거절된다. `{amount(±), memo, idempotencyKey}` — 음수 잔액 불가(409 `insufficient_balance`), 회원 계정 언어로 쪽지 자동 발송. 절대값 100,000 이상은 슈퍼관리자만(그 밖은 403 `large_adjustment`). 같은 `idempotencyKey`를 다시 보내면 원장·잔액은 그대로 두고 처음 결과를 돌려준다. 거절은 감사 로그 `user.chips_refused`(`reason` forbidden·large_adjustment·insufficient_balance, 금액, 메모), 중복 요청은 `user.chips_duplicate`(금액, 메모, 원래 원장 ID)로 남는다 |
 | POST | `/users/:id/reset-link` 🔒 | 30분 1회용 링크 → `{path, url, expiresInMinutes, locale, mailed, message:{subject,text}}`. 회원 계정 언어의 안내문을 만들고, 메일이 설정돼 있으면 발송(`mailed`). 자기 계정 400, 관리자 대상은 슈퍼관리자만(403) |
 | GET / POST | `/tables?paged=1&q&status&roomType&issue=1&limit(≤200)&offset` | 목록과 생성(2·6·9석, 최소 바이인 ≥ 10BB). 목록은 만든 최신 순이고 참가 코드 해시 대신 `hasJoinCode`만 준다. `paged=1`이면 검색 `q`(이름 일부나 정확한 테이블 ID, 64자까지)와 필터(`status` open·closing·closed·`active`(닫히지 않은 테이블), `roomType` official·member, `issue=1`이면 룸이 문제를 보고한 테이블만; 모르는 값은 무시)를 받아 `{items, total, limit, offset}`, 아니면 전체 배열(예전 형식). 감사 로그 없음(카드·잔액이 없는 운영 정보) |

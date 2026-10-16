@@ -3,6 +3,7 @@ import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PlayingCa
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { HandReview } from '../components/HandReview';
+import { MemberName, RoleBadge } from '../components/MemberName';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -16,14 +17,16 @@ function AuthorName({ a, onPick }: { a: PostListItemDto['author']; onPick?: (a: 
   const { me } = useAuth();
   if (a.withdrawn) return <span className="font-normal italic text-ink-400" data-testid="author-withdrawn">{t('board.withdrawn')}</span>;
   const name = onPick && a.id !== me?.id ? (
-    <button type="button" className="font-semibold text-ink-100 hover:text-gold-300 hover:underline" onClick={() => onPick(a)} data-testid="author-name">{a.nickname}</button>
+    <button type="button" className="min-w-0 font-semibold text-ink-100 hover:text-gold-300 hover:underline" onClick={() => onPick(a)} data-testid="author-name">
+      <MemberName name={a.nickname} role={a.role} />
+    </button>
   ) : (
-    a.nickname
+    <MemberName name={a.nickname} role={a.role} />
   );
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1">
       {name}
-      {a.isAdmin && <Badge tone="gold">{t('board.admin')}</Badge>}
+      <RoleBadge role={a.role} />
     </span>
   );
 }
@@ -39,10 +42,10 @@ function PostRow({ p, notice }: { p: PostListItemDto; notice?: boolean }) {
           {p.commentCount > 0 && <span className="shrink-0 text-xs font-semibold text-gold-400">[{p.commentCount}]</span>}
           {p.handCount > 0 && <span className="shrink-0 rounded bg-success/15 px-1 text-[10px] font-bold text-[#9fd8b6]">♠ {p.handCount}</span>}
         </span>
-        <span className="flex shrink-0 gap-3 text-xs text-ink-400">
+        <span className="flex min-w-0 gap-3 text-xs text-ink-400 sm:shrink-0">
           <AuthorName a={p.author} />
-          <span>{formatDate(p.createdAt, locale)}</span>
-          <span>{t('board.views', { n: p.viewCount })}</span>
+          <span className="shrink-0">{formatDate(p.createdAt, locale)}</span>
+          <span className="shrink-0">{t('board.views', { n: p.viewCount })}</span>
         </span>
       </Link>
     </li>

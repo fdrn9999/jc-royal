@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import { NEWCOMER_HANDS, QuickPlaySchema, TableAccessSchema, type LobbyTableDto, type QuickPlayDto } from '@jc/types';
+import { NEWCOMER_HANDS, publicRole, QuickPlaySchema, TableAccessSchema, type LobbyTableDto, type QuickPlayDto } from '@jc/types';
 import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import { Hono, type Context, type Handler } from 'hono';
 import type { AppEnv } from '../env';
@@ -17,12 +17,13 @@ type TableRow = typeof schema.tables.$inferSelect;
 /** Tables quick play asks the room about, best ranked first, before giving up with tables_full. */
 const QUICK_PLAY_CHECKS = 5;
 
-export function toLobbyDto(t: TableRow, hostNickname: string | null = null): LobbyTableDto {
+export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null): LobbyTableDto {
+  const role = publicRole(hostUser?.role);
   return {
     id: t.id,
     name: t.name,
     roomType: t.roomType,
-    host: t.roomType === 'member' && t.createdBy ? { id: t.createdBy, nickname: hostNickname ?? '' } : null,
+    host: t.roomType === 'member' && t.createdBy ? { id: t.createdBy, nickname: hostUser?.nickname ?? '', ...(role ? { role } : {}) } : null,
     maxSeats: t.maxSeats,
     smallBlind: t.smallBlind,
     bigBlind: t.bigBlind,
@@ -58,9 +59,15 @@ export interface RoomIdentity {
   authAt: number;
 }
 
-/** Tables with the nickname of the member who opened them. */
+/** The member who opened a table: nickname and role (for the staff badge). */
+type HostUser = { nickname: string; role: string };
+
+/** Tables with the member who opened them. */
 const withHost = (c: Context<AppEnv>) =>
-  c.var.db.select({ t: schema.tables, host: schema.users.nickname }).from(schema.tables).leftJoin(schema.users, eq(schema.users.id, schema.tables.createdBy));
+  c.var.db
+    .select({ t: schema.tables, host: { nickname: schema.users.nickname, role: schema.users.role } })
+    .from(schema.tables)
+    .leftJoin(schema.users, eq(schema.users.id, schema.tables.createdBy));
 
 export const tableRoutes = new Hono<AppEnv>()
   .use('*', requireUser)

@@ -45,7 +45,7 @@
 | t | 내용 |
 |---|---|
 | `state` | `{ state: TableView, cues: TableCue[] }`. 이 화면을 보는 사람 기준으로 투영된 전체 상태 |
-| `chatHistory` / `chat` | 최근 채팅 50개, 새 메시지 |
+| `chatHistory` / `chat` | 최근 채팅 50개, 새 메시지. 관리자가 쓴 줄에는 `role`(아래 '운영진 표시') |
 | `ack` | `{reqId}`: `reqId`를 단 명령의 성공(대기열에 들어간 충전 포함). 액션은 `reqId` 자리에 `intentId`. 이미 처리한 명령을 다시 받아도 `ack`만 다시 보냄 |
 | `error` | `{code, message, reqId?}` |
 | `notice` | `{code, amount?}`: 해당 플레이어에게만 보냄. 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과: `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐). 사전 액션을 지키지 못했을 때: `preaction_cancelled` |
@@ -55,7 +55,7 @@
 ### TableView (요약, 정의는 `packages/types/src/table.ts`)
 
 - **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정, 회원 방이면 `roomType:'member'`와 방장 `hostId`), `status`(waiting/playing/closing/closed).
-- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`.
+- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시').
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 자동 머크로 공개되지 않은 패는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
   - `shown`은 핸드가 끝난 뒤 주인이 보이기로 고른 카드입니다. `[카드 또는 null, 카드 또는 null]`로 고른 자리에만 카드가 있고, 고르지 않은 카드는 누구에게도 보내지 않습니다. 쇼다운에서 이미 공개된 좌석과 고른 카드가 없는 좌석에는 이 필드가 없습니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
@@ -108,6 +108,14 @@
 - **유지 기간**: 룸 상태에 저장되므로 재접속해도 같은 핸드 동안 남고, 다음 핸드를 시작할 때 지웁니다. 이후 설정을 꺼도 이미 보인 카드는 그 핸드 동안 남습니다.
 - **기록**: 핸드 기록(`hand_players.shown`)·리플레이·커뮤니티 리뷰에는 넣지 않습니다. 보이기는 그 자리에서 보여 주는 것일 뿐이라, 기록의 공개 규칙은 위 '쇼다운 머크' 그대로입니다.
 - **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `show`를 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보내고 `canShow`를 보내지 않으므로, 새 웹은 버튼을 그리지 않습니다.
+
+## 운영진 표시 (`role`)
+
+- **값**: `'super_admin'` 또는 `'admin'`. 일반 회원의 좌석·채팅 줄에는 필드가 없습니다. 출처는 api가 세션을 확인하며 D1 `users.role`에서 읽어 핸드셰이크 신원에 넣은 값뿐이고, 클라이언트가 보낸 `role`(`sit`·`chat` 등)은 스키마가 버립니다.
+- **좌석**: 앉을 때 그 연결의 역할을 좌석에 붙이고, 이후 핸드셰이크마다 다시 맞춥니다(역할이 바뀐 뒤 처음 연결할 때 반영).
+- **채팅**: 게시할 때 그 연결의 역할을 줄에 붙입니다. 이미 게시된 줄은 바뀌지 않습니다.
+- **역할 변경 즉시 반영**: 관리자 콘솔에서 역할을 바꾸면 api가 그 회원이 앉아 있는 테이블의 룸에 내부 요청 `role`(`?user=&role=`, 값은 D1에 저장된 역할)을 보냅니다. 룸은 그 회원의 열린 연결 신원을 고치고(다음 채팅부터 새 역할), 좌석 표시가 바뀌면 저장한 뒤 모두에게 `state`를 보냅니다(`version` 증가). 응답 `{ok, seated}`. 앉아 있지 않은 테이블의 관전 연결은 다시 연결할 때 맞춰집니다.
+- **배포 순서**: api와 game-worker를 먼저, 웹을 나중에. 이전 룸은 `role`을 보내지 않으므로 새 웹은 표시 없이 그대로 그립니다. 이전 룸이 내부 `role` 요청을 모르면 api는 `reached`에서 빼고 역할 변경은 그대로 저장합니다.
 
 ## 웹 클라이언트의 전달 규칙 (`apps/web/src/game/link.ts`, `useTableSocket.ts`)
 

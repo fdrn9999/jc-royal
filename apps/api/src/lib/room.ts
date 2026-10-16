@@ -3,7 +3,7 @@ import type { AppEnv, Env } from '../env';
 import { INTERNAL_HEADER } from '../routes/tables';
 import { fail } from './http';
 
-type RoomAction = 'status' | 'reload' | 'close' | 'seat-check' | 'kick';
+type RoomAction = 'status' | 'reload' | 'close' | 'seat-check' | 'kick' | 'role';
 
 /** Calls a table room's internal endpoint with the worker's bindings (also from the cron handler). Null when unreachable. */
 export async function roomCallEnv(env: Env, tableId: string, action: RoomAction, query: Record<string, string> = {}): Promise<Record<string, unknown> | null> {
@@ -95,6 +95,19 @@ export async function kickEverywhere(env: Env, userId: string, reason: 'suspende
     if (typeof r.seat === 'string' && r.seat !== 'none') report.seats.push({ tableId: id, seat: r.seat });
   }
   return report;
+}
+
+/**
+ * After an admin changes a member's role: the tables where they sit show the new staff badge (or none) at once. A room
+ * that does not answer catches up when the member next connects (the handshake carries the role read from D1), so this
+ * never fails the change. Spectating connections pick up the role the same way.
+ */
+export async function refreshRoleEverywhere(env: Env, userId: string, role: string): Promise<{ tables: number; reached: number }> {
+  const { results } = await env.DB.prepare(`SELECT DISTINCT table_id AS id FROM table_sessions WHERE user_id = ?1 AND status = 'seated'`)
+    .bind(userId)
+    .all<{ id: string }>();
+  const answers = await Promise.all(results.map(({ id }) => roomCallEnv(env, id, 'role', { user: userId, role })));
+  return { tables: results.length, reached: answers.filter(Boolean).length };
 }
 
 /**

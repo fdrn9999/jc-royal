@@ -28,7 +28,7 @@ import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
 import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
-import { kickEverywhere, roomCall } from '../lib/room';
+import { kickEverywhere, refreshRoleEverywhere, roomCall } from '../lib/room';
 
 /** "Online": a member session used within this long (the dashboard counts the same way). */
 const ONLINE_MS = 5 * 60_000;
@@ -712,7 +712,9 @@ const admin = new Hono<AppEnv>()
     // Role changes take effect immediately: drop existing admin sessions of the target.
     await c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
-    return c.json({ ok: true });
+    // The staff badge other players see at the tables where the member sits.
+    const tables = await refreshRoleEverywhere(c.env, id, body.role);
+    return c.json({ ok: true, tables });
   })
   /**
    * `preview` (the same body, idempotency key included): the balance before and after, whether it is a large

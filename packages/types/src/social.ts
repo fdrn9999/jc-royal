@@ -1,5 +1,18 @@
 import { z } from 'zod';
 
+// ------------------------------------------------------------------ public role
+
+/**
+ * The staff role other players see next to a name (SUPER ADMIN, ADMIN). Taken from `users.role` on the server only;
+ * ordinary members carry none, so the field is simply absent for them.
+ */
+export type PublicRole = 'admin' | 'super_admin';
+
+/** The public role of a stored `users.role` value: staff roles only. */
+export function publicRole(role: string | null | undefined): PublicRole | undefined {
+  return role === 'admin' || role === 'super_admin' ? role : undefined;
+}
+
 // ------------------------------------------------------------------ friends
 
 /** A user as shown to other players: never email or other private fields. */
@@ -7,6 +20,8 @@ export interface PublicUserDto {
   id: string;
   nickname: string;
   avatarUrl: string | null;
+  /** Staff only (see PublicRole). */
+  role?: PublicRole;
 }
 
 export interface FriendDto extends PublicUserDto {

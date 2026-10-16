@@ -5,6 +5,7 @@
  */
 import { Button, formatChips } from '@jc/ui';
 import { useEffect, useMemo, useState } from 'react';
+import { MemberName } from '../components/MemberName';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { buildReplay, type ReplayInput, type ReplayStep } from './replay';
 import { TableScene, useBoxSize, useTableLayout } from './TableScene';
@@ -141,7 +142,7 @@ function Settlement({ hand, name }: { hand: ReplayInput; name: (seat: number) =>
               .filter((p) => p.won > 0)
               .map((p) => (
                 <li key={p.seatIndex} className="flex justify-between gap-2">
-                  <span>{p.nickname}</span>
+                  <MemberName name={p.nickname} role={p.role} />
                   <span className="font-mono text-[#9fd8b6] tabular-nums">+{formatChips(p.won)}</span>
                 </li>
               ))}

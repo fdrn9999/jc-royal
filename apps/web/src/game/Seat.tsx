@@ -6,6 +6,7 @@
 import type { SeatView } from '@jc/types';
 import { cx, formatChips, PlayingCard } from '@jc/ui';
 import { useEffect, useState, type CSSProperties } from 'react';
+import { MemberName } from '../components/MemberName';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
 function useNow(active: boolean) {
@@ -162,12 +163,20 @@ export function Seat(p: SeatProps) {
         >
           <span className="relative grid size-9 shrink-0 place-items-center rounded-full sm:size-11">
             {p.isActor && p.deadline && <TimerRing deadline={p.deadline} totalMs={p.turnMs} />}
-            <span className="relative grid size-full place-items-center overflow-hidden rounded-full border border-white/10 bg-gradient-to-br from-ink-600 to-ink-800 text-xs font-bold text-gold-300">
+            <span
+              className={cx(
+                'relative grid size-full place-items-center overflow-hidden rounded-full border bg-gradient-to-br from-ink-600 to-ink-800 text-xs font-bold text-gold-300',
+                s.role === 'super_admin' ? 'border-[#e2bd6a]/80' : s.role === 'admin' ? 'border-[#5aa9ff]/80' : 'border-white/10',
+              )}
+            >
               {s.avatarUrl ? <img src={s.avatarUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" /> : initials(s.nickname)}
             </span>
           </span>
           <span className="flex min-w-0 flex-col leading-tight">
-            <span className={cx('max-w-[5.5rem] truncate text-xs font-semibold sm:max-w-[7rem] sm:text-[13px]', p.isMe ? 'text-gold-300' : 'text-ivory')}>{s.nickname}</span>
+            {/* The width cap sits on a wrapper: MemberName's own max-w-full comes later in the stylesheet and would win. */}
+            <span className="flex min-w-0 max-w-[5.5rem] sm:max-w-[7rem]">
+              <MemberName name={s.nickname ?? ''} role={s.role} className={cx('text-xs font-semibold sm:text-[13px]', p.isMe ? 'text-gold-300' : 'text-ivory')} />
+            </span>
             <span className="font-mono text-[11px] font-semibold text-[#9fd8b6] tabular-nums sm:text-xs" data-testid={`stack-${s.seatIndex}`}>
               {formatChips(s.stack, p.compact)}
             </span>

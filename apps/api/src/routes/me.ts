@@ -4,7 +4,7 @@ import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
-import { replayLog, replayPlayer } from '../lib/community';
+import { replayLog, replayPlayer, replayUser } from '../lib/community';
 import { fail } from '../lib/http';
 
 function pageParams(q: (k: string) => string | undefined) {
@@ -181,7 +181,7 @@ export const meRoutes = new Hono<AppEnv>()
     if (!row) fail(404, 'not_found', 'hand not found');
     const { h: hand, t } = row;
     const players = await c.var.db
-      .select({ hp: schema.handPlayers, nickname: schema.users.nickname })
+      .select({ hp: schema.handPlayers, user: replayUser })
       .from(schema.handPlayers)
       .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
       .where(eq(schema.handPlayers.handId, handId));
@@ -199,7 +199,7 @@ export const meRoutes = new Hono<AppEnv>()
       ...replayLog(hand.eventLog),
       players: players
         .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
-        .map(({ hp, nickname }) => ({ ...replayPlayer(hp, nickname, uid), userId: hp.userId, isYou: hp.userId === uid })),
+        .map(({ hp, user }) => ({ ...replayPlayer(hp, user, uid), userId: hp.userId, isYou: hp.userId === uid })),
     };
     return c.json(out);
   });

@@ -18,6 +18,7 @@ import {
   ClientMessageSchema,
   MEMBER_IDLE_CLOSE_MS,
   PLAYER_REPORT_WINDOW_MS,
+  publicRole,
   type ChatMessage,
   type ClientMessage,
   type ErrorCode,
@@ -26,6 +27,7 @@ import {
   type MaxSeats,
   type NoticeCode,
   type PreActionKind,
+  type PublicRole,
   type SeatView,
   type ServerMessage,
   type TableCue,
@@ -75,6 +77,8 @@ interface SeatState {
   userId: string;
   nickname: string;
   avatarUrl: string | null;
+  /** Staff only: set at sit, then brought up to date by `refreshRole`. */
+  role?: PublicRole;
   stack: number;
   tableSessionId: string;
   /** 'pending' while the buy-in is being committed to D1; 'cashing' while cashing out. */
@@ -502,6 +506,8 @@ export class TableRoom extends DurableObject<Env> {
       return this.run(async () => {
         await this.ensureLoaded(tableId);
         if (this.room.closed) return new Response('table closed', { status: 410 });
+        // The api read the role from D1 for this handshake: a seat taken under an older role shows the current one.
+        if (this.setSeatRole(identity.userId, identity.role)) await this.save();
         return this.openSocket(identity, retry);
       });
     }
@@ -554,6 +560,9 @@ export class TableRoom extends DurableObject<Env> {
             return Response.json(this.reportContext(url.searchParams.get('target') ?? '', url.searchParams.get('reporter') ?? ''));
           case 'seat-check':
             return Response.json(this.seatCheck(url.searchParams.get('user') ?? ''));
+          case 'role':
+            // An admin changed this member's role (the api passes the stored value).
+            return Response.json({ ok: true, seated: await this.refreshRole(url.searchParams.get('user') ?? '', url.searchParams.get('role') ?? 'user') });
           default:
             return new Response('not found', { status: 404 });
         }
@@ -696,7 +705,8 @@ export class TableRoom extends DurableObject<Env> {
         b.lastChat = now;
         const isSeated = this.seatIndexOf(a.userId) !== null;
         if (!isSeated && !t.allowSpectators) throw new CommandError('forbidden', 'spectator chat is disabled');
-        const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, text: msg.text, at: now };
+        const role = publicRole(a.role);
+        const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, ...(role ? { role } : {}), text: msg.text, at: now };
         this.chat = [...this.chat, line].slice(-CHAT_HISTORY);
         await this.ctx.storage.put('chat', this.chat);
         for (const s of this.sockets()) this.send(s, { t: 'chat', message: line });
@@ -859,10 +869,12 @@ export class TableRoom extends DurableObject<Env> {
     this.assertNoWaitlistPriority(a.userId);
 
     const tableSessionId = crypto.randomUUID();
+    const role = publicRole(a.role);
     const seat: SeatState = {
       userId: a.userId,
       nickname: a.nickname,
       avatarUrl: a.avatarUrl,
+      ...(role ? { role } : {}),
       stack: amount,
       tableSessionId,
       phase: 'pending',
@@ -1830,6 +1842,7 @@ export class TableRoom extends DurableObject<Env> {
         userId: s.userId,
         nickname: s.nickname,
         avatarUrl: s.avatarUrl,
+        ...(s.role ? { role: s.role } : {}),
         // Once the hand is settled the seat holds its final stack plus any top-up made since.
         stack: hi && !h!.isSettled ? hi.stack : s.stack,
         streetBet: hi?.streetBet ?? 0,
@@ -1910,6 +1923,35 @@ export class TableRoom extends DurableObject<Env> {
   private muckOf(h: HandEngine): ReadonlySet<string> {
     const m = this.room.muck;
     return new Set(m && m.handId === h.handId ? m.ids : []);
+  }
+
+  /** Puts the staff role of `users.role` on the member's seat, if they have one here. True when the seat changed. */
+  private setSeatRole(userId: string, stored: string): boolean {
+    const i = this.seatIndexOf(userId);
+    const seat = i === null ? null : this.room.seats[i]!;
+    const next = publicRole(stored);
+    if (!seat || seat.role === next) return false;
+    if (next) seat.role = next;
+    else delete seat.role;
+    return true;
+  }
+
+  /**
+   * An admin changed a member's role: the identity of their open connections (so their next chat lines carry it) and
+   * their seat, shown to everyone at once. Lines already posted keep the role they were posted with. Returns whether the
+   * member holds a seat here.
+   */
+  private async refreshRole(userId: string, stored: string): Promise<boolean> {
+    if (!userId) return false;
+    for (const ws of this.sockets()) {
+      const a = this.att(ws);
+      if (a.userId === userId && a.role !== stored) ws.serializeAttachment({ ...a, role: stored });
+    }
+    if (this.setSeatRole(userId, stored)) {
+      await this.save();
+      this.broadcast();
+    }
+    return this.seatIndexOf(userId) !== null;
   }
 
   /** Seats whose cards the showdown of the settled hand `h` turned over for everybody. */

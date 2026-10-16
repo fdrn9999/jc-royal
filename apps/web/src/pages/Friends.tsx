@@ -14,6 +14,7 @@ import { Button, cx, Empty, formatChips, Input, Modal, Panel, Spinner } from '@j
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { JoinCodeModal } from '../components/JoinCode';
+import { MemberName } from '../components/MemberName';
 import { Avatar, BlockConfirm, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -60,7 +61,9 @@ function RequestRow({ r, children }: { r: FriendRequestDto; children: React.Reac
     <li className="flex items-center gap-3 py-2.5" data-testid="friend-request">
       <Avatar user={r} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-semibold text-ivory">{r.nickname}</span>
+        <span className="flex min-w-0">
+          <MemberName name={r.nickname} role={r.role} badge className="font-semibold text-ivory" />
+        </span>
         <span className="text-xs text-ink-400">{shortTime(r.at, locale)}</span>
       </span>
       <span className="flex shrink-0 gap-1.5">{children}</span>
@@ -224,7 +227,9 @@ export function FriendsPage() {
                     <Link to={`/friends/${f.id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-white/[0.03]" data-testid="friend-row">
                       <Avatar user={f} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate font-semibold text-ivory">{f.nickname}</span>
+                        <span className="flex min-w-0">
+                          <MemberName name={f.nickname} role={f.role} badge className="font-semibold text-ivory" />
+                        </span>
                         <span className={cx('block truncate text-xs', f.unread ? 'font-semibold text-ink-100' : 'text-ink-400')}>
                           {f.lastMessage
                             ? `${f.lastMessage.fromMe ? `${t('friends.me')}: ` : ''}${f.lastMessage.kind === 'invite' ? t('invite.preview', { name: f.lastMessage.body }) : f.lastMessage.body}`
@@ -364,7 +369,9 @@ export function FriendSettingsPage() {
               <li key={u.id} className="flex items-center gap-3 py-2.5" data-testid="blocked-row">
                 <Avatar user={u} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold text-ivory">{u.nickname}</span>
+                  <span className="flex min-w-0">
+                    <MemberName name={u.nickname} role={u.role} badge className="font-semibold text-ivory" />
+                  </span>
                   <span className="text-xs text-ink-400">{shortTime(u.at, locale)}</span>
                 </span>
                 <span className="flex shrink-0 flex-wrap justify-end gap-1.5">
@@ -618,7 +625,9 @@ export function ConversationPage() {
       <header className="flex shrink-0 items-center gap-3">
         <Link to="/friends" className="grid size-10 place-items-center rounded-full text-gold-300 hover:bg-white/5" aria-label={t('friends.title')}>←</Link>
         <Avatar user={conv.user} />
-        <h1 className="min-w-0 flex-1 truncate text-lg font-bold text-ivory" data-testid="dm-title">{conv.user.nickname}</h1>
+        <h1 className="flex min-w-0 flex-1 text-lg font-bold text-ivory" data-testid="dm-title">
+          <MemberName name={conv.user.nickname} role={conv.user.role} badge />
+        </h1>
         {conv.isFriend && (
           <Button size="sm" variant="ghost" className="text-ink-300" onClick={unfriend} data-testid="unfriend">{t('friends.remove')}</Button>
         )}

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { PublicRole } from './social';
 import { SUPPORTED_MAX_SEATS } from './table';
 
 export const NICKNAME_RE = /^[\p{L}\p{N}_]{2,16}$/u;
@@ -193,7 +194,7 @@ export interface LobbyTableDto {
   name: string;
   roomType: RoomType;
   /** The member who opened a member room. */
-  host: { id: string; nickname: string } | null;
+  host: { id: string; nickname: string; role?: PublicRole } | null;
   maxSeats: number;
   smallBlind: number;
   bigBlind: number;

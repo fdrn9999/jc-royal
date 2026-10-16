@@ -6,6 +6,7 @@ import { BadgeShelf } from '../academy/Badges';
 import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
+import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
 import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
 import { ReportModal, type ReportSubject } from '../components/Social';
@@ -371,7 +372,9 @@ export function HandDetailPage() {
               <li key={p.seatIndex} className="flex items-center gap-3 py-2.5">
                 <span className="w-6 text-xs text-ink-400">#{p.seatIndex + 1}</span>
                 <span className="flex gap-0.5">{(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.7rem" />)}</span>
-                <span className={`min-w-0 flex-1 truncate text-sm ${p.isYou ? 'font-semibold text-gold-300' : ''}`}>{p.nickname}</span>
+                <span className="flex min-w-0 flex-1 text-sm">
+                  <MemberName name={p.nickname} role={p.role} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
+                </span>
                 {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
                 <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{signed(p.net)}</span>
                 {!p.isYou && (

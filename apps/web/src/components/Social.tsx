@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { blockUser, setMuted, unblockUser, useMuted } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
+import { MemberName, RoleBadge } from './MemberName';
 
 export function Avatar({ user, size = 'size-10' }: { user: Pick<PublicUserDto, 'nickname' | 'avatarUrl'>; size?: string }) {
   return (
@@ -197,7 +198,8 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user
           <div className="flex items-center gap-3">
             <Avatar user={user} size="size-14" />
             <div className="min-w-0">
-              <div className="truncate text-lg font-bold text-ivory">{user.nickname}</div>
+              <MemberName name={user.nickname} role={user.role} className="text-lg font-bold text-ivory" />
+              {user.role && <RoleBadge role={user.role} className="mb-0.5 mt-1" />}
               {rel === 'friend' && <div className="text-xs font-semibold text-[#9fd8b6]">{t('friends.isFriend')}</div>}
               {rel === 'blocked' && <div className="text-xs font-semibold text-[#f0a0a2]" data-testid="player-blocked">{t('block.isBlocked')}</div>}
             </div>

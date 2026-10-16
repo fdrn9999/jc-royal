@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { PublicRole } from './social';
 import type { TableCue, TableView } from './table';
 
 /** An automatic rebuy's total limit may cover at most this many rebuys of the chosen amount. */
@@ -71,6 +72,8 @@ export interface ChatMessage {
   id: string;
   userId: string;
   nickname: string;
+  /** Staff only (see PublicRole): the role the sender held when the line was posted. */
+  role?: PublicRole;
   text: string;
   at: number;
 }

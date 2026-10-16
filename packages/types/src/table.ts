@@ -1,4 +1,5 @@
 import type { Card, HandRankClass } from './cards';
+import type { PublicRole } from './social';
 
 /** Seat counts poker-engine-ts supports (SessionConfig.maxSeats). */
 export const SUPPORTED_MAX_SEATS = [2, 6, 9] as const;
@@ -33,6 +34,8 @@ export interface SeatView {
   userId?: string;
   nickname?: string;
   avatarUrl?: string | null;
+  /** Staff only (see PublicRole): refreshed when the player connects and when an admin changes the role. */
+  role?: PublicRole;
   stack: number;
   /** Chips committed on the current street. */
   streetBet: number;

@@ -3,6 +3,7 @@ import { AUTO_REBUY_MAX_TIMES, type ChatMessage, type TableView } from '@jc/type
 import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { MemberName, RoleBadge } from '../components/MemberName';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { setPrefs, usePrefs } from '../lib/prefs';
@@ -323,12 +324,15 @@ export function ChatPanel({
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 text-sm">
         {shown.map((m) => (
-          <div key={m.id} className="break-words" data-testid="chat-line">
+          <div key={m.id} className={cx('break-words', m.role && 'jc-role-line')} data-role={m.role} data-testid="chat-line">
             {onPick && m.userId !== myId ? (
-              <button type="button" className="font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">{m.nickname}</button>
+              <button type="button" className="max-w-full align-bottom font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">
+                <MemberName name={m.nickname} role={m.role} />
+              </button>
             ) : (
-              <span className="font-semibold text-gold-300">{m.nickname}</span>
-            )}{' '}
+              <MemberName name={m.nickname} role={m.role} className="font-semibold text-gold-300" />
+            )}
+            {m.role && <RoleBadge role={m.role} className="ml-1 align-[1px]" />}{' '}
             <span className="text-ink-100">{m.text}</span>
           </div>
         ))}

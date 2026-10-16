@@ -78,6 +78,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-leave-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Administrator permissions: a table whose settings a plain administrator changes.
   { id: 'it-perm-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Staff marks: a member whose role changes while seated, heads-up so one fold ends a hand for the history.
+  { id: 'it-role-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {
