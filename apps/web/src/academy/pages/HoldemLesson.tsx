@@ -81,7 +81,7 @@ function TourStep() {
   const tr = useTr();
   const view = useTourView();
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
-  const layout = useTableLayout(area, view?.table.maxSeats, view?.you.seatIndex ?? 0);
+  const layout = useTableLayout(area, view?.table.maxSeats, view?.you.seatIndex ?? 0, { me: view?.you.seatIndex != null, footer: true });
   const wrap = useRef<HTMLDivElement>(null);
   const [i, setI] = useState(0);
   const [rect, setRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);

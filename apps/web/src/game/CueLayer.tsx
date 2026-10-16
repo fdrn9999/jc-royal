@@ -8,7 +8,7 @@
 import { sound, type SoundId } from '@jc/audio';
 import { Chip } from '@jc/ui';
 import { useEffect, useRef, useState } from 'react';
-import { POT_POINT, type SeatGeometry, type Point } from './layout';
+import type { Point, SeatGeometry } from './layout';
 import type { CueEvent } from './useTableSocket';
 
 interface Flight {
@@ -26,12 +26,15 @@ export function CueLayer({
   cues,
   consume,
   geometry,
+  pot,
   mySeat,
   reducedMotion,
 }: {
   cues: CueEvent[];
   consume: (upTo: number) => void;
   geometry: SeatGeometry[];
+  /** Where the pot sits (% of the table, like the geometry). */
+  pot: Point;
   mySeat: number | null;
   reducedMotion: boolean;
 }) {
@@ -65,7 +68,7 @@ export function CueLayer({
           // Street bets are swept into the pot.
           geometry.forEach((g, i) => {
             const bet = ev.state.seats[i];
-            if (bet && i < geometry.length && add.length < MAX_FLIGHTS && bet.state !== 'empty') add.push({ id: ++seq.current, from: g.bet, to: POT_POINT, amount: 25, delay: 40 * i });
+            if (bet && i < geometry.length && add.length < MAX_FLIGHTS && bet.state !== 'empty') add.push({ id: ++seq.current, from: g.bet, to: pot, amount: 25, delay: 40 * i });
           });
           break;
         }
@@ -74,7 +77,7 @@ export function CueLayer({
           break;
         case 'payout': {
           const g = geometry[c.seatIndex];
-          if (g) for (let k = 0; k < 4; k++) add.push({ id: ++seq.current, from: POT_POINT, to: g.seat, amount: c.amount, delay: 350 + k * 90 });
+          if (g) for (let k = 0; k < 4; k++) add.push({ id: ++seq.current, from: pot, to: g.seat, amount: c.amount, delay: 350 + k * 90 });
           if (c.seatIndex === mySeat) sounds.add('win');
           else sounds.add('chip');
           break;
@@ -86,7 +89,7 @@ export function CueLayer({
     for (const s of sounds) sound.play(s);
     if (!reducedMotion && add.length) setFlights((f) => [...f, ...add].slice(-MAX_FLIGHTS * 2));
     consume(cues[cues.length - 1]!.id);
-  }, [cues, consume, geometry, mySeat, reducedMotion]);
+  }, [cues, consume, geometry, pot, mySeat, reducedMotion]);
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30" aria-hidden>

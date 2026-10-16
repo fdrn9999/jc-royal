@@ -4,6 +4,16 @@ import { signUp, sitWith, test, widerThanDevice } from './helpers';
 /** The seats a table bot holds, by their BOT pill. */
 const botSeats = (page: Page) => page.locator('[data-testid^="seat-"]').filter({ has: page.getByTestId('bot-badge') });
 
+/** The seats, taken or free, that reach past either side of the screen, with how far they run. */
+const seatsOffScreen = (page: Page) =>
+  page.evaluate(() => {
+    const vw = document.documentElement.clientWidth;
+    return Array.from(document.querySelectorAll('[data-testid=table] [data-testid]'))
+      .filter((el) => /^(seat|sit)-\d+$/.test(el.getAttribute('data-testid')!))
+      .map((el) => ({ id: el.getAttribute('data-testid'), left: Math.round(el.getBoundingClientRect().left), right: Math.round(el.getBoundingClientRect().right - vw) }))
+      .filter((x) => x.left < 0 || x.right > 0);
+  });
+
 /** Taps the first bot's seat and returns its card. */
 async function openBotCard(page: Page) {
   const seat = botSeats(page).first();
@@ -26,6 +36,11 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
     await expect(badge).toHaveAttribute('title', '테이블 봇 · 보통');
   }
   expect(await widerThanDevice(page)).toBe(false);
+  // Six seats, bots and a member with a long name among them, all inside the screen on phones of several widths.
+  for (const [width, height] of [[360, 800], [375, 667], [390, 844]] as const) {
+    await page.setViewportSize({ width, height });
+    await expect.poll(() => seatsOffScreen(page), { message: `at ${width}px` }).toEqual([]);
+  }
   await page.screenshot({ path: 'test-results/bots-table-mobile.png', animations: 'disabled' });
 
   // A bot's card says what it is; there is nothing to befriend, message, block or report.

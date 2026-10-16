@@ -355,7 +355,10 @@ export function HandDetailPage() {
           </span>
         }
       >
-        <HandReplay hand={data} heroSeat={data.players.find((p) => p.isYou)?.seatIndex ?? null} />
+        {/* Phones give the replay the panel's padding too: the table needs the width more than the frame does. */}
+        <div className="-mx-4 sm:mx-0">
+          <HandReplay hand={data} heroSeat={data.players.find((p) => p.isYou)?.seatIndex ?? null} />
+        </div>
       </Panel>
       {links.length > 0 && (
         <Panel title={t('replay.lessons')}>
@@ -410,8 +413,8 @@ export function HandDetailPage() {
             {data.actions.map((a, i) => (
               <li key={i} className="flex gap-2">
                 <span className="w-16 shrink-0 text-xs uppercase text-ink-400">{t(`stage.${a.stage}` as MsgKey)}</span>
-                <span className="flex-1">{name(a.seatIndex)}</span>
-                <span className="text-ink-200">{actionText(a.type)}</span>
+                <span className="min-w-0 flex-1 truncate" title={name(a.seatIndex)}>{name(a.seatIndex)}</span>
+                <span className="shrink-0 whitespace-nowrap text-ink-200">{actionText(a.type)}</span>
                 <span className="w-20 shrink-0 text-right font-mono text-gold-300">{a.amount > 0 ? amt.fmt(a.amount) : ''}</span>
               </li>
             ))}

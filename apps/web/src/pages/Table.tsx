@@ -16,7 +16,7 @@ import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
 import { useReactionSender } from '../game/Reactions';
-import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
+import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -192,7 +192,8 @@ export function TablePage() {
   }, [opened, myId, id]);
 
   const anchor = s?.you.seatIndex ?? 0;
-  const layout = useTableLayout(area, s?.table.maxSeats, anchor);
+  // Seated, my seat is at the bottom with room above my cards for the show-card buttons.
+  const layout = useTableLayout(area, s?.table.maxSeats, anchor, { me: s?.you.seatIndex != null, meTop: 28, footer: true, chars: amountChars(amt.unit) });
 
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
@@ -217,6 +218,7 @@ export function TablePage() {
 
   const academy = useProgress(me?.id);
   const tip = coachActive(academy, s?.you.seatIndex != null) && myTurn && s ? coachTip(s) : null;
+  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${coachActive(academy, s?.you.seatIndex != null)}`);
   // First-hands coach: count each real hand this player was dealt into while coaching is on.
   const coachedHands = useRef(new Set<string>());
   useEffect(() => {
@@ -396,9 +398,9 @@ export function TablePage() {
 
       <div className="flex min-h-0 flex-1">
         {/* table area */}
-        <div className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
-          {/* Beginner aids and coaching stack above the action bar: reserve room so they never cover my seat. */}
-          <div ref={areaRef} className={cx('relative mx-2 mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-24 sm:mt-6', seated && (prefs.beginner || tip) ? 'mb-[12rem]' : 'mb-[6.75rem]')}>
+        <div ref={room.colRef} className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
+          {/* Beginner aids and coaching stack above the action bar: the room they take is kept free so they never cover my seat. */}
+          <div ref={areaRef} className="relative mx-2 mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mt-6" style={room.style}>
             {s && (
               <TableScene
                 s={s}
@@ -422,10 +424,11 @@ export function TablePage() {
           </div>
 
           {/* bottom: action bar / status */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
-            {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert">{toast}</div>}
+          <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
+            {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert" data-transient>{toast}</div>}
             {notice && (
-              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-1 text-xs text-gold-300 sm:py-2 sm:text-sm" role="status" data-testid="table-notice">
+              // In beginner mode the notice stands in for the street note, so it counts like it.
+              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-1 text-xs text-gold-300 sm:py-2 sm:text-sm" role="status" data-testid="table-notice" data-transient={prefs.beginner && hand ? undefined : ''}>
                 {notice}
               </div>
             )}

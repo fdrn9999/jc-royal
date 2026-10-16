@@ -8,6 +8,7 @@ import { cx, PlayingCard } from '@jc/ui';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
+import type { Density } from './layout';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { ReactionBubble, ReactionTray, type ReactionSender, type SeatReaction } from './Reactions';
 
@@ -41,6 +42,70 @@ function initials(name?: string) {
   return (name ?? '?').slice(0, 2).toUpperCase();
 }
 
+/**
+ * The seat's sizes at each density. layout.ts (DIMS) lays the table out by them: change both together. Written out
+ * in full so the stylesheet keeps every class.
+ */
+const SIZE: Record<Density, Record<'me' | 'other' | 'cards' | 'spread' | 'plate' | 'avatar' | 'initials' | 'name' | 'nameText' | 'stack' | 'badges' | 'dealer' | 'blind' | 'host' | 'status' | 'sit' | 'empty', string>> = {
+  full: {
+    me: '3.4rem',
+    other: '2.5rem',
+    cards: 'mb-[-0.6rem]',
+    spread: '-space-x-3',
+    plate: 'min-w-[8.5rem] gap-2 py-1 pl-1 pr-3',
+    avatar: 'size-11',
+    initials: 'text-xs',
+    name: 'max-w-[7rem]',
+    nameText: 'text-[13px]',
+    stack: 'text-xs',
+    badges: '-left-2 -top-2',
+    dealer: 'size-5 text-[10px]',
+    blind: 'px-1.5 text-[9px] leading-4',
+    host: '-right-1.5 -top-2',
+    status: 'mt-1 h-4 max-w-[12.375rem] text-[11px]',
+    sit: 'size-16',
+    empty: 'size-11',
+  },
+  compact: {
+    me: '2.6rem',
+    other: '1.7rem',
+    cards: 'mb-[-0.6rem]',
+    spread: '-space-x-3',
+    plate: 'min-w-[6.5rem] gap-2 py-1 pl-1 pr-3',
+    avatar: 'size-9',
+    initials: 'text-xs',
+    name: 'max-w-[5.5rem]',
+    nameText: 'text-xs',
+    stack: 'text-[11px]',
+    badges: '-left-2 -top-2',
+    dealer: 'size-5 text-[10px]',
+    blind: 'px-1.5 text-[9px] leading-4',
+    host: '-right-1.5 -top-2',
+    status: 'mt-1 h-4 max-w-[10.375rem] text-[10px]',
+    sit: 'size-14',
+    empty: 'size-9',
+  },
+  dense: {
+    me: '2.2rem',
+    other: '1.45rem',
+    cards: 'mb-[-0.5rem]',
+    spread: '-space-x-2',
+    plate: 'min-w-[5.75rem] gap-1 py-0.5 pl-0.5 pr-2',
+    avatar: 'size-6',
+    initials: 'text-[9px]',
+    name: 'max-w-[3.25rem]',
+    nameText: 'text-[10px]',
+    stack: 'text-[10px]',
+    badges: '-left-1 -top-2',
+    dealer: 'size-4 text-[9px]',
+    blind: 'px-1 text-[8px] leading-3.5',
+    host: '-right-1 -top-2',
+    status: 'mt-0.5 h-3.5 max-w-[6.25rem] text-[10px]',
+    sit: 'size-12',
+    empty: 'size-9',
+  },
+};
+
 export interface SeatProps {
   seat: SeatView;
   isMe: boolean;
@@ -65,7 +130,7 @@ export interface SeatProps {
   reaction?: SeatReaction | null;
   /** My seat at a real table, with reactions on: tapping the plate opens the reaction tray. */
   react?: ReactionSender;
-  compact: boolean;
+  density: Density;
   amounts: Amounts;
   style: CSSProperties;
 }
@@ -73,7 +138,9 @@ export interface SeatProps {
 export function Seat(p: SeatProps) {
   const { t } = useI18n();
   const s = p.seat;
-  const cardSize = p.compact ? (p.isMe ? '2.6rem' : '1.7rem') : p.isMe ? '3.4rem' : '2.5rem';
+  const z = SIZE[p.density];
+  const compact = p.density !== 'full';
+  const cardSize = p.isMe ? z.me : z.other;
   const [tray, setTray] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -107,13 +174,13 @@ export function Seat(p: SeatProps) {
           <button
             onClick={p.onSit}
             data-testid={`sit-${s.seatIndex}`}
-            className="flex size-14 flex-col items-center justify-center rounded-full border border-dashed border-gold-500/50 bg-black/40 text-[10px] font-semibold text-gold-300 transition hover:bg-gold-500/15 sm:size-16"
+            className={cx('flex flex-col items-center justify-center rounded-full border border-dashed border-gold-500/50 bg-black/40 text-[10px] font-semibold text-gold-300 transition hover:bg-gold-500/15', z.sit)}
           >
             <span className="text-base leading-none">＋</span>
             {t('table.sit')}
           </button>
         ) : (
-          <div className="size-9 rounded-full border border-dashed border-white/[0.07] sm:size-11" title={t('table.emptySeat')} />
+          <div className={cx('rounded-full border border-dashed border-white/[0.07]', z.empty)} title={t('table.emptySeat')} />
         )}
       </div>
     );
@@ -122,6 +189,7 @@ export function Seat(p: SeatProps) {
   const folded = s.state === 'folded';
   const allIn = s.state === 'allin';
   const winner = p.winAmount !== null && p.winAmount > 0;
+  const won = winner ? `+${p.amounts.fmt(p.winAmount!, true)}${p.handLabel ? ` · ${p.handLabel}` : ''}` : '';
   // Cards shown after the hand: face up where chosen, the other one face down (its owner sees both in holeCards).
   const shown = s.shown?.length ? s.shown : null;
   const isShown = (i: number) => !!shown?.[i];
@@ -150,7 +218,7 @@ export function Seat(p: SeatProps) {
       <div className={cx('relative flex flex-col items-center', folded && !shown && 'opacity-55')}>
         {/* hole cards */}
         {cards.length > 0 && (
-          <div className={cx('relative mb-[-0.6rem] flex', p.isMe ? 'gap-1' : '-space-x-3')} key={p.newHandKey ?? 'cards'}>
+          <div className={cx('relative flex', z.cards, p.isMe ? 'gap-1' : z.spread)} key={p.newHandKey ?? 'cards'}>
             {cards.map((c, i) => (
               <PlayingCard
                 key={`${c ?? 'x'}-${i}`}
@@ -195,47 +263,49 @@ export function Seat(p: SeatProps) {
         {/* plate */}
         <div
           className={cx(
-            'relative flex min-w-[6.5rem] items-center gap-2 rounded-full border py-1 pl-1 pr-3 shadow-xl backdrop-blur-sm sm:min-w-[8.5rem]',
+            'relative flex items-center rounded-full border shadow-xl backdrop-blur-sm',
+            z.plate,
             p.isActor ? 'border-gold-400/80' : 'border-[var(--t-seat-border)]',
             winner && 'jc-winner',
           )}
           style={{ background: 'var(--t-seat)' }}
         >
-          <span className="relative grid size-9 shrink-0 place-items-center rounded-full sm:size-11">
+          <span className={cx('relative grid shrink-0 place-items-center rounded-full', z.avatar)}>
             {p.isActor && p.deadline && <TimerRing deadline={p.deadline} totalMs={p.turnMs} />}
             <span
               className={cx(
-                'relative grid size-full place-items-center overflow-hidden rounded-full border bg-gradient-to-br from-ink-600 to-ink-800 text-xs font-bold text-gold-300',
+                'relative grid size-full place-items-center overflow-hidden rounded-full border bg-gradient-to-br from-ink-600 to-ink-800 font-bold text-gold-300',
+                z.initials,
                 s.role === 'super_admin' ? 'border-[#e2bd6a]/80' : s.role === 'admin' ? 'border-[#5aa9ff]/80' : s.bot ? 'border-[#6fd8c6]/60' : 'border-white/10',
               )}
             >
               {s.avatarUrl ? <img src={s.avatarUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" /> : initials(s.nickname)}
             </span>
-            {p.reaction && <ReactionBubble key={p.reaction.id} r={p.reaction} compact={p.compact} />}
+            {p.reaction && <ReactionBubble key={p.reaction.id} r={p.reaction} compact={compact} />}
           </span>
           <span className="flex min-w-0 flex-col leading-tight">
             {/* The width cap sits on a wrapper: MemberName's own max-w-full comes later in the stylesheet and would win. */}
-            <span className="flex min-w-0 max-w-[5.5rem] sm:max-w-[7rem]">
-              <MemberName name={s.nickname ?? ''} role={s.role} bot={s.bot} className={cx('text-xs font-semibold sm:text-[13px]', p.isMe ? 'text-gold-300' : 'text-ivory')} />
+            <span className={cx('flex min-w-0', z.name)}>
+              <MemberName name={s.nickname ?? ''} role={s.role} bot={s.bot} className={cx('font-semibold', z.nameText, p.isMe ? 'text-gold-300' : 'text-ivory')} />
             </span>
-            <span className="font-mono text-[11px] font-semibold text-[#9fd8b6] tabular-nums sm:text-xs" data-testid={`stack-${s.seatIndex}`}>
-              {p.amounts.fmt(s.stack, p.compact)}
+            <span className={cx('font-mono font-semibold text-[#9fd8b6] tabular-nums', z.stack)} data-testid={`stack-${s.seatIndex}`}>
+              {p.amounts.fmt(s.stack, compact)}
             </span>
           </span>
           {(p.isDealer || p.blind) && (
-            <span className="absolute -left-2 -top-2 z-10 flex items-center gap-0.5">
+            <span className={cx('absolute z-10 flex items-center gap-0.5', z.badges)}>
               {p.isDealer && (
-                <span className="grid size-5 place-items-center rounded-full border border-black/30 bg-gradient-to-b from-ivory to-[#cfc6b0] font-display text-[10px] font-black text-ink-950 shadow-md" data-testid="dealer-button">
+                <span className={cx('grid place-items-center rounded-full border border-black/30 bg-gradient-to-b from-ivory to-[#cfc6b0] font-display font-black text-ink-950 shadow-md', z.dealer)} data-testid="dealer-button">
                   D
                 </span>
               )}
               {p.blind && (
-                <span data-tour={`blind-${p.blind}`} className={cx('rounded-full border px-1.5 text-[9px] font-bold leading-4', p.blind === 'SB' ? 'border-info/50 bg-[#16263b] text-[#a9c8ee]' : 'border-danger/50 bg-[#3a1618] text-[#f0a0a2]')}>{p.blind}</span>
+                <span data-tour={`blind-${p.blind}`} className={cx('rounded-full border font-bold', z.blind, p.blind === 'SB' ? 'border-info/50 bg-[#16263b] text-[#a9c8ee]' : 'border-danger/50 bg-[#3a1618] text-[#f0a0a2]')}>{p.blind}</span>
               )}
             </span>
           )}
           {p.isHost && (
-            <span className="absolute -right-1.5 -top-2 z-10 rounded-full border border-gold-500/50 bg-ink-950 px-1 text-[10px] leading-4" title={t('room.host')} aria-label={t('room.host')} data-testid="host-mark">
+            <span className={cx('absolute z-10 rounded-full border border-gold-500/50 bg-ink-950 px-1 text-[10px] leading-4', z.host)} title={t('room.host')} aria-label={t('room.host')} data-testid="host-mark">
               👑
             </span>
           )}
@@ -259,12 +329,13 @@ export function Seat(p: SeatProps) {
             </>
           )}
         </div>
-        {/* status line */}
-        <div className="mt-1 flex h-4 items-center gap-1 text-[10px] font-bold tracking-wide sm:text-[11px]">
+        {/* status line: no wider than the seat (layout.ts); what does not fit is cut short, whole in its title */}
+        <div className={cx('flex items-center gap-1 overflow-hidden whitespace-nowrap font-bold tracking-wide [&>span]:min-w-0 [&>span]:truncate', z.status)} data-testid={`seat-status-${s.seatIndex}`}>
           {winner ? (
-            <span className="text-[var(--t-winner)]">
-              {t('table.winner')} +{p.amounts.fmt(p.winAmount!, true)}
-              {p.handLabel ? ` · ${p.handLabel}` : ''}
+            <span className="text-[var(--t-winner)]" title={`${t('table.winner')} ${won}`}>
+              {/* The smallest seats keep the word for screen readers only: the plate already glows. */}
+              <span className={cx(p.density === 'dense' && 'sr-only')}>{t('table.winner')} </span>
+              {won}
             </span>
           ) : allIn ? (
             <span className="rounded-full bg-[#e08227]/20 px-1.5 text-[#f5a860]">{t('table.allin')}</span>

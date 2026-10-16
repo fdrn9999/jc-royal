@@ -33,7 +33,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
         {replaying ? t('replay.close') : `▶ ${t('replay.open')}`}
       </Button>
       {replaying && (
-        <div className="mb-3">
+        <div className="-mx-3 mb-3 sm:mx-0">
           <HandReplay hand={hand} heroSeat={hand.players.find((p) => p.isAuthor)?.seatIndex ?? null} />
         </div>
       )}

@@ -9,7 +9,7 @@ import { Button, cx, Modal } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ActionBar } from '../../game/ActionBar';
-import { TableScene, useBoxSize, useTableLayout } from '../../game/TableScene';
+import { TableScene, useBoxSize, useStackRoom, useTableLayout } from '../../game/TableScene';
 import { useAuth } from '../../lib/auth';
 import { useI18n, type MsgKey } from '../../lib/i18n';
 import { currentHand, l, useTr, type L } from '../content';
@@ -149,7 +149,8 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
   const [chart, setChart] = useState(false);
   const [fault, setFault] = useState(false);
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
-  const layout = useTableLayout(area, view.table.maxSeats, sc.hero);
+  const layout = useTableLayout(area, view.table.maxSeats, sc.hero, { me: true, footer: true });
+  const room = useStackRoom('');
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
   const delay = reducedMotion ? 350 : 800;
 
@@ -270,8 +271,8 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
         </div>
       </div>
 
-      <div className="jc-game-surface relative flex min-h-0 flex-1 flex-col">
-        <div ref={areaRef} className="relative mx-2 mb-[6.75rem] mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-24">
+      <div ref={room.colRef} className="jc-game-surface relative flex min-h-0 flex-1 flex-col">
+        <div ref={areaRef} className="relative mx-2 mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6" style={room.style}>
           <TableScene
             s={shown}
             layout={layout}
@@ -288,7 +289,7 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
           />
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
+        <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
           {asked && (
             <div className="jc-panel pointer-events-auto flex w-full max-w-md flex-col gap-2 p-3" data-testid="practice-question">
               <div className="font-bold text-gold-300">{tr(asked.q.prompt)}</div>
