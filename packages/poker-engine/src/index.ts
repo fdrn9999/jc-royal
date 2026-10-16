@@ -1,3 +1,4 @@
+export * from './bot';
 export * from './deck';
 export * from './evaluate';
 export * from './hand';

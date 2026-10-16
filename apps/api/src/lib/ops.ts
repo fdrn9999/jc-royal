@@ -41,7 +41,9 @@ interface TypeRow {
   blocked: number;
   occupied: number;
   playing: number;
+  /** Members seated; table bots are counted apart. */
   seated: number;
+  bots: number;
   waitlist: number;
   spectators: number;
   connections: number;
@@ -64,13 +66,13 @@ export async function liveOps(db: D1Database, now = Date.now()) {
          SUM(CASE WHEN status = 'closing' THEN 1 ELSE 0 END) AS closing,
          SUM(CASE WHEN entry_blocked = 1 THEN 1 ELSE 0 END) AS blocked,
          SUM(CASE WHEN live_seated > 0 THEN 1 ELSE 0 END) AS occupied,
-         SUM(live_playing) AS playing, SUM(live_seated) AS seated, SUM(live_waitlist) AS waitlist,
+         SUM(live_playing) AS playing, SUM(live_seated - live_bots) AS seated, SUM(live_bots) AS bots, SUM(live_waitlist) AS waitlist,
          SUM(live_spectators) AS spectators, SUM(live_connections) AS connections
        FROM tables WHERE status IN ('open', 'closing') GROUP BY room_type`,
     ),
     db.prepare(
-      `SELECT id, name, room_type AS type, status, entry_blocked AS entryBlocked, max_seats AS maxSeats, live_seated AS seated,
-         live_playing AS playing, live_waitlist AS waitlist, live_spectators AS spectators, live_connections AS connections,
+      `SELECT id, name, room_type AS type, status, entry_blocked AS entryBlocked, max_seats AS maxSeats, live_seated - live_bots AS seated,
+         live_bots AS bots, live_playing AS playing, live_waitlist AS waitlist, live_spectators AS spectators, live_connections AS connections,
          live_updated_at AS liveUpdatedAt, last_issue AS lastIssue
        FROM tables WHERE status IN ('open', 'closing') AND (live_connections > 0 OR live_seated > 0 OR status = 'closing')
        ORDER BY status = 'closing' DESC, live_connections DESC, live_seated DESC LIMIT 12`,
@@ -125,7 +127,7 @@ export async function liveOps(db: D1Database, now = Date.now()) {
 }
 
 function emptyType(type: TypeRow['type']): TypeRow {
-  return { type, tables: 0, closing: 0, blocked: 0, occupied: 0, playing: 0, seated: 0, waitlist: 0, spectators: 0, connections: 0 };
+  return { type, tables: 0, closing: 0, blocked: 0, occupied: 0, playing: 0, seated: 0, bots: 0, waitlist: 0, spectators: 0, connections: 0 };
 }
 
 /** SUM over no rows is NULL. */

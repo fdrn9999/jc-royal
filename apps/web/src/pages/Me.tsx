@@ -379,14 +379,15 @@ export function HandDetailPage() {
                 <span className="w-6 text-xs text-ink-400">#{p.seatIndex + 1}</span>
                 <span className="flex gap-0.5">{(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.7rem" />)}</span>
                 <span className="flex min-w-0 flex-1 text-sm">
-                  <MemberName name={p.nickname} role={p.role} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
+                  <MemberName name={p.nickname} role={p.role} bot={p.bot} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
                 </span>
                 {/* Stacked, so an amount in big blinds ("+2.5 BB") leaves the name its room on a phone. */}
                 <span className="flex shrink-0 flex-col items-end leading-tight">
                   {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
                   <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`} data-testid="hand-net">{p.net > 0 ? '+' : ''}{amt.fmt(p.net)}</span>
                 </span>
-                {!p.isYou && p.role !== 'super_admin' && (
+                {/* A table bot only plays the server's moves: nothing of its own to report (the server refuses too). */}
+                {!p.isYou && p.role !== 'super_admin' && !p.bot && (
                   <button
                     type="button"
                     className="jc-tap -my-1 min-h-9 rounded-md px-2 text-xs font-semibold text-[#f0a0a2] hover:bg-danger/10"

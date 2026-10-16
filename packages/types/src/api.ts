@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { PublicRole } from './social';
-import { SUPPORTED_MAX_SEATS } from './table';
+import { BOT_LEVELS, SUPPORTED_MAX_SEATS, type BotLevel } from './table';
 
 export const NICKNAME_RE = /^[\p{L}\p{N}_]{2,16}$/u;
 
@@ -85,6 +85,30 @@ export const ResetRequestSchema = z.object({ email: EmailSchema });
 export const ResetConfirmSchema = z.object({ token: z.string().min(20).max(200), newPassword: PasswordSchema });
 export const DeleteAccountSchema = z.object({ password: z.string().min(1).max(128) });
 
+/**
+ * An official table's table bots: whether they may sit in, how well they play, how many members must be seated first
+ * (minHumans), how many bots at most (max), the player count they fill up to (fillTo), and whether one stands up after
+ * the hand for a member waiting for a seat (yieldSeat). Member rooms never have bots.
+ */
+const BotSettingsShape = {
+  botsEnabled: z.boolean().default(false),
+  botLevel: z.enum(BOT_LEVELS).default('normal'),
+  botMinHumans: z.number().int().min(1).max(8).default(1),
+  botMax: z.number().int().min(1).max(8).default(1),
+  botFillTo: z.number().int().min(2).max(9).default(2),
+  botYield: z.boolean().default(true),
+};
+export type BotSettings = { botsEnabled: boolean; botLevel: BotLevel; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
+
+/** What makes a table's bot settings unusable at its size (also checked against the stored row on a patch). */
+export function botSettingsIssues(b: Pick<BotSettings, 'botMinHumans' | 'botMax' | 'botFillTo'>, maxSeats: number): { message: string; path: string[] }[] {
+  const out: { message: string; path: string[] }[] = [];
+  if (b.botFillTo > maxSeats) out.push({ message: 'botFillTo must be <= maxSeats', path: ['botFillTo'] });
+  if (b.botMax > maxSeats - 1) out.push({ message: 'botMax must leave a seat for a member', path: ['botMax'] });
+  if (b.botMinHumans >= b.botFillTo) out.push({ message: 'botMinHumans must be < botFillTo', path: ['botMinHumans'] });
+  return out;
+}
+
 export const TableInputSchema = z
   .object({
     name: z.string().trim().min(2).max(40),
@@ -98,11 +122,13 @@ export const TableInputSchema = z
     beginner: z.boolean().default(false),
     isPrivate: z.boolean().default(false),
     joinCode: z.string().trim().min(4).max(32).optional(),
+    ...BotSettingsShape,
   })
   .refine((t) => t.bigBlind >= t.smallBlind, { message: 'bigBlind must be >= smallBlind', path: ['bigBlind'] })
   .refine((t) => t.minBuyIn >= t.bigBlind * 10, { message: 'minBuyIn must be >= 10 BB', path: ['minBuyIn'] })
   .refine((t) => t.maxBuyIn >= t.minBuyIn, { message: 'maxBuyIn must be >= minBuyIn', path: ['maxBuyIn'] })
-  .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private tables need a join code', path: ['joinCode'] });
+  .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private tables need a join code', path: ['joinCode'] })
+  .superRefine((t, ctx) => botSettingsIssues(t, t.maxSeats).forEach((i) => ctx.addIssue({ code: 'custom', ...i })));
 export type TableInput = z.infer<typeof TableInputSchema>;
 
 /** Blinds a member can choose for their own room (small blind is half the big blind). */
@@ -154,6 +180,12 @@ export const TablePatchSchema = z.object({
   allowSpectators: z.boolean().optional(),
   beginner: z.boolean().optional(),
   entryBlocked: z.boolean().optional(),
+  botsEnabled: z.boolean().optional(),
+  botLevel: z.enum(BOT_LEVELS).optional(),
+  botMinHumans: BotSettingsShape.botMinHumans.removeDefault().optional(),
+  botMax: BotSettingsShape.botMax.removeDefault().optional(),
+  botFillTo: BotSettingsShape.botFillTo.removeDefault().optional(),
+  botYield: z.boolean().optional(),
 });
 
 /** Hands played below which quick play counts a player as a newcomer and prefers beginner tables. */
@@ -210,6 +242,10 @@ export interface LobbyTableDto {
   status: 'open' | 'closed';
   /** Live occupancy reported by the table room. */
   seated: number;
+  /** Of seated, the table bots. */
+  bots: number;
+  /** Table bots may sit in while few members play (official tables only): how well they play; null when they may not. */
+  botLevel: BotLevel | null;
   playing: boolean;
   waitlist: number;
   spectators: number;

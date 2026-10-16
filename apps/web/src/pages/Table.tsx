@@ -1,5 +1,5 @@
 import { sound } from '@jc/audio';
-import type { ActionType, PublicUserDto, TableView } from '@jc/types';
+import type { ActionType, PublicUserDto, SeatView, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -11,7 +11,7 @@ import { JoinCodeModal } from '../components/JoinCode';
 import { LinkShare } from '../components/Share';
 import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
-import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
+import { BotCard, PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
@@ -70,6 +70,7 @@ export function TablePage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chart, setChart] = useState(false);
   const [picked, setPicked] = useState<PublicUserDto | null>(null);
+  const [pickedBot, setPickedBot] = useState<SeatView | null>(null);
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
   // Table chat from players I muted on this device or blocked; it hides their lines for me only.
   const hiddenChat = useHiddenChat(me?.id);
@@ -405,7 +406,9 @@ export function TablePage() {
                 mySeat={mySeat}
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
-                onSeatClick={(seat) => seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}) })}
+                onSeatClick={(seat) =>
+                  seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}) })
+                }
                 onShow={(card) => sock.send({ t: 'show', card })}
                 reactions={reactions}
                 react={seated && prefs.reactions ? reactSender : undefined}
@@ -608,6 +611,7 @@ export function TablePage() {
           setPicked(null);
         }}
       />
+      <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} />
       <ReportModal subject={reporting} onClose={() => setReporting(null)} />
       <Modal open={chart} onClose={() => setChart(false)} title={t('table.handChart')}>
         <HandRankingChart compact />

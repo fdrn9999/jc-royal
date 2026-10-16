@@ -37,7 +37,10 @@ writeFileSync(
    ('e2e-lobby-full', 'E2E Lobby Hidden', 2, 3, 6, 60, 600, 30, 0), ('e2e-lobby-fav', 'E2E Lobby Fav', 6, 3, 6, 60, 600, 30, 1), ('e2e-lobby-m', 'E2E Lobby Mobile', 2, 3, 6, 60, 600, 30, 0);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators) VALUES
    ('e2e-secret', 'E2E Secret', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-secret:secret-77').digest('base64url')}', 1),
-   ('e2e-vault', 'E2E Vault', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-vault:vault-88').digest('base64url')}', 0);`,
+   ('e2e-vault', 'E2E Vault', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-vault:vault-88').digest('base64url')}', 0);
+   INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, bots_enabled, bot_level, bot_max, bot_fill_to) VALUES
+   ('e2e-bots-m', 'E2E Bots Mobile', 6, 5, 10, 100, 1000, 60, 1, 'normal', 2, 3), ('e2e-bots-admin', 'E2E Bots Admin', 2, 5, 10, 100, 1000, 60, 1, 'hard', 1, 2);
+   INSERT INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) VALUES (2, 1, 1000000, 20, 'policy', 'e2e seed');`,
 );
 run(['d1', 'execute', 'jc-royal-db', '--local', '--persist-to', state, '-c', 'apps/api/wrangler.jsonc', '--file', seed]);
 const child = spawn(

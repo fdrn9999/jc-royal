@@ -9,6 +9,9 @@ import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, STATS_DAY, STATS_MARKER_DAY, ST
  * rolled up whole and replaced whole, so running it twice (the cron and an administrator opening the page at the same
  * time) writes the same numbers. The page reads only `daily_stats`.
  *
+ * Table bots are left out of members' numbers: their seats and sign-ups are not counted, and hands they played in are
+ * counted as `hands_bots` instead of by room.
+ *
  * Cost of one day: every `tables` row once (hands are reached through hands_table_idx), the day's hands and closed
  * seats (tsess_closed_idx), the seats open during it, every `users` row once (no created_at index), the reports filed in it
  * (reports_created_idx) and every report once for the decided ones (no handled_at index), and the activity markers of
@@ -86,21 +89,23 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
     // tables first (CROSS JOIN keeps the order), each table's hands of the span through hands_table_idx.
     db
       .prepare(
-        `SELECT CAST((h.ended_at + ?3) / 86400000 AS INTEGER) AS day, t.room_type AS room, COUNT(*) AS n, COUNT(DISTINCT h.table_id) AS tables
-           FROM tables t CROSS JOIN hands h ON h.table_id = t.id AND h.ended_at >= ?1 AND h.ended_at < ?2 GROUP BY day, room`,
+        `SELECT CAST((h.ended_at + ?3) / 86400000 AS INTEGER) AS day, t.room_type AS room, h.bots > 0 AS bots, COUNT(*) AS n, COUNT(DISTINCT h.table_id) AS tables
+           FROM tables t CROSS JOIN hands h ON h.table_id = t.id AND h.ended_at >= ?1 AND h.ended_at < ?2 GROUP BY day, room, bots`,
       )
       .bind(s, e, tz),
+    // Members' seats only (table bots' are not play to count; the few bot accounts are read through users_bot_idx).
     db
       .prepare(
         `SELECT CAST((s.closed_at + ?3) / 86400000 AS INTEGER) AS day, t.room_type AS room, COUNT(*) AS n, SUM(s.closed_at - s.created_at) AS ms
-           FROM table_sessions s CROSS JOIN tables t ON t.id = s.table_id WHERE s.closed_at >= ?1 AND s.closed_at < ?2 GROUP BY day, room`,
+           FROM table_sessions s CROSS JOIN tables t ON t.id = s.table_id
+          WHERE s.closed_at >= ?1 AND s.closed_at < ?2 AND s.user_id NOT IN (SELECT id FROM users WHERE is_bot = 1) GROUP BY day, room`,
       )
       .bind(s, e, tz),
     // Seats open at some point of the span: closed after it began (tsess_closed_idx), or still open.
     db
       .prepare(
-        `SELECT created_at AS a, closed_at AS b FROM table_sessions WHERE closed_at >= ?1 AND created_at < ?2
-         UNION ALL SELECT created_at AS a, NULL AS b FROM table_sessions WHERE status = 'seated' AND created_at < ?2`,
+        `SELECT created_at AS a, closed_at AS b FROM table_sessions WHERE closed_at >= ?1 AND created_at < ?2 AND user_id NOT IN (SELECT id FROM users WHERE is_bot = 1)
+         UNION ALL SELECT created_at AS a, NULL AS b FROM table_sessions WHERE status = 'seated' AND created_at < ?2 AND user_id NOT IN (SELECT id FROM users WHERE is_bot = 1)`,
       )
       .bind(s, e),
     // Sign-ups, and whether each took a seat within a day / a week: from COHORT_DAYS before the span, whose week ends in it.
@@ -109,7 +114,7 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
         `SELECT CAST((u.created_at + ?3) / 86400000 AS INTEGER) AS day, COUNT(*) AS n,
                 SUM(EXISTS (SELECT 1 FROM table_sessions s WHERE s.user_id = u.id AND s.created_at < u.created_at + 86400000)) AS d1,
                 SUM(EXISTS (SELECT 1 FROM table_sessions s WHERE s.user_id = u.id AND s.created_at < u.created_at + ?4)) AS d7
-           FROM users u WHERE u.created_at >= ?1 AND u.created_at < ?2 GROUP BY day`,
+           FROM users u WHERE u.created_at >= ?1 AND u.created_at < ?2 AND u.is_bot = 0 GROUP BY day`,
       )
       .bind(s - COHORT_DAYS * DAY, e, tz, COHORT_DAYS * DAY),
     db.prepare(`SELECT CAST((created_at + ?3) / 86400000 AS INTEGER) AS day, COUNT(*) AS n FROM reports WHERE created_at >= ?1 AND created_at < ?2 GROUP BY day`).bind(s, e, tz),
@@ -144,9 +149,11 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
   const put = (day: number, metric: string, n: number | null | undefined) => {
     if (n) rows.push({ day, metric, n: Math.round(n) });
   };
+  // Hands a table bot played in are counted apart (hands_bots): the rooms' counts are members-only play.
   for (const r of hands!) {
-    put(r.day as number, `hands_${r.room as Room}`, r.n as number);
-    put(r.day as number, `tables_${r.room as Room}`, r.tables as number);
+    const kind = r.bots ? 'bots' : (r.room as Room);
+    put(r.day as number, `hands_${kind}`, r.n as number);
+    put(r.day as number, `tables_${kind}`, r.tables as number);
   }
   for (const r of seats!) {
     put(r.day as number, `seats_${r.room as Room}`, r.n as number);
@@ -312,6 +319,8 @@ export function summarize(get: (day: number, metric: string) => number, a: numbe
       peak: days ? Math.max(...dayList.map((d) => get(d, 'peak'))) : null,
       official,
       member,
+      /** Hands a table bot played in (not in the counts above), and the tables that dealt them per day. */
+      bots: { hands: sum('hands_bots'), tablesAvg: perDay(sum('tables_bots'), days) },
     },
     reports: { created: sum('reports'), handled, avgHandleMs: handled ? Math.round(sum('handle_ms') / handled) : null },
     // Counted as events arrive (not rolled up), so the days since they began, rolled up or not.

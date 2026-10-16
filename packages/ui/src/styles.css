@@ -419,6 +419,21 @@
   background: linear-gradient(135deg, #1d4fbf, #1877b4);
   border-color: rgba(160, 215, 255, 0.55);
   color: #fff;
+}/* A table bot (web MemberName's BotBadge): a quiet teal pill, apart from the staff colors. */
+.jc-bot-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  border: 1px solid rgba(111, 216, 198, 0.55);
+  border-radius: 9999px;
+  padding: 0 0.35rem;
+  background: rgba(16, 58, 56, 0.9);
+  color: #a6efe2;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 15px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 /* A staff member's line in the table chat: a quiet tint, not a banner. */
 .jc-role-line {

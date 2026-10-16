@@ -40,6 +40,8 @@ export const CAPABILITIES = {
   'sessions.all': 'super_admin',
   /** Change the free chip refill policy, or resume refills after an emergency stop (anyone on duty may stop them). */
   'refill.policy': 'super_admin',
+  /** Change the table bot policy (on, fund limit, how many bots), which also switches them on again (anyone on duty may stop them). */
+  'bots.policy': 'super_admin',
 } as const satisfies Record<string, AdminRole>;
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -71,6 +73,7 @@ export const FEATURES = [
   'stats',
   'reconcile',
   'refill',
+  'bots',
   'audit',
   'reports',
   'board',
@@ -151,6 +154,14 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'GET /refill/stats': r('refill', 'refill.stats'),
   'GET /refill/claims': r('refill', 'refill.claims'),
   'GET /users/:id/refill': r('refill', 'refill.member', { target: 'user' }),
+
+  // Table bots (routes/admin-bots.ts): the policy is a super admin's; anyone on duty may stop them. Each table's bot
+  // settings are the table's (PATCH /tables/:id).
+  'GET /bots': r('bots', 'bots.view'),
+  'PUT /bots/policy': r('bots', 'bots.policy', { role: CAPABILITIES['bots.policy'], reauth, preview }),
+  'POST /bots/stop': r('bots', 'bots.stop', { reauth }),
+  'GET /bots/events': r('bots', 'bots.events'),
+  'GET /bots/integrity': r('bots', 'bots.integrity'),
 
   'GET /board/posts': r('board', 'board.list'),
   'GET /board/posts/:id': r('board', 'board.view', { target: 'post' }),

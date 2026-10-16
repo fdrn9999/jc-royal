@@ -53,6 +53,23 @@ describe('MemberName', () => {
     expect(out.indexOf('role-icon')).toBeLessThan(name);
     expect(out.indexOf('role-badge')).toBeGreaterThan(out.indexOf('a'.repeat(16)));
   });
+
+  it('marks a table bot with the BOT pill after the name, its level for screen readers and on hover', () => {
+    const out = html(h(MemberName, { name: 'Bot-K4P2', bot: 'hard' }));
+    expect(out).toMatch(/data-level="hard" data-testid="bot-badge"><span aria-hidden="true">BOT<\/span><span class="sr-only">테이블 봇 · 어려움<\/span>/);
+    expect(out).toContain('title="테이블 봇 · 어려움"');
+    expect(out.indexOf('bot-badge')).toBeGreaterThan(out.indexOf('Bot-K4P2'));
+    // Not a staff member, and no badge flag needed: a bot is always marked.
+    expect(out).not.toContain('jc-role-name');
+    expect(out).not.toContain('role-badge');
+  });
+
+  it('marks a bot of a past hand (level not recorded) without a level, and members not at all', () => {
+    const out = html(h(MemberName, { name: 'Bot-K4P2', bot: true }));
+    expect(out).toContain('<span class="sr-only">테이블 봇</span>');
+    expect(out).not.toContain('data-level');
+    expect(html(h(MemberName, { name: 'river_rat' }))).not.toContain('bot-badge');
+  });
 });
 
 describe('HostedBy', () => {

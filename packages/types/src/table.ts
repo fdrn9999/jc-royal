@@ -28,6 +28,13 @@ export type LegalOption =
 
 export type SeatState = 'empty' | 'waiting' | 'active' | 'folded' | 'allin' | 'sittingOut';
 
+/**
+ * Levels of the table bots an official table may seat (apps/game-worker/src/bots.ts): rule-based players that use the
+ * same engine and legal options as everybody and see only what a player in their seat sees.
+ */
+export const BOT_LEVELS = ['easy', 'normal', 'hard'] as const;
+export type BotLevel = (typeof BOT_LEVELS)[number];
+
 export interface SeatView {
   seatIndex: number;
   state: SeatState;
@@ -36,6 +43,13 @@ export interface SeatView {
   avatarUrl?: string | null;
   /** Staff only (see PublicRole): refreshed when the player connects and when an admin changes the role. */
   role?: PublicRole;
+  /**
+   * A table bot of this level, not a member: it has no profile, and cannot be befriended, messaged or reported. `true`
+   * in the replay of a past hand, which records that a seat was a bot but not how well it played.
+   */
+  bot?: BotLevel | true;
+  /** A bot that gives up its seat once the current hand ends (to a member waiting for one, or the bots were turned off). */
+  botLeaving?: boolean;
   stack: number;
   /** Chips committed on the current street. */
   streetBet: number;

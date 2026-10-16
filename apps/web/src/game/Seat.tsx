@@ -6,7 +6,7 @@
 import type { SeatView } from '@jc/types';
 import { cx, PlayingCard } from '@jc/ui';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { MemberName } from '../components/MemberName';
+import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { ReactionBubble, ReactionTray, type ReactionSender, type SeatReaction } from './Reactions';
@@ -206,7 +206,7 @@ export function Seat(p: SeatProps) {
             <span
               className={cx(
                 'relative grid size-full place-items-center overflow-hidden rounded-full border bg-gradient-to-br from-ink-600 to-ink-800 text-xs font-bold text-gold-300',
-                s.role === 'super_admin' ? 'border-[#e2bd6a]/80' : s.role === 'admin' ? 'border-[#5aa9ff]/80' : 'border-white/10',
+                s.role === 'super_admin' ? 'border-[#e2bd6a]/80' : s.role === 'admin' ? 'border-[#5aa9ff]/80' : s.bot ? 'border-[#6fd8c6]/60' : 'border-white/10',
               )}
             >
               {s.avatarUrl ? <img src={s.avatarUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" /> : initials(s.nickname)}
@@ -216,7 +216,7 @@ export function Seat(p: SeatProps) {
           <span className="flex min-w-0 flex-col leading-tight">
             {/* The width cap sits on a wrapper: MemberName's own max-w-full comes later in the stylesheet and would win. */}
             <span className="flex min-w-0 max-w-[5.5rem] sm:max-w-[7rem]">
-              <MemberName name={s.nickname ?? ''} role={s.role} className={cx('text-xs font-semibold sm:text-[13px]', p.isMe ? 'text-gold-300' : 'text-ivory')} />
+              <MemberName name={s.nickname ?? ''} role={s.role} bot={s.bot} className={cx('text-xs font-semibold sm:text-[13px]', p.isMe ? 'text-gold-300' : 'text-ivory')} />
             </span>
             <span className="font-mono text-[11px] font-semibold text-[#9fd8b6] tabular-nums sm:text-xs" data-testid={`stack-${s.seatIndex}`}>
               {p.amounts.fmt(s.stack, p.compact)}
@@ -276,7 +276,15 @@ export function Seat(p: SeatProps) {
             <span className="text-gold-300">{p.handLabel}</span>
           ) : actionLabel ? (
             <span className={actionTone}>{actionLabel}</span>
+          ) : s.bot && s.bot !== true && !s.botLeaving ? (
+            <span className="text-[#8fd9cb]/80" data-testid={`bot-level-${s.seatIndex}`}>{t(BOT_LEVEL_LABEL[s.bot])}</span>
           ) : null}
+          {/* A bot giving up its seat plays the hand out first: its action stays readable beside the notice. */}
+          {s.botLeaving && (
+            <span className="text-ink-300" title={t('bot.leavingTitle')} data-testid={`bot-leaving-${s.seatIndex}`}>
+              {t('bot.leaving')}
+            </span>
+          )}
         </div>
       </div>
     </div>

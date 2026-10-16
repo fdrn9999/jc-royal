@@ -26,6 +26,7 @@ export const ledgerTypeLabel = labeler({
   admin_adjust: 'ledgerAdminAdjust',
   reconcile: 'ledgerReconcile',
   free_refill: 'ledgerFreeRefill',
+  bot_fund: 'ledgerBotFund',
 });
 /** The memos the server writes itself (sign-up grant, buy-in seat, top-ups); a memo an admin typed is shown as it is. */
 const SYSTEM_MEMOS: Record<string, Key> = {
@@ -35,6 +36,7 @@ const SYSTEM_MEMOS: Record<string, Key> = {
   'recorded difference': 'memoRecorded',
   'balance corrected': 'memoCorrected',
   'free refill': 'memoFreeRefill',
+  'bot fund': 'memoBotFund',
 };
 export function memoLabel(t: Tr, memo: string | null | undefined): string {
   if (!memo) return '';
@@ -69,6 +71,11 @@ const auditNames = labeler({
   'admin.session.end': 'auditSessionEnd',
   'admin.session.end_others': 'auditSessionEndOthers',
   'board.comment.status': 'auditCommentStatus',
+  'bots.events': 'auditBotsEvents',
+  'bots.integrity': 'auditBotsIntegrity',
+  'bots.policy': 'auditBotsPolicy',
+  'bots.stop': 'auditBotsStop',
+  'bots.view': 'auditBotsView',
   'board.notice.create': 'auditNoticeCreate',
   'board.notice.update': 'auditNoticeUpdate',
   'board.post.status': 'auditPostStatus',
@@ -135,7 +142,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'report', 'board', 'message', 'service', 'maintenance'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -145,6 +152,7 @@ export const auditFamilyLabel = labeler({
   ledger: 'famLedger',
   reconcile: 'famReconcile',
   refill: 'famRefill',
+  bots: 'famBots',
   report: 'famReport',
   board: 'famBoard',
   message: 'famMessage',
@@ -162,6 +170,7 @@ export const capabilityLabel = labeler({
   'audit.all': 'capAuditAll',
   'sessions.all': 'capSessionsAll',
   'refill.policy': 'capRefillPolicy',
+  'bots.policy': 'capBotsPolicy',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({
@@ -182,6 +191,7 @@ export const featureLabel = labeler({
   stats: 'featStats',
   reconcile: 'reconcile',
   refill: 'featRefill',
+  bots: 'featBots',
   audit: 'audit',
   reports: 'reports',
   board: 'board',
@@ -213,6 +223,26 @@ export const tableIssueLabel = labeler({
 export const noticeKindLabel = labeler({ general: 'noticeKindGeneral', urgent: 'noticeKindUrgent', maintenance: 'noticeKindMaintenance' });
 export const noticeStateLabel = labeler({ live: 'noticeStateLive', scheduled: 'noticeStateScheduled', ended: 'noticeStateEnded', deleted: 'noticeStateDeleted' });
 export const maintStateLabel = labeler({ active: 'maintStateActive', scheduled: 'maintStateScheduled', finished: 'maintStateFinished', ended_early: 'maintStateEndedEarly', cancelled: 'maintStateCancelled' });
+/** Table bots: difficulty, the operations log's kinds and the codes the room writes with them (others are shown as they are). */
+export const botLevelLabel = labeler({ easy: 'botLevelEasy', normal: 'botLevelNormal', hard: 'botLevelHard' });
+export const botEventKindLabel = labeler({ join: 'botEvJoin', leave: 'botEvLeave', fund_exhausted: 'botEvFundExhausted', join_failed: 'botEvJoinFailed', action_failed: 'botEvActionFailed' });
+const botCodes = labeler({
+  busted: 'botCodeBusted',
+  bots_off: 'botCodeBotsOff',
+  no_members: 'botCodeNoMembers',
+  yield: 'botCodeYield',
+  limit: 'botCodeLimit',
+  policy_off: 'botCodePolicyOff',
+  busy: 'botCodeBusy',
+  max_bots: 'botCodeMaxBots',
+  fund_exhausted: 'botCodeFundExhausted',
+  error: 'botCodeError',
+  no_view: 'botCodeNoView',
+});
+export function botEventCodeLabel(t: Tr, code: string | null | undefined): string {
+  const funded = code ? /^funded (\d+)$/.exec(code) : null;
+  return funded ? t('botCodeFunded', { n: Number(funded[1]).toLocaleString() }) : botCodes(t, code);
+}
 export const seatPhaseLabel = labeler({ pending: 'phasePending', cashing: 'phaseCashing' });
 export const topUpStateLabel = labeler({ queued: 'topUpQueued', debiting: 'topUpDebiting' });
 export const targetTypeLabel = labeler({

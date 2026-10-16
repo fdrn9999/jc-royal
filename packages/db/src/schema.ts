@@ -30,6 +30,11 @@ export const users = sqliteTable(
     dmNotifications: integer('dm_notifications', { mode: 'boolean' }).notNull().default(true),
     /** Last member sign-in (signup or login), kept after the session itself ends. Null before it was recorded. */
     lastLoginAt: integer('last_login_at'),
+    /**
+     * A table bot's account (apps/game-worker/src/bots.ts): it cannot sign in, never appears among members, and its
+     * chips come from the bot fund (chip_ledger type bot_fund), never from the signup grant.
+     */
+    isBot: integer('is_bot', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -38,6 +43,8 @@ export const users = sqliteTable(
     uniqueIndex('users_nickname_uq').on(sql`lower(${t.nickname})`),
     // Administrators only (the people a report can be assigned to), without reading every member.
     index('users_staff_idx').on(t.role, t.status).where(sql`role != 'user'`),
+    // Bot accounts only, for a room picking an idle one.
+    index('users_bot_idx').on(t.status).where(sql`is_bot = 1`),
   ],
 );
 
@@ -92,7 +99,7 @@ export const chipLedger = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id),
     type: text('type', {
-      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'free_refill'],
+      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'free_refill', 'bot_fund'],
     }).notNull(),
     /** Signed delta applied to users.balance. */
     amount: integer('amount').notNull(),
@@ -134,6 +141,8 @@ export const tables = sqliteTable(
     liveWaitlist: integer('live_waitlist').notNull().default(0),
     liveSpectators: integer('live_spectators').notNull().default(0),
     liveConnections: integer('live_connections').notNull().default(0),
+    /** Of live_seated, the table bots. */
+    liveBots: integer('live_bots').notNull().default(0),
     handsPlayed: integer('hands_played').notNull().default(0),
     lastIssue: text('last_issue'),
     liveUpdatedAt: integer('live_updated_at'),
@@ -143,6 +152,17 @@ export const tables = sqliteTable(
      * rename it, change spectating and the join code, and close it; never touch chips, cards or results.
      */
     roomType: text('room_type', { enum: ['official', 'member'] }).notNull().default('official'),
+    /**
+     * Table bots (official tables only, and only while the bot policy is on): once ot_min_humans members sit, bots
+     * of ot_level join one at a time until ot_fill_to players sit, never more than ot_max bots. With
+     * ot_yield a bot leaves after its hand for each member waiting for a seat.
+     */
+    botsEnabled: integer('bots_enabled', { mode: 'boolean' }).notNull().default(false),
+    botLevel: text('bot_level', { enum: ['easy', 'normal', 'hard'] }).notNull().default('normal'),
+    botMinHumans: integer('bot_min_humans').notNull().default(1),
+    botMax: integer('bot_max').notNull().default(1),
+    botFillTo: integer('bot_fill_to').notNull().default(2),
+    botYield: integer('bot_yield', { mode: 'boolean' }).notNull().default(true),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -185,6 +205,8 @@ export const hands = sqliteTable(
     engineVersion: text('engine_version').notNull(),
     /** Full engine event log incl. hole cards. Restricted: audit only, finished hands only. */
     eventLog: text('event_log').notNull(),
+    /** Table bots dealt in, so statistics can keep hands with bots apart from hands among members only. */
+    bots: integer('bots').notNull().default(0),
   },
   (t) => [index('hands_table_idx').on(t.tableId, t.endedAt)],
 );
@@ -653,4 +675,44 @@ export const refillClaims = sqliteTable(
     createdAt: integer('created_at').notNull().default(now),
   },
   (t) => [uniqueIndex('refill_claims_user_seq_uq').on(t.userId, t.seq), index('refill_claims_created_idx').on(t.createdAt)],
+);
+/**
+ * Table bot policy (apps/game-worker/src/bots.ts), one row per version and never changed: the newest row is in force.
+ * Off, no bot joins a table and seated bots leave after their hand. `fund_limit` caps the chips ever issued to bots
+ * (bot_fund.issued); `max_bots` caps the bots seated across all tables at once.
+ */
+export const botPolicies = sqliteTable('bot_policies', {
+  version: integer('version').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  fundLimit: integer('fund_limit').notNull(),
+  maxBots: integer('max_bots').notNull(),
+  change: text('change', { enum: ['seed', 'policy'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * The bot fund's one row (id 1): chips issued to bot accounts so far, raised in the same batch as each chip_ledger row
+ * of type bot_fund (and only when that row was written), so it always equals their sum.
+ */
+export const botFund = sqliteTable('bot_fund', {
+  id: integer('id').primaryKey(),
+  issued: integer('issued').notNull().default(0),
+  updatedAt: integer('updated_at').notNull().default(now),
+});
+
+/** What table bots did that an operator may need to see: joins, leaves, an empty fund, a failed decision or write. */
+export const botEvents = sqliteTable(
+  'bot_events',
+  {
+    id: text('id').primaryKey(),
+    tableId: text('table_id').notNull(),
+    botId: text('bot_id'),
+    kind: text('kind', { enum: ['join', 'leave', 'fund_exhausted', 'join_failed', 'action_failed'] }).notNull(),
+    /** An error code or reason, never cards. */
+    code: text('code'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('bot_events_created_idx').on(t.createdAt), index('bot_events_table_idx').on(t.tableId, t.createdAt)],
 );

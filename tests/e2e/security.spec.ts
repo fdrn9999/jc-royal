@@ -88,7 +88,7 @@ test('permissions and audit: a plain admin is refused super-admin work and sees 
   // Their security page: every super-admin ability marked as such, export not allowed, and only their own sessions.
   await p.getByRole('link', { name: /^보안$|^Security$/ }).click();
   const mine = p.getByTestId('my-permissions');
-  await expect(mine.getByText(/^최고관리자 전용$|^Super admin only$/)).toHaveCount(9);
+  await expect(mine.getByText(/^최고관리자 전용$|^Super admin only$/)).toHaveCount(10);
   await expect(mine.getByText(/^가능$|^Allowed$/)).toHaveCount(0);
   await expect(p.getByTestId('permission-matrix').locator('tr').filter({ hasText: /회원 정보 내보내기|Member data export/ })).toContainText(/불가|None/);
   await expect(p.getByTestId('admin-session').first()).toBeVisible();

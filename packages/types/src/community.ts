@@ -62,6 +62,8 @@ export interface HandReplayPlayer {
   nickname: string;
   /** Staff only (see PublicRole): the member's role now, not when the hand was played. */
   role?: PublicRole;
+  /** A table bot (the server played its moves). */
+  bot?: true;
   holeCards: string[] | null;
   stackStart: number;
   net: number;

@@ -3,11 +3,28 @@
  * own color and mark: a crown for the super admin, a shield for an admin, and where there is room the SUPER ADMIN /
  * ADMIN badge. Ordinary members look exactly as before. The crown is drawn, so it never reads as the 👑 host mark.
  */
-import type { PublicRole } from '@jc/types';
+import type { BotLevel, PublicRole } from '@jc/types';
 import { cx } from '@jc/ui';
 import { useI18n } from '../lib/i18n';
 
 const LABEL = { super_admin: 'role.superAdmin', admin: 'role.admin' } as const;
+/** How a table bot's level reads ("Normal"). */
+export const BOT_LEVEL_LABEL = { easy: 'bot.easy', normal: 'bot.normal', hard: 'bot.hard' } as const;
+
+/**
+ * The BOT pill on a table bot's name (the same word in Korean and English). The level, when known, is in its title and
+ * read out by screen readers; the replay of a past hand knows only that the seat was a bot.
+ */
+export function BotBadge({ level, className }: { level: BotLevel | true; className?: string }) {
+  const { t } = useI18n();
+  const label = level === true ? t('bot.label') : t('bot.labelLevel', { level: t(BOT_LEVEL_LABEL[level]) });
+  return (
+    <span className={cx('jc-bot-badge', className)} title={label} data-level={level === true ? undefined : level} data-testid="bot-badge">
+      <span aria-hidden>BOT</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
 
 /** The crown (super admin) or shield (admin) in front of a staff name. Nothing for other members. */
 export function RoleIcon({ role, className }: { role?: PublicRole; className?: string }) {
@@ -64,9 +81,10 @@ export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole
 
 /**
  * A member's name: for staff, the mark and their color (over whatever color `className` gives other members), and the
- * badge with `badge`. Long names are cut with an ellipsis; the mark and the badge always stay whole.
+ * badge with `badge`. A table bot (`bot`) always carries the BOT pill. Long names are cut with an ellipsis; the mark and
+ * the badges always stay whole.
  */
-export function MemberName({ name, role, badge, className }: { name: string; role?: PublicRole; badge?: boolean; className?: string }) {
+export function MemberName({ name, role, bot, badge, className }: { name: string; role?: PublicRole; bot?: BotLevel | true; badge?: boolean; className?: string }) {
   return (
     <span className={cx('inline-flex min-w-0 max-w-full items-center gap-1 align-bottom', className)} data-testid="member-name">
       <RoleIcon role={role} className="size-[1.05em]" />
@@ -74,6 +92,7 @@ export function MemberName({ name, role, badge, className }: { name: string; rol
         {name}
       </span>
       {badge && <RoleBadge role={role} />}
+      {bot && <BotBadge level={bot} />}
     </span>
   );
 }

@@ -145,7 +145,7 @@ function Settlement({ hand, name, amounts: a }: { hand: ReplayInput; name: (seat
               .filter((p) => p.won > 0)
               .map((p) => (
                 <li key={p.seatIndex} className="flex justify-between gap-2">
-                  <MemberName name={p.nickname} role={p.role} />
+                  <MemberName name={p.nickname} role={p.role} bot={p.bot} />
                   <span className="font-mono text-[#9fd8b6] tabular-nums">+{a.fmt(p.won)}</span>
                 </li>
               ))}

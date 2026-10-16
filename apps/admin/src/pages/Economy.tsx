@@ -13,7 +13,7 @@ import { Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
 
 type Flow = { n: number; sum: number; plus: number; minus: number };
-type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill';
+type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill' | 'bot_fund';
 type Scope = 'user_ledger' | 'table';
 interface AdminRow { id: string; userId: string; nickname: string | null; amount: number; memo: string | null; actorId: string | null; actorNickname: string | null; createdAt: number }
 interface Economy {
@@ -22,9 +22,9 @@ interface Economy {
   at: number;
   d1Ms: number;
   rowsRead: number;
-  wallets: { members: number; accounts: number; balance: number; deleted: number; suspended: number; staff: number };
+  wallets: { members: number; accounts: number; balance: number; deleted: number; suspended: number; staff: number; bots?: number; botAccounts?: number };
   tables: { chips: number; openSessions: number; seatedBuyIn: number };
-  issued: { signup: number; admin: number; reconcile: number; refill: number; total: number };
+  issued: { signup: number; admin: number; reconcile: number; refill: number; bots?: number; total: number };
   ledger: { total: number; byType: Record<LedgerType, Flow> };
   gap: number;
   period: { counts: Record<LedgerType | 'auto_rebuy', Flow>; moved: number; series: { date: string; n: number; moved: number; in: number; out: number }[] };
@@ -53,6 +53,7 @@ const FLOWS: [LedgerType | 'auto_rebuy', Key][] = [
   ['cash_out', 'ledgerCashOut'],
   ['admin_adjust', 'ledgerAdminAdjust'],
   ['reconcile', 'ledgerReconcile'],
+  ['bot_fund', 'ledgerBotFund'],
 ];
 const REFUSAL: Record<string, Key> = { forbidden: 'refusedForbidden', large_adjustment: 'refusedLarge', insufficient_balance: 'refusedBalance' };
 const STALE: Record<string, Key> = { closed_table: 'staleClosedTable', closing_table: 'staleClosingTable', long: 'staleLong' };
@@ -108,9 +109,9 @@ export function EconomyPage() {
     <div className={`flex flex-col gap-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
       {header}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5" data-testid="economy-totals">
-        <Stat label={t('econWallets')} value={formatChips(d.wallets.balance)} sub={t('econWalletsSub', { n: formatChips(d.wallets.members), suspended: formatChips(d.wallets.suspended), staff: formatChips(d.wallets.staff) })} />
+        <Stat label={t('econWallets')} value={formatChips(d.wallets.balance)} sub={<>{t('econWalletsSub', { n: formatChips(d.wallets.members), suspended: formatChips(d.wallets.suspended), staff: formatChips(d.wallets.staff) })}{d.wallets.botAccounts ? <> · <Link to="/bots" className="text-gold-300 hover:underline">{t('econBotWallets', { n: formatChips(d.wallets.bots ?? 0) })}</Link></> : null}</>} />
         <Stat label={t('econOnTables')} value={formatChips(d.tables.chips)} sub={t('econOnTablesSub', { n: d.tables.openSessions, buyIn: formatChips(d.tables.seatedBuyIn) })} />
-        <Stat label={t('econIssued')} value={formatChips(d.issued.total)} sub={t('econIssuedSub', { signup: formatChips(d.issued.signup), admin: signed(d.issued.admin), rec: signed(d.issued.reconcile), refill: formatChips(d.issued.refill) })} />
+        <Stat label={t('econIssued')} value={formatChips(d.issued.total)} sub={`${t('econIssuedSub', { signup: formatChips(d.issued.signup), admin: signed(d.issued.admin), rec: signed(d.issued.reconcile), refill: formatChips(d.issued.refill) })}${d.issued.bots ? ` · ${t('econBotFund', { n: formatChips(d.issued.bots) })}` : ''}`} />
         <Stat
           label={t('econGap')}
           value={<span className={d.gap ? 'text-danger' : 'text-success'} data-testid="economy-gap">{signed(d.gap)}</span>}

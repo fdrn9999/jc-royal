@@ -172,7 +172,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
         `INSERT INTO messages (id, user_id, category, title, body, sender_id, batch_id, created_at)
          SELECT lower(hex(randomblob(16))), id, 'notice', CASE WHEN locale = 'en' THEN ?1 ELSE ?2 END,
                 CASE WHEN locale = 'en' THEN ?3 ELSE ?4 END, ?5, ?6, ?7
-         FROM users WHERE status = 'active'`,
+         FROM users WHERE status = 'active' AND is_bot = 0`,
       )
         .bind(body.titleEn, body.titleKo, body.bodyEn ?? body.titleEn, body.bodyKo ?? body.titleKo, me, batchId, now)
         .run();
@@ -243,7 +243,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       c.var.db.select({ w: W, author: schema.users.nickname }).from(W).leftJoin(schema.users, eq(schema.users.id, W.createdBy)).orderBy(desc(W.createdAt)).limit(limit).offset(offset),
       c.env.DB.prepare(
         `SELECT COALESCE(SUM(CASE WHEN live_playing = 1 THEN 1 ELSE 0 END), 0) AS playing, COALESCE(SUM(CASE WHEN live_seated > 0 THEN 1 ELSE 0 END), 0) AS seated,
-                COALESCE(SUM(live_seated), 0) AS players
+                COALESCE(SUM(live_seated - live_bots), 0) AS players
          FROM tables WHERE status IN ('open', 'closing')`,
       ).first<{ playing: number; seated: number; players: number }>(),
     ]);

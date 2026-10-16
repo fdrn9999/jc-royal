@@ -1,4 +1,4 @@
-import { REPORT_REASONS, type FriendRequestResultDto, type PublicUserDto, type RelationDto, type RelationKind, type ReportReason, type ReportTarget } from '@jc/types';
+import { REPORT_REASONS, type FriendRequestResultDto, type PublicUserDto, type RelationDto, type RelationKind, type ReportReason, type ReportTarget, type SeatView } from '@jc/types';
 import { Button, cx, Modal, Spinner } from '@jc/ui';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { blockUser, setMuted, unblockUser, useMuted } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
-import { MemberName, RoleBadge } from './MemberName';
+import { BOT_LEVEL_LABEL, MemberName, RoleBadge } from './MemberName';
 
 export function Avatar({ user, size = 'size-10' }: { user: Pick<PublicUserDto, 'nickname' | 'avatarUrl'>; size?: string }) {
   return (
@@ -120,6 +120,35 @@ export function BlockConfirm({ name, busy, onConfirm, onCancel }: { name: string
         <Button variant="danger" loading={busy} onClick={onConfirm} data-testid="block-confirm-yes">{t('block.action')}</Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * A table bot's card in place of a player's: what it is and how well it plays. A bot has no profile and takes no
+ * friend request, message, block or report (the server refuses them), so the card offers none.
+ */
+export function BotCard({ seat, onClose }: { seat: SeatView | null; onClose: () => void }) {
+  const { t } = useI18n();
+  const level = seat?.bot;
+  return (
+    <Modal open={!!level} onClose={onClose} title={seat?.nickname ?? ''}>
+      {seat && level && (
+        <div className="flex flex-col gap-4" data-testid="bot-card">
+          <div className="flex items-center gap-3">
+            <Avatar user={{ nickname: seat.nickname ?? '', avatarUrl: null }} size="size-14" />
+            <div className="min-w-0">
+              <MemberName name={seat.nickname ?? ''} bot={level} className="text-lg font-bold text-ivory" />
+              {level !== true && <div className="text-sm text-[#8fd9cb]" data-testid="bot-card-level">{t('bot.levelLine', { level: t(BOT_LEVEL_LABEL[level]) })}</div>}
+              {seat.botLeaving && <div className="text-xs text-ink-300">{t('bot.leavingTitle')}</div>}
+            </div>
+          </div>
+          <p className="text-sm leading-relaxed text-ink-200">{t('bot.about')}</p>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

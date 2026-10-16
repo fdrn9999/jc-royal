@@ -5,7 +5,7 @@
  * what they would change without changing it.
  */
 import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
-import { ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
+import { botSettingsIssues, ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, ne, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -19,6 +19,7 @@ import { can, capabilitiesOf, matchedRoute, requirePermission } from '../lib/per
 import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
+import { adminBotRoutes } from './admin-bots';
 import { adminRefillRoutes } from './admin-refill';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
@@ -190,6 +191,11 @@ async function findMember(d1: D1Database, q: string) {
     .first<{ id: string; nickname: string }>();
 }
 
+/** Table bots are run by the service: no sanction, role, chip adjustment or reset link applies to them (봇 운영 does). */
+function refuseBot(u: { isBot?: boolean } | undefined) {
+  if (u?.isBot) fail(409, 'bot_account', 'table bot accounts are managed from the bots page');
+}
+
 /** One page and the cursor of the next (the extra row asked for says whether there is one). */
 function keysetPage<T extends { seq: number }>(rows: T[], limit: number, timeOf: ((r: T) => number) | null) {
   const items = rows.slice(0, limit);
@@ -306,21 +312,28 @@ const admin = new Hono<AppEnv>()
   .get('/dashboard', async (c) => {
     const t0 = Date.now();
     const db = c.env.DB;
+    // Members only: table bots (users.is_bot) are counted apart, as `seatedBots`.
     const [users, online, tables, hands, today, seats, issues] = await db.batch([
-      db.prepare(`SELECT COUNT(*) AS n FROM users WHERE status != 'deleted'`),
+      db.prepare(`SELECT COUNT(*) AS n FROM users WHERE status != 'deleted' AND is_bot = 0`),
       db.prepare(`SELECT COUNT(DISTINCT user_id) AS n FROM sessions WHERE kind = 'user' AND last_seen_at > ?1`).bind(Date.now() - 5 * 60_000),
-      db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status != 'closed' THEN 1 ELSE 0 END) AS active, SUM(live_playing) AS playing, SUM(live_connections) AS conns, SUM(live_seated) AS seated FROM tables`),
+      db.prepare(
+        `SELECT COUNT(*) AS total, SUM(CASE WHEN status != 'closed' THEN 1 ELSE 0 END) AS active, SUM(live_playing) AS playing, SUM(live_connections) AS conns,
+                SUM(live_seated) AS seated, SUM(live_bots) AS bots FROM tables`,
+      ),
       db.prepare(`SELECT COUNT(*) AS n FROM hands`),
       db.prepare(`SELECT COUNT(*) AS n FROM hands WHERE ended_at > ?1`).bind(Date.now() - 24 * 60 * 60_000),
-      db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(buy_in), 0) AS chips FROM table_sessions WHERE status = 'seated'`),
+      db.prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(buy_in), 0) AS chips FROM table_sessions
+          WHERE status = 'seated' AND user_id NOT IN (SELECT id FROM users WHERE is_bot = 1)`,
+      ),
       db.prepare(`SELECT id, name, last_issue AS issue FROM tables WHERE last_issue IS NOT NULL ORDER BY updated_at DESC LIMIT 10`),
     ]);
     const one = <T>(r: D1Result | undefined) => (r?.results[0] ?? {}) as T;
-    const tb = one<{ total: number; active: number; playing: number; conns: number; seated: number }>(tables);
+    const tb = one<{ total: number; active: number; playing: number; conns: number; seated: number; bots: number }>(tables);
     return c.json({
       users: one<{ n: number }>(users).n,
       onlineUsers: one<{ n: number }>(online).n,
-      tables: { total: tb.total ?? 0, active: tb.active ?? 0, playing: tb.playing ?? 0, seatedPlayers: tb.seated ?? 0 },
+      tables: { total: tb.total ?? 0, active: tb.active ?? 0, playing: tb.playing ?? 0, seatedPlayers: (tb.seated ?? 0) - (tb.bots ?? 0), seatedBots: tb.bots ?? 0 },
       websocketConnections: tb.conns ?? 0,
       handsCompleted: one<{ n: number }>(hands).n,
       handsLast24h: one<{ n: number }>(today).n,
@@ -343,6 +356,8 @@ const admin = new Hono<AppEnv>()
     const locale = c.req.query('locale');
     const onlineOnly = c.req.query('online') === '1';
     const role = c.req.query('role');
+    // Table bots are listed only when asked for (`bots=1`), and then alone.
+    const bots = c.req.query('bots') === '1';
     const sortKey = c.req.query('sort') ?? 'created';
     const dir = c.req.query('dir') === 'asc' ? asc : desc;
     const U = schema.users;
@@ -355,6 +370,7 @@ const admin = new Hono<AppEnv>()
       locale === 'ko' || locale === 'en' ? eq(U.locale, locale) : undefined,
       role === 'user' || role === 'admin' || role === 'super_admin' ? eq(U.role, role) : undefined,
       onlineOnly ? online : undefined,
+      eq(U.isBot, bots),
     );
     // Members with no recorded sign-in sort last in both directions; ties keep the newest member first.
     const order =
@@ -378,7 +394,7 @@ const admin = new Hono<AppEnv>()
       .limit(limit)
       .offset(offset);
     // The list shows email addresses, so every look is recorded (search terms and how many members it showed).
-    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, role: role ?? null, online: onlineOnly, sort: sortKey, offset, count: rows.length });
+    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, role: role ?? null, online: onlineOnly, ...(bots ? { bots } : {}), sort: sortKey, offset, count: rows.length });
     const items = rows.map((r) => ({ ...r, online: !!r.online }));
     // `paged=1` adds the number of matching members for page controls; without it the plain array, as before.
     if (c.req.query('paged') !== '1') return c.json(items);
@@ -408,7 +424,8 @@ const admin = new Hono<AppEnv>()
     const rows: Awaited<ReturnType<typeof selectChunk>> = [];
     // D1 caps bound parameters per statement.
     function selectChunk(chunk: string[]) {
-      return c.var.db.select(cols).from(u).where(inArray(u.id, chunk));
+      // (Table bots are not members: they have no data to export.)
+      return c.var.db.select(cols).from(u).where(and(inArray(u.id, chunk), eq(u.isBot, false)));
     }
     for (let i = 0; i < ids.length; i += 90) rows.push(...(await selectChunk(ids.slice(i, i + 90))));
     rows.sort((a, b) => b.createdAt - a.createdAt);
@@ -609,6 +626,7 @@ const admin = new Hono<AppEnv>()
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     // A withdrawn account is gone (its notices went with it); it is not suspended back into existence.
     if (!target || target.status === 'deleted') fail(404, 'not_found', 'user not found');
+    refuseBot(target);
     if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can suspend administrators');
     if (body.reportId) {
       const rep = await c.var.db.query.reports.findFirst({ where: eq(schema.reports.id, body.reportId), columns: { targetUserId: true } });
@@ -657,8 +675,10 @@ const admin = new Hono<AppEnv>()
     const preview = await isPreview(c);
     const body = await parseBody(c, preview ? DisconnectSchema.partial({ reason: true }) : DisconnectSchema);
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot disconnect yourself');
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, nickname: true, status: true } });
-    if (!target) fail(404, 'not_found', 'user not found');
+    const found = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, nickname: true, status: true, isBot: true } });
+    if (!found) fail(404, 'not_found', 'user not found');
+    refuseBot(found);
+    const { isBot: _bot, ...target } = found;
     if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can disconnect administrators');
     if (preview) return c.json({ preview: true, member: target, removeFromTable: body.removeFromTable, ...(await sanctionPreview(c.env.DB, id)) });
     const ended = await c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)).returning({ kind: schema.sessions.kind });
@@ -670,8 +690,9 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const preview = await isPreview(c);
     const body = await parseBody(c, z.object({ reason: preview ? ReasonSchema.optional() : ReasonSchema }));
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, status: true, suspendedReason: true, nickname: true } });
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, status: true, suspendedReason: true, nickname: true, isBot: true } });
     if (!target) fail(404, 'not_found', 'user not found');
+    refuseBot(target);
     if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can unsuspend administrators');
     if (preview) {
       return c.json({ preview: true, member: { nickname: target.nickname, role: target.role }, from: target.status, to: target.status === 'suspended' ? 'active' : target.status, suspendedReason: target.suspendedReason });
@@ -694,6 +715,7 @@ const admin = new Hono<AppEnv>()
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot change your own role');
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!target || target.status !== 'active') fail(404, 'not_found', 'active user not found');
+    refuseBot(target);
     if (preview) {
       const sessions = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?1 AND kind = 'admin' AND expires_at > ?2`).bind(id, Date.now()).first<{ n: number }>();
       const before = capabilitiesOf(target.role);
@@ -729,13 +751,15 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const preview = await isPreview(c);
     const body = await parseBody(c, ChipAdjustSchema);
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, nickname: true, status: true, balance: true } });
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, nickname: true, status: true, balance: true, isBot: true } });
     const role = c.var.user!.role;
     // A refused adjustment is audited too: the economy page lists them.
     const refuse = async (reason: string, status: 403 | 409, code: string, message: string): Promise<never> => {
       if (!preview) await audit(c, 'user.chips_refused', { type: 'user', id }, { reason, amount: body.amount, memo: body.memo }, 'failed');
       fail(status, code, message);
     };
+    // A bot's chips come only from the bot fund and its play (the fund's total must stay its issuance).
+    if (target?.isBot) await refuse('bot_account', 409, 'bot_account', 'table bot accounts are managed from the bots page');
     if (target && target.role !== 'user' && !can(role, 'admins.manage')) await refuse('forbidden', 403, 'forbidden', 'only a super admin can adjust chips of administrators');
     if (Math.abs(body.amount) >= LARGE_ADJUSTMENT && !can(role, 'chips.large')) await refuse('large_adjustment', 403, 'large_adjustment', `only a super admin can adjust ${LARGE_ADJUSTMENT} chips or more at once`);
     const ref = body.refLedgerId
@@ -790,6 +814,7 @@ const admin = new Hono<AppEnv>()
     if (id === c.var.user!.id) fail(400, 'bad_request', 'use the change-password flow for your own account');
     const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.id, id), eq(schema.users.status, 'active')) });
     if (!u) fail(404, 'not_found', 'user not found');
+    refuseBot(u);
     // A reset link is an account takeover token: plain admins may only issue them for members.
     if (u.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can issue reset links for administrators');
     const token = randomToken();
@@ -851,6 +876,12 @@ const admin = new Hono<AppEnv>()
       joinCodeHash: body.isPrivate && body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null,
       allowSpectators: body.allowSpectators,
       beginner: body.beginner,
+      botsEnabled: body.botsEnabled,
+      botLevel: body.botLevel,
+      botMinHumans: body.botMinHumans,
+      botMax: body.botMax,
+      botFillTo: body.botFillTo,
+      botYield: body.botYield,
       createdBy: c.var.user!.id,
     });
     await audit(c, 'table.create', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : undefined });
@@ -898,6 +929,19 @@ const admin = new Hono<AppEnv>()
     let joinCodeHash = t.joinCodeHash;
     if (body.joinCode !== undefined) joinCodeHash = body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null;
     if (isPrivate && !joinCodeHash) fail(400, 'bad_request', 'private tables need a join code');
+    const bots = {
+      botsEnabled: body.botsEnabled ?? t.botsEnabled,
+      botLevel: body.botLevel ?? t.botLevel,
+      botMinHumans: body.botMinHumans ?? t.botMinHumans,
+      botMax: body.botMax ?? t.botMax,
+      botFillTo: body.botFillTo ?? t.botFillTo,
+      botYield: body.botYield ?? t.botYield,
+    };
+    const botFields = (['botsEnabled', 'botLevel', 'botMinHumans', 'botMax', 'botFillTo', 'botYield'] as const).filter((k) => body[k] !== undefined);
+    // Table bots sit only at official tables; a member's room is theirs and other members'.
+    if (botFields.length && t.roomType !== 'official') fail(400, 'bad_request', 'member rooms have no table bots');
+    const botIssue = botFields.length ? botSettingsIssues(bots, t.maxSeats)[0] : undefined;
+    if (botIssue) fail(400, 'bad_request', botIssue.message);
     await c.var.db
       .update(schema.tables)
       .set({
@@ -911,13 +955,26 @@ const admin = new Hono<AppEnv>()
         allowSpectators: body.allowSpectators ?? t.allowSpectators,
         beginner: body.beginner ?? t.beginner,
         entryBlocked: body.entryBlocked ?? t.entryBlocked,
+        ...bots,
         updatedAt: Date.now(),
       })
       .where(eq(schema.tables.id, id));
-    // Blind changes apply from the next hand; the running hand keeps its config. A room that does not confirm keeps
-    // its old settings (entry blocking included) until it reloads, so the admin is told to send the change again.
+    // Blind changes apply from the next hand; the running hand keeps its config. Bot settings apply at once without
+    // touching the running hand: a bot over the new limits stands up after it, and a bot that sits down meanwhile is dealt
+    // in from the next one. A room that does not confirm keeps its old settings (entry blocking included) until it
+    // reloads, so the admin is told to send the change again.
     const live = (await roomCall(c, id, 'reload')) ?? (await roomCall(c, id, 'reload'));
-    await audit(c, 'table.update', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : body.joinCode, roomConfirmed: !!live });
+    await audit(
+      c,
+      'table.update',
+      { type: 'table', id },
+      {
+        ...body,
+        joinCode: body.joinCode ? '***' : body.joinCode,
+        ...(botFields.length ? { botsBefore: Object.fromEntries(botFields.map((k) => [k, t[k]])) } : {}),
+        roomConfirmed: !!live,
+      },
+    );
     if (!live) fail(503, 'room_unavailable', 'saved, but the table did not confirm; try again', { saved: true });
     return c.json({ ok: true, appliesFrom: live.appliesFrom ?? 'next hand' });
   })
@@ -1241,4 +1298,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes));

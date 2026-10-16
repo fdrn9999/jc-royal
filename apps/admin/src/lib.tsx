@@ -60,6 +60,10 @@ const BY_MESSAGE: Record<string, Key> = {
   'no permission rule for this action': 'errNoRule',
   "only a super admin can end other administrators' sessions": 'errAdminSessions',
   'session not found': 'errSessionGone',
+  'member rooms have no table bots': 'errBotsMemberRoom',
+  'botFillTo must be <= maxSeats': 'errBotFillTo',
+  'botMax must leave a seat for a member': 'errBotMax',
+  'botMinHumans must be < botFillTo': 'errBotMinHumans',
 };
 const BY_CODE: Record<string, Key> = {
   forbidden: 'errForbidden',
@@ -88,6 +92,10 @@ const BY_CODE: Record<string, Key> = {
   refill_not_paused: 'errRefillNotPaused',
   refill_no_policy: 'errRefillNoPolicy',
   ref_not_found: 'errRefNotFound',
+  bot_account: 'errBotAccount',
+  bot_policy_conflict: 'errBotPolicyConflict',
+  bot_policy_no_change: 'errBotPolicyNoChange',
+  bot_already_off: 'errBotAlreadyOff',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

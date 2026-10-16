@@ -5,8 +5,9 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD, opsUpserts, type OpsCount } from '@jc/db';
+import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD, opsUpserts, type LedgerOp, type OpsCount } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
+import { BOT_LEVELS, type BotLevel } from '@jc/types';
 
 export interface TableRow {
   id: string;
@@ -28,6 +29,14 @@ export interface TableRow {
   createdBy: string | null;
   /** Hash of a private table's current join code. Never sent to clients. */
   joinCodeHash: string | null;
+  /**
+   * The table's bot settings (official tables only, see bots.ts): whether bots may sit, their level, how many members
+   * must be seated first, at most how many bots, the player count they fill up to, and whether one gives up its seat
+   * after the hand to a member waiting for one.
+   */
+  bots: { enabled: boolean; level: BotLevel; minHumans: number; max: number; fillTo: number; yieldSeat: boolean };
+  /** The service-wide bot switch (bot_policies, newest version) as D1 last showed it; read again with each hand record. */
+  botPolicyOn: boolean;
 }
 
 /** The next maintenance window that has not finished (the current one while it runs): see maintenance_windows. */
@@ -61,7 +70,9 @@ export async function loadTable(d1: D1Database, tableId: string, now = Date.now(
         `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
                 min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
                 is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
-                room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash
+                room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash,
+                bots_enabled AS botsEnabled, bot_level AS botLevel, bot_min_humans AS botMinHumans, bot_max AS botMax,
+                bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn
          FROM tables WHERE id = ?1`,
       )
       .bind(tableId),
@@ -89,8 +100,20 @@ function toTableRow(r: Record<string, unknown>): TableRow {
     roomType: r.roomType === 'member' ? 'member' : 'official',
     createdBy: r.createdBy == null ? null : String(r.createdBy),
     joinCodeHash: r.joinCodeHash == null ? null : String(r.joinCodeHash),
+    bots: {
+      enabled: !!r.botsEnabled,
+      level: BOT_LEVELS.includes(r.botLevel as BotLevel) ? (r.botLevel as BotLevel) : 'normal',
+      minHumans: Math.max(1, Number(r.botMinHumans ?? 1)),
+      max: Math.max(0, Number(r.botMax ?? 0)),
+      fillTo: Math.max(0, Number(r.botFillTo ?? 0)),
+      yieldSeat: r.botYield == null ? true : !!r.botYield,
+    },
+    botPolicyOn: Number(r.botPolicyOn) === 1,
   };
 }
+
+/** Whether the newest bot policy has bots on (SQL expression; null, read as off, before any policy exists). */
+export const BOT_POLICY_ON = `SELECT enabled FROM bot_policies ORDER BY version DESC LIMIT 1`;
 
 export type BuyInResult = { ok: true; balanceAfter: number } | { ok: false; code: 'insufficient_balance' | 'already_seated' | 'suspended' };
 
@@ -100,10 +123,13 @@ async function accountActive(d1: D1Database, userId: string): Promise<boolean> {
   return r?.status === 'active';
 }
 
-/** Debits the wallet and opens a table session atomically. */
+/**
+ * Debits the wallet and opens a table session atomically. `guard` adds conditions to the ledger statement (see
+ * LedgerOp.guard): a table bot's buy-in uses it (bots.ts), and its refusal reads as 'insufficient_balance'.
+ */
 export async function buyIn(
   d1: D1Database,
-  p: { userId: string; tableId: string; tableSessionId: string; seatIndex: number; amount: number },
+  p: { userId: string; tableId: string; tableSessionId: string; seatIndex: number; amount: number; guard?: LedgerOp['guard'] },
 ): Promise<BuyInResult> {
   try {
     const r = await applyLedger(
@@ -117,6 +143,7 @@ export async function buyIn(
         refId: p.tableSessionId,
         memo: `seat ${p.seatIndex + 1}`,
         activeOnly: true,
+        ...(p.guard ? { guard: p.guard } : {}),
       },
       (ledgerId) => [
         d1
@@ -214,23 +241,34 @@ async function gzipBase64(text: string): Promise<string> {
  * is gzip-compressed for audits of finished hands only. Records queued before the
  * button and pots existed have neither.
  *
- * The same batch reads the maintenance window back, so a dealing room that was never told of one (the admin's
- * fan-out did not reach it, and its occupancy did not change) learns of it before its next hand.
+ * The same batch reads the maintenance window back (and, with `botPolicy`, the bot switch: only tables that allow bots
+ * ask), so a dealing room that was never told of a change (the admin's fan-out did not reach it, and its occupancy did
+ * not change) learns of it before its next hand. `bots` is how many table bots were dealt in: hands with bots are kept
+ * apart from members-only play in statistics.
  */
-export async function recordHand(d1: D1Database, tableId: string, handNumber: number, rec: HandRecord, engineLog: unknown): Promise<Maintenance | null> {
+export async function recordHand(
+  d1: D1Database,
+  tableId: string,
+  handNumber: number,
+  rec: HandRecord,
+  engineLog: unknown,
+  opts: { bots?: number; botPolicy?: boolean } = {},
+): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null }> {
   const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
+  const policy = opts.botPolicy ? [d1.prepare(`SELECT (${BOT_POLICY_ON}) AS botPolicyOn`)] : [];
   const stmts: D1PreparedStatement[] = [
     maintenanceQuery(d1, Date.now()),
+    ...policy,
     // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
     d1
       .prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM hands WHERE id = ?2)`)
       .bind(tableId, rec.handId),
     d1
       .prepare(
-        `INSERT OR IGNORE INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+        `INSERT OR IGNORE INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log, bots)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
       )
-      .bind(rec.handId, tableId, handNumber, rec.startedAt, rec.endedAt, JSON.stringify(rec.board), rec.potTotal, rec.engineVersion, eventLog),
+      .bind(rec.handId, tableId, handNumber, rec.startedAt, rec.endedAt, JSON.stringify(rec.board), rec.potTotal, rec.engineVersion, eventLog, opts.bots ?? 0),
     ...rec.players.map((p) =>
       d1
         .prepare(
@@ -263,11 +301,17 @@ export async function recordHand(d1: D1Database, tableId: string, handNumber: nu
   } catch (e) {
     console.error('hand stats failed', tableId, rec.handId, e);
   }
-  return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
+  return {
+    maintenance: toMaintenance(results[0]?.results[0] as Maintenance | undefined),
+    botPolicyOn: policy.length ? Number((results[1]?.results[0] as { botPolicyOn?: unknown } | undefined)?.botPolicyOn) === 1 : null,
+  };
 }
 
 export interface LiveStats {
+  /** Seats taken, table bots included. */
   seated: number;
+  /** Of those, the table bots. */
+  bots: number;
   playing: boolean;
   waitlist: number;
   spectators: number;
@@ -284,15 +328,15 @@ export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveS
     d1
       .prepare(
         `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
-                live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue)
+                live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue), live_bots = ?8
          WHERE id = ?1`,
       )
-      .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue),
+      .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue, s.bots),
     ...opsUpserts(d1, ops),
   ]);
   return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
 }
 
 export async function markTableClosed(d1: D1Database, tableId: string): Promise<void> {
-  await d1.prepare(`UPDATE tables SET status = 'closed', live_seated = 0, live_playing = 0, updated_at = (unixepoch('subsec') * 1000) WHERE id = ?1`).bind(tableId).run();
+  await d1.prepare(`UPDATE tables SET status = 'closed', live_seated = 0, live_bots = 0, live_playing = 0, updated_at = (unixepoch('subsec') * 1000) WHERE id = ?1`).bind(tableId).run();
 }

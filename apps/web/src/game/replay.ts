@@ -128,6 +128,7 @@ export function buildReplay(h: ReplayInput, heroSeat: number | null): ReplayStep
         state: out ? 'folded' : (final ? stack === 0 : allIn.has(i)) ? 'allin' : 'active',
         nickname: p.nickname,
         ...(p.role ? { role: p.role } : {}),
+        ...(p.bot ? { bot: true as const } : {}),
         stack,
         streetBet: final ? 0 : (streetBets.get(i) ?? 0),
         connected: true,

@@ -44,12 +44,14 @@ const toPublic = (u: { id: string; nickname: string; avatarUrl: string | null; r
   return { id: u.id, nickname: u.nickname, avatarUrl: u.avatarUrl, ...(role ? { role } : {}) };
 };
 
+/** The player friend requests, blocks and messages are about. Table bots are not members and take none of them. */
 async function publicUser(c: Context<AppEnv>, where: { id?: string; nickname?: string }): Promise<PublicUserDto | null> {
   const u = await c.var.db.query.users.findFirst({
     where: where.id ? eq(schema.users.id, where.id) : sql`lower(${schema.users.nickname}) = lower(${where.nickname ?? ''})`,
-    columns: { id: true, nickname: true, avatarUrl: true, role: true, status: true },
+    columns: { id: true, nickname: true, avatarUrl: true, role: true, status: true, isBot: true },
   });
   if (!u || u.status === 'deleted') return null;
+  if (u.isBot) fail(409, 'bot_account', 'table bots take no friend requests, blocks or messages');
   return toPublic(u);
 }
 

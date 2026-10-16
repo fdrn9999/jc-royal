@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
 import { JoinCodeModal } from '../components/JoinCode';
-import { HostedBy } from '../components/MemberName';
+import { BOT_LEVEL_LABEL, HostedBy } from '../components/MemberName';
 import { ANY, QuickPlayPanel, useLobbyFilters } from '../components/QuickPlay';
 import { CreateRoomModal } from '../components/Rooms';
 import { MaintenanceNote } from '../components/MaintenanceNote';
@@ -261,6 +261,11 @@ export function LobbyPage() {
                       </span>
                     )}
                     {tb.beginner && <span data-testid="beginner-badge"><Badge tone="blue">🔰 {t('lobby.beginner')}</Badge></span>}
+                    {tb.botLevel && (
+                      <span data-testid="bot-table-badge" data-level={tb.botLevel} title={t('lobby.botTableHint')}>
+                        <Badge>{t('lobby.botTable', { level: t(BOT_LEVEL_LABEL[tb.botLevel]) })}</Badge>
+                      </span>
+                    )}
                     {tb.isPrivate && <Badge tone="red">🔒 {t('lobby.private')}</Badge>}
                     {!tb.allowSpectators && <Badge>{t('lobby.noSpectate')}</Badge>}
                     {tb.entryBlocked && <Badge tone="red">{t('lobby.blocked')}</Badge>}
@@ -273,6 +278,11 @@ export function LobbyPage() {
                       <span className="text-base text-ink-400">/{tb.maxSeats}</span>
                     </div>
                     <div className="text-[11px] uppercase tracking-wider text-ink-400">{t('lobby.players')}</div>
+                    {tb.bots > 0 && (
+                      <div className="whitespace-nowrap text-[11px] text-ink-300" data-testid="lobby-humans-bots">
+                        {t('lobby.humansBots', { humans: tb.seated - tb.bots, bots: tb.bots })}
+                      </div>
+                    )}
                   </div>
                   <button
                     type="button"

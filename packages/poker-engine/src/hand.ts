@@ -353,6 +353,10 @@ export class HandEngine {
   get version(): number {
     return this.snapshot.index;
   }
+  /** The blinds and turn time this hand was dealt with (the table's may have changed since). */
+  get rules(): Readonly<HandRules> {
+    return this.meta.rules;
+  }
 
   actorId(): string | null {
     if (this.isSettled) return null;

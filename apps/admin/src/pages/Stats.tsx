@@ -21,7 +21,7 @@ interface Period {
   complete: boolean;
   members: { signups: number; dauAvg: number | null; returningAvg: number | null; wau: number | null; mau: number | null; partial: { dau: boolean; wau: boolean; mau: boolean }; activityDays: number };
   activation: { cohort: number; play1d: number; play7d: number; cohortDays: number };
-  play: { hands: number; handsPerDay: number | null; tablesAvg: number | null; seats: number; avgSeatMs: number | null; peak: number | null; official: RoomPlay; member: RoomPlay };
+  play: { hands: number; handsPerDay: number | null; tablesAvg: number | null; seats: number; avgSeatMs: number | null; peak: number | null; official: RoomPlay; member: RoomPlay; bots?: { hands: number; tablesAvg: number | null } };
   reports: { created: number; handled: number; avgHandleMs: number | null };
   academy: Record<AcademyKey, number>;
 }
@@ -120,6 +120,7 @@ export function StatsPage() {
         <Stat label={t('osHandsDay')} value={<span data-testid="stats-hands-day">{num(tot.play.handsPerDay)}</span>} sub={t('osHandsDaySub', { n: num(tot.play.hands) })} />
         <Stat label={t('osSeatLen')} value={len(tot.play.avgSeatMs)} sub={t('osSeatLenSub', { n: num(tot.play.seats) })} />
         <Stat label={t('osTables')} value={num(tot.play.tablesAvg)} sub={t('osTablesSub')} />
+        <Stat label={t('osBotHands')} value={<span data-testid="stats-bot-hands">{num(tot.play.bots?.hands ?? 0)}</span>} sub={t('osBotHandsSub', { n: num(tot.play.bots?.tablesAvg ?? null) })} />
         <Stat label={t('osPeak')} value={<span data-testid="stats-peak">{num(tot.play.peak)}</span>} sub={t('osPeakSub')} />
         <Stat
           label={t('osReports')}

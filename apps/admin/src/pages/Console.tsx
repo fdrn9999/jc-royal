@@ -1,11 +1,12 @@
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat } from '@jc/ui';
-import { academyItemName, ageOn, isoDate, type AcademyItemKind } from '@jc/types';
+import { academyItemName, ageOn, BOT_LEVELS, botSettingsIssues, isoDate, type AcademyItemKind, type BotLevel } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
 import {
   academyKindLabel,
   actionLabel,
+  botLevelLabel,
   capabilityLabel,
   handRankLabel,
   ledgerTypeLabel,
@@ -795,6 +796,57 @@ interface TableRow {
   id: string; name: string; maxSeats: number; smallBlind: number; bigBlind: number; minBuyIn: number; maxBuyIn: number; turnSeconds: number;
   isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; handsPaused?: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
   roomType: 'official' | 'member'; hostNickname: string | null;
+  /** Table bots (official tables only); `liveBots` is how many of `liveSeated` are bots. */
+  botsEnabled?: boolean; botLevel?: string; botMinHumans?: number; botMax?: number; botFillTo?: number; botYield?: boolean; liveBots?: number;
+}
+type BotForm = { botsEnabled: boolean; botLevel: BotLevel; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
+const BOT_DEFAULTS: BotForm = { botsEnabled: false, botLevel: 'normal', botMinHumans: 1, botMax: 1, botFillTo: 2, botYield: true };
+/** Bot counts that still fit a table of maxSeats (the create form's size can change under them). */
+const fitBots = (b: BotForm, maxSeats: number): Pick<BotForm, 'botMinHumans' | 'botMax' | 'botFillTo'> => {
+  const botFillTo = Math.min(b.botFillTo, maxSeats);
+  return { botFillTo, botMax: Math.min(b.botMax, maxSeats - 1), botMinHumans: Math.min(b.botMinHumans, botFillTo - 1) };
+};
+const BOT_ISSUE = { botFillTo: 'errBotFillTo', botMax: 'errBotMax', botMinHumans: 'errBotMinHumans' } as const;
+
+/** The table bot settings: the same inputs when a table is created and on its page. */
+function BotFields({ v, set, maxSeats, disabled }: { v: BotForm; set: (v: BotForm) => void; maxSeats: number; disabled?: boolean }) {
+  const { t } = useT();
+  const issues = botSettingsIssues(v, maxSeats);
+  const num = (k: 'botMinHumans' | 'botMax' | 'botFillTo') => (e: React.ChangeEvent<HTMLSelectElement>) => set({ ...v, [k]: Number(e.target.value) });
+  const counts = (from: number, to: number) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
+  const pick = (k: 'botMinHumans' | 'botMax' | 'botFillTo', from: number, to: number, testid: string) => (
+    <Field label={t(k)}>{(id) => (
+      <select id={id} className={selectCls} value={v[k]} disabled={disabled || !v.botsEnabled} onChange={num(k)} data-testid={testid}>
+        {counts(from, to).map((n) => <option key={n} value={n}>{n}</option>)}
+      </select>
+    )}</Field>
+  );
+  return (
+    <div className="col-span-2 grid grid-cols-2 gap-3" data-testid="bot-fields">
+      <label className="col-span-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" className={checkbox} checked={v.botsEnabled} disabled={disabled} onChange={(e) => set({ ...v, botsEnabled: e.target.checked })} data-testid="bot-enabled" />
+        {t('botsAllow')}
+      </label>
+      <Field label={t('botsLevel')}>{(id) => (
+        <select id={id} className={selectCls} value={v.botLevel} disabled={disabled || !v.botsEnabled} onChange={(e) => set({ ...v, botLevel: e.target.value as BotLevel })} data-testid="bot-level">
+          {BOT_LEVELS.map((l) => <option key={l} value={l}>{botLevelLabel(t, l)}</option>)}
+        </select>
+      )}</Field>
+      {pick('botMinHumans', 1, Math.min(8, maxSeats - 1), 'bot-min-humans')}
+      {pick('botMax', 1, Math.min(8, maxSeats - 1), 'bot-max')}
+      {pick('botFillTo', 2, maxSeats, 'bot-fill-to')}
+      <label className="col-span-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" className={checkbox} checked={v.botYield} disabled={disabled || !v.botsEnabled} onChange={(e) => set({ ...v, botYield: e.target.checked })} data-testid="bot-yield" />
+        {t('botYield')}
+      </label>
+      {issues.length > 0 && (
+        <ul className="col-span-2 flex flex-col gap-0.5 text-xs text-danger" role="alert" data-testid="bot-issues">
+          {issues.map((x) => <li key={x.message}>{t(BOT_ISSUE[x.path[0] as keyof typeof BOT_ISSUE] ?? 'errBotMax')}</li>)}
+        </ul>
+      )}
+      <p className="col-span-2 text-xs text-ink-400">{t('botsFieldsHint')}</p>
+    </div>
+  );
 }
 
 /** One colour per table state wherever a table's state is shown: open green, closing gold, closed grey. */
@@ -832,7 +884,7 @@ export function TablesPage() {
     setOffset(0);
   };
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false });
+  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false, ...BOT_DEFAULTS });
   const [note, setNote] = useState<Note>(null);
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -893,7 +945,7 @@ export function TablesPage() {
               <td className="px-2 py-2">{tb.maxSeats}</td>
               <td className="px-2 py-2 font-mono">{tb.smallBlind}/{tb.bigBlind}</td>
               <td className="whitespace-nowrap px-2 py-2 font-mono">{formatChips(tb.minBuyIn, true)}–{formatChips(tb.maxBuyIn, true)}</td>
-              <td className="px-2 py-2 text-xs">{t('seatedWs', { seated: tb.liveSeated, ws: tb.liveConnections })} {tb.livePlaying && <Badge tone="green">{t('inHand')}</Badge>}</td>
+              <td className="px-2 py-2 text-xs">{t('seatedWs', { seated: tb.liveSeated - (tb.liveBots ?? 0), ws: tb.liveConnections })} {!!tb.liveBots && <Badge tone="blue">{t('botsN', { n: tb.liveBots })}</Badge>} {tb.botsEnabled && !tb.liveBots && <Badge>{t('botsAllowedShort')}</Badge>} {tb.livePlaying && <Badge tone="green">{t('inHand')}</Badge>}</td>
               <td className="px-2 py-2">{tb.handsPlayed}</td>
               <td className="px-2 py-2"><Link to={`/tables/${tb.id}`} className="text-gold-300">{t('detail')}</Link></td>
             </tr>
@@ -915,7 +967,7 @@ export function TablesPage() {
         <form className="grid grid-cols-2 gap-3" onSubmit={create}>
           <div className="col-span-2"><Field label={t('name')}>{(id) => <Input id={id} required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field></div>
           <Field label={t('maxSeats')}>{(id) => (
-            <select id={id} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3" value={f.maxSeats} onChange={(e) => setF({ ...f, maxSeats: Number(e.target.value) })}>
+            <select id={id} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3" value={f.maxSeats} onChange={(e) => setF({ ...f, ...fitBots(f, Number(e.target.value)), maxSeats: Number(e.target.value) })}>
               {[2, 6, 9].map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           )}</Field>
@@ -928,6 +980,7 @@ export function TablesPage() {
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.beginner} onChange={(e) => setF({ ...f, beginner: e.target.checked })} data-testid="table-beginner" /> {t('beginnerTable')}</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.isPrivate} onChange={(e) => setF({ ...f, isPrivate: e.target.checked })} /> {t('private')}</label>
           {f.isPrivate && <div className="col-span-2"><Field label={t('joinCode')}>{(id) => <Input id={id} value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} />}</Field></div>}
+          <BotFields v={f} set={(b) => setF({ ...f, ...b })} maxSeats={f.maxSeats} />
           <div className="col-span-2 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Button><Button type="submit">{t('save')}</Button></div>
         </form>
       </Modal>
@@ -945,6 +998,8 @@ interface LiveSeat {
   leaveAfterHand?: boolean;
   timeouts?: number;
   topUp?: { state: string; amount: number; auto: boolean } | null;
+  /** A table bot's level (the room plays it). */
+  bot?: string | null;
 }
 /** The room's admin status (never cards). Fields after `chipsOnTable` are absent from rooms older than B2. */
 interface LiveStatus {
@@ -963,6 +1018,8 @@ interface LiveStatus {
   at?: number;
   /** The service maintenance window the room knows of (active by its clock). */
   maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
+  /** Table bots as the room sees them: allowed now (table setting and service policy), and when it tries a bot again after a failure. */
+  bots?: { allowed: boolean; policyOn: boolean; retryAt: number | null; failures: number } | null;
 }
 interface Diagnosis {
   issues: string[];
@@ -980,6 +1037,61 @@ interface ClosePreview {
   handInProgress: boolean | null;
   waitlist: number | null;
   roomAnswered: boolean;
+}
+
+/**
+ * An official table's table bots, saved as one change (the API checks them against the table's size). They take effect
+ * between hands; the service-wide policy and the bots' log are on the bots page.
+ */
+function TableBotsPanel({ tb, live, act }: { tb: TableRow; live: LiveStatus | null; act: (fn: () => Promise<unknown>) => Promise<void> }) {
+  const { t, locale } = useT();
+  const { api } = useAdmin();
+  const saved: BotForm = {
+    botsEnabled: !!tb.botsEnabled,
+    botLevel: (BOT_LEVELS as readonly string[]).includes(tb.botLevel ?? '') ? (tb.botLevel as BotLevel) : 'normal',
+    botMinHumans: tb.botMinHumans ?? 1,
+    botMax: tb.botMax ?? 1,
+    botFillTo: tb.botFillTo ?? 2,
+    botYield: tb.botYield ?? true,
+  };
+  const [v, setV] = useState(saved);
+  const dirty = (Object.keys(saved) as (keyof BotForm)[]).some((k) => saved[k] !== v[k]);
+  const bad = botSettingsIssues(v, tb.maxSeats).length > 0;
+  const closed = tb.status === 'closed';
+  const b = live?.bots;
+  const link = <Link to={`/bots?table=${encodeURIComponent(tb.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="table-bots-link">{t('botsNav')} →</Link>;
+  if (tb.roomType !== 'official') {
+    return (
+      <Panel title={t('botsPanel')}>
+        <p className="text-sm text-ink-400">{t('botsMemberRoomNote')}</p>
+      </Panel>
+    );
+  }
+  return (
+    <Panel title={t('botsPanel')} actions={link}>
+      <form
+        className="grid grid-cols-2 gap-3"
+        data-testid="table-bots"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          void act(() => api(`/api/admin/tables/${tb.id}`, { method: 'PATCH', body: v }));
+        }}
+      >
+        {b && (
+          <p className="col-span-2 flex flex-wrap items-center gap-1 text-xs" data-testid="table-bots-live">
+            <Badge tone={b.allowed ? 'green' : 'neutral'}>{b.allowed ? t('botsLiveAllowed') : t('botsLiveNotAllowed')}</Badge>
+            {!b.policyOn && <Badge tone="gold">{t('botsPolicyOffShort')}</Badge>}
+            {b.failures > 0 && <Badge tone="red">{t('botsLiveFailures', { n: b.failures, at: b.retryAt ? formatDate(b.retryAt, locale) : '—' })}</Badge>}
+          </p>
+        )}
+        <BotFields v={v} set={setV} maxSeats={tb.maxSeats} disabled={closed} />
+        <div className="col-span-2 flex flex-wrap gap-2">
+          <Button type="submit" disabled={closed || !dirty || bad} data-testid="table-bots-save">{t('save')}</Button>
+          {dirty && <Button type="button" variant="ghost" onClick={() => setV(saved)}>{t('cancel')}</Button>}
+        </div>
+      </form>
+    </Panel>
+  );
 }
 
 export function TableDetailPage() {
@@ -1059,6 +1171,7 @@ export function TableDetailPage() {
                   <li key={i} className="flex justify-between gap-2 py-1.5">
                     <span className="flex min-w-0 flex-wrap items-center gap-1">
                       #{s.seatIndex + 1} {s.nickname}
+                      {s.bot && <Badge tone="blue">{t('botBadge')} · {botLevelLabel(t, s.bot)}</Badge>}
                       {!s.connected && <Badge>{t('offline')}</Badge>}
                       {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}
                       {s.phase && s.phase !== 'seated' && <Badge tone="gold">{seatPhaseLabel(t, s.phase)}</Badge>}
@@ -1154,6 +1267,7 @@ export function TableDetailPage() {
             </div>
           </form>
         </Panel>
+        <TableBotsPanel key={[tb.botsEnabled, tb.botLevel, tb.botMinHumans, tb.botMax, tb.botFillTo, tb.botYield].join(':')} tb={tb} live={live} act={act} />
       </div>
       <div className="flex flex-wrap gap-4">
         <Link to={`/hands?tableId=${id}`} className="text-sm text-gold-300">{t('hands')} →</Link>
@@ -1378,7 +1492,7 @@ export function HandDetailPage() {
 
 // ------------------------------------------------------------------ ledger, reconcile, audit
 const LEDGER_KEYS = ['member', 'type', 'from', 'to'] as const;
-const LEDGER_TYPES = ['signup_grant', 'free_refill', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'] as const;
+const LEDGER_TYPES = ['signup_grant', 'free_refill', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'bot_fund'] as const;
 
 /**
  * The chip ledger, newest first, page by page. Every look (with its filters and page) is recorded in the audit log by

@@ -20,6 +20,8 @@ export interface TestTable {
   allowSpectators?: boolean;
   beginner?: boolean;
   entryBlocked?: boolean;
+  /** Table bots allowed here (an official table), with these settings; the service-wide policy still has to turn them on. */
+  bots?: { level?: 'easy' | 'normal' | 'hard'; minHumans?: number; max?: number; fillTo?: number; yieldSeat?: boolean };
 }
 
 /** Tables seeded for integration tests (admin API arrives in Phase 7). */
@@ -88,6 +90,15 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 3 }, (_, i) => ({ id: `it-react-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Free refill: chips on a table (a hand's bets included), and a table whose room holds no seat D1 has open.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-refill-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Table bots (off until bots.test.ts turns the policy on): heads-up, a six-seat table three bots fill, short stacks
+  // all in for side pots (a three-big-blind minimum no admin could set, so an easy bot calls), a seat given up to a member waiting,
+  // the emergency stop, and a buy-in larger than the fund has left.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-bot-hu-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: {} })),
+  { id: 'it-bot-six', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'easy', max: 3, fillTo: 4 } },
+  { id: 'it-bot-pot', maxSeats: 6, sb: 5, bb: 10, min: 30, max: 1000, turnSeconds: 60, bots: { level: 'easy', max: 1, fillTo: 3 } },
+  { id: 'it-bot-yield', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { yieldSeat: true } },
+  { id: 'it-bot-stop', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'hard' } },
+  { id: 'it-bot-fund', maxSeats: 2, sb: 50, bb: 100, min: 10000, max: 10000, turnSeconds: 60, bots: {} },
 ];
 
 async function sha256b64url(s: string) {
@@ -102,8 +113,10 @@ export async function prepareState(state: string, tables: TestTable[] = TABLES) 
   const rows: string[] = [];
   for (const t of tables) {
     const code = t.joinCode ? `'${await sha256b64url(`${t.id}:${t.joinCode}`)}'` : 'NULL';
+    const b = t.bots;
+    const bots = b ? `1, '${b.level ?? 'normal'}', ${b.minHumans ?? 1}, ${b.max ?? 1}, ${b.fillTo ?? 2}, ${b.yieldSeat === false ? 0 : 1}` : `0, 'normal', 1, 1, 2, 1`;
     rows.push(
-      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators, beginner, entry_blocked) VALUES ('${t.id}', '${t.id}', ${t.maxSeats}, ${t.sb}, ${t.bb}, ${t.min}, ${t.max}, ${t.turnSeconds ?? 20}, ${t.isPrivate ? 1 : 0}, ${code}, ${t.allowSpectators === false ? 0 : 1}, ${t.beginner ? 1 : 0}, ${t.entryBlocked ? 1 : 0});`,
+      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators, beginner, entry_blocked, bots_enabled, bot_level, bot_min_humans, bot_max, bot_fill_to, bot_yield) VALUES ('${t.id}', '${t.id}', ${t.maxSeats}, ${t.sb}, ${t.bb}, ${t.min}, ${t.max}, ${t.turnSeconds ?? 20}, ${t.isPrivate ? 1 : 0}, ${code}, ${t.allowSpectators === false ? 0 : 1}, ${t.beginner ? 1 : 0}, ${t.entryBlocked ? 1 : 0}, ${bots});`,
     );
   }
   const file = resolve(state, '..', `seed-${Date.now()}.sql`);

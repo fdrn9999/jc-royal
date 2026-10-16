@@ -29,6 +29,8 @@ describe('admin permission table', () => {
     expect(reauth.sort()).toEqual(
       [
         'GET /hands/:id',
+        'POST /bots/stop',
+        'PUT /bots/policy',
         'PATCH /service/maintenance/:id',
         'POST /reconcile/:id/resolve',
         'POST /refill/pause',
@@ -48,11 +50,11 @@ describe('admin permission table', () => {
       ].sort(),
     );
     const superOnly = Object.entries(ROUTE_RULES).filter(([, r]) => r.role === 'super_admin').map(([k]) => k);
-    expect(superOnly.sort()).toEqual(['POST /refill/resume', 'POST /users/:id/role', 'POST /users/export', 'PUT /refill/policy'].sort());
+    expect(superOnly.sort()).toEqual(['PUT /bots/policy', 'POST /refill/resume', 'POST /users/:id/role', 'POST /users/export', 'PUT /refill/policy'].sort());
     // A preview skips only the password, so only routes that answer a preview and write nothing are marked.
     const previews = Object.entries(ROUTE_RULES).filter(([, r]) => r.preview).map(([k]) => k);
     expect(previews.sort()).toEqual(
-      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend'].sort(),
+      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /bots/policy', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend'].sort(),
     );
     // Deciding a report asks for no password, so its preview skips nothing; every other preview stands before one.
     expect(previews.filter((k) => !ROUTE_RULES[k]!.reauth)).toEqual(['POST /reports/:id']);

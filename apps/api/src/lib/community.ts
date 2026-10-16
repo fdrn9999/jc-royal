@@ -24,8 +24,8 @@ export function replayLog(eventLog: string): Pick<HandReplayFields, 'actions' | 
 }
 
 /** The columns of `users` a replay player is drawn with. */
-export type ReplayUser = { nickname: string; role: string; status: string };
-export const replayUser = { nickname: schema.users.nickname, role: schema.users.role, status: schema.users.status };
+export type ReplayUser = { nickname: string; role: string; status: string; isBot: boolean };
+export const replayUser = { nickname: schema.users.nickname, role: schema.users.role, status: schema.users.status, isBot: schema.users.isBot };
 
 /**
  * A player of a finished hand as `viewerId` may see it: hole cards, rank and best five only for the viewer and for
@@ -39,6 +39,7 @@ export function replayPlayer(hp: typeof schema.handPlayers.$inferSelect, user: R
     seatIndex: hp.seatIndex,
     nickname: user.nickname,
     ...(role ? { role } : {}),
+    ...(user.isBot ? { bot: true as const } : {}),
     holeCards: visible ? (JSON.parse(hp.holeCards) as string[]) : null,
     stackStart: hp.stackStart,
     net: hp.net,

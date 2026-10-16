@@ -8,10 +8,13 @@ export const LARGE_ADJUSTMENT = 100_000;
 /** Grants to one member at least this many times within RAPID_WINDOW_MS are listed. */
 export const RAPID_GRANTS = 3;
 export const RAPID_WINDOW_MS = DAY;
-/** A seat held this long is listed. It can be a long session: only sitting out stands a player up (after 10 minutes). */
+/**
+ * A seat held this long is listed. It can be a long session: only sitting out stands a player up (after 10 minutes).
+ * A table bot's seat is listed only on a closed or stuck table (bots stay as long as members play beside them).
+ */
 export const STALE_SESSION_MS = 12 * 60 * 60_000;
 
-type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill';
+type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill' | 'bot_fund';
 type Flow = { n: number; sum: number; plus: number; minus: number };
 const flow = (): Flow => ({ n: 0, sum: 0, plus: 0, minus: 0 });
 const add = (a: Flow, b: Flow) => {
@@ -47,10 +50,11 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
   const since = (today - days + 1) * DAY - shift;
   const results = await db.batch([
     db.prepare(
-      `SELECT COUNT(*) AS accounts, SUM(CASE WHEN status != 'deleted' THEN 1 ELSE 0 END) AS members, COALESCE(SUM(balance), 0) AS balance,
+      `SELECT COUNT(*) AS accounts, SUM(CASE WHEN status != 'deleted' AND is_bot = 0 THEN 1 ELSE 0 END) AS members, COALESCE(SUM(balance), 0) AS balance,
               COALESCE(SUM(CASE WHEN status = 'deleted' THEN balance ELSE 0 END), 0) AS deleted,
               COALESCE(SUM(CASE WHEN status = 'suspended' THEN balance ELSE 0 END), 0) AS suspended,
-              COALESCE(SUM(CASE WHEN role != 'user' THEN balance ELSE 0 END), 0) AS staff
+              COALESCE(SUM(CASE WHEN role != 'user' THEN balance ELSE 0 END), 0) AS staff,
+              SUM(is_bot) AS botAccounts, COALESCE(SUM(CASE WHEN is_bot = 1 THEN balance ELSE 0 END), 0) AS bots
          FROM users`,
     ),
     // Every ledger row once: totals by type since the start, and by day within the period. Automatic rebuys are top-ups
@@ -85,7 +89,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
       `SELECT ts.id, ts.table_id AS tableId, t.name AS tableName, t.status AS tableStatus, ts.user_id AS userId, u.nickname, ts.buy_in AS buyIn, ts.created_at AS createdAt,
               CASE WHEN t.status = 'closed' THEN 'closed_table' WHEN t.status = 'closing' AND t.updated_at < ?2 THEN 'closing_table' ELSE 'long' END AS reason
          FROM table_sessions ts CROSS JOIN tables t ON t.id = ts.table_id LEFT JOIN users u ON u.id = ts.user_id
-        WHERE ts.status = 'seated' AND (ts.created_at < ?1 OR t.status = 'closed' OR (t.status = 'closing' AND t.updated_at < ?2))
+        WHERE ts.status = 'seated' AND ((ts.created_at < ?1 AND COALESCE(u.is_bot, 0) = 0) OR t.status = 'closed' OR (t.status = 'closing' AND t.updated_at < ?2))
         ORDER BY ts.created_at LIMIT 50`,
     ).bind(now - STALE_SESSION_MS, now - SWEEP_CLOSING_AFTER_MS),
     db.prepare(
@@ -99,7 +103,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
   const one = <T>(r: D1Result | undefined) => (r?.results[0] ?? {}) as T;
 
   // Ledger: totals by type, period counts, and the daily movement.
-  const total: Record<LedgerType, Flow> = { signup_grant: flow(), buy_in: flow(), top_up: flow(), cash_out: flow(), admin_adjust: flow(), reconcile: flow(), free_refill: flow() };
+  const total: Record<LedgerType, Flow> = { signup_grant: flow(), buy_in: flow(), top_up: flow(), cash_out: flow(), admin_adjust: flow(), reconcile: flow(), free_refill: flow(), bot_fund: flow() };
   const period = { ...structuredClone(total), auto_rebuy: flow() };
   const perDay = new Map<number, Flow>();
   for (const r of rows<Flow & { type: LedgerType; day: number | null; rebuy: number }>(ledger)) {
@@ -117,7 +121,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
     return { date: new Date(day * DAY).toISOString().slice(0, 10), n: d.n, moved: d.plus + d.minus, in: d.plus, out: d.minus };
   });
 
-  const w = one<{ accounts: number; members: number; balance: number; deleted: number; suspended: number; staff: number }>(wallets);
+  const w = one<{ accounts: number; members: number; balance: number; deleted: number; suspended: number; staff: number; botAccounts: number | null; bots: number }>(wallets);
   const s = one<{ n: number; buyIn: number }>(seated);
   const ledgerTotal = Object.values(total).reduce((a, f) => a + f.sum, 0);
   // Chips bought in and not paid back yet: what the tables hold. A player who lost everything left no cash-out row,
@@ -129,7 +133,9 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
     admin: total.admin_adjust.sum,
     reconcile: total.reconcile.sum,
     refill: total.free_refill.sum,
-    total: total.signup_grant.sum + total.admin_adjust.sum + total.reconcile.sum + total.free_refill.sum,
+    // The bot fund's issuance (lib bots / game-worker bots.ts): chips table bots play with, apart from members' grants.
+    bots: total.bot_fund.sum,
+    total: total.signup_grant.sum + total.admin_adjust.sum + total.reconcile.sum + total.free_refill.sum + total.bot_fund.sum,
   };
 
   // Repeated grants: the most grants (amount > 0) one member got within any RAPID_WINDOW_MS of the period.
@@ -170,7 +176,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
   return {
     days,
     since,
-    wallets: { members: w.members ?? 0, accounts: w.accounts ?? 0, balance: w.balance ?? 0, deleted: w.deleted ?? 0, suspended: w.suspended ?? 0, staff: w.staff ?? 0 },
+    wallets: { members: w.members ?? 0, accounts: w.accounts ?? 0, balance: w.balance ?? 0, deleted: w.deleted ?? 0, suspended: w.suspended ?? 0, staff: w.staff ?? 0, bots: w.bots ?? 0, botAccounts: w.botAccounts ?? 0 },
     tables: { chips: onTables, openSessions: s.n ?? 0, seatedBuyIn: s.buyIn ?? 0 },
     issued,
     ledger: { total: ledgerTotal, byType: total },

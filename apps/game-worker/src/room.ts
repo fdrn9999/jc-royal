@@ -12,9 +12,10 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import { OpsCounter } from '@jc/db';
-import { HandEngine, nextButtonSeat, type HandRecord, type PersistedHand } from '@jc/poker-engine';
+import { botView, decideBot, HandEngine, nextButtonSeat, type ActResult, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
   AUTO_REBUY_MAX_TIMES,
+  type BotLevel,
   ClientMessageSchema,
   MEMBER_IDLE_CLOSE_MS,
   PLAYER_REPORT_WINDOW_MS,
@@ -51,6 +52,7 @@ import {
   type Maintenance,
   type TableRow,
 } from './settlement';
+import { botBuyIn, botEvent, pickBot, type BotEventKind } from './bots';
 
 export interface Env {
   DB: D1Database;
@@ -110,6 +112,11 @@ interface SeatState {
   preReqs?: string[];
   /** The player's setting: a losing showdown hand stays face down when the rules allow it (see HandEngine.handView). */
   autoMuck?: boolean;
+  /**
+   * A table bot of this level (bots.ts), not a member. It acts on its turn from what its seat sees (`playBotTurn`), never
+   * times out or sits out, and leaves through `leaveAfterHand` like a member — but plays the hand out first.
+   */
+  bot?: BotLevel;
 }
 
 /** A word for one player about a top-up or rebuy the room carried out on its own. */
@@ -157,6 +164,10 @@ interface RoomState {
    * checked before that moment is refused: a handshake already on its way when the admin acted does not get back in.
    */
   kicks?: Record<string, number>;
+  /** No bot joins before this (a join failed: the fund or the service's bot count used up, D1 unreachable). */
+  botRetryAt?: number | null;
+  /** Bot joins that failed in a row, for the back-off. */
+  botFails?: number;
 }
 
 const BETWEEN_HANDS_MS = 4_000;
@@ -180,12 +191,20 @@ const KICK_WINDOW_MS = 60_000;
 const KICK_SKEW_MS = 2_000;
 /** A turn this far past its deadline, or a next hand this late, means the room's timer did not run. */
 const OVERDUE_MS = 5_000;
+/** How long a bot takes over its turn (at most half the turn): long enough to read the table, never the whole clock. */
+const BOT_THINK_MS = { min: 700, max: 2_200 };
+/** Back-off after a failed bot join, doubling with each failure in a row up to the maximum. */
+const BOT_RETRY_MS = { first: 60_000, max: 30 * 60_000 };
+/** A bot sits down with this many big blinds, within the table's buy-in range. */
+const BOT_BUY_IN_BB = 100;
 
 /** A finished hand kept in room storage until its D1 record is written. */
 interface UnrecordedHand {
   handNumber: number;
   record: HandRecord;
   log: PersistedHand;
+  /** Table bots dealt in (absent from hands kept by older builds: none). */
+  bots?: number;
 }
 
 /** A chat line's id from its sender and request id: a line sent again is recognised without storing anything more. */
@@ -419,10 +438,17 @@ export class TableRoom extends DurableObject<Env> {
    */
   private async publishStats() {
     if (!this.tableId) return;
-    const seated = this.room.seats.filter((s) => s && s.phase !== 'pending').length;
+    const taken = this.room.seats.filter((s): s is SeatState => !!s && s.phase !== 'pending');
     const conns = this.sockets().map((ws) => this.att(ws).userId);
     const spectators = new Set(conns.filter((u) => this.seatIndexOf(u) === null)).size;
-    const stats = { seated, playing: !!this.hand, waitlist: this.room.waitlist.length, spectators, connections: conns.length };
+    const stats = {
+      seated: taken.length,
+      bots: taken.filter((s) => s.bot).length,
+      playing: !!this.hand,
+      waitlist: this.room.waitlist.length,
+      spectators,
+      connections: conns.length,
+    };
     const key = JSON.stringify(stats);
     const changed = key !== this.lastStats;
     const now = Date.now();
@@ -541,6 +567,12 @@ export class TableRoom extends DurableObject<Env> {
               else if (this.room.closed && t.status !== 'closed') await markTableClosed(this.env.DB, tableId);
               // A new join code, privacy or spectator setting applies to people already here.
               await this.enforceAccess();
+              // New bot settings or a new bot policy (a larger fund, say): a bot may try to join again now, not after the backoff.
+              if (this.room.botRetryAt !== undefined) {
+                this.room.botRetryAt = undefined;
+                this.room.botFails = 0;
+                await this.save();
+              }
             }
             if (this.maintShown && !this.inMaintenance()) await this.offerFreedSeat();
             this.broadcast();
@@ -797,6 +829,8 @@ export class TableRoom extends DurableObject<Env> {
         if (msg.reqId) this.remember(msg.reqId);
         await this.save();
         this.broadcast();
+        // A table bot may give its seat up to a member now waiting (or another may sit once nobody waits).
+        if (this.table?.bots.enabled) await this.schedule();
         return this.ack(ws, msg.reqId);
       }
       case 'action':
@@ -1301,10 +1335,11 @@ export class TableRoom extends DurableObject<Env> {
         cues.push(...(await h.resolveStall(now)));
         continue;
       }
-      // Players who left / sit out act instantly instead of burning the clock.
+      // Players who left / sit out act instantly instead of burning the clock. (A table bot on its way out plays the
+      // hand out: it leaves for the table's sake, not because it stopped playing.)
       const actor = h.actorId();
       const seat = actor ? this.room.seats[this.seatIndexOf(actor) ?? -1] : null;
-      if (actor && seat && seat.leaveAfterHand) {
+      if (actor && seat && seat.leaveAfterHand && !seat.bot) {
         const r = await h.act(actor, { type: 'fold' }, `leave-fold-${h.version}`, now);
         if (r.ok) cues.push(...r.cues);
         else break;
@@ -1355,7 +1390,8 @@ export class TableRoom extends DurableObject<Env> {
       this.room.muck = { handId: h.handId, ids: this.room.seats.filter((s) => s?.autoMuck && stacks.has(s.userId)).map((s) => s!.userId) };
       // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
       const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
-      const entry: UnrecordedHand = { handNumber: this.room.handNumber, record: h.record(now, this.muckOf(h)), log: h.persist() };
+      const bots = h.startingSeats.filter((p) => this.botSeat(p.playerId)).length;
+      const entry: UnrecordedHand = { handNumber: this.room.handNumber, record: h.record(now, this.muckOf(h)), log: h.persist(), ...(bots ? { bots } : {}) };
       await this.save({ [key]: entry });
       this.unrecorded.add(key);
     }
@@ -1373,6 +1409,8 @@ export class TableRoom extends DurableObject<Env> {
         try {
           await this.standUp(i);
           left.push({ kind: 'leave', seatIndex: i });
+          // (A bot that was asked to leave was logged then; one that lost its chips is logged here.)
+          if (s.bot && !s.leaveAfterHand && s.stack === 0) await this.logBot('leave', s.userId, 'busted');
         } catch (e) {
           // The seat stays 'cashing' and the alarm finishes the cash-out (its ledger key makes a repeat a no-op).
           this.fault('cash-out failed; will retry', e);
@@ -1448,8 +1486,9 @@ export class TableRoom extends DurableObject<Env> {
     this.room.shown = null;
     const dealt = this.eligibleSeats();
     // A paused table deals nothing until an admin resumes it (`reload` then schedules the next hand), nor does any table
-    // during maintenance (the alarm at its end does).
-    if (dealt.length < 2 || this.room.closing || t.status !== 'open' || t.handsPaused || this.inMaintenance()) {
+    // during maintenance (the alarm at its end does). Table bots never play a hand among themselves.
+    const members = dealt.filter((i) => !this.room.seats[i]!.bot).length;
+    if (dealt.length < 2 || members === 0 || this.room.closing || t.status !== 'open' || t.handsPaused || this.inMaintenance()) {
       this.room.nextHandAt = null;
       this.hand = null;
       await this.save();
@@ -1493,6 +1532,14 @@ export class TableRoom extends DurableObject<Env> {
     if (this.hand && !this.hand.isSettled) {
       const d = this.hand.deadline();
       if (d) times.push(d);
+      const botAt = this.botActAt();
+      if (botAt !== null) times.push(botAt);
+    }
+    // Table bots to seat or send away (a failed seating waits out its back-off).
+    if (this.loaded && this.table && !this.room.closed) {
+      const plan = this.botPlan();
+      if (plan.leave.length) times.push(Date.now());
+      else if (plan.join) times.push(Math.max(Date.now(), this.room.botRetryAt ?? 0));
     }
     if (this.room.nextHandAt) times.push(this.room.nextHandAt);
     if (this.room.reservation) times.push(this.room.reservation.until);
@@ -1525,15 +1572,17 @@ export class TableRoom extends DurableObject<Env> {
       }
       if (this.unfinishedWork()) await this.finishWorkSafely();
       const now = Date.now();
-      // Turn timer.
+      // Turn timer (a table bot moves once it has thought; if it could not, the clock decides as for anyone).
       if (this.hand && !this.hand.isSettled) {
         const d = this.hand.deadline();
         const actor = this.hand.actorId();
-        if (d && actor && d <= now) {
+        const botAt = this.botActAt();
+        const played = botAt !== null && botAt <= now && (await this.playBotTurn(now));
+        if (!played && d && actor && d <= now) {
           const r = await this.hand.timeout(actor, now);
           if (r.ok) {
             const seat = this.room.seats[this.seatIndexOf(actor) ?? -1];
-            if (seat) {
+            if (seat && !seat.bot) {
               seat.timeouts += 1;
               if (seat.timeouts >= TIMEOUTS_BEFORE_SIT_OUT && !seat.sittingOut) {
                 seat.sittingOut = true;
@@ -1586,6 +1635,11 @@ export class TableRoom extends DurableObject<Env> {
         this.broadcast();
         await this.afterChange();
       }
+      // Table bots sit down or leave.
+      if (!this.room.closed) {
+        const plan = this.botPlan();
+        if (plan.leave.length || (plan.join && (this.room.botRetryAt ?? 0) <= now)) await this.balanceBots(plan);
+      }
       // Next hand.
       if (this.room.nextHandAt && this.room.nextHandAt <= now && (!this.hand || this.hand.isSettled)) {
         this.hand = null;
@@ -1602,6 +1656,229 @@ export class TableRoom extends DurableObject<Env> {
       }
       await this.schedule();
     });
+  }
+
+  // ------------------------------------------------------------------ table bots
+
+  /** The seat of `userId` when a table bot holds it. */
+  private botSeat(userId: string): SeatState | null {
+    const i = this.seatIndexOf(userId);
+    const s = i === null ? null : this.room.seats[i]!;
+    return s?.bot ? s : null;
+  }
+
+  /** Whether bots may sit here: an official table that allows them, open, while the service has them on. */
+  private botsAllowed(): boolean {
+    const t = this.table!;
+    return t.roomType === 'official' && t.bots.enabled && t.botPolicyOn && t.status === 'open' && !this.room.closing && !this.room.closed;
+  }
+
+  /**
+   * What the table's bots should do now. Members always come first: bots sit only beside enough members who are
+   * playing, never past the table's limits, never ahead of a member waiting for a seat; and they leave — between hands
+   * at once, otherwise once the hand is over — when bots are switched off, too few members stay, the limits went down,
+   * or (when the table says so) a member is waiting for a seat no one else is freeing. `leave` lists the bots to go,
+   * first those not in the hand, then the latest to sit; `join` says one more bot should sit down (the back-off after a
+   * failed seating is the caller's to check).
+   */
+  private botPlan(): { leave: number[]; reason: string; join: boolean } {
+    const t = this.table!;
+    // A closing room cashes everyone out itself.
+    if (this.room.closing || this.room.closed) return { leave: [], reason: 'closing', join: false };
+    const staying: number[] = [];
+    let leaving = 0;
+    let pending = false;
+    let members = 0;
+    let playing = 0;
+    this.room.seats.forEach((s, i) => {
+      if (!s) return;
+      if (s.phase === 'pending') pending = true;
+      if (s.bot) {
+        if (s.leaveAfterHand) leaving++;
+        else if (s.phase === 'seated') staying.push(i);
+      } else if (s.phase === 'seated' && !s.leaveAfterHand) {
+        members++;
+        if (!s.sittingOut) playing++;
+      }
+    });
+    const allowed = this.botsAllowed();
+    const waiting = t.bots.yieldSeat ? Math.max(0, this.room.waitlist.length - this.openSeats() - leaving) : 0;
+    let keep = staying.length;
+    let reason = 'limit';
+    if (!allowed) {
+      keep = 0;
+      reason = 'bots_off';
+    } else if (members < t.bots.minHumans) {
+      keep = 0;
+      reason = 'no_members';
+    } else {
+      if (waiting > 0) reason = 'yield';
+      keep = Math.max(0, Math.min(staying.length - waiting, t.bots.max, t.bots.fillTo - members));
+    }
+    const inHand = (i: number) => (this.handHasPlayer(this.room.seats[i]!.userId) ? 1 : 0);
+    const order = [...staying].sort((a, b) => inHand(a) - inHand(b) || this.room.seats[b]!.joinedAt - this.room.seats[a]!.joinedAt);
+    const leave = order.slice(0, staying.length - keep);
+    const join =
+      allowed &&
+      leave.length === 0 &&
+      leaving === 0 &&
+      !pending &&
+      !t.entryBlocked &&
+      !t.handsPaused &&
+      !this.inMaintenance() &&
+      playing >= t.bots.minHumans &&
+      staying.length < t.bots.max &&
+      members + staying.length < t.bots.fillTo &&
+      this.openSeats() > 0 &&
+      this.room.waitlist.length === 0 &&
+      !this.room.reservation;
+    return { leave, reason, join };
+  }
+
+  /** Carries out `plan`: bots leave (between hands at once, otherwise after the hand), then at most one sits down. */
+  private async balanceBots(plan: ReturnType<TableRoom['botPlan']>) {
+    const left: TableCue[] = [];
+    for (const i of plan.leave) {
+      const s = this.room.seats[i]!;
+      s.leaveAfterHand = true;
+      await this.save();
+      await this.logBot('leave', s.userId, plan.reason);
+      // In the hand: it plays it out and stands up when it settles.
+      if (this.handHasPlayer(s.userId)) continue;
+      try {
+        await this.standUp(i);
+        left.push({ kind: 'leave', seatIndex: i });
+      } catch (e) {
+        // Left 'cashing' for the retry alarm (its ledger key makes a repeat a no-op).
+        this.fault('bot cash-out failed; will retry', e);
+      }
+    }
+    if (plan.leave.length) {
+      this.broadcast(left);
+      await this.afterChange();
+    }
+    if (plan.join) await this.seatBot();
+  }
+
+  /**
+   * Seats one bot in the first free seat with BOT_BUY_IN_BB big blinds (within the table's range), the way `sit` seats a
+   * member: the seat is held durably before any chips move, so a restart half way is settled by `recoverPendingSeats`.
+   * When no bot can sit (bots switched off, the fund or the service's bot count used up, D1 unreachable), the next try
+   * waits, longer after each failure in a row.
+   */
+  private async seatBot() {
+    const t = this.table!;
+    const seatIndex = this.room.seats.findIndex((s, i) => !s && i < t.maxSeats);
+    if (seatIndex < 0) return;
+    const amount = Math.min(t.maxBuyIn, Math.max(t.minBuyIn, BOT_BUY_IN_BB * t.bigBlind));
+    let failure: string = 'busy';
+    try {
+      const exclude = this.room.seats.flatMap((s) => (s?.bot ? [s.userId] : []));
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const bot = await pickBot(this.env.DB, exclude);
+        const seat: SeatState = {
+          userId: bot.id,
+          nickname: bot.nickname,
+          avatarUrl: null,
+          stack: amount,
+          tableSessionId: crypto.randomUUID(),
+          phase: 'pending',
+          buyIn: amount,
+          sittingOut: false,
+          sitOutSince: null,
+          leaveAfterHand: false,
+          timeouts: 0,
+          joinedAt: Date.now(),
+          autoMuck: true,
+          bot: t.bots.level,
+        };
+        this.room.seats[seatIndex] = seat;
+        await this.save();
+        const r = await botBuyIn(this.env.DB, { bot, tableId: t.id, tableSessionId: seat.tableSessionId, seatIndex, amount });
+        if (r.ok) {
+          seat.phase = 'seated';
+          this.room.botFails = 0;
+          this.room.botRetryAt = null;
+          await this.save();
+          this.broadcast([{ kind: 'seat', seatIndex, nickname: bot.nickname }]);
+          await this.logBot('join', bot.id, r.funded ? `funded ${r.funded}` : null);
+          await this.afterChange();
+          return;
+        }
+        this.room.seats[seatIndex] = null;
+        await this.save();
+        failure = r.code;
+        if (r.code === 'policy_off') t.botPolicyOn = false;
+        // Another table seated this bot first: try another one.
+        if (r.code !== 'busy') break;
+        exclude.push(bot.id);
+      }
+    } catch (e) {
+      // A seat left pending (its buy-in outcome unknown) is settled by the retry alarm.
+      this.fault('bot join failed', e);
+      failure = 'error';
+    }
+    const fails = (this.room.botFails ?? 0) + 1;
+    this.room.botFails = fails;
+    this.room.botRetryAt = Date.now() + Math.min(BOT_RETRY_MS.max, BOT_RETRY_MS.first * 2 ** Math.min(fails - 1, 10));
+    await this.save();
+    await this.logBot(failure === 'fund_exhausted' ? 'fund_exhausted' : 'join_failed', null, failure);
+  }
+
+  /** When the table bot to act moves: once it has thought a moment (the same moment however often this is asked). */
+  private botActAt(): number | null {
+    const h = this.hand;
+    const actor = h && !h.isSettled ? h.actorId() : null;
+    const d = h?.deadline();
+    if (!h || !actor || !d || h.isStalled() || !this.botSeat(actor)) return null;
+    const turnMs = h.rules.turnMs;
+    const think = BOT_THINK_MS.min + Math.round(unitHash(`${h.handId}:${h.version}`) * (BOT_THINK_MS.max - BOT_THINK_MS.min));
+    return d - turnMs + Math.min(think, Math.floor(turnMs / 2));
+  }
+
+  /**
+   * The table bot to act moves, from what its own seat sees (`botView`: its cards, the board, the pot, the bets and its
+   * legal moves — never another player's cards or the deck), through the engine's checks like anyone's move. A choice
+   * the engine refuses becomes a check, or a fold when it must call. False when it could not move at all.
+   */
+  private async playBotTurn(now: number): Promise<boolean> {
+    const h = this.hand!;
+    const actor = h.actorId();
+    const seat = actor ? this.botSeat(actor) : null;
+    if (!actor || !seat?.bot) return false;
+    let failed: string | null = null;
+    let r: ActResult | null = null;
+    try {
+      const v = botView(h, actor, h.rules.bigBlind);
+      if (!v) failed = 'no_view';
+      else {
+        r = await h.act(actor, decideBot(seat.bot, v), `bot-${h.version}`, now);
+        if (!r.ok) failed = r.code;
+      }
+    } catch (e) {
+      failed = 'error';
+      console.error('bot decision', e instanceof Error ? e.message : e);
+    }
+    if (!r?.ok) {
+      const type = h.legalOptions(actor).some((o) => o.type === 'check') ? 'check' : 'fold';
+      r = await h.act(actor, { type }, `bot-safe-${h.version}`, now);
+      if (!r.ok) {
+        this.fault('bot turn failed', new Error(r.reason));
+        return false;
+      }
+    }
+    if (failed) await this.logBot('action_failed', actor, failed);
+    await this.progress(r.cues);
+    return true;
+  }
+
+  /** A line in the bots' operations log; a failure to write it changes nothing else. */
+  private async logBot(kind: BotEventKind, botId: string | null, code: string | null = null) {
+    try {
+      await botEvent(this.env.DB, { tableId: this.tableId!, botId, kind, code });
+    } catch (e) {
+      console.error('bot event', e instanceof Error ? e.message : e);
+    }
   }
 
   // ------------------------------------------------------------------ admin
@@ -1670,8 +1947,10 @@ export class TableRoom extends DurableObject<Env> {
       const u = await this.ctx.storage.get<UnrecordedHand>(key);
       const read = ++this.maintReads;
       try {
-        const m = u ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log) : undefined;
-        if (m !== undefined && this.takeMaint(m, read)) void this.run(() => this.maintenanceChanged());
+        const r = u ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log, { bots: u.bots ?? 0, botPolicy: !!this.table?.bots.enabled }) : undefined;
+        if (r && this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
+        // Bots switched on or off service-wide: `schedule` seats them or sends them away.
+        if (r && r.botPolicyOn !== null && this.table) this.table.botPolicyOn = r.botPolicyOn;
       } catch (e) {
         this.fault('recordHand failed; will retry', e);
         return;
@@ -1811,6 +2090,13 @@ export class TableRoom extends DurableObject<Env> {
       closing: this.room.closing,
       closed: this.room.closed,
       connections: this.sockets().length,
+      bots: {
+        allowed: this.botsAllowed(),
+        settings: t.bots,
+        policyOn: t.botPolicyOn,
+        retryAt: this.room.botRetryAt ?? null,
+        failures: this.room.botFails ?? 0,
+      },
       chipsOnTable: this.room.seats.reduce((a, s) => a + (s ? (live ? (h!.finalStacks().get(s.userId) ?? s.stack) : s.stack) : 0), 0) + (live ? h!.handView().potTotal : 0),
       seats: this.room.seats.map((s, i) =>
         s
@@ -1829,6 +2115,7 @@ export class TableRoom extends DurableObject<Env> {
               sitOutSince: s.sitOutSince,
               topUp: s.topUp ? { state: s.topUp.state, amount: s.topUp.amount, auto: !!s.topUp.auto } : null,
               tableSessionId: s.tableSessionId,
+              bot: s.bot ?? null,
             }
           : null,
       ),
@@ -1879,7 +2166,9 @@ export class TableRoom extends DurableObject<Env> {
         // Once the hand is settled the seat holds its final stack plus any top-up made since.
         stack: hi && !h!.isSettled ? hi.stack : s.stack,
         streetBet: hi?.streetBet ?? 0,
-        connected: connected.has(s.userId),
+        // A table bot is played by the room itself: never shown as away.
+        connected: !!s.bot || connected.has(s.userId),
+        ...(s.bot ? { bot: s.bot, ...(s.leaveAfterHand ? { botLeaving: true } : {}) } : {}),
         lastAction: hi?.lastAction ?? null,
         hasCards: !!hi?.inHand && !hi.folded,
         holeCards: hi?.holeCards ?? null,
@@ -1999,6 +2288,13 @@ function preActionMove(legal: LegalOption[], kind: PreActionKind): 'check' | 'fo
   // A fold is never made while checking is free.
   if (can('check')) return kind === 'fold' ? null : 'check';
   return kind !== 'check' && can('fold') ? 'fold' : null;
+}
+
+/** A number in [0, 1) fixed by `s` (FNV-1a), for a pause that must come out the same every time it is computed. */
+function unitHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return (h >>> 0) / 2 ** 32;
 }
 
 function emptyRoom(maxSeats: number): RoomState {

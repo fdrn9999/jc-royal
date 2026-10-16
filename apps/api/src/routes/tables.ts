@@ -35,6 +35,8 @@ export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null): Lobby
     entryBlocked: t.entryBlocked,
     status: t.status === 'open' ? 'open' : 'closed',
     seated: t.liveSeated,
+    bots: t.liveBots,
+    botLevel: t.roomType === 'official' && t.botsEnabled ? t.botLevel : null,
     playing: t.livePlaying,
     waitlist: t.liveWaitlist,
     spectators: t.liveSpectators,
@@ -121,7 +123,8 @@ export const tableRoutes = new Hono<AppEnv>()
       .first<{ n: number }>();
     const newcomer = (played?.n ?? 0) < NEWCOMER_HANDS;
     const looksOpen = (t: TableRow) => t.maxSeats - t.liveSeated > t.liveWaitlist;
-    const rank = (t: TableRow) => [looksOpen(t) ? 0 : 1, t.beginner === newcomer ? 0 : 1, -t.liveSeated, t.bigBlind, t.roomType === 'official' ? 0 : 1];
+    // Tables with members already seated come first; table bots do not make a table look busy.
+    const rank = (t: TableRow) => [looksOpen(t) ? 0 : 1, t.beginner === newcomer ? 0 : 1, t.liveBots - t.liveSeated, t.bigBlind, t.roomType === 'official' ? 0 : 1];
     const ranked = affordable.sort((a, b) => {
       const ra = rank(a.t);
       const rb = rank(b.t);

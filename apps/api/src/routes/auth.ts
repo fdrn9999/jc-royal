@@ -202,8 +202,9 @@ export const authRoutes = new Hono<AppEnv>()
     await rateLimit(c, `login-ip:${clientIp(c)}`, 30, 15 * 60 * 1000, { perIp: true });
     await rateLimit(c, `login-acct:${body.email}`, 10, 15 * 60 * 1000);
     const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.email, body.email) });
-    const ok = await verifyPassword(body.password, u?.passwordHash ?? DUMMY_HASH);
-    if (!u || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
+    // A table bot's account has no password: it is refused like an unknown address.
+    const ok = await verifyPassword(body.password, u && !u.isBot ? u.passwordHash : DUMMY_HASH);
+    if (!u || u.isBot || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
     if (u.status === 'suspended') fail(403, 'suspended', u.suspendedReason ?? 'account suspended');
     // After the password check, so the refusal tells nothing to someone who does not know it.
     await refuseSignInInMaintenance(c, u.role);
@@ -219,7 +220,7 @@ export const authRoutes = new Hono<AppEnv>()
     await rateLimit(c, `reset:${clientIp(c)}`, 5, 60 * 60 * 1000, { perIp: true });
     // Per-address cap, applied whether or not the account exists, so nobody can flood an inbox.
     await rateLimit(c, `reset-email:${body.email}`, 3, 60 * 60 * 1000);
-    const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.email, body.email), eq(schema.users.status, 'active')) });
+    const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.email, body.email), eq(schema.users.status, 'active'), eq(schema.users.isBot, false)) });
     let devToken: string | undefined;
     if (u) {
       const token = randomToken();
