@@ -17,6 +17,7 @@ import { DashboardPage } from './pages/Dashboard';
 import { EconomyPage, ReconcilePage } from './pages/Economy';
 import { RefillPage } from './pages/Refill';
 import { BotsPage } from './pages/Bots';
+import { ReferralsPage } from './pages/Referrals';
 import { AuditPage } from './pages/Audit';
 import { AcademyStatsPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
@@ -26,6 +27,7 @@ const NAV: [string, Key][] = [
   ['/users', 'users'],
   ['/tables', 'tables'],
   ['/bots', 'botsNav'],
+  ['/referrals', 'referralNav'],
   ['/academy', 'academy'],
   ['/hands', 'hands'],
   ['/ledger', 'ledger'],
@@ -124,6 +126,7 @@ const router = createBrowserRouter([
       { path: '/tables', element: <TablesPage /> },
       { path: '/tables/:id', element: <TableDetailPage /> },
       { path: '/bots', element: <BotsPage /> },
+      { path: '/referrals', element: <ReferralsPage /> },
       { path: '/hands', element: <HandsPage /> },
       { path: '/hands/:id', element: <HandDetailPage /> },
       { path: '/ledger', element: <LedgerPage /> },

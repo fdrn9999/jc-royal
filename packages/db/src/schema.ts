@@ -99,7 +99,7 @@ export const chipLedger = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id),
     type: text('type', {
-      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'free_refill', 'bot_fund'],
+      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'free_refill', 'bot_fund', 'referral'],
     }).notNull(),
     /** Signed delta applied to users.balance. */
     amount: integer('amount').notNull(),
@@ -715,4 +715,83 @@ export const botEvents = sqliteTable(
     createdAt: integer('created_at').notNull().default(now),
   },
   (t) => [index('bot_events_created_idx').on(t.createdAt), index('bot_events_table_idx').on(t.tableId, t.createdAt)],
+);
+
+/**
+ * Referral rewards policy (apps/api/src/lib/referral.ts), one row per version and never changed: the newest row is in
+ * force. A signup with a code is accepted under the version in force then (its amounts and conditions are copied onto
+ * the referral); `paused` holds payouts without closing anything; the caps are read when a referrer side is paid.
+ */
+export const referralPolicies = sqliteTable('referral_policies', {
+  version: integer('version').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  /** Chips for the member who shared the code, and for the new member who used it. */
+  referrerAmount: integer('referrer_amount').notNull(),
+  inviteeAmount: integer('invitee_amount').notNull(),
+  /** Referrer rewards one member may receive per KST day, and in total. */
+  dailyCap: integer('daily_cap').notNull(),
+  totalCap: integer('total_cap').notNull(),
+  /** Hands the new member must finish before either side is paid (0: paid at signup). */
+  minHands: integer('min_hands').notNull(),
+  /** Signups for one referrer from one network within 24 hours from which new ones wait for review. */
+  burstLimit: integer('burst_limit').notNull(),
+  change: text('change', { enum: ['seed', 'policy', 'pause', 'resume'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/** A member's own referral code, made the first time they open it; removed when the member withdraws. */
+export const referralCodes = sqliteTable('referral_codes', {
+  userId: text('user_id').primaryKey(),
+  code: text('code').notNull().unique(),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * One signup made with a referral code (at most one per new member). Each side is paid at most once through
+ * chip_ledger type 'referral' with the key `referral:<id>:invitee` / `referral:<id>:referrer`; the side's status and
+ * ledger id are written in the same batch, and only when that ledger row was written. Kept when either member
+ * withdraws, under the tombstoned account, so a rejoin with the same email is recognised (docs/PRIVACY_OPERATIONS.md).
+ */
+export const referrals = sqliteTable(
+  'referrals',
+  {
+    id: text('id').primaryKey(),
+    code: text('code').notNull(),
+    referrerId: text('referrer_id').notNull(),
+    inviteeId: text('invitee_id').notNull().unique(),
+    /** pending: waiting to pay; review: held for an operator; settled: both sides final; unpaid: closed without pay. */
+    status: text('status', { enum: ['pending', 'review', 'settled', 'unpaid'] }).notNull(),
+    referrerStatus: text('referrer_status', { enum: ['pending', 'paid', 'capped', 'skipped', 'unpaid'] }).notNull(),
+    inviteeStatus: text('invitee_status', { enum: ['pending', 'paid', 'capped', 'skipped', 'unpaid'] }).notNull(),
+    /** The policy in force at signup and what it promised. */
+    policyVersion: integer('policy_version').notNull(),
+    referrerAmount: integer('referrer_amount').notNull(),
+    inviteeAmount: integer('invitee_amount').notNull(),
+    minHands: integer('min_hands').notNull(),
+    referrerLedgerId: text('referrer_ledger_id'),
+    inviteeLedgerId: text('invitee_ledger_id'),
+    referrerPaidAt: integer('referrer_paid_at'),
+    inviteePaidAt: integer('invitee_paid_at'),
+    /** SHA-256 of the normalised email (lower case, no +tag, no Gmail dots): the same inbox signing up again. */
+    emailHash: text('email_hash').notNull(),
+    /** Keyed hash of the signup network, cleared after 30 days; only ever a signal, never a verdict on its own. */
+    ipHash: text('ip_hash'),
+    sameIp: integer('same_ip', { mode: 'boolean' }).notNull().default(false),
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
+    /** Why it is waiting or was not paid (lib/referral.ts REFERRAL_FAILURES). */
+    failureCode: text('failure_code'),
+    reviewedBy: text('reviewed_by'),
+    reviewReason: text('review_reason'),
+    reviewedAt: integer('reviewed_at'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [
+    index('referrals_referrer_idx').on(t.referrerId, t.createdAt),
+    index('referrals_status_idx').on(t.status, t.createdAt),
+    index('referrals_email_idx').on(t.emailHash),
+  ],
 );

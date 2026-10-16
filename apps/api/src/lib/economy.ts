@@ -14,7 +14,7 @@ export const RAPID_WINDOW_MS = DAY;
  */
 export const STALE_SESSION_MS = 12 * 60 * 60_000;
 
-type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill' | 'bot_fund';
+type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill' | 'bot_fund' | 'referral';
 type Flow = { n: number; sum: number; plus: number; minus: number };
 const flow = (): Flow => ({ n: 0, sum: 0, plus: 0, minus: 0 });
 const add = (a: Flow, b: Flow) => {
@@ -103,7 +103,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
   const one = <T>(r: D1Result | undefined) => (r?.results[0] ?? {}) as T;
 
   // Ledger: totals by type, period counts, and the daily movement.
-  const total: Record<LedgerType, Flow> = { signup_grant: flow(), buy_in: flow(), top_up: flow(), cash_out: flow(), admin_adjust: flow(), reconcile: flow(), free_refill: flow(), bot_fund: flow() };
+  const total: Record<LedgerType, Flow> = { signup_grant: flow(), buy_in: flow(), top_up: flow(), cash_out: flow(), admin_adjust: flow(), reconcile: flow(), free_refill: flow(), bot_fund: flow(), referral: flow() };
   const period = { ...structuredClone(total), auto_rebuy: flow() };
   const perDay = new Map<number, Flow>();
   for (const r of rows<Flow & { type: LedgerType; day: number | null; rebuy: number }>(ledger)) {
@@ -135,7 +135,9 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
     refill: total.free_refill.sum,
     // The bot fund's issuance (lib bots / game-worker bots.ts): chips table bots play with, apart from members' grants.
     bots: total.bot_fund.sum,
-    total: total.signup_grant.sum + total.admin_adjust.sum + total.reconcile.sum + total.free_refill.sum + total.bot_fund.sum,
+    // Referral rewards (lib/referral.ts), both sides, apart from the sign-up grant.
+    referral: total.referral.sum,
+    total: total.signup_grant.sum + total.admin_adjust.sum + total.reconcile.sum + total.free_refill.sum + total.bot_fund.sum + total.referral.sum,
   };
 
   // Repeated grants: the most grants (amount > 0) one member got within any RAPID_WINDOW_MS of the period.

@@ -11,3 +11,5 @@ INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_b
   ('dev-bots-6', 'Bot Practice', 6, 5, 10, 200, 2000, 20, 0, 1, 1, 'normal', 3, 4);
 -- Bots on locally (the migration's seed policy keeps them off until a super admin turns them on).
 INSERT OR IGNORE INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) VALUES (2, 1, 1000000, 20, 'policy', 'dev seed');
+-- Referral rewards on locally, with development amounts (the migration's seed policy keeps them off and pays nothing).
+INSERT OR IGNORE INTO referral_policies (version, enabled, paused, referrer_amount, invitee_amount, daily_cap, total_cap, min_hands, burst_limit, change, reason) VALUES (2, 1, 0, 1000, 1000, 5, 50, 0, 20, 'policy', 'dev seed');

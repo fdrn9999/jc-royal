@@ -9,6 +9,7 @@ import { useBadges } from '../academy/sync';
 import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
 import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
+import { ReferralCard } from '../components/Referral';
 import { RefillCard } from '../components/Refill';
 import { ReportModal, type ReportSubject } from '../components/Social';
 import { HandReplay } from '../game/HandReplay';
@@ -119,6 +120,8 @@ export function MePage() {
       </div>
 
       <RefillCard onClaimed={() => void ledger.reload()} />
+
+      <ReferralCard onPaid={ledger.reload} />
 
       <Panel title={t('me.stats')}>
         {st ? (

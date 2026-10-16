@@ -7,6 +7,7 @@ import { requireUser } from '../lib/auth';
 import { replayLog, replayPlayer, replayUser } from '../lib/community';
 import { fail } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
+import { referralMe } from '../lib/referral';
 import { claimRefill, REFILL_RATE, refillSnapshot } from '../lib/refill';
 
 function pageParams(q: (k: string) => string | undefined) {
@@ -29,6 +30,15 @@ export const meRoutes = new Hono<AppEnv>()
     const r = await claimRefill(c.env, uid);
     if (!r.ok) fail(409, r.code, r.code === 'refill_changed' ? 'chips changed while the refill was decided; try again' : 'no refill now', { status: r.status });
     return c.json(r.claim);
+  })
+  /**
+   * The member's referral code, share link and rewards (lib/referral.ts). Opening it also pays what the member's
+   * referrals may pay now, so it is rate limited.
+   */
+  .get('/referral', async (c) => {
+    const uid = c.var.user!.id;
+    await rateLimit(c, `referral-me:${uid}`, 30, 60_000);
+    return c.json(await referralMe(c.env, uid, new URL(c.req.url).origin));
   })
   .get('/ledger', async (c) => {
     const { limit, before } = pageParams((k) => c.req.query(k));

@@ -255,15 +255,16 @@ describe('free chip refill', () => {
     const [m, other] = await Promise.all([newUser(), newUser()]);
     await setWallet(m, 400);
     await setWallet(other, 400);
-    const eco = async () => (await admin.get('/api/admin/economy?days=7&tz=540')).body.issued as { refill: number; total: number; signup: number; admin: number; reconcile: number; bots: number };
+    const eco = async () => (await admin.get('/api/admin/economy?days=7&tz=540')).body.issued as { refill: number; total: number; signup: number; admin: number; reconcile: number; bots: number; referral: number };
     const before = await eco();
     const r = await claim(m);
     expect(r.status).toBe(200);
     expect((await claim(other)).status).toBe(200);
     const after = await eco();
     expect(after.refill - before.refill).toBe(2 * r.body.amount);
-    // The total also counts what the table bots' fund issued (bots.test.ts, when it ran first in this database).
-    expect(after.total).toBe(after.signup + after.admin + after.reconcile + after.refill + after.bots);
+    // The total also counts what the table bots' fund and referral rewards issued (bots.test.ts and referral.test.ts, when
+    // they ran first in this database).
+    expect(after.total).toBe(after.signup + after.admin + after.reconcile + after.refill + after.bots + after.referral);
 
     const [row] = await claims(m.me.id);
     const list = await admin.get(`/api/admin/refill/claims?user=${m.me.id}`);

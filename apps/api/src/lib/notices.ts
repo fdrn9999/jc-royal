@@ -6,6 +6,8 @@ type Locale = 'ko' | 'en';
 type Notice = { title: string; body: string };
 type ReportTarget = 'post' | 'comment' | 'player' | 'dm';
 type ReportReason = 'spam' | 'abuse' | 'inappropriate' | 'cheating' | 'other';
+/** Which side of a referral the member is: the one who shared the code, or the new member who signed up with it. */
+type ReferralSide = 'referrer' | 'invitee';
 
 /** What was reported, from the reporter's side ("the post you reported") and the reported member's ("your post"). */
 const KO_REPORTED = { post: '게시글을', comment: '댓글을', player: '플레이어를', dm: '1:1 메시지를' } as const;
@@ -47,6 +49,15 @@ const NOTICES = {
         `회원님의 ${KO_YOUR[target]}에 대한 신고를 검토한 결과 운영 정책 위반(${KO_REASON[reason]})으로 확인되었습니다.` +
         (hidden ? `\n해당 ${KO_YOUR[target]}은 숨김 처리되었습니다.` : ''),
     }),
+    /** A referral reward paid. `other`: the other member's nickname (null when it is not known any more). */
+    referralPaid: (side: ReferralSide, amount: number, other: string | null): Notice => ({
+      title: '추천 보상 지급 안내',
+      body:
+        (side === 'referrer'
+          ? `회원님의 추천 코드로 ${other ? `'${other}' 님이` : '새 회원이'} 가입해 추천 보상을 받았습니다.`
+          : `추천 코드${other ? `('${other}' 님)` : ''}로 가입해 추천 보상을 받았습니다.`) +
+        `\n+${n(amount)} 가상 칩이 지급되었습니다. 가입 축하 칩과 별도이며, 현금 가치가 없는 플레이 전용 가상 칩입니다.`,
+    }),
   },
   en: {
     welcome: (grant: number): Notice => ({
@@ -74,6 +85,14 @@ const NOTICES = {
       body:
         `We reviewed a report about your ${EN_YOUR[target]} and found that it breached our operating policy (${EN_REASON[reason]}).` +
         (hidden ? `\nThe ${EN_YOUR[target]} has been hidden.` : ''),
+    }),
+    referralPaid: (side: ReferralSide, amount: number, other: string | null): Notice => ({
+      title: 'Referral reward paid',
+      body:
+        (side === 'referrer'
+          ? `${other ? `'${other}'` : 'A new member'} signed up with your referral code, so you received a referral reward.`
+          : `You signed up with a referral code${other ? ` from '${other}'` : ''}, so you received a referral reward.`) +
+        `\n+${n(amount)} virtual chips were added. They are separate from the welcome chips and are play-only virtual chips with no cash value.`,
     }),
   },
 } as const;

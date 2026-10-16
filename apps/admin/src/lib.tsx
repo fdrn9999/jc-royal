@@ -96,6 +96,15 @@ const BY_CODE: Record<string, Key> = {
   bot_policy_conflict: 'errBotPolicyConflict',
   bot_policy_no_change: 'errBotPolicyNoChange',
   bot_already_off: 'errBotAlreadyOff',
+  referral_policy_conflict: 'errReferralConflict',
+  referral_no_policy: 'errReferralNoPolicy',
+  referral_already_paused: 'errReferralAlreadyPaused',
+  referral_not_paused: 'errReferralNotPaused',
+  referral_no_change: 'errReferralNoChange',
+  referral_nothing_to_pay: 'errReferralNothingToPay',
+  referral_caps_order: 'errReferralCapsOrder',
+  referral_not_in_review: 'errReferralNotInReview',
+  referral_final: 'errReferralFinal',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

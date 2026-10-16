@@ -19,7 +19,7 @@ export const NicknameSchema = z.string().trim().regex(NICKNAME_RE);
 
 export const LocaleSchema = z.enum(['ko', 'en']);
 /** Version of the signup privacy notice. Bump it when the notice text changes; each signup stores the version it accepted. */
-export const PRIVACY_NOTICE_VERSION = '2026-10-15';
+export const PRIVACY_NOTICE_VERSION = '2026-10-16';
 
 /** Youngest age (full years) allowed to sign up; matches the "14 or older" agreement. */
 export const MIN_SIGNUP_AGE = 14;
@@ -53,6 +53,8 @@ export const RegisterSchema = z.object({
   agreements: z.object({ age14: z.literal(true), privacy: z.literal(true) }),
   /** Proof from /email-verification/confirm. Required while sign-up email verification is on. */
   emailVerificationToken: z.string().min(20).max(200).optional(),
+  /** A referral code (from the link's `?ref=` or typed); empty is no code. Checked by the server: `referral_invalid`. */
+  referralCode: z.string().max(40).optional(),
 });
 export const EmailVerificationRequestSchema = z.object({ email: EmailSchema, locale: LocaleSchema.default('ko') });
 export const EmailVerificationConfirmSchema = z.object({ email: EmailSchema, code: z.string().regex(/^\d{6}$/) });
@@ -302,6 +304,90 @@ export interface RefillClaimDto {
   /** Another request (a second tab, a retry) had already claimed this refill: nothing more was paid. */
   duplicate: boolean;
   status: RefillStatusDto;
+}
+
+/** A member's referral code as shared: JC and 5–10 capital letters or digits (the codes made now have 5). */
+export const REFERRAL_CODE_RE = /^JC[A-Z0-9]{5,10}$/;
+/** A code as typed or pasted, before it is checked: no spaces, capital letters. */
+export const normalizeReferralCode = (s: string) => s.replace(/\s+/g, '').toUpperCase();
+
+/**
+ * A signup made with a code (apps/api/src/lib/referral.ts). `pending`: not paid yet (the new member's hands, a pause,
+ * a suspension); `review`: held for an operator; `settled`: both sides final; `unpaid`: closed without a reward.
+ */
+export type ReferralStatus = 'pending' | 'review' | 'settled' | 'unpaid';
+/** One side's reward: `capped` when the referrer had reached a cap, `skipped` when that member had withdrawn. */
+export type ReferralSideStatus = 'pending' | 'paid' | 'capped' | 'skipped' | 'unpaid';
+/** Why a referral is waiting or closed without a reward. */
+export type ReferralFailure =
+  | 'off'
+  | 'paused'
+  | 'hands'
+  | 'email'
+  | 'repeat_email'
+  | 'burst'
+  | 'rejected'
+  | 'daily_cap'
+  | 'total_cap'
+  | 'invitee_deleted'
+  | 'invitee_suspended'
+  | 'referrer_deleted'
+  | 'referrer_suspended';
+/** What members are told of the referral policy (the review threshold is not shown). */
+export interface ReferralPolicyDto {
+  version: number;
+  enabled: boolean;
+  paused: boolean;
+  referrerAmount: number;
+  inviteeAmount: number;
+  /** Referrer rewards per day (KST) and in total. */
+  dailyCap: number;
+  totalCap: number;
+  /** Hands the new member finishes before either side is paid. */
+  minHands: number;
+}
+/** One side of one referral, as its member sees it. */
+export interface ReferralRewardDto {
+  status: ReferralStatus;
+  side: ReferralSideStatus;
+  /** Chips promised to this side when the signup was accepted. */
+  amount: number;
+  paidAt: number | null;
+  failure: ReferralFailure | null;
+  /**
+   * Hands the new member still has to finish (0 once done), told to the new member only: in the referrer's list it is
+   * null, and `failure: 'hands'` says only that the reward waits for them.
+   */
+  handsLeft: number | null;
+  createdAt: number;
+}
+export interface ReferralInviteeDto extends ReferralRewardDto {
+  /** Null once that member has withdrawn. */
+  nickname: string | null;
+}
+/** GET /api/me/referral: the member's code and link, the policy, and what their referrals paid. */
+export interface ReferralMeDto {
+  code: string;
+  link: string;
+  policy: ReferralPolicyDto | null;
+  counts: { invited: number; paid: number; pending: number; unpaid: number };
+  /** Chips received as the referrer, and promised ones not paid yet. */
+  earned: number;
+  waiting: number;
+  /** The member who invited this one, if any, and this member's own reward. */
+  invitedBy: (ReferralRewardDto & { nickname: string | null }) | null;
+  /** The newest members invited (up to 20). */
+  recent: ReferralInviteeDto[];
+  /** Chips this request paid to the member (waiting rewards settled as the card opened): the wallet changed. */
+  paidNow: number;
+  now: number;
+}
+/** GET /api/auth/referral/:code, for the signup form: whose code it is and what the new member would get now. */
+export interface ReferralCodeCheckDto {
+  valid: boolean;
+  inviter: string | null;
+  /** Null when referral rewards are off (the code is still accepted). */
+  reward: { amount: number; minHands: number; paused: boolean } | null;
 }
 
 export interface LedgerEntryDto {

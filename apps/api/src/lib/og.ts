@@ -7,6 +7,8 @@
  * A private or closed table, and a hidden or deleted post, get the site's default preview. Query strings are never
  * echoed, except a well-formed referral code on /register (a code is meant to be shared).
  */
+import { REFERRAL_CODE_RE } from '@jc/types';
+
 export const SITE = 'https://jc-royal.site';
 /** Replacing the image: give the new file a new name (og-image-2.png) and change this, so caches fetch it again. */
 export const OG_IMAGE = `${SITE}/og-image.png`;
@@ -111,7 +113,7 @@ export function metaLocale(url: URL): MetaLocale {
 }
 
 /** A referral code as members share it (JC + 5–10 letters or digits). Anything else is dropped from the preview. */
-export const REFERRAL_CODE = /^JC[A-Z0-9]{5,10}$/;
+export const REFERRAL_CODE = REFERRAL_CODE_RE;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** The page's address for the preview: the path, plus ?lang=en when asked for. Nothing else from the query. */

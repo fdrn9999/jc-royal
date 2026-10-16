@@ -12,9 +12,9 @@
 /**
  * `top_up` adds chips to an open table session (a player's top-up or automatic rebuy); `free_refill` is the free chip
  * refill a member with few chips left claims (apps/api/src/lib/refill.ts); `bot_fund` issues a table bot the chips for
- * its buy-in (apps/game-worker/src/bots.ts).
+ * its buy-in (apps/game-worker/src/bots.ts); eferral is a referral reward to either member (apps/api/src/lib/referral.ts).
  */
-export type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill' | 'bot_fund';
+export type LedgerType = 'signup_grant' | 'buy_in' | 'top_up' | 'cash_out' | 'admin_adjust' | 'reconcile' | 'free_refill' | 'bot_fund' | 'referral';
 
 export interface LedgerOp {
   userId: string;

@@ -4,6 +4,7 @@ import type { AppEnv, Env } from './env';
 import { housekeeping } from './lib/housekeeping';
 import { metaFor, metaLocale, defaultMeta, replaceMeta, type PageMeta } from './lib/og';
 import { countOps } from './lib/ops';
+import { sweepReferrals } from './lib/referral';
 import { sweepRooms } from './lib/room';
 import { rollup } from './lib/stats';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
@@ -98,7 +99,8 @@ export default {
   /**
    * Cron trigger (wrangler.jsonc `triggers`): rolls up the day that ended into the operations statistics (before the
    * housekeeping deletes old activity markers), deletes expired short-lived rows, then wakes rooms whose close or idle
-   * close stalled. Awaited, so a failure shows as a failed run; a failed rollup does not stop the clean-up.
+   * close stalled, and settles referrals waiting for a payout (lib/referral.ts). Awaited, so a failure shows as a failed
+   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest.
    */
   async scheduled(_event, env) {
     let failed: unknown = null;
@@ -110,6 +112,12 @@ export default {
     }
     console.log('housekeeping', JSON.stringify(await housekeeping(env.DB)));
     console.log('room sweep', JSON.stringify(await sweepRooms(env)));
+    try {
+      console.log('referral sweep', JSON.stringify(await sweepReferrals(env)));
+    } catch (e) {
+      failed ??= e;
+      console.error('referral sweep failed', e instanceof Error ? e.message : String(e));
+    }
     if (failed) throw failed;
   },
 } satisfies ExportedHandler<Env>;

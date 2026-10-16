@@ -42,6 +42,8 @@ export const CAPABILITIES = {
   'refill.policy': 'super_admin',
   /** Change the table bot policy (on, fund limit, how many bots), which also switches them on again (anyone on duty may stop them). */
   'bots.policy': 'super_admin',
+  /** Change the referral policy (on, amounts, caps, hands, review threshold), or resume payouts after an emergency stop (anyone on duty may stop them). */
+  'referral.policy': 'super_admin',
 } as const satisfies Record<string, AdminRole>;
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -74,6 +76,7 @@ export const FEATURES = [
   'reconcile',
   'refill',
   'bots',
+  'referral',
   'audit',
   'reports',
   'board',
@@ -162,6 +165,18 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /bots/stop': r('bots', 'bots.stop', { reauth }),
   'GET /bots/events': r('bots', 'bots.events'),
   'GET /bots/integrity': r('bots', 'bots.integrity'),
+
+  // Referral rewards (routes/admin-referral.ts): the policy and resuming are a super admin's; anyone on duty may pause,
+  // review a held referral (password and reason) and settle one again (it pays at most once per side).
+  'GET /referrals': r('referral', 'referral.view'),
+  'PUT /referrals/policy': r('referral', 'referral.policy', { role: CAPABILITIES['referral.policy'], reauth, preview }),
+  'POST /referrals/pause': r('referral', 'referral.pause', { reauth }),
+  'POST /referrals/resume': r('referral', 'referral.resume', { role: CAPABILITIES['referral.policy'], reauth }),
+  'GET /referrals/list': r('referral', 'referral.list'),
+  'POST /referrals/:id/approve': r('referral', 'referral.approve', { reauth, target: 'referral' }),
+  'POST /referrals/:id/reject': r('referral', 'referral.reject', { reauth, target: 'referral' }),
+  'POST /referrals/:id/settle': r('referral', 'referral.settle', { target: 'referral' }),
+  'GET /users/:id/referral': r('referral', 'referral.member', { target: 'user' }),
 
   'GET /board/posts': r('board', 'board.list'),
   'GET /board/posts/:id': r('board', 'board.view', { target: 'post' }),

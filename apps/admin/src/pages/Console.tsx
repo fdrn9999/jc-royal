@@ -22,6 +22,7 @@ import {
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
 import { dayStart, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
+import { MemberReferralPanel } from './Referrals';
 import { MemberRefillPanel, RefillRefLine, type RefillRef } from './Refill';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
@@ -748,6 +749,7 @@ export function UserDetailPage() {
       {data.reports && <MemberReportsPanel userId={u.id} reports={data.reports} />}
       <MemberHistoryPanel key={rev} userId={u.id} />
       <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />
+      <MemberReferralPanel key={`referral${rev}`} userId={u.id} />
       <Panel title={t('ledger')}>
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (
@@ -1492,7 +1494,7 @@ export function HandDetailPage() {
 
 // ------------------------------------------------------------------ ledger, reconcile, audit
 const LEDGER_KEYS = ['member', 'type', 'from', 'to'] as const;
-const LEDGER_TYPES = ['signup_grant', 'free_refill', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'bot_fund'] as const;
+const LEDGER_TYPES = ['signup_grant', 'free_refill', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'bot_fund', 'referral'] as const;
 
 /**
  * The chip ledger, newest first, page by page. Every look (with its filters and page) is recorded in the audit log by

@@ -27,6 +27,7 @@ export const ledgerTypeLabel = labeler({
   reconcile: 'ledgerReconcile',
   free_refill: 'ledgerFreeRefill',
   bot_fund: 'ledgerBotFund',
+  referral: 'ledgerReferral',
 });
 /** The memos the server writes itself (sign-up grant, buy-in seat, top-ups); a memo an admin typed is shown as it is. */
 const SYSTEM_MEMOS: Record<string, Key> = {
@@ -37,6 +38,8 @@ const SYSTEM_MEMOS: Record<string, Key> = {
   'balance corrected': 'memoCorrected',
   'free refill': 'memoFreeRefill',
   'bot fund': 'memoBotFund',
+  'referral reward (invited)': 'memoReferralInvited',
+  'referral reward (referrer)': 'memoReferralReferrer',
 };
 export function memoLabel(t: Tr, memo: string | null | undefined): string {
   if (!memo) return '';
@@ -93,6 +96,15 @@ const auditNames = labeler({
   'note.delete': 'auditNoteDelete',
   'reconcile.resolve': 'auditReconcileResolve',
   'reconcile.run': 'auditReconcileRun',
+  'referral.approve': 'auditReferralApprove',
+  'referral.list': 'auditReferralList',
+  'referral.member': 'auditReferralMember',
+  'referral.pause': 'auditReferralPause',
+  'referral.policy': 'auditReferralPolicy',
+  'referral.reject': 'auditReferralReject',
+  'referral.resume': 'auditReferralResume',
+  'referral.settle': 'auditReferralSettle',
+  'referral.view': 'auditReferralView',
   'refill.claims': 'auditRefillClaims',
   'refill.member': 'auditRefillMember',
   'refill.pause': 'auditRefillPause',
@@ -142,7 +154,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'report', 'board', 'message', 'service', 'maintenance'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -153,6 +165,7 @@ export const auditFamilyLabel = labeler({
   reconcile: 'famReconcile',
   refill: 'famRefill',
   bots: 'famBots',
+  referral: 'famReferral',
   report: 'famReport',
   board: 'famBoard',
   message: 'famMessage',
@@ -171,6 +184,7 @@ export const capabilityLabel = labeler({
   'sessions.all': 'capSessionsAll',
   'refill.policy': 'capRefillPolicy',
   'bots.policy': 'capBotsPolicy',
+  'referral.policy': 'capReferralPolicy',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({
@@ -192,6 +206,7 @@ export const featureLabel = labeler({
   reconcile: 'reconcile',
   refill: 'featRefill',
   bots: 'featBots',
+  referral: 'featReferral',
   audit: 'audit',
   reports: 'reports',
   board: 'board',
@@ -253,6 +268,7 @@ export const targetTypeLabel = labeler({
   notice: 'targetNotice',
   post: 'targetPost',
   reconciliation: 'targetReconciliation',
+  referral: 'targetReferral',
   report: 'targetReport',
   session: 'targetSession',
   table: 'targetTable',
