@@ -37,7 +37,7 @@ export interface TableSocketApi {
   ) => Promise<void>;
   /** Like request, without a result: a refusal shows in `lastError`. */
   send: (
-    msg: { t: 'sitOut' } | { t: 'sitIn' } | { t: 'waitlist'; join: boolean } | { t: 'chat'; text: string } | { t: 'sync' } | { t: 'cancelTopUp' } | { t: 'muck'; on: boolean },
+    msg: { t: 'sitOut' } | { t: 'sitIn' } | { t: 'waitlist'; join: boolean } | { t: 'chat'; text: string } | { t: 'sync' } | { t: 'cancelTopUp' } | { t: 'muck'; on: boolean } | { t: 'show'; card: 0 | 1 },
   ) => void;
   act: (type: ActionType, amount?: number) => boolean;
   /**

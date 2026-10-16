@@ -42,6 +42,11 @@ export interface SeatView {
   hasCards: boolean;
   /** Only present for the viewer's own seat or cards revealed at showdown. */
   holeCards?: Card[] | null;
+  /**
+   * Cards the player chose to show after the hand ended (the `show` command), by position: a card not shown is null.
+   * Only on a seat whose cards the showdown did not already turn over, and only until the next deal.
+   */
+  shown?: (Card | null)[];
 }
 
 export interface PotView {
@@ -129,6 +134,8 @@ export interface TableView {
     preAction?: PreActionKind | null;
     /** The seated viewer's auto-muck setting as the room holds it; null when not seated. Absent from older rooms. */
     autoMuck?: boolean | null;
+    /** The seated viewer may show cards from the hand that just ended (auto-muck on, dealt in, not shown at showdown). */
+    canShow?: boolean;
   };
 }
 

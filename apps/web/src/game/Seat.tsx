@@ -56,6 +56,8 @@ export interface SeatProps {
   onSit: () => void;
   /** Opens this player's card (other occupied seats only). */
   onPick?: () => void;
+  /** My seat after a hand, with auto-muck on: a button over each card turns it face up for the table. */
+  onShow?: (card: 0 | 1) => void;
   compact: boolean;
   style: CSSProperties;
 }
@@ -87,8 +89,11 @@ export function Seat(p: SeatProps) {
   const folded = s.state === 'folded';
   const allIn = s.state === 'allin';
   const winner = p.winAmount !== null && p.winAmount > 0;
-  const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0);
-  const cards = s.holeCards && s.holeCards.length ? s.holeCards : showCards ? [null, null] : [];
+  // Cards shown after the hand: face up where chosen, the other one face down (its owner sees both in holeCards).
+  const shown = s.shown?.length ? s.shown : null;
+  const isShown = (i: number) => !!shown?.[i];
+  const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0) || !!shown;
+  const cards = s.holeCards && s.holeCards.length ? s.holeCards : (shown ?? (showCards ? [null, null] : []));
   const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${formatChips(s.lastAction.amount, true)}` : ''}` : null;
   const actionTone =
     s.lastAction?.type === 'fold'
@@ -101,10 +106,10 @@ export function Seat(p: SeatProps) {
 
   return (
     <div className="absolute z-10 -translate-x-1/2 -translate-y-1/2" style={p.style} data-testid={`seat-${s.seatIndex}`} data-state={s.state}>
-      <div className={cx('relative flex flex-col items-center', folded && 'opacity-55')}>
+      <div className={cx('relative flex flex-col items-center', folded && !shown && 'opacity-55')}>
         {/* hole cards */}
         {cards.length > 0 && (
-          <div className={cx('mb-[-0.6rem] flex', p.isMe ? 'gap-1' : '-space-x-3')} key={p.newHandKey ?? 'cards'}>
+          <div className={cx('relative mb-[-0.6rem] flex', p.isMe ? 'gap-1' : '-space-x-3')} key={p.newHandKey ?? 'cards'}>
             {cards.map((c, i) => (
               <PlayingCard
                 key={`${c ?? 'x'}-${i}`}
@@ -112,10 +117,38 @@ export function Seat(p: SeatProps) {
                 size={cardSize}
                 animate={c ? 'flip' : 'deal'}
                 highlight={!!c && !!p.bestFive?.includes(c)}
-                dim={folded}
+                dim={folded && !isShown(i)}
                 style={{ animationDelay: `${i * 90}ms`, transform: !p.isMe ? `rotate(${i === 0 ? -6 : 6}deg)` : undefined }}
               />
             ))}
+            {p.onShow && (
+              <div className="absolute bottom-full left-0 mb-1 flex gap-1" data-testid="show-cards">
+                {cards.map((_, i) =>
+                  isShown(i) ? (
+                    <span
+                      key={i}
+                      className="grid h-6 place-items-center rounded-full border border-[#9fd8b6]/40 bg-ink-950/85 text-[10px] font-bold text-[#9fd8b6]"
+                      style={{ width: cardSize }}
+                      data-testid={`shown-card-${i}`}
+                    >
+                      {t('table.shownCard')}
+                    </span>
+                  ) : (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => p.onShow!(i === 0 ? 0 : 1)}
+                      className="jc-tap grid h-6 place-items-center rounded-full border border-gold-500/60 bg-ink-950/85 text-[10px] font-bold text-gold-200 hover:bg-gold-500/20 focus-visible:outline-2 focus-visible:outline-gold-400"
+                      style={{ width: cardSize }}
+                      aria-label={t('table.showCardAria', { n: i + 1 })}
+                      data-testid={`show-card-${i}`}
+                    >
+                      {t('table.showCard')}
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
           </div>
         )}
         {/* plate */}

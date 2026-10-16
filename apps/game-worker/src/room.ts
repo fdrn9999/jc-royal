@@ -128,6 +128,11 @@ interface RoomState {
    * and the hand history agree and a setting changed afterwards does not turn cards over.
    */
   muck?: { handId: string; ids: string[] } | null;
+  /**
+   * Cards players chose to show after the settled hand (`show`), by user id and card position. Kept until the next deal
+   * and never part of the hand's record or replay.
+   */
+  shown?: { handId: string; cards: Record<string, number[]> } | null;
   version: number;
   /** Member rooms: since when nobody has been seated (the room closes itself after MEMBER_IDLE_CLOSE_MS). */
   emptySince?: number | null;
@@ -779,6 +784,24 @@ export class TableRoom extends DurableObject<Env> {
         this.sendView(a.userId);
         return;
       }
+      case 'show': {
+        // A card of the hand that just ended, turned over for the table until the next deal. Only for players with
+        // auto-muck on (the setting describes it); a card already shown, or a hand the showdown showed, changes nothing.
+        const i = this.seatIndexOf(a.userId);
+        if (i === null) throw new CommandError('forbidden', 'not seated');
+        const h = this.hand;
+        if (!h || !h.isSettled || this.room.settledHandId !== h.handId) throw new CommandError('conflict', 'no finished hand to show');
+        if (!h.holeCardsOf(a.userId)) throw new CommandError('forbidden', 'not dealt in');
+        if (!this.room.seats[i]!.autoMuck) throw new CommandError('forbidden', 'auto-muck is off');
+        const prev = this.room.shown?.handId === h.handId ? this.room.shown.cards : {};
+        const mine = prev[a.userId] ?? [];
+        if (!this.revealedSeats(h).has(i) && !mine.includes(msg.card)) {
+          this.room.shown = { handId: h.handId, cards: { ...prev, [a.userId]: [...mine, msg.card].sort((x, y) => x - y) } };
+          await this.save();
+          this.broadcast();
+        }
+        return this.ack(ws, msg.reqId);
+      }
     }
   }
 
@@ -1376,6 +1399,8 @@ export class TableRoom extends DurableObject<Env> {
     const t = this.table!;
     // Normally done when the last hand settled; this catches anything a restart or a failed D1 call left behind.
     this.notify(await this.applyTopUps(this.room.settledHandId));
+    // Cards shown after the last hand go with its result.
+    this.room.shown = null;
     const dealt = this.eligibleSeats();
     // A paused table deals nothing until an admin resumes it (`reload` then schedules the next hand), nor does any table
     // during maintenance (the alarm at its end does).
@@ -1788,11 +1813,17 @@ export class TableRoom extends DurableObject<Env> {
     const showHand = isSeated || t.allowSpectators;
     const muck = h ? this.muckOf(h) : undefined;
     const info = h && showHand ? h.seatInfo(isSeated ? a.userId : null, muck) : null;
+    const hv = h && showHand ? { ...h.handView(muck), number: this.room.handNumber } : null;
+    const revealed = new Set((hv?.result?.showdown ?? []).map((x) => x.seatIndex));
+    const shown = h && hv?.result && this.room.shown?.handId === h.handId ? this.room.shown.cards : {};
     const seats: SeatView[] = this.room.seats.map((s, i) => {
       if (!s) return { seatIndex: i, state: 'empty', stack: 0, streetBet: 0, connected: false, hasCards: false };
       const hi = info?.get(i);
       let state: SeatView['state'] = s.sittingOut ? 'sittingOut' : 'waiting';
       if (hi?.inHand) state = hi.folded ? 'folded' : hi.allIn ? 'allin' : 'active';
+      // Only the chosen positions carry a card: the other one stays unknown to everybody but its owner.
+      const picked = !revealed.has(i) ? shown[s.userId] : undefined;
+      const dealt = picked?.length ? h!.holeCardsOf(s.userId) : null;
       return {
         seatIndex: i,
         state,
@@ -1806,9 +1837,9 @@ export class TableRoom extends DurableObject<Env> {
         lastAction: hi?.lastAction ?? null,
         hasCards: !!hi?.inHand && !hi.folded,
         holeCards: hi?.holeCards ?? null,
+        ...(dealt ? { shown: dealt.map((c, k) => (picked!.includes(k) ? c : null)) } : {}),
       };
     });
-    const hv = h && showHand ? { ...h.handView(muck), number: this.room.handNumber } : null;
     const myLegal = h && isSeated && !h.isSettled && h.actorId() === a.userId && !h.isStalled() ? h.legalOptions(a.userId) : [];
     const myPre = isSeated ? this.room.seats[mySeat]!.preAction : null;
     const res = this.room.reservation;
@@ -1863,6 +1894,14 @@ export class TableRoom extends DurableObject<Env> {
         autoRebuy: isSeated ? (this.room.seats[mySeat]!.autoRebuy ?? null) : null,
         preAction: myPre && h && !h.isSettled && myPre.handId === h.handId && myPre.stage === h.stage ? myPre.kind : null,
         autoMuck: isSeated ? !!this.room.seats[mySeat]!.autoMuck : null,
+        // The same conditions as the `show` command.
+        canShow:
+          isSeated &&
+          !!hv?.result &&
+          this.room.settledHandId === h!.handId &&
+          !!this.room.seats[mySeat]!.autoMuck &&
+          !!h!.holeCardsOf(a.userId) &&
+          !revealed.has(mySeat),
       },
     };
   }
@@ -1871,6 +1910,11 @@ export class TableRoom extends DurableObject<Env> {
   private muckOf(h: HandEngine): ReadonlySet<string> {
     const m = this.room.muck;
     return new Set(m && m.handId === h.handId ? m.ids : []);
+  }
+
+  /** Seats whose cards the showdown of the settled hand `h` turned over for everybody. */
+  private revealedSeats(h: HandEngine): Set<number> {
+    return new Set((h.handView(this.muckOf(h)).result?.showdown ?? []).map((x) => x.seatIndex));
   }
 }
 

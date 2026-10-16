@@ -34,6 +34,7 @@
 | `action` | `intentId, handId, seq, type, amount?` | `type`: fold/check/call/bet/raise/allin. bet·raise의 `amount`는 이번 스트리트 총액("to"). `seq`는 현재 `hand.seq`와 같아야 함. 적용되면 `intentId`로 `ack` |
 | `preAction` | `reqId, handId, stage, toCall, kind` | 사전 액션: 다른 사람 차례 동안 이번 스트리트의 내 다음 액션을 예약. `kind`: `check`·`checkFold`·`fold`, `null`이면 취소. `handId`·`stage`·`toCall`은 고를 때 본 화면 값. 아래 '사전 액션' 참고 |
 | `muck` | `reqId, on` | 패배한 쇼다운 핸드 자동 머크 켜기·끄기. 착석한 플레이어만(아니면 `forbidden`). 같은 값을 다시 보내도 결과가 같음. 아래 '쇼다운 머크' 참고 |
+| `show` | `reqId, card(0·1)` | 끝난 핸드의 내 카드 한 장을 다음 핸드 전까지 테이블에 보여 줌. 자동 머크를 켠 착석 플레이어만. 아래 '패 보이기' 참고 |
 | `chat` | `text(1-200), reqId?` | 채팅. 같은 `reqId`로 다시 보내면 한 번만 게시 |
 | `ping` | — | → `pong`. 정확히 `{"t":"ping"}`이면 런타임이 룸을 깨우지 않고 답함 |
 
@@ -54,10 +55,11 @@
 ### TableView (요약, 정의는 `packages/types/src/table.ts`)
 
 - **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정, 회원 방이면 `roomType:'member'`와 방장 `hostId`), `status`(waiting/playing/closing/closed).
-- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`.
+- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`.
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 자동 머크로 공개되지 않은 패는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
+  - `shown`은 핸드가 끝난 뒤 주인이 보이기로 고른 카드입니다. `[카드 또는 null, 카드 또는 null]`로 고른 자리에만 카드가 있고, 고르지 않은 카드는 누구에게도 보내지 않습니다. 쇼다운에서 이미 공개된 좌석과 고른 카드가 없는 좌석에는 이 필드가 없습니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
-- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다.
+- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다. `canShow`(지금 `show`를 보낼 수 있음: 끝난 핸드에 참여했고, 자동 머크가 켜져 있고, 내 패가 쇼다운에서 공개되지 않음. 이전 룸은 보내지 않음).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
 - **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음), `maintenance`(서비스 점검 `{startsAt, endsAt, active}` 또는 null. 이전 룸은 보내지 않음).
 
@@ -97,6 +99,15 @@
 - **기록**: 같은 결정이 `hand_players.shown`(1 공개, 0 머크)에 들어가고, `/api/me/hands/:id`와 커뮤니티 핸드 리뷰는 본인이 아닌 머크된 패의 `holeCards`·`rankClass`를 null로 줍니다. 이 열이 NULL인 이전 기록은 `went_to_showdown`을 따릅니다. 관리자 감사 화면(종료 핸드 전체)은 그대로 모든 카드를 봅니다.
 - **웹 클라이언트**: 설정은 기기에 저장되고(`jc.prefs`), 착석해 있고 연결이 열려 있을 때 룸의 `you.autoMuck`이 다르면 한 번 보냅니다. 연결이 끊긴 동안 보낸 명령은 남지 않으므로 재연결 뒤에 다시 맞춥니다. 머크된 본인의 패는 결과의 `showdown`에 없어 자리 아래에 족보 이름이 나오지 않습니다(카드는 보임).
 - **배포 순서**: 마이그레이션 `0011_hand_shown` → game-worker → api → web. 열이 없으면 새 game-worker의 핸드 기록 INSERT가 실패합니다. 이전 룸은 `autoMuck`을 보내지 않으므로 새 웹은 아무것도 보내지 않습니다.
+
+## 패 보이기 (`show`)
+
+- **보낼 수 있는 때**: 핸드가 정산된 뒤 다음 핸드가 시작되기 전(보통 4초, 다음 핸드를 시작할 인원이 없으면 그보다 김). 핸드 중이거나 끝난 핸드가 없으면 `conflict`, 착석하지 않았거나 그 핸드에 카드를 받지 않았거나 자동 머크가 꺼져 있으면 `forbidden`입니다.
+- **대상**: 폴드한 패, 쇼다운 없이 이긴 패, 쇼다운에서 머크된 패. 쇼다운에서 이미 공개된 패는 보낼 수 있지만 아무것도 바뀌지 않고 `ack`만 옵니다. 이미 보인 카드를 다시 보내도 같습니다(상태 버전이 늘지 않음).
+- **보이는 것**: 고른 카드만 `seats[].shown`으로 모든 사람(관전자 포함)에게 갑니다. 다른 카드는 뒷면으로 그려지고 그 값은 어떤 메시지에도 들어가지 않습니다. 결과의 `showdown`과 족보 표시는 바뀌지 않습니다.
+- **유지 기간**: 룸 상태에 저장되므로 재접속해도 같은 핸드 동안 남고, 다음 핸드를 시작할 때 지웁니다. 이후 설정을 꺼도 이미 보인 카드는 그 핸드 동안 남습니다.
+- **기록**: 핸드 기록(`hand_players.shown`)·리플레이·커뮤니티 리뷰에는 넣지 않습니다. 보이기는 그 자리에서 보여 주는 것일 뿐이라, 기록의 공개 규칙은 위 '쇼다운 머크' 그대로입니다.
+- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `show`를 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보내고 `canShow`를 보내지 않으므로, 새 웹은 버튼을 그리지 않습니다.
 
 ## 웹 클라이언트의 전달 규칙 (`apps/web/src/game/link.ts`, `useTableSocket.ts`)
 

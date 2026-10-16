@@ -59,6 +59,8 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-pre-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Showdown muck: heads-up, so a checked-down hand has one covered loser.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-muck-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Showing cards after a hand: six seats, so a third player can sit down during a hand without being dealt in.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-show-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Operations dashboard: connection counters and a room failure.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-ops-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Emergency controls: forced disconnects (a suspended player's open socket) and paused tables.

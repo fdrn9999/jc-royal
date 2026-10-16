@@ -399,6 +399,7 @@ export function TablePage() {
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
                 onSeatClick={(seat) => seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null })}
+                onShow={(card) => sock.send({ t: 'show', card })}
                 nextIn={nextIn}
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}

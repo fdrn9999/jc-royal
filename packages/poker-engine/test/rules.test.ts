@@ -146,6 +146,11 @@ describe('blinds, positions and betting rules', () => {
     expect(v.result!.showdown).toEqual([]);
     const seen = h.seatInfo('p1');
     expect(seen.get(0)!.holeCards).toBeNull();
+    // The room can still read a folded player's own cards (to show one on request); the views never carry them.
+    expect(h.holeCardsOf('p1')).toHaveLength(2);
+    expect(h.holeCardsOf('p1')).toEqual(seen.get(1)!.holeCards);
+    expect(h.seatInfo('p0').get(1)!.holeCards).toBeNull();
+    expect(h.holeCardsOf('nobody')).toBeNull();
   });
 
   it('a player who cannot cover the big blind posts all-in and can still win', async () => {

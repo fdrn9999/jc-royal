@@ -572,6 +572,12 @@ export class HandEngine {
     return collectFoldedPlayers(this.snapshot.hand);
   }
 
+  /** The cards dealt to `playerId`, or null when not dealt in. For the room's own use: views go through `seatInfo`. */
+  holeCardsOf(playerId: string): Card[] | null {
+    const c = this.snapshot.cards.holeCards[playerId];
+    return c && c.length ? ([...c] as Card[]) : null;
+  }
+
   /** Seat-level info for a viewer. Hidden cards are never included for other players. */
   seatInfo(viewerId: string | null, autoMuck: ReadonlySet<string> = new Set()): Map<number, SeatHandInfo> {
     const s = this.snapshot;

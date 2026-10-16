@@ -62,6 +62,7 @@ export function TableScene({
   canSit,
   onSit,
   onSeatClick,
+  onShow,
   nextIn,
   cues,
   consumeCues,
@@ -74,6 +75,8 @@ export function TableScene({
   onSit: (seatIndex: number) => void;
   /** Tapping another player's plate (the real table only). */
   onSeatClick?: (seat: SeatView) => void;
+  /** Shows one of my cards after the hand (the real table only; offered while `you.canShow`). */
+  onShow?: (card: 0 | 1) => void;
   nextIn: number | null;
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
@@ -151,6 +154,7 @@ export function TableScene({
               canSit={canSit}
               onSit={() => onSit(seat.seatIndex)}
               onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
+              onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? onShow : undefined}
               compact={compact}
               style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
             />
