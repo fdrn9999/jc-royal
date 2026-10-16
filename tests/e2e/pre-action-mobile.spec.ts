@@ -88,9 +88,11 @@ test('mobile: a check chosen while the other player acts is made on the turn, an
   await b.page.waitForTimeout(300);
   await barB.getByRole('button', { name: /^(레이즈|Raise|벳|Bet)$/ }).click();
   await barB.getByRole('textbox').fill('40');
+  // 40 is far below half of B's stack (about 1,000), so one press sends it and the panel closes; a press that only armed
+  // it fails here. The button is never read: a read waits for it to exist, and once it is gone that lasts until the timeout.
   const commit = barB.getByTestId('action-commit');
   await commit.click();
-  if (/^(한 번 더|Press again)/.test((await commit.textContent().catch(() => '')) ?? '')) await commit.click();
+  await expect(commit).toHaveCount(0);
   const notice = a.page.getByTestId('table-notice');
   await expect(notice).toHaveText(/미리 선택을 취소|pre-selection cancelled/);
   await expect(barA.getByRole('button', { name: /^(콜|Call)/ })).toBeVisible();
