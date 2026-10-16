@@ -15,11 +15,14 @@ const MAIN_STATE = resolve(root, 'tests/.state/main');
  *
  * This runs in a second process on the SQLite file the worker has open, so while the worker writes (tables left by
  * earlier test files keep playing) it can get SQLITE_BUSY. A batch that fails that way leaves nothing behind, so it is
- * retried; any other error fails at once.
+ * retried; any other error fails at once. The lock shows up in other words too ("Failed to get session commit token:
+ * internal error", "internal error", and a runtime that dies under it answers "fetch failed"); a single SELECT changes
+ * nothing, so it is retried on those as well.
  */
 export async function d1<T = Record<string, unknown>>(sql: string, state = MAIN_STATE): Promise<T[]> {
   const wrangler = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
   const args = [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', state, '-c', 'apps/api/wrangler.jsonc', '--json', '--command', sql];
+  const readOnly = /^\s*SELECT\b/i.test(sql) && !/;\s*\S/.test(sql);
   for (let attempt = 1; ; attempt++) {
     try {
       const { stdout } = await promisify(execFile)(process.execPath, args, { cwd: root, encoding: 'utf8' });
@@ -29,7 +32,8 @@ export async function d1<T = Record<string, unknown>>(sql: string, state = MAIN_
       // With --json wrangler reports a failed statement on stdout, which the bare error message leaves out.
       const { stdout, stderr, message } = e as Error & { stdout?: string; stderr?: string };
       const why = (stdout || stderr || message).trim().slice(0, 2000);
-      if (!why.includes('SQLITE_BUSY') || attempt >= 10) throw new Error(`d1 execute failed (attempt ${attempt}): ${why}`);
+      const busy = why.includes('SQLITE_BUSY') || (readOnly && /fetch failed|internal error/.test(why));
+      if (!busy || attempt >= 10) throw new Error(`d1 execute failed (attempt ${attempt}): ${why}`);
       await new Promise((r) => setTimeout(r, 100 * attempt + Math.random() * 100));
     }
   }
