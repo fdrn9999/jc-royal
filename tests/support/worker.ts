@@ -122,6 +122,33 @@ async function waitHealthy(url: string, ms: number) {
   throw new Error(`worker did not become healthy at ${url}`);
 }
 
+/** Whether anything answers HTTP at this address; a refused or stalled connection counts as no. */
+async function answers(url: string) {
+  try {
+    await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(2000) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kills wrangler and the workerd it runs at once, like a crash of the whole server: on Windows the process tree, elsewhere
+ * the process group wrangler leads (it is spawned detached). Killing wrangler alone leaves workerd serving the port on
+ * Linux, and a restart's health check then reaches the old process, which never reloaded anything.
+ */
+function killTree(child: ChildProcess) {
+  if (!child.pid) return;
+  if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+  else {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 /** Local secrets come from .dev.vars (gitignored); create them from the examples when absent (e.g. CI). */
 export function ensureDevVars() {
   for (const app of ['apps/api', 'apps/game-worker']) {
@@ -132,6 +159,9 @@ export function ensureDevVars() {
 
 export async function startWorker(port: number, state: string): Promise<RunningWorker> {
   ensureDevVars();
+  const url = `http://127.0.0.1:${port}`;
+  // A server left on the port would pass the health check below in place of this one.
+  if (await answers(url)) throw new Error(`port ${port} is still served by an earlier worker`);
   const child = spawn(
     process.execPath,
     [
@@ -147,17 +177,22 @@ export async function startWorker(port: number, state: string): Promise<RunningW
       // Members' rooms with nobody seated close after 8 s here (10 min in production).
       '--var', 'MEMBER_IDLE_CLOSE_MS:8000',
     ],
-    { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
+    {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
+      detached: process.platform !== 'win32',
+    },
   );
   let log = '';
   child.stdout?.on('data', (d) => (log += d));
   child.stderr?.on('data', (d) => (log += d));
-  const url = `http://127.0.0.1:${port}`;
   try {
     await waitHealthy(url, 90_000);
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`wrangler dev exited (${child.exitCode ?? child.signalCode})`);
   } catch (e) {
     console.error(log.slice(-4000));
-    child.kill();
+    killTree(child);
     throw e;
   }
   return {
@@ -165,8 +200,12 @@ export async function startWorker(port: number, state: string): Promise<RunningW
     child,
     log: () => log,
     stop: async () => {
-      if (process.platform === 'win32' && child.pid) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F']);
-      else child.kill('SIGKILL');
+      killTree(child);
+      const end = Date.now() + 15_000;
+      while (await answers(url)) {
+        if (Date.now() > end) throw new Error(`the worker on port ${port} still answers after it was killed`);
+        await new Promise((r) => setTimeout(r, 200));
+      }
       await new Promise((r) => setTimeout(r, 500));
     },
   };
