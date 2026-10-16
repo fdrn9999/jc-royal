@@ -23,7 +23,7 @@ interface PotSpec {
   winners: [seat: number, amount: number][];
 }
 
-function build(id: string, maxSeats: number, button: number, board: string[], seats: SeatSpec[], acts: Act[], pots: PotSpec[]): HandDetailDto {
+export function build(id: string, maxSeats: number, button: number, board: string[], seats: SeatSpec[], acts: Act[], pots: PotSpec[]): HandDetailDto {
   const put = new Map<number, number>();
   for (const [s, , , amount] of acts) put.set(s, (put.get(s) ?? 0) + amount);
   const won = new Map<number, number>();

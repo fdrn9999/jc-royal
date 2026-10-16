@@ -138,7 +138,8 @@ test('mobile: with big blinds chosen, the table, the buy-in and the replay read 
   const bet = a.page.getByTestId('hand-replay').getByTestId(`bet-${seatA}`);
   for (let k = 0; k < 30 && (await bet.textContent().catch(() => null)) !== '2.5 BB'; k++) await a.page.getByTestId('replay-next').tap();
   await expect(bet).toHaveText('2.5 BB');
-  await expect(a.page.getByTestId('replay-step')).toHaveText(/(레이즈|Raise|벳|Bet) [\d.]+ BB$/);
+  // The step's line reads a bet or a raise as the total it reaches, as the seat's bet shows it.
+  await expect(a.page.getByTestId('replay-step')).toHaveText(/(2\.5 BB까지 레이즈|raises to 2\.5 BB|2\.5 BB 벳|bets 2\.5 BB)$/);
   expect(await widerThanDevice(a.page)).toBe(false);
   await a.page.screenshot({ path: test.info().outputPath('bb-replay-360.png') });
   // The payout reads in BB too.

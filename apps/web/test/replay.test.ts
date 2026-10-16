@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildReplay, replayPots, type ReplayInput } from '../src/game/replay';
+import { buildReplay, replayParts, replayPhase, replayPots, type ReplayInput } from '../src/game/replay';
 
 const a = (seatIndex: number, stage: string, type: string, amount = 0) => ({ seatIndex, stage, type, amount });
+const act = (seat: number, type: string, amount = 0) => ({ kind: 'act', seat, type, amount });
 const player = (seatIndex: number, o: { stackStart: number; net: number; won: number; holeCards?: string[] | null; rankClass?: string | null; bestFive?: string[] | null }) => ({
   seatIndex,
   nickname: `p${seatIndex}`,
@@ -148,6 +149,46 @@ describe('buildReplay', () => {
     const sd = steps.find((s) => s.kind === 'showdown')!.view;
     expect(sd.seats[2]).toMatchObject({ hasCards: true, holeCards: null });
     expect(sd.hand!.result!.showdown.map((x) => x.seatIndex)).toEqual([0]);
+    expect(steps.find((s) => s.kind === 'showdown')!.line).toEqual([{ kind: 'shows', seat: 0, rankClass: 'three_of_a_kind', bestFive: ['As', 'Ac', 'Ah', 'Kd', '9h'] }]);
+  });
+
+  it('says what each step did: bets, raises and all-ins as the street total they reach, calls and blinds as what went in', () => {
+    const steps = buildReplay(sidePotHand(), 1);
+    expect(steps.map((s) => s.line)).toEqual([
+      [{ kind: 'deal' }, act(1, 'post-sb', 5), act(2, 'post-bb', 10)],
+      [act(0, 'allin', 100)],
+      [act(1, 'call', 95)],
+      [act(2, 'raise', 300)],
+      [act(1, 'call', 200)],
+      [{ kind: 'board', cards: ['Ah', 'Kd', '7c'] }],
+      [act(1, 'check')],
+      [act(2, 'bet', 200)],
+      [act(1, 'fold')],
+      [{ kind: 'board', cards: ['2s'] }],
+      [{ kind: 'board', cards: ['9h'] }],
+      [
+        { kind: 'shows', seat: 0, rankClass: 'three_of_a_kind', bestFive: ['As', 'Ac', 'Ah', 'Kd', '9h'] },
+        { kind: 'shows', seat: 2, rankClass: 'three_of_a_kind', bestFive: ['Kh', 'Ks', 'Kd', 'Ah', '9h'] },
+      ],
+      // The uncalled 200 handed back to seat 2 is no win.
+      [
+        { kind: 'wins', seat: 0, amount: 300 },
+        { kind: 'wins', seat: 2, amount: 400 },
+      ],
+    ]);
+  });
+
+  it('marks the part of the hand each step is in, and where each part the hand reached starts and ends', () => {
+    const steps = buildReplay(sidePotHand(), 1);
+    expect(steps.map((s) => replayPhase(s))).toEqual(['preflop', 'preflop', 'preflop', 'preflop', 'preflop', 'flop', 'flop', 'flop', 'flop', 'turn', 'river', 'showdown', 'result']);
+    expect(replayParts(steps)).toEqual([
+      { phase: 'preflop', first: 0, last: 4 },
+      { phase: 'flop', first: 5, last: 8 },
+      { phase: 'turn', first: 9, last: 9 },
+      { phase: 'river', first: 10, last: 10 },
+      { phase: 'showdown', first: 11, last: 11 },
+      { phase: 'result', first: 12, last: 12 },
+    ]);
   });
 
   it('ends without a showdown when everyone else folds', () => {
@@ -172,6 +213,12 @@ describe('buildReplay', () => {
     expect(res.hand!.result).toEqual({ winners: [{ seatIndex: 0, amount: 40, potIds: ['pot-0'] }], showdown: [] });
     expect(res.seats.map((s) => s.stack)).toEqual([510, 490]);
     expect(res.seats[0]!.holeCards).toBeNull();
+    // A raise from the small blind reads as the total it reaches; a time-out as stored; no street, showdown or board.
+    expect(steps.map((s) => s.line)).toEqual([[{ kind: 'deal' }, act(0, 'post-sb', 5), act(1, 'post-bb', 10)], [act(0, 'raise', 30)], [act(1, 'timeout-fold')], [{ kind: 'wins', seat: 0, amount: 40 }]]);
+    expect(replayParts(steps)).toEqual([
+      { phase: 'preflop', first: 0, last: 2 },
+      { phase: 'result', first: 3, last: 3 },
+    ]);
   });
 
   it('replays hands recorded before pots and the button were stored from the per-player totals', () => {

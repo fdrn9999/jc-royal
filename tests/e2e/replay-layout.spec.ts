@@ -64,13 +64,21 @@ test('replay: at 2, 6 and 9 seats on phones, a tablet and desktops, every seat, 
         }
         // Scrolled to the top of the replay and to its end: nothing overlaps, is cut off or drawn over in either, and
         // every piece shows whole in at least one (a 9-seat table on the smallest phones is taller than the screen).
+        // Where the settlement under the controls fills the end, the controls show whole once scrolled to them.
         const top = await measureReplay(p, 'table');
         const end = await measureReplay(p, 'bottom');
         expect(hard(top), `${where} · step ${k} from the top`).toEqual([]);
         expect(hard(end), `${where} · step ${k} at the end`).toEqual([]);
         const hidden = (m: LayoutReport) => new Set(m.issues.filter((x) => x.kind === 'offscreen').map((x) => x.item));
         const [h1, h2] = [hidden(top), hidden(end)];
-        expect(top.items.filter((x) => h1.has(x) && h2.has(x)), `${where} · step ${k} never whole on screen`).toEqual([]);
+        let never = top.items.filter((x) => h1.has(x) && h2.has(x));
+        if (never.length > 0) {
+          const reach = await measureReplay(p, 'controls');
+          expect(hard(reach), `${where} · step ${k} at the controls`).toEqual([]);
+          const h3 = hidden(reach);
+          never = never.filter((x) => h3.has(x));
+        }
+        expect(never, `${where} · step ${k} never whole on screen`).toEqual([]);
       }
       await p.screenshot({ path: test.info().outputPath(`replay-${sc.name}-${hand.maxSeats}.png`), fullPage: true });
     }

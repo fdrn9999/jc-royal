@@ -124,6 +124,20 @@ describe('table layout: every seat, bet and the board in a place of its own', ()
     expect(plan.density).toBe('full');
   });
 
+  it('takes smaller seats over passing the cap, and passes it only when even the smallest need more', () => {
+    // A 412px phone's replay: the compact seats would need about 350px, the cap that keeps the controls in view is 289.
+    const short = { stack: 4, bet: 3, pot: 3 };
+    const two = planHeight(358, 422, 289, input(2, { chars: short }), SMALL);
+    expect(two.h).toBeLessThanOrEqual(289);
+    expect(two.density).toBe('dense');
+    expect(problems(two, input(2, { chars: short }))).toEqual([]);
+    // Six seats fit nowhere within 269px: the table takes the least height its seats need.
+    const six = planHeight(358, 402, 269, input(6, { chars: short }), SMALL);
+    expect(six.h).toBeGreaterThan(269);
+    expect(six.overlap).toBe(0);
+    expect(problems(six, input(6, { chars: short }))).toEqual([]);
+  });
+
   it('falls back to the least overlap, not a crash, when nothing fits', () => {
     const plan = planTable(120, 90, input(9), SMALL);
     expect(plan.overlap).toBeGreaterThan(0);

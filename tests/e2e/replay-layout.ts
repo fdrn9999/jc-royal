@@ -23,14 +23,19 @@ export interface LayoutReport {
  * drawn: inside the table area and the screen, not under anything else (hit tests at several points of each), and not
  * overlapping another seat's or the board's pieces. `scroll: 'table'` first scrolls the replay (its step line, or the
  * table where there is none) to just under the header, as a player looking at it would; `'bottom'` scrolls its end (the
- * controls, or the settlement under them) to just above the bottom navigation; `'none'` measures the page as it opened.
+ * controls, or the settlement under them) to just above the bottom navigation; `'controls'` scrolls the controls' end
+ * there, as a player reaching for them would; `'none'` measures the page as it opened.
  */
-export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'none', root = '[data-testid=hand-replay]'): Promise<LayoutReport> {
+export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls' | 'none', root = '[data-testid=hand-replay]'): Promise<LayoutReport> {
   return page.evaluate(
     ([scrollMode, rootSel]) => {
       const host = document.querySelector(rootSel)!;
       const surface = (host.querySelector('[data-testid=replay-table]') ?? host.querySelector('.jc-game-surface'))!;
-      const header = document.querySelector('header')?.getBoundingClientRect().bottom ?? 0;
+      // Where the header ends, its own content included: on a tablet its labels wrap and run past its 64px box, and
+      // whatever lies under them is under the header.
+      const headerEl = document.querySelector('header');
+      const headerEnd = () => Math.max(headerEl?.getBoundingClientRect().bottom ?? 0, ...Array.from(headerEl?.querySelectorAll('*') ?? []).map((e) => e.getBoundingClientRect().bottom));
+      const header = headerEnd();
       const first = host.querySelector('[data-testid=replay-status]') ?? surface;
       const vw = document.documentElement.clientWidth;
       const vh = innerHeight;
@@ -38,7 +43,9 @@ export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'none', r
       const bottom = nav ? nav.getBoundingClientRect().top : vh;
       if (scrollMode === 'table') scrollBy(0, Math.min(first.getBoundingClientRect().top, surface.getBoundingClientRect().top) - Math.max(0, header));
       if (scrollMode === 'bottom') scrollBy(0, host.getBoundingClientRect().bottom - bottom);
-      const top = Math.max(0, document.querySelector('header')?.getBoundingClientRect().bottom ?? 0);
+      const controlsEl = host.querySelector('[data-testid=replay-controls]');
+      if (scrollMode === 'controls' && controlsEl) scrollBy(0, controlsEl.getBoundingClientRect().bottom - bottom);
+      const top = Math.max(0, headerEnd());
       const s = surface.getBoundingClientRect();
 
       interface Item {
@@ -74,6 +81,7 @@ export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'none', r
       if (status?.textContent?.trim()) add('table-status', status, { text: true });
       const controls = host.querySelector('[data-testid=replay-controls]');
       for (const id of ['replay-step', 'replay-index', 'replay-pot', 'replay-side-pots', 'replay-action']) add(id, host.querySelector(`[data-testid=${id}]`), { table: false, text: true });
+      add('replay-slider', host.querySelector('[data-testid=replay-slider]'), { table: false });
       controls?.querySelectorAll('button').forEach((b, k) => add(`control-${b.getAttribute('data-testid') ?? k}`, b, { table: false }));
       host.querySelectorAll('[data-testid=replay-pot-row]').forEach((x, k) => add(`settlement-${k}`, x, { table: false }));
 
