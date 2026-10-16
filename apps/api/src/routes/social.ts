@@ -53,13 +53,22 @@ async function publicUser(c: Context<AppEnv>, where: { id?: string; nickname?: s
   return toPublic(u);
 }
 
+/**
+ * Staff (admins and the super admin) cannot be blocked. A block made before that rule, or before the player became
+ * staff, stays in `user_blocks` but has no effect and is not listed while they are staff; it applies again if they
+ * go back to being a member. Every block check joins the blocked player's role for that.
+ */
+const IN_FORCE = `JOIN users bu ON bu.id = ub.blocked_id AND bu.role = 'user'`;
+
 /** SQL condition: neither of the two placeholders has blocked the other. */
 const notBlocked = (a: string, b: string) =>
-  `NOT EXISTS (SELECT 1 FROM user_blocks WHERE (blocker_id = ${a} AND blocked_id = ${b}) OR (blocker_id = ${b} AND blocked_id = ${a}))`;
+  `NOT EXISTS (SELECT 1 FROM user_blocks ub ${IN_FORCE} WHERE (ub.blocker_id = ${a} AND ub.blocked_id = ${b}) OR (ub.blocker_id = ${b} AND ub.blocked_id = ${a}))`;
 
 /** 'mine' when I blocked them, 'theirs' when they blocked me (which is never shown to me as such). */
 async function blockState(c: Context<AppEnv>, me: string, other: string): Promise<'none' | 'mine' | 'theirs'> {
-  const { results } = await c.env.DB.prepare(`SELECT blocker_id AS blocker FROM user_blocks WHERE (blocker_id = ?1 AND blocked_id = ?2) OR (blocker_id = ?2 AND blocked_id = ?1)`)
+  const { results } = await c.env.DB.prepare(
+    `SELECT ub.blocker_id AS blocker FROM user_blocks ub ${IN_FORCE} WHERE (ub.blocker_id = ?1 AND ub.blocked_id = ?2) OR (ub.blocker_id = ?2 AND ub.blocked_id = ?1)`,
+  )
     .bind(me, other)
     .all<{ blocker: string }>();
   if (results.some((r) => r.blocker === me)) return 'mine';
@@ -221,7 +230,8 @@ export const friendRoutes = new Hono<AppEnv>()
 
 /**
  * My block list. Blocking is personal: it deletes the friendship or pending requests with that player and stops new
- * requests and 1:1 messages both ways. It keeps nobody off a table; admin sanctions are a separate thing.
+ * requests and 1:1 messages both ways. It keeps nobody off a table; admin sanctions are a separate thing. Staff cannot
+ * be blocked (see IN_FORCE): they answer members and send them notices.
  */
 export const blockRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
@@ -229,7 +239,7 @@ export const blockRoutes = new Hono<AppEnv>()
     const { results } = await c.env.DB.prepare(
       `SELECT u.id, u.nickname, u.avatar_url AS avatarUrl, u.role, b.created_at AS at
          FROM user_blocks b JOIN users u ON u.id = b.blocked_id
-        WHERE b.blocker_id = ?1 AND u.status != 'deleted' ORDER BY b.created_at DESC`,
+        WHERE b.blocker_id = ?1 AND u.status != 'deleted' AND u.role = 'user' ORDER BY b.created_at DESC`,
     )
       .bind(c.var.user!.id)
       .all<{ id: string; nickname: string; avatarUrl: string | null; role: string; at: number }>();
@@ -241,8 +251,9 @@ export const blockRoutes = new Hono<AppEnv>()
     if (other === me) fail(400, 'block_self', 'you cannot block yourself');
     const user = await publicUser(c, { id: other });
     if (!user) fail(404, 'user_not_found', 'no such player');
+    if (user.role) fail(403, 'block_staff', 'admins and the super admin cannot be blocked');
     await rateLimit(c, `block:${me}`, 60, 60 * 60_000);
-    const n = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM user_blocks WHERE blocker_id = ?1`).bind(me).first<{ n: number }>();
+    const n = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM user_blocks ub ${IN_FORCE} WHERE ub.blocker_id = ?1`).bind(me).first<{ n: number }>();
     if ((n?.n ?? 0) >= MAX_BLOCKS && (await blockState(c, me, other)) !== 'mine') fail(409, 'block_limit', `at most ${MAX_BLOCKS} blocked players`);
     const [a, b] = pairOf(me, other);
     // One transaction: the block row and the end of any friendship or request between the two.

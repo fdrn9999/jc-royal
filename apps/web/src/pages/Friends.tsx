@@ -631,12 +631,16 @@ export function ConversationPage() {
         {conv.isFriend && (
           <Button size="sm" variant="ghost" className="text-ink-300" onClick={unfriend} data-testid="unfriend">{t('friends.remove')}</Button>
         )}
-        {!conv.blocked && (
+        {!conv.blocked && !conv.user.role && (
           <Button size="sm" variant="ghost" className="text-[#f0a0a2]" onClick={() => setConfirmBlock((v) => !v)} aria-expanded={confirmBlock} data-testid="dm-block">{t('block.action')}</Button>
         )}
       </header>
       {confirmBlock && <BlockConfirm name={conv.user.nickname} busy={blockBusy} onConfirm={() => void setBlocked(true)} onCancel={() => setConfirmBlock(false)} />}
-      {msgs.some((m) => !m.fromMe) && <p className="-mt-1 shrink-0 text-[11px] text-ink-400">{t('dm.reportTip')}</p>}
+      {conv.user.role === 'super_admin' ? (
+        <p className="-mt-1 shrink-0 text-[11px] text-ink-400" data-testid="dm-staff-note">{t('staff.noReportBlock')}</p>
+      ) : (
+        msgs.some((m) => !m.fromMe) && <p className="-mt-1 shrink-0 text-[11px] text-ink-400">{t('dm.reportTip')}</p>
+      )}
 
       <div ref={box} className="jc-panel min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4" data-testid="dm-messages">
         {conv.hasMore && (
@@ -659,7 +663,8 @@ export function ConversationPage() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setSelected((s) => (s === m.id ? null : m.id))}
+                      // A message is picked to report it; the super admin's cannot be reported.
+                      onClick={() => conv.user.role !== 'super_admin' && setSelected((s) => (s === m.id ? null : m.id))}
                       aria-pressed={selected === m.id}
                       className={cx('whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm bg-ink-700 px-3 py-2 text-left text-sm text-ink-100', selected === m.id && 'ring-2 ring-danger/60')}
                     >
@@ -670,7 +675,7 @@ export function ConversationPage() {
                     {m === lastMine && m.readAt && <span className="text-gold-300" data-testid="dm-read">{t('dm.read')}</span>}
                     {timeFmt.format(m.at)}
                   </span>
-                  {selected === m.id && (
+                  {selected === m.id && conv.user.role !== 'super_admin' && (
                     <button
                       type="button"
                       className="jc-tap shrink-0 self-center rounded-full border border-danger/50 px-3 py-1.5 text-xs font-semibold text-[#f0a0a2] hover:bg-danger/10"

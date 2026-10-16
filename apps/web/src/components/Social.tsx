@@ -125,7 +125,8 @@ export function BlockConfirm({ name, busy, onConfirm, onCancel }: { name: string
 
 /**
  * A player's name card: friend request / accept / message, block, and optionally a report button and (at a table)
- * a device-local mute for that player's table chat.
+ * a device-local mute for that player's table chat. Staff cannot be blocked, and the super admin cannot be reported
+ * (the server refuses both); the card says so instead of offering the button.
  */
 export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user: PublicUserDto | null; onClose: () => void; onReport?: () => void; newTab?: boolean; chatMute?: boolean }) {
   const { t, err } = useI18n();
@@ -191,6 +192,8 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user
     });
   const self = !!user && user.id === me?.id;
   const isMuted = !!user && muted.has(user.id);
+  const staff = !!user?.role;
+  const canBlock = rel !== null && rel !== 'blocked' && !confirmBlock && !staff;
   return (
     <Modal open={!!user} onClose={onClose} title={user?.nickname ?? ''}>
       {user && (
@@ -207,7 +210,7 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user
           {note && <p className="text-sm text-gold-300" role="status">{note}</p>}
           {confirmBlock && <BlockConfirm name={user.nickname} busy={busy} onConfirm={block} onCancel={() => setConfirmBlock(false)} />}
           <div className="flex flex-wrap justify-end gap-2">
-            {onReport && (
+            {onReport && user.role !== 'super_admin' && (
               <Button variant="ghost" className="mr-auto text-[#f0a0a2]" onClick={onReport} data-testid="player-report">
                 {t('report.action')}
               </Button>
@@ -228,7 +231,7 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user
               </Button>
             )}
           </div>
-          {!self && me && (chatMute || (rel !== null && rel !== 'blocked' && !confirmBlock)) && (
+          {!self && me && (chatMute || canBlock || staff) && (
             <div className="flex flex-col gap-2 border-t border-white/5 pt-3">
               <div className="flex flex-wrap gap-2">
                 {chatMute && (
@@ -236,13 +239,14 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user
                     {isMuted ? t('mute.off') : t('mute.on')}
                   </Button>
                 )}
-                {rel !== null && rel !== 'blocked' && !confirmBlock && (
+                {canBlock && (
                   <Button size="sm" variant="ghost" className="ml-auto text-[#f0a0a2]" onClick={() => setConfirmBlock(true)} data-testid="player-block">
                     {t('block.action')}
                   </Button>
                 )}
               </div>
               {chatMute && <p className="text-xs text-ink-400">{t('mute.hint')}</p>}
+              {staff && <p className="text-xs text-ink-400" data-testid="player-staff-note">{t(user.role === 'super_admin' ? 'staff.noReportBlock' : 'staff.noBlock')}</p>}
             </div>
           )}
         </div>

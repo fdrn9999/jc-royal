@@ -171,7 +171,7 @@ export function PostPage() {
                 <button className="text-[#f0a0a2] hover:underline" onClick={() => confirm(t('board.deleteConfirm')) && run(async () => { await api(`/api/board/posts/${post.id}`, { method: 'DELETE' }); nav('/board'); })}>{t('board.delete')}</button>
               </span>
             )}
-            {!post.isMine && !post.isNotice && (
+            {!post.isMine && !post.isNotice && post.author.role !== 'super_admin' && (
               <button className="ml-auto text-ink-400 hover:text-[#f0a0a2]" onClick={() => setReporting({ type: 'post', id: post.id, label: post.title })} data-testid="report-post">
                 {t('report.action')}
               </button>
@@ -231,7 +231,7 @@ function CommentItem({ c, onRun, onReply, replyTo, postId, onPick, onReport, pau
               <button className="text-[#f0a0a2]" onClick={() => confirm(t('board.deleteConfirm')) && onRun(() => api(`/api/board/comments/${c.id}`, { method: 'DELETE' }))}>{t('board.delete')}</button>
             </>
           )}
-          {!c.isMine && (
+          {!c.isMine && c.author.role !== 'super_admin' && (
             <button className="text-ink-400 hover:text-[#f0a0a2]" onClick={() => onReport({ type: 'comment', id: c.id, label: c.body })} data-testid="report-comment">
               {t('report.action')}
             </button>

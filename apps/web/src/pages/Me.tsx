@@ -383,7 +383,7 @@ export function HandDetailPage() {
                   {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
                   <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`} data-testid="hand-net">{p.net > 0 ? '+' : ''}{amt.fmt(p.net)}</span>
                 </span>
-                {!p.isYou && (
+                {!p.isYou && p.role !== 'super_admin' && (
                   <button
                     type="button"
                     className="jc-tap -my-1 min-h-9 rounded-md px-2 text-xs font-semibold text-[#f0a0a2] hover:bg-danger/10"

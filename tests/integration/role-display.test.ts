@@ -117,12 +117,12 @@ describe('staff marks', () => {
     expect((await member.client.get(`/api/dm/${staff.me.id}`)).body.user).toMatchObject({ id: staff.me.id, role: 'admin' });
     expect('role' in (await staff.client.get(`/api/dm/${member.me.id}`)).body.user).toBe(false);
 
-    // The block list.
-    expect((await other.client.req('PUT', `/api/blocks/${staff.me.id}`)).status).toBe(200);
+    // The block list. Staff cannot be blocked (staff-safety.test.ts), so it only ever lists members.
+    expect((await other.client.req('PUT', `/api/blocks/${staff.me.id}`)).body.error.code).toBe('block_staff');
     expect((await other.client.req('PUT', `/api/blocks/${member.me.id}`)).status).toBe(200);
     const blocked = (await other.client.get('/api/blocks')).body as { id: string; role?: string }[];
-    expect(blocked.find((u) => u.id === staff.me.id)!.role).toBe('admin');
-    expect('role' in blocked.find((u) => u.id === member.me.id)!).toBe(false);
+    expect(blocked.map((u) => u.id)).toEqual([member.me.id]);
+    expect('role' in blocked[0]!).toBe(false);
 
     // The board: posts and comments.
     const post = await staff.client.post('/api/board/posts', { title: '운영 안내', body: '안녕하세요' });
