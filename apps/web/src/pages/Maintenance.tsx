@@ -15,6 +15,7 @@ const COPY = {
     scheduled: '서비스 점검이 예정되어 있습니다.',
     period: '점검 시간',
     rules: '점검 중에는 새 게임 입장과 새 핸드가 멈춥니다. 이미 진행 중이던 핸드는 끝까지 진행되며, 테이블과 지갑의 칩은 그대로 보관됩니다.',
+    board: '점검 중에는 게시판 글과 댓글 쓰기도 멈춥니다. 읽기와 내 글 삭제는 그대로 할 수 있습니다.',
     login: '점검 중에는 새 로그인과 회원가입도 잠시 제한됩니다. 이미 로그인한 상태는 유지됩니다.',
     resume: '점검이 끝나면 자동으로 정상 운영이 재개되며, 이 화면도 30초마다 상태를 확인합니다.',
   },
@@ -25,6 +26,7 @@ const COPY = {
     scheduled: 'Maintenance is scheduled.',
     period: 'Window',
     rules: 'During maintenance no one can join a game and no new hand starts. A hand already in progress plays to the end, and chips at tables and in wallets stay where they are.',
+    board: 'New posts and comments on the board are paused as well. You can still read and delete your own.',
     login: 'New sign-ins and sign-ups are also paused during maintenance. If you are already signed in, you stay signed in.',
     resume: 'Play resumes on its own when maintenance ends; this page checks every 30 seconds.',
   },
@@ -82,6 +84,7 @@ export function MaintenancePage() {
               {message && <p className="mt-3 whitespace-pre-line text-sm text-ink-100">{message}</p>}
               <ul className="mt-4 list-disc space-y-1.5 pl-5 text-sm text-ink-200">
                 <li>{c.rules}</li>
+                <li>{c.board}</li>
                 {m.blockLogin && <li>{c.login}</li>}
                 <li>{c.resume}</li>
               </ul>

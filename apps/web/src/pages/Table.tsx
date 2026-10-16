@@ -377,7 +377,7 @@ export function TablePage() {
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
               <span>{t('quick.missed')}</span>
               <span className="flex gap-2">
-                <Button size="sm" loading={quickPlay.busy} onClick={() => quickPlay.run(quick.filters, [...new Set([...quick.tried, id])])} data-testid="quick-another">
+                <Button size="sm" loading={quickPlay.busy} disabled={!!s?.maintenance?.active} onClick={() => quickPlay.run(quick.filters, [...new Set([...quick.tried, id])])} data-testid="quick-another">
                   {t('quick.another')}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setQuickMissed(false)}>

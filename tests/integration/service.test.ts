@@ -254,6 +254,10 @@ describe('maintenance', () => {
     expect(await wv.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
     const register = new Client();
     const fresh = await signupBody(register, { email: `${uniq('e')}@test.dev`, nickname: uniq('n').slice(0, 14) });
+    // A member's post and comment from before, to edit and delete during it.
+    const post = (await d!.client.post('/api/board/posts', { title: '점검 전 글', body: '점검 전에 쓴 글' })).body.id as string;
+    const comment = (await d!.client.post(`/api/board/posts/${post}/comments`, { body: '점검 전 댓글' })).body.id as string;
+    const staffPost = (await staff!.client.post('/api/board/posts', { title: '운영 공지 초안', body: '점검 안내' })).body.id as string;
 
     // Maintenance from now, blocking member sign-in.
     const start = await admin.post(M, { startsAt: Date.now() - 1_000, endsAt: Date.now() + 10 * 60_000, blockLogin: true, messageKo: '정기 점검', messageEn: 'Scheduled maintenance', reason: 'database upgrade' });
@@ -298,6 +302,20 @@ describe('maintenance', () => {
       expect((await new Client().post('/api/auth/login', { email: staff!.email, password: PASSWORD })).status).toBe(200);
       expect((await new Client(ADMIN_ORIGIN).post('/api/admin/auth/login', { email: staff!.email, password: PASSWORD })).status).toBe(200);
       expect((await a!.client.get('/api/auth/me')).status).toBe(200);
+
+      // Members can't post, comment or edit (the same refusal, with the end time); they can read and delete their own.
+      // Staff can post, to answer questions about it.
+      const posting = await d!.client.post('/api/board/posts', { title: '점검 중 글', body: '되나요?' });
+      expect(posting.status).toBe(503);
+      expect(posting.body.error).toMatchObject({ code: 'maintenance', details: { endsAt } });
+      expect((await d!.client.post(`/api/board/posts/${post}/comments`, { body: '점검 중 댓글' })).body.error).toMatchObject({ code: 'maintenance', details: { endsAt } });
+      expect((await d!.client.patch(`/api/board/posts/${post}`, { title: '고친 글', body: '고친 본문' })).body.error?.code).toBe('maintenance');
+      expect((await d!.client.patch(`/api/board/comments/${comment}`, { body: '고친 댓글' })).body.error?.code).toBe('maintenance');
+      expect((await d!.client.get(`/api/board/posts/${post}`)).body).toMatchObject({ title: '점검 전 글' });
+      expect((await d!.client.req('DELETE', `/api/board/comments/${comment}`)).status).toBe(200);
+      expect((await d!.client.req('DELETE', `/api/board/posts/${post}`)).status).toBe(200);
+      expect((await staff!.client.post(`/api/board/posts/${staffPost}/comments`, { body: '점검은 30분 뒤 끝납니다' })).status).toBe(201);
+      expect((await staff!.client.patch(`/api/board/posts/${staffPost}`, { title: '운영 공지', body: '점검 안내' })).status).toBe(200);
 
       // The console sees it per table, with no missing-hand warning; a table can still be closed (its player paid out).
       const detail = (await admin.get('/api/admin/tables/it-mt-0')).body;

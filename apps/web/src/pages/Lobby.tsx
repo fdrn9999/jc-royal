@@ -7,11 +7,13 @@ import { JoinCodeModal } from '../components/JoinCode';
 import { HostedBy } from '../components/MemberName';
 import { ANY, QuickPlayPanel, useLobbyFilters } from '../components/QuickPlay';
 import { CreateRoomModal } from '../components/Rooms';
+import { MaintenanceNote } from '../components/MaintenanceNote';
 import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { entryOf, latest, lobbyPoller, POLL_MS, setFavourite, useTablePrefs, type Latest } from '../lib/lobby';
+import { useMaintenance } from '../lib/service';
 import { siteUrl } from '../lib/share';
 
 type Filter = 'all' | 'fav' | 'recent' | 'beginner' | 'playing' | 'open' | 'empty';
@@ -75,6 +77,8 @@ export function LobbyPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [codeFor, setCodeFor] = useState<{ table: LobbyTableDto; then: 'sit' | 'wait' } | null>(null);
   const [creating, setCreating] = useState(false);
+  // Maintenance under way: the server refuses new rooms, quick play and seats, so those buttons wait for its end.
+  const paused = useMaintenance().games;
 
   const favs = useMemo(() => new Set(prefs.fav), [prefs.fav]);
   const visited = useMemo(() => new Map(prefs.recent.map((r) => [r.id, r.at])), [prefs.recent]);
@@ -143,7 +147,7 @@ export function LobbyPage() {
             <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('lobby.title')}</h1>
             <p className="mt-1 text-sm text-ink-300">{t('app.virtual')}</p>
           </div>
-          <Button size="sm" variant="outline" className="shrink-0 sm:hidden" onClick={() => setCreating(true)} data-testid="room-create-open">
+          <Button size="sm" variant="outline" className="shrink-0 sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open">
             ＋ {t('room.create')}
           </Button>
         </div>
@@ -161,13 +165,14 @@ export function LobbyPage() {
             </svg>
           </ShareButton>
           {/* max-sm (not `hidden sm:inline-flex`): the button's own inline-flex would otherwise win and show it twice on phones. */}
-          <Button variant="outline" className="max-sm:hidden" onClick={() => setCreating(true)} data-testid="room-create-open-wide">
+          <Button variant="outline" className="max-sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open-wide">
             ＋ {t('room.create')}
           </Button>
         </div>
       </div>
 
-      <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} />
+      {paused && <MaintenanceNote m={paused} what="games" />}
+      <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} paused={!!paused} />
 
       <div className="flex flex-col gap-2">
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1" role="tablist">
@@ -311,12 +316,12 @@ export function LobbyPage() {
                   </Button>
                   <Button
                     variant={entry === 'wait' ? 'outline' : 'gold'}
-                    disabled={entry === 'blocked' || entry === 'closing'}
+                    disabled={entry === 'blocked' || entry === 'closing' || !!paused}
                     onClick={() => open(tb, entry === 'wait' ? 'wait' : 'sit')}
                     data-testid="lobby-enter"
                     data-entry={entry}
                   >
-                    {t(`lobby.entry.${entry}` as MsgKey)}
+                    {paused ? t('lobby.entry.maintenance') : t(`lobby.entry.${entry}` as MsgKey)}
                   </Button>
                 </div>
               </div>

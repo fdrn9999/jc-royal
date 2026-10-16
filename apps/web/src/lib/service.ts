@@ -1,6 +1,7 @@
-import type { ServiceStatusDto } from '@jc/types';
+import type { MaintenanceDto, ServiceStatusDto } from '@jc/types';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, setMaintenanceListener } from './api';
+import { useAuth } from './auth';
 
 /** Service notices and maintenance (GET /api/service/status), shared by the banners and the maintenance page. */
 let status: ServiceStatusDto | null = null;
@@ -55,4 +56,22 @@ export function useService() {
     },
     () => status,
   );
+}
+
+/** The maintenance window under way at `now` (the server's clock), or null. */
+export function maintenanceUnderWay(st: ServiceStatusDto | null, now = serverNow()): MaintenanceDto | null {
+  const m = st?.maintenance;
+  return m && m.startsAt <= now && now < m.endsAt ? m : null;
+}
+
+/**
+ * What maintenance under way pauses for the signed-in viewer, as the server refuses it: `games` (a new room, quick
+ * play, taking a seat or the waiting list; for everyone) and `posting` (posts and comments; members only, staff post
+ * the notices about it). Null when nothing is paused; the buttons come back on their own within 30 s of the end.
+ */
+export function useMaintenance(): { games: MaintenanceDto | null; posting: MaintenanceDto | null } {
+  const m = maintenanceUnderWay(useService());
+  const { me } = useAuth();
+  const staff = me?.role === 'admin' || me?.role === 'super_admin';
+  return { games: m, posting: staff ? null : m };
 }

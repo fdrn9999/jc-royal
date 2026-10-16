@@ -83,6 +83,16 @@ export async function refuseSignInInMaintenance(c: Context<AppEnv>, role?: 'user
   if (m?.active && m.blockLogin) fail(503, 'maintenance', 'service maintenance: sign-in reopens when it ends', { endsAt: m.endsAt });
 }
 
+/**
+ * New posts and comments, and edits to them, wait while maintenance is under way, except for staff (who post the
+ * notices about it and answer questions). Reading, deleting one's own and reporting stay open.
+ */
+export async function refusePostingInMaintenance(c: Context<AppEnv>, role: 'user' | 'admin' | 'super_admin') {
+  if (role === 'admin' || role === 'super_admin') return;
+  const m = await currentMaintenance(c.env.DB);
+  if (m?.active) fail(503, 'maintenance', 'service maintenance: posting reopens when it ends', { endsAt: m.endsAt });
+}
+
 /** Most rooms one maintenance change asks right away; the others learn of it at their next D1 write or alarm. */
 export const MAINTENANCE_MAX_ROOMS = 60;
 

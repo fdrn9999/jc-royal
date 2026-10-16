@@ -128,11 +128,14 @@ export function QuickPlayPanel({
   blinds,
   onFilters,
   onCreateRoom,
+  paused = false,
 }: {
   filters: QuickFilters;
   blinds: [number, number][];
   onFilters: (f: QuickFilters) => void;
   onCreateRoom: () => void;
+  /** Maintenance under way: quick play and new rooms wait (the server refuses both). */
+  paused?: boolean;
 }) {
   const { t } = useI18n();
   const { run, busy, miss, clear } = useQuickPlay();
@@ -173,12 +176,12 @@ export function QuickPlayPanel({
               ))}
             </select>
           </label>
-          <Button className="h-11 sm:ml-auto sm:min-w-36" loading={busy} onClick={() => run(filters)} data-testid="quick-go">
+          <Button className="h-11 sm:ml-auto sm:min-w-36" loading={busy} disabled={paused} onClick={() => run(filters)} data-testid="quick-go">
             {t('quick.go')}
           </Button>
         </div>
       </div>
-      {miss && (
+      {miss && !paused && (
         <QuickMissNote
           miss={miss}
           filtered={!!(filters.maxSeats || filters.bigBlind)}

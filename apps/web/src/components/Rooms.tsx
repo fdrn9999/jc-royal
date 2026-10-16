@@ -9,7 +9,9 @@ import { useNavigate } from 'react-router';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { useMaintenance } from '../lib/service';
 import { copyText } from '../lib/share';
+import { MaintenanceNote } from './MaintenanceNote';
 
 const MIN_BB = [10, 20, 50, 100] as const;
 const MAX_BB = [50, 100, 200] as const;
@@ -57,6 +59,7 @@ export function CreateRoomModal({ open, onClose }: { open: boolean; onClose: () 
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const paused = useMaintenance().games;
   useEffect(() => {
     if (!open) return;
     setName(me ? t('room.defaultName', { name: me.nickname }).slice(0, 30) : '');
@@ -94,13 +97,14 @@ export function CreateRoomModal({ open, onClose }: { open: boolean; onClose: () 
           <Button variant="ghost" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={!valid} loading={busy} onClick={create} data-testid="room-create">
+          <Button disabled={!valid || !!paused} loading={busy} onClick={create} data-testid="room-create">
             {t('room.create')}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-4">
+        {paused && <MaintenanceNote m={paused} what="games" />}
         <Field label={t('room.name')}>{(id) => <Input id={id} value={name} maxLength={30} onChange={(e) => setName(e.target.value)} data-testid="room-name" />}</Field>
         <Field label={t('room.seats')}>{() => <Choice label={t('room.seats')} value={maxSeats} options={SUPPORTED_MAX_SEATS} onChange={setMaxSeats} render={(n) => t('room.seatsN', { n })} testid="room-seats" />}</Field>
         <Field label={t('lobby.blinds')}>

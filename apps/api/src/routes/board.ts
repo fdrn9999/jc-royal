@@ -8,6 +8,7 @@ import { requireUser } from '../lib/auth';
 import { handReviews } from '../lib/community';
 import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
+import { refusePostingInMaintenance } from '../lib/service';
 
 const PAGE_SIZE = 20;
 const replyTarget = alias(schema.users, 'reply_target');
@@ -148,6 +149,7 @@ export const boardRoutes = new Hono<AppEnv>()
   })
   .post('/posts', async (c) => {
     const me = c.var.user!;
+    await refusePostingInMaintenance(c, me.role);
     await rateLimit(c, `post:${me.id}`, 10, 60 * 60 * 1000);
     const body = await parseBody(c, PostInputSchema);
     const handIds = await validHandIds(c, me.id, body.handIds);
@@ -158,6 +160,7 @@ export const boardRoutes = new Hono<AppEnv>()
   })
   .patch('/posts/:id', async (c) => {
     const me = c.var.user!;
+    await refusePostingInMaintenance(c, me.role);
     const id = c.req.param('id');
     const body = await parseBody(c, PostInputSchema);
     const post = await c.var.db.query.posts.findFirst({ where: eq(schema.posts.id, id) });
@@ -178,6 +181,7 @@ export const boardRoutes = new Hono<AppEnv>()
   })
   .post('/posts/:id/comments', async (c) => {
     const me = c.var.user!;
+    await refusePostingInMaintenance(c, me.role);
     await rateLimit(c, `comment:${me.id}`, 30, 10 * 60 * 1000);
     const id = c.req.param('id');
     const body = await parseBody(c, CommentCreateSchema);
@@ -198,6 +202,7 @@ export const boardRoutes = new Hono<AppEnv>()
     return c.json({ id: cid }, 201);
   })
   .patch('/comments/:id', async (c) => {
+    await refusePostingInMaintenance(c, c.var.user!.role);
     const id = c.req.param('id');
     const body = await parseBody(c, CommentInputSchema);
     const cm = await c.var.db.query.comments.findFirst({ where: eq(schema.comments.id, id) });
