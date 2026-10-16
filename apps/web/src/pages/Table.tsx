@@ -8,6 +8,7 @@ import { HandRankingChart } from '../academy/HandChart';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
 import { JoinCodeModal } from '../components/JoinCode';
+import { LinkShare } from '../components/Share';
 import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
@@ -21,6 +22,7 @@ import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { rememberVisit } from '../lib/lobby';
+import { siteUrl } from '../lib/share';
 import { usePrefs } from '../lib/prefs';
 import { when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
@@ -564,7 +566,20 @@ export function TablePage() {
         />
       )}
       <JoinCodeModal table={codeOpen ? { id, name: s?.table.name ?? t('lobby.private') } : null} then={codeThen} onClose={() => setCodeOpen(false)} onGranted={onCodeGranted} />
-      <SettingsModal open={settings} onClose={() => setSettings(false)} />
+      <SettingsModal
+        open={settings}
+        onClose={() => setSettings(false)}
+        top={
+          s && s.status !== 'closed' ? (
+            <LinkShare
+              data={{ title: s.table.name, text: t('share.tableText', { name: s.table.name }), url: siteUrl(`/table/${encodeURIComponent(s.table.id)}${locale === 'en' ? '?lang=en' : ''}`) }}
+              label={t('share.table')}
+              hint={s.table.isPrivate ? t('room.inviteHint') : undefined}
+              testId="table-invite"
+            />
+          ) : undefined
+        }
+      />
       {s && isHost && <HostRoomModal open={hosting} onClose={() => setHosting(false)} table={s.table} />}
       {/* The 1:1 chat opens in a new tab so the game connection stays. */}
       <PlayerCard

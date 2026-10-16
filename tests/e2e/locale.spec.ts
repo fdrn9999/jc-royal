@@ -35,3 +35,17 @@ test('choosing English in the settings switches the page at once, and back', asy
   await expect(page.getByRole('heading', { name: '테이블 로비' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
 });
+
+test('a link that asks for English (?lang=en, as its preview was) opens in English for someone with no saved language', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await page.goto('/login?lang=en');
+  await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+
+  // A saved choice wins over the link.
+  await page.evaluate(() => localStorage.setItem('jc.locale', 'ko'));
+  await page.reload();
+  await expect(page.getByRole('button', { name: '로그인' })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+});

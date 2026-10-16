@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { copyText } from '../lib/share';
 
 const MIN_BB = [10, 20, 50, 100] as const;
 const MAX_BB = [50, 100, 200] as const;
@@ -213,8 +214,7 @@ export function HostRoomModal({ open, onClose, table }: { open: boolean; onClose
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
+      setCopied(await copyText(link));
     } catch {
       setCopied(false);
     }

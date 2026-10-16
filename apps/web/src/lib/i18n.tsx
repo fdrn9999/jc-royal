@@ -1,5 +1,5 @@
 import { createTranslator } from '@jc/ui';
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 const ko = {
   'app.tagline': '프리미엄 텍사스 홀덤 라운지',
@@ -606,6 +606,15 @@ const ko = {
   'room.copy': '복사',
   'room.copied': '복사됨',
   'room.inviteHint': '참가 코드는 링크에 들어 있지 않습니다. 따로 알려 주세요.',
+  'share.site': 'JC ROYAL 공유',
+  'share.siteText': '전략과 승부가 만나는 곳, JC ROYAL에서 함께 텍사스 홀덤을 즐겨요.',
+  'share.table': '테이블 초대 링크',
+  'share.tableText': '「{name}」 테이블에서 함께 플레이해요.',
+  'share.share': '공유',
+  'share.copy': '링크 복사',
+  'share.copied': '링크를 복사했습니다.',
+  'share.shared': '공유했습니다.',
+  'share.failed': '복사하지 못했습니다. 주소를 길게 눌러 직접 복사해 주세요.',
   'room.close': '방 닫기',
   'room.closeNow': '지금 방 닫기',
   'room.closeConfirm': '방을 닫으면 진행 중인 핸드가 끝난 뒤 앉아 있는 모든 플레이어의 칩이 각자의 지갑으로 돌아갑니다.',
@@ -616,7 +625,6 @@ const ko = {
 } as const;
 
 export type Dict = Record<keyof typeof ko, string>;
-
 
 export type MsgKey = keyof typeof ko;
 export type Locale = 'ko' | 'en';
@@ -644,6 +652,7 @@ interface I18nCtx {
 
 const Ctx = createContext<I18nCtx | null>(null);
 
+/** A saved choice first; otherwise the language a shared link asks for (?lang=en, as its preview was), else Korean. */
 export function initialLocale(): Locale {
   try {
     const saved = localStorage.getItem('jc.locale');
@@ -651,12 +660,17 @@ export function initialLocale(): Locale {
   } catch {
     /* ignore */
   }
-  return 'ko';
+  const asked = new URLSearchParams(window.location.search).get('lang');
+  return asked === 'en' ? 'en' : 'ko';
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   // main.tsx loads the first language before rendering; English that failed to load shows as Korean.
   const [locale, setLocaleState] = useState<Locale>(() => (initialLocale() === 'en' && en ? 'en' : 'ko'));
+  // index.html says ko; a saved or asked-for English has to say so too (screen readers, translation prompts).
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
   // The latest choice wins when an earlier one is still loading.
   const wanted = useRef<Locale | null>(null);
   const setLocale = useCallback((l: Locale) => {
@@ -668,9 +682,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
     loadLocale(l).then(
       () => {
-        if (wanted.current !== l) return;
-        setLocaleState(l);
-        document.documentElement.lang = l;
+        if (wanted.current === l) setLocaleState(l);
       },
       () => {
         /* stays in the current language; the next choice tries again */

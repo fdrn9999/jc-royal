@@ -145,6 +145,7 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 | WS 연결 1회 | D1 `rate_limits` upsert 1행 | 측정(연결 수와 정확히 같음). 재연결이 잦으면 그만큼 쓴다 |
 | 로그인한 회원의 요청 | 세션 만료 갱신 최대 1분에 1행 | 코드(`apps/api/src/lib/session.ts`) |
 | 로비 목록 1회 | Workers 요청 1 + D1 읽기: 열린·닫는 중 테이블 전부(`tables_status_idx` 검색, + 방장 조인) + 세션·회원 조회. 로비 화면은 보이는 동안만 다시 부른다. 쓰는 동안 5초마다, 1분 동안 입력(포인터·키·휠)이 없으면 30초마다. 숨긴 탭은 멈추고, 요청이 겹치지 않는다 | 코드(`apps/web/src/pages/Lobby.tsx`, `apps/web/src/lib/lobby.ts`), 횟수는 단위 테스트(`apps/web/test/lobby.test.ts`) |
+| 링크 미리보기 페이지 1회 | `/`·`/register`·`/table/*`·`/board/*`를 **주소창·새로고침·외부 링크로 처음 열 때** Workers 요청 1(앱 안에서 화면을 옮기는 것은 0회). D1 읽기는 테이블·게시글 주소만 기본 키로 1행(`/board/write` 같은 앱 경로도 1회 찾아보고 없으면 기본 미리보기). 세션 갱신·쓰기 없음 | 코드(`apps/api/src/index.ts`의 `sharePage`, `apps/api/src/lib/og.ts`). 예전에는 이 경로가 정적 자산으로 Workers 요청 없이 나갔다. 운영 측정 아님. 아래 7절 |
 | 앱 핑 | 웹 클라이언트는 서버 메시지가 25초 동안 하나도 없을 때만 `{t:'ping'}`을 보낸다(핸드 진행 중에는 상태가 계속 와서 0회, 조용한 테이블에서 소켓당 10분에 약 23회). 런타임 자동 응답이 `{t:'pong'}`으로 답하고 DO를 깨우지 않는다 | 코드(`apps/web/src/game/link.ts`, `room.ts`), 횟수는 단위 테스트(`apps/web/test/link.test.ts`), 자동 응답은 통합 테스트(`tests/integration/ws-reliability.test.ts`) |
 | 관리자 대시보드 실시간 현황 1회 | Workers 요청 1 + D1 batch 1(문장 8개). 읽는 행: 열린·닫는 중 테이블 약 3번(`tables_status_idx`), **세션 전부**(접속자 수, 아래), 최근 1시간 `ops_metrics`(최대 60분 × 4종), 열린 신고, 미해결 정합성 이벤트, 착석 세션. 화면이 보이고 관리자가 5분 안에 조작했을 때만 30초마다 다시 부른다 → 관리자 1명이 시간당 최대 120회. 숨긴 탭·자리 비움은 0회 | 코드(`apps/api/src/lib/ops.ts`, `apps/admin/src/pages/Dashboard.tsx`). 응답의 `rowsRead`(D1 `meta.rows_read` 합)를 화면에 그대로 보인다. 로컬 측정은 아래 "관리자 대시보드" |
 | 운영 카운터(`ops_metrics`) | 분·종류마다 1행을 upsert(`ON CONFLICT … n = n + excluded.n`). 룸은 기존 점유 현황 UPDATE와 같은 batch로 보내고, 그 밖에는 최대 10초에 한 번만 쓴다(새 Workers 요청·DO 요청 없음). API는 5xx 응답 1건마다 1행. 사건이 없으면 0행. 14일 지난 행은 매일 정리 | 코드(`packages/db/src/ops.ts`, `apps/game-worker/src/room.ts`의 `publishStats`, `apps/api/src/index.ts`) |
@@ -200,3 +201,34 @@ gh secret set CLOUDFLARE_API_TOKEN --repo fdrn9999/jc-royal   # 프롬프트에 
 - [ ] 배포 후 가입 인증번호 메일과 비밀번호 재설정 메일이 `noreply@jc-royal.site`에서 오고, 재설정 링크가 https://jc-royal.site/reset 으로 열리는지 확인
 - [ ] 관리자 콘솔에서 테이블 생성(운영 DB에는 개발용 시드 테이블을 넣지 않는다)
 - [ ] 대시보드 서버 상태, 정합성 검사 실행으로 확인
+- [ ] 링크 미리보기: 7절의 `curl` 두 줄로 태그와 이미지(200, `image/png`)를 확인하고, 카카오 공유 디버거에서 `https://jc-royal.site/`를 한 번 초기화
+
+## 7. 링크 미리보기(OG)와 공유
+
+카카오톡·페이스북·X 같은 미리보기 크롤러는 스크립트를 실행하지 않고 첫 HTML만 읽는다. 그래서 태그는 `apps/web/index.html`의 `<!-- og:begin -->`·`<!-- og:end -->` 사이에 있고, 링크마다 내용이 다른 네 경로(`apps/api/wrangler.jsonc`의 `run_worker_first`: `/`, `/register`, `/table/*`, `/board/*`)만 `play` Worker가 그 블록을 바꿔 보낸다(`apps/api/src/lib/og.ts`). 나머지 화면은 정적 자산 그대로이며 같은 기본 태그를 갖는다.
+
+| 링크 | 미리보기 |
+|---|---|
+| 홈, 그 밖의 앱 화면 | 기본: "JC ROYAL \| No.1 마인드 스포츠" + 소개 문구 + `https://jc-royal.site/og-image.png` |
+| `?lang=en` | 영어 제목·설명, `og:locale=en_US`, `<html lang="en">`. 언어를 저장하지 않은 방문자의 앱도 영어로 연다 |
+| 공개 테이블 `/table/<id>` | 테이블 이름(40자)과 블라인드·인원만. 비공개·닫힌·없는 테이블은 기본 미리보기(이름·참가 코드 없음) |
+| 게시글 `/board/<id>` | 공개(`visible`) 글의 제목(60자)과 본문 앞부분(110자, 줄바꿈·제어 문자 정리). 숨김·삭제·없는 글은 기본 미리보기 |
+| 추천 링크 `/register?ref=JC…` | 기본 미리보기. `og:url`에는 형식에 맞는 코드(`JC` + 영문 대문자·숫자 5–10자)만 남기고 그 밖의 쿼리는 버린다 |
+
+- 쿼리 문자열(참가 코드·토큰 등)은 미리보기에 옮기지 않는다. 텍스트는 모두 HTML 이스케이프한다. 회원 앱의 공유·초대 버튼도 `/table/<id>`처럼 주소만 공유한다(비공개 방의 참가 코드는 따로 전한다).
+- 공유 버튼은 브라우저의 공유 시트(Web Share API)가 있으면 그것을 열고, 없거나 막히면 링크를 복사한다(클립보드 API가 없으면 선택 복사). 위치: 로비 검색창 옆, 테이블 설정 맨 위 "테이블 초대 링크".
+- 미리보기를 만드는 응답은 `cache-control: no-cache`이고 정적 페이지와 같은 보안 헤더(CSP 등)를 갖는다. D1 읽기가 실패하면 기본 미리보기로 답한다(페이지는 그대로 열림).
+
+**이미지**
+- `apps/web/public/og-image.png`는 전달받은 배너 원본이다(1200×630 PNG, 1,054,620바이트, SHA-256 `68DEED47…E68B`). 다시 만들거나 압축하지 않았고, `tests/integration/og.test.ts`가 바이트 단위로 같은지 확인한다.
+- 파일이 1 MB를 조금 넘는다. 큰 이미지를 미리보기에서 빼는 메신저가 있다고 알려져 있으나 이 저장소에서 확인하지 않았다. 문제가 보이면 같은 디자인을 압축한 새 파일로 바꾼다(아래 교체 순서).
+- **교체 순서**: 새 파일을 **새 이름**(`og-image-2.png`)으로 넣고 `og.ts`의 `OG_IMAGE`, `index.html`의 블록(`og.test.ts` 단위 테스트가 두 곳이 같은지 확인), `tests/integration/og.test.ts`의 크기·해시를 함께 바꾼다. 같은 이름을 덮어쓰면 메신저가 저장해 둔 이전 이미지가 계속 보일 수 있다.
+
+**미리보기가 바뀌지 않을 때(배포 후)**
+- 카카오톡: [카카오 공유 디버거](https://developers.kakao.com/tool/debugger/sharing)에 **https까지 포함한 정확한 주소**를 넣고 캐시를 초기화한다. 주소 단위로만 초기화되고(경로 일괄 불가), 메타데이터만 지워지므로 이미지가 그대로면 이미지 주소를 바꿔야 한다. 카카오 개발자 포럼 답변 기준으로 같은 주소는 기본 1시간 캐시된다(서버의 `Cache-Control`과 무관).
+- 페이스북·메신저: [Sharing Debugger](https://developers.facebook.com/tools/debug/)에서 "다시 스크랩". 이미 게시된 글의 미리보기는 바뀌지 않는다.
+- 확인: `curl -s -A 'facebookexternalhit/1.1' https://jc-royal.site/ | grep -E 'og:|twitter:'`, `curl -sI https://jc-royal.site/og-image.png`(200, `image/png`).
+
+**비용**: 위 네 경로를 처음 열 때마다 Workers 요청이 1회 늘고(앱 안 이동은 0회), 테이블·게시글 주소는 D1 1행을 읽는다(5절 표). 같은 사람이 테이블 화면을 열면 바로 WebSocket 연결(요청 1 + D1 쓰기 1행)과 API 호출이 뒤따르므로 그보다 작다. 운영에서 측정하지 않았다.
+
+**배포**: `play` Worker(api + web 자산)만 바뀐다. 마이그레이션·game-worker·admin 변경은 없다.

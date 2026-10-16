@@ -1,7 +1,7 @@
 import { sound, type AudioSettings } from '@jc/audio';
 import { AUTO_REBUY_MAX_TIMES, type ChatMessage, type TableView } from '@jc/types';
 import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -360,8 +360,8 @@ function useAudioSettings(): AudioSettings {
   );
 }
 
-/** Sound, table look and language; from the header it also offers logout (`onLogout`). */
-export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onClose: () => void; onLogout?: () => void }) {
+/** Sound, table look and language; from the header it also offers logout (`onLogout`), at a table its invite link (`top`). */
+export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean; onClose: () => void; onLogout?: () => void; top?: ReactNode }) {
   const { t, locale } = useI18n();
   const { chooseLocale } = useAuth();
   const prefs = usePrefs();
@@ -369,6 +369,12 @@ export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onCl
   return (
     <Modal open={open} onClose={onClose} title={t('settings.title')}>
       <div className="flex flex-col gap-5">
+        {top && (
+          <>
+            {top}
+            <div className="jc-divider" />
+          </>
+        )}
         <section className="flex flex-col gap-3">
           <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-ink-300">{t('settings.sound')}</h4>
           <label className="flex items-center justify-between gap-3 text-sm">

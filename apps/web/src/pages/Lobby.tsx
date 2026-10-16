@@ -6,10 +6,12 @@ import { tutorialComplete, useProgress } from '../academy/progress';
 import { JoinCodeModal } from '../components/JoinCode';
 import { ANY, QuickPlayPanel, useLobbyFilters } from '../components/QuickPlay';
 import { CreateRoomModal } from '../components/Rooms';
+import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { entryOf, latest, lobbyPoller, POLL_MS, setFavourite, useTablePrefs, type Latest } from '../lib/lobby';
+import { siteUrl } from '../lib/share';
 
 type Filter = 'all' | 'fav' | 'recent' | 'beginner' | 'playing' | 'open' | 'empty';
 const FILTERS: Filter[] = ['all', 'fav', 'recent', 'beginner', 'playing', 'open', 'empty'];
@@ -61,7 +63,7 @@ function useLobbyTables() {
 }
 
 export function LobbyPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const nav = useNavigate();
   const { me } = useAuth();
   const academy = useProgress(me?.id);
@@ -149,6 +151,14 @@ export function LobbyPage() {
           <Button variant="subtle" onClick={refresh} aria-label={t('lobby.refresh')} data-testid="lobby-refresh">
             ↻
           </Button>
+          <ShareButton size="md" data={{ title: 'JC ROYAL', text: t('share.siteText'), url: siteUrl(locale === 'en' ? '/?lang=en' : '/') }} label={t('share.site')} testId="site-share">
+            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4" />
+            </svg>
+          </ShareButton>
           {/* max-sm (not `hidden sm:inline-flex`): the button's own inline-flex would otherwise win and show it twice on phones. */}
           <Button variant="outline" className="max-sm:hidden" onClick={() => setCreating(true)} data-testid="room-create-open-wide">
             ＋ {t('room.create')}
