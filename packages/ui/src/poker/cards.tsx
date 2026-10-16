@@ -84,8 +84,8 @@ export function Chip({ amount, size = '1.5rem', style }: { amount: number; size?
   return <span className="jc-chip" style={{ '--chip-base': t.base, '--chip-face': t.face, '--chip-size': size, ...style } as CSSProperties} />;
 }
 
-/** A small pile whose height grows with the amount, plus the amount label. */
-export function ChipStack({ amount, size = '1.35rem', label = true, className }: { amount: number; size?: string; label?: boolean; className?: string }) {
+/** A small pile whose height grows with the amount, plus the amount label (`text` replaces the chip count, e.g. in big blinds). */
+export function ChipStack({ amount, size = '1.35rem', label = true, text, className }: { amount: number; size?: string; label?: boolean; text?: string; className?: string }) {
   if (amount <= 0) return null;
   const count = Math.min(5, 1 + Math.floor(Math.log10(Math.max(1, amount))));
   const t = chipTier(amount);
@@ -96,7 +96,7 @@ export function ChipStack({ amount, size = '1.35rem', label = true, className }:
           <span key={i} className="jc-chip" style={{ bottom: i * 3, '--chip-base': t.base, '--chip-face': t.face, '--chip-size': size } as CSSProperties} />
         ))}
       </span>
-      {label && <span className="rounded-full bg-black/55 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-gold-300 tabular-nums">{formatChips(amount, true)}</span>}
+      {label && <span className="rounded-full bg-black/55 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-gold-300 tabular-nums">{text ?? formatChips(amount, true)}</span>}
     </span>
   );
 }

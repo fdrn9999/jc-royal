@@ -4,9 +4,10 @@ import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { MemberName, RoleBadge } from '../components/MemberName';
+import { useAmounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { setPrefs, usePrefs } from '../lib/prefs';
+import { AMOUNT_UNITS, setPrefs, usePrefs } from '../lib/prefs';
 import { RequestError, rid, type TableSocketApi } from './useTableSocket';
 
 export function BuyInModal({
@@ -30,6 +31,8 @@ export function BuyInModal({
 }) {
   const { t } = useI18n();
   const { minBuyIn, maxBuyIn, bigBlind } = state.table;
+  // The wallet reads in chips; what goes to the table reads in the player's unit, with the exact chips where it is paid.
+  const a = useAmounts(bigBlind);
   const cap = Math.min(maxBuyIn, wallet);
   const [amount, setAmount] = useState(() => Math.min(cap, Math.max(minBuyIn, bigBlind * 100)));
   useEffect(() => {
@@ -47,7 +50,7 @@ export function BuyInModal({
             {t('common.cancel')}
           </Button>
           <Button disabled={!affordable} loading={busy} onClick={() => onConfirm(amount)} data-testid="buyin-confirm">
-            {t('table.buyIn')} {formatChips(amount)}
+            {t('table.buyIn')} {a.exact(amount)}
           </Button>
         </>
       }
@@ -60,13 +63,16 @@ export function BuyInModal({
         <div className="flex justify-between text-sm">
           <span className="text-ink-300">{t('lobby.buyin')}</span>
           <span className="font-mono">
-            {formatChips(minBuyIn)} – {formatChips(maxBuyIn)}
+            {a.fmt(minBuyIn)} – {a.fmt(maxBuyIn)}
           </span>
         </div>
         {affordable ? (
           <>
             <input type="range" min={minBuyIn} max={cap} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('table.buyIn')} />
-            <div className="text-center font-mono text-3xl font-semibold text-gold-300 tabular-nums">{formatChips(amount)}</div>
+            <div className="text-center font-mono text-3xl font-semibold text-gold-300 tabular-nums" data-testid="buyin-amount">
+              {a.fmt(amount)}
+              {a.unit === 'bb' && <span className="block text-xs font-normal text-ink-400">{formatChips(amount)}</span>}
+            </div>
           </>
         ) : (
           <p className="text-sm text-danger">{t('err.insufficient_balance')}</p>
@@ -168,21 +174,23 @@ export function TopUpModal({
     }
   }
 
+  // The wallet, and sentences that name chips, stay in chips; the stack and the amounts for it read in the player's unit.
   const fmt = (n: number) => formatChips(n);
+  const a = useAmounts(bigBlind);
   return (
     <Modal open={open} onClose={onClose} title={t('topup.title')}>
       <div className="flex flex-col gap-4" data-testid="topup-modal">
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div className="flex flex-col rounded-lg bg-ink-850/80 px-3 py-2">
             <span className="text-xs text-ink-400">{t('topup.stack')}</span>
-            <span className="font-mono font-semibold tabular-nums" data-testid="topup-stack">{fmt(stack)}</span>
+            <span className="font-mono font-semibold tabular-nums" data-testid="topup-stack">{a.fmt(stack)}</span>
           </div>
           <div className="flex flex-col rounded-lg bg-ink-850/80 px-3 py-2">
             <span className="text-xs text-ink-400">{t('table.wallet')}</span>
             <span className="font-mono font-semibold text-gold-300 tabular-nums" data-testid="topup-wallet">{fmt(wallet)}</span>
           </div>
         </div>
-        <p className="text-xs text-ink-300">{t('topup.limit', { min: fmt(minBuyIn), max: fmt(maxBuyIn) })}</p>
+        <p className="text-xs text-ink-300">{t('topup.limit', { min: a.fmt(minBuyIn), max: a.fmt(maxBuyIn) })}</p>
 
         {state.you.topUpQueued !== null && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/30 bg-gold-500/10 px-3 py-2 text-sm text-gold-300" role="status">
@@ -207,11 +215,11 @@ export function TopUpModal({
             {inHand && <p className="text-xs text-ink-300">{t('topup.afterHand')}</p>}
             {hi > lo && <input type="range" min={lo} max={hi} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('topup.open')} data-testid="topup-range" />}
             <div className="flex items-center justify-between gap-3">
-              <span className="font-mono text-2xl font-semibold text-gold-300 tabular-nums" data-testid="topup-amount">+{fmt(amount)}</span>
-              <span className="font-mono text-xs text-ink-400">→ {fmt(stack + amount)}</span>
+              <span className="font-mono text-2xl font-semibold text-gold-300 tabular-nums" data-testid="topup-amount">+{a.fmt(amount)}</span>
+              <span className="font-mono text-xs text-ink-400">→ {a.fmt(stack + amount)}</span>
             </div>
             <Button loading={busy === 'topup'} disabled={busy !== null} onClick={topUp} data-testid="topup-confirm">
-              {t('topup.confirm', { amount: fmt(amount) })}
+              {t('topup.confirm', { amount: a.exact(amount) })}
             </Button>
           </div>
         )}
@@ -225,7 +233,7 @@ export function TopUpModal({
           {auto ? (
             <div className="flex flex-col gap-2">
               <p className="text-sm text-gold-300" data-testid="rebuy-active">
-                {t('rebuy.active', { amount: fmt(auto.amount), spent: fmt(auto.spent), cap: fmt(auto.cap) })}
+                {t('rebuy.active', { amount: a.exact(auto.amount), spent: a.fmt(auto.spent), cap: a.fmt(auto.cap) })}
               </p>
               <Button variant="outline" loading={busy === 'rebuy'} disabled={busy !== null} onClick={() => setRebuy(false)} data-testid="rebuy-off">
                 {t('rebuy.off')}
@@ -236,7 +244,7 @@ export function TopUpModal({
               <label className="flex flex-col gap-1.5 text-xs text-ink-300">
                 <span className="flex justify-between">
                   {t('rebuy.amount')}
-                  <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="rebuy-amount">{fmt(rebuyAmount)}</span>
+                  <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="rebuy-amount">{a.exact(rebuyAmount)}</span>
                 </span>
                 <input
                   type="range"
@@ -267,7 +275,7 @@ export function TopUpModal({
                       className={cx('jc-tap rounded-lg border px-2 py-2 text-xs font-semibold', times === n ? 'border-gold-400 text-gold-300' : 'border-white/10 text-ink-200')}
                       data-testid={`rebuy-times-${n}`}
                     >
-                      {t('rebuy.times', { n, total: fmt(rebuyAmount * n) })}
+                      {t('rebuy.times', { n, total: a.fmt(rebuyAmount * n) })}
                     </button>
                   ))}
                 </div>
@@ -430,6 +438,27 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
             </span>
             <input type="checkbox" checked={prefs.autoMuck} onChange={(e) => setPrefs({ autoMuck: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-automuck" />
           </label>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5" id="amount-unit-label">
+              {t('settings.amountUnit')}
+              <span className="text-xs text-ink-300">{t('settings.amountUnitHint')}</span>
+            </span>
+            <div className="flex shrink-0 rounded-lg border border-white/10 p-0.5" role="radiogroup" aria-labelledby="amount-unit-label">
+              {AMOUNT_UNITS.map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  role="radio"
+                  aria-checked={prefs.amountUnit === u}
+                  onClick={() => setPrefs({ amountUnit: u })}
+                  className={cx('jc-tap min-h-9 min-w-12 rounded-md px-2.5 text-xs font-semibold', prefs.amountUnit === u ? 'bg-gold-500/20 text-gold-300' : 'text-ink-300 hover:text-ivory')}
+                  data-testid={`settings-unit-${u}`}
+                >
+                  {t(`settings.unit.${u}` as MsgKey)}
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
         <div className="jc-divider" />
         <Field label={t('settings.language')}>

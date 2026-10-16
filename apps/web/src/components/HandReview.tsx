@@ -2,6 +2,7 @@ import { handLabelKey, type Card, type HandReviewDto } from '@jc/types';
 import { Button, formatChips, formatDate, PlayingCard } from '@jc/ui';
 import { useState } from 'react';
 import { HandReplay } from '../game/HandReplay';
+import { useAmounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { MemberName } from './MemberName';
 
@@ -13,6 +14,8 @@ const STREET_CARDS: Record<string, [number, number]> = { preflop: [0, 0], flop: 
 export function HandReview({ hand }: { hand: HandReviewDto }) {
   const { t, locale } = useI18n();
   const [replaying, setReplaying] = useState(false);
+  // The blinds stay in chips (they define the big blind); the pot and the bets read in the player's unit.
+  const amt = useAmounts(hand.bigBlind ?? 0);
   const name = (seat: number) => hand.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const act = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   return (
@@ -23,7 +26,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
         </h3>
         <span className="text-xs text-ink-400">
           {hand.smallBlind !== null && `${formatChips(hand.smallBlind)}/${formatChips(hand.bigBlind ?? 0)} · `}
-          {t('table.pot')} {formatChips(hand.potTotal)} · {formatDate(hand.endedAt, locale)}
+          {t('table.pot')} {amt.fmt(hand.potTotal)} · {formatDate(hand.endedAt, locale)}
         </span>
       </header>
       <Button variant={replaying ? 'ghost' : 'outline'} size="sm" className="mb-3" onClick={() => setReplaying(!replaying)} aria-expanded={replaying} data-testid="replay-toggle">
@@ -45,7 +48,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
               <MemberName name={p.nickname} role={p.role} className={p.isAuthor ? 'font-semibold text-gold-300' : undefined} />
             </span>
             {p.rankClass && <span className="text-[11px] text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
-            <span className={`font-mono text-xs tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{p.net > 0 ? '+' : ''}{formatChips(p.net)}</span>
+            <span className={`font-mono text-xs tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{p.net > 0 ? '+' : ''}{amt.fmt(p.net)}</span>
           </li>
         ))}
       </ul>
@@ -63,7 +66,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
                 {rows.map((a, i) => (
                   <li key={i} className="flex justify-between gap-2">
                     <span className="truncate text-ink-300">{name(a.seatIndex)}</span>
-                    <span className="shrink-0 text-ivory">{act(a.type)}{a.amount > 0 ? ` ${formatChips(a.amount)}` : ''}</span>
+                    <span className="shrink-0 text-ivory">{act(a.type)}{a.amount > 0 ? ` ${amt.fmt(a.amount)}` : ''}</span>
                   </li>
                 ))}
               </ol>

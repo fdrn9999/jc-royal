@@ -24,6 +24,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { rememberVisit } from '../lib/lobby';
 import { siteUrl } from '../lib/share';
 import { usePrefs } from '../lib/prefs';
+import { useAmounts } from '../lib/amount';
 import { when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
 
@@ -57,6 +58,8 @@ export function TablePage() {
   const sock = useTableSocket(id);
   const { reopen } = sock;
   const s = sock.state;
+  // Table amounts in the player's unit; the wallet balance and the blinds in the header stay in chips.
+  const amt = useAmounts(s?.table.bigBlind ?? 0);
   const [codeOpen, setCodeOpen] = useState(false);
   const [buySeat, setBuySeat] = useState<number | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -404,6 +407,7 @@ export function TablePage() {
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}
                 reducedMotion={reducedMotion}
+                amounts={amt}
               />
             )}
           </div>
@@ -428,7 +432,7 @@ export function TablePage() {
                 <span className="mt-0.5 shrink-0 rounded-full bg-info/25 px-1.5 text-[10px] font-bold text-[#a9c8ee]">{t('coach.title')}</span>
                 <span className="min-w-0 flex-1">
                   {tip.key === 'coach.call'
-                    ? t('coach.call', { amount: formatChips(tip.amount), pot: formatChips(tip.pot) })
+                    ? t('coach.call', { amount: amt.fmt(tip.amount), pot: amt.fmt(tip.pot) })
                     : tip.key === 'coach.strong'
                       ? t('coach.strong', { hand: t(`hand.${tip.rankClass}` as MsgKey) })
                       : t(tip.key)}
@@ -446,7 +450,7 @@ export function TablePage() {
                 ) : (
                   <div className="hidden rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:block sm:self-end">{t('table.yourTurn')}</div>
                 )}
-                <ActionBar state={s} onAct={onAct} busy={sock.acting} />
+                <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} />
               </>
             )}
             {s && !myTurn && seated && <PreActions s={s} onPick={sock.preAct} />}
@@ -480,7 +484,7 @@ export function TablePage() {
                 {seated && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
                 {seated && s.you.topUpQueued !== null && (
                   <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
-                    {t('topup.queued', { amount: formatChips(s.you.topUpQueued) })}
+                    {t('topup.queued', { amount: amt.exact(s.you.topUpQueued) })}
                     <button type="button" className="jc-tap grid size-6 place-items-center rounded-full hover:bg-gold-500/20" onClick={() => sock.send({ t: 'cancelTopUp' })} aria-label={t('topup.cancel')} data-testid="topup-cancel">
                       ✕
                     </button>
@@ -488,7 +492,7 @@ export function TablePage() {
                 )}
                 {seated && s.you.autoRebuy && (
                   <span className="rounded-full border border-white/10 px-2.5 py-0.5 font-mono text-xs text-ink-200" data-testid="rebuy-badge">
-                    {t('rebuy.badge', { spent: formatChips(s.you.autoRebuy.spent), cap: formatChips(s.you.autoRebuy.cap) })}
+                    {t('rebuy.badge', { spent: amt.fmt(s.you.autoRebuy.spent), cap: amt.fmt(s.you.autoRebuy.cap) })}
                   </span>
                 )}
                 {seated && !s.you.leaving && (

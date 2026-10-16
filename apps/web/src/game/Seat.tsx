@@ -4,9 +4,10 @@
  * rebuilt for the server-projected SeatView and the JC ROYAL style.
  */
 import type { SeatView } from '@jc/types';
-import { cx, formatChips, PlayingCard } from '@jc/ui';
+import { cx, PlayingCard } from '@jc/ui';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { MemberName } from '../components/MemberName';
+import type { Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
 function useNow(active: boolean) {
@@ -60,6 +61,7 @@ export interface SeatProps {
   /** My seat after a hand, with auto-muck on: a button over each card turns it face up for the table. */
   onShow?: (card: 0 | 1) => void;
   compact: boolean;
+  amounts: Amounts;
   style: CSSProperties;
 }
 
@@ -95,7 +97,7 @@ export function Seat(p: SeatProps) {
   const isShown = (i: number) => !!shown?.[i];
   const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0) || !!shown;
   const cards = s.holeCards && s.holeCards.length ? s.holeCards : (shown ?? (showCards ? [null, null] : []));
-  const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${formatChips(s.lastAction.amount, true)}` : ''}` : null;
+  const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${p.amounts.fmt(s.lastAction.amount, true)}` : ''}` : null;
   const actionTone =
     s.lastAction?.type === 'fold'
       ? 'text-[#f0a0a2]'
@@ -178,7 +180,7 @@ export function Seat(p: SeatProps) {
               <MemberName name={s.nickname ?? ''} role={s.role} className={cx('text-xs font-semibold sm:text-[13px]', p.isMe ? 'text-gold-300' : 'text-ivory')} />
             </span>
             <span className="font-mono text-[11px] font-semibold text-[#9fd8b6] tabular-nums sm:text-xs" data-testid={`stack-${s.seatIndex}`}>
-              {formatChips(s.stack, p.compact)}
+              {p.amounts.fmt(s.stack, p.compact)}
             </span>
           </span>
           {(p.isDealer || p.blind) && (
@@ -206,7 +208,7 @@ export function Seat(p: SeatProps) {
         <div className="mt-1 flex h-4 items-center gap-1 text-[10px] font-bold tracking-wide sm:text-[11px]">
           {winner ? (
             <span className="text-[var(--t-winner)]">
-              {t('table.winner')} +{formatChips(p.winAmount!, true)}
+              {t('table.winner')} +{p.amounts.fmt(p.winAmount!, true)}
               {p.handLabel ? ` · ${p.handLabel}` : ''}
             </span>
           ) : allIn ? (

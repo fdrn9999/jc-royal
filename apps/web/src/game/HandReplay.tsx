@@ -1,11 +1,13 @@
 /**
  * Step-by-step replay of a finished hand on the live table's TableScene: previous/next action, play/pause and speed,
  * the pot growing street by street, then the winners and every pot's payout. Only the stored record is shown (see
- * replay.ts); nothing is fetched or derived from hidden cards.
+ * replay.ts); nothing is fetched or derived from hidden cards. Amounts read in the player's unit, in big blinds of this
+ * hand's table when chosen (hands recorded without blinds stay in chips).
  */
-import { Button, formatChips } from '@jc/ui';
+import { Button } from '@jc/ui';
 import { useEffect, useMemo, useState } from 'react';
 import { MemberName } from '../components/MemberName';
+import { useAmounts, type Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { buildReplay, type ReplayInput, type ReplayStep } from './replay';
 import { TableScene, useBoxSize, useTableLayout } from './TableScene';
@@ -15,6 +17,7 @@ const SPEEDS = [0.5, 1, 2] as const;
 
 export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: number | null }) {
   const { t } = useI18n();
+  const a = useAmounts(hand.bigBlind ?? 0);
   const steps = useMemo(() => buildReplay(hand, heroSeat), [hand, heroSeat]);
   const last = steps.length - 1;
   const [i, setI] = useState(0);
@@ -44,7 +47,7 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
   const name = (seat: number) => hand.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const actionText = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   const describe = (s: ReplayStep) => {
-    const acts = s.actions.map((a) => `${name(a.seatIndex)} ${actionText(a.type)}${a.amount > 0 ? ` ${formatChips(a.amount)}` : ''}`).join(' · ');
+    const acts = s.actions.map((x) => `${name(x.seatIndex)} ${actionText(x.type)}${x.amount > 0 ? ` ${a.fmt(x.amount)}` : ''}`).join(' · ');
     if (s.kind === 'deal') return acts ? `${t('replay.step.deal')} · ${acts}` : t('replay.step.deal');
     if (s.kind === 'street') return t('replay.step.street', { street: t(`stage.${s.stage}` as MsgKey) });
     if (s.kind === 'showdown') return t('replay.step.showdown');
@@ -57,7 +60,7 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
       <div className="jc-game-surface relative overflow-hidden rounded-2xl" style={{ background: 'var(--t-bg)' }}>
         {/* Room above and below the felt for the top and bottom seats' plates and cards. */}
         <div ref={areaRef} className="flex h-[min(60vh,32rem)] items-center justify-center px-2 pb-8 pt-10">
-          <TableScene s={step.view} layout={layout} mySeat={heroSeat} canSit={false} onSit={() => {}} nextIn={null} cues={[]} consumeCues={() => {}} reducedMotion={reducedMotion} />
+          <TableScene s={step.view} layout={layout} mySeat={heroSeat} canSit={false} onSit={() => {}} nextIn={null} cues={[]} consumeCues={() => {}} reducedMotion={reducedMotion} amounts={a} />
         </div>
       </div>
       {/* On phones the controls stay in reach just above the bottom navigation while the replay is on screen. */}
@@ -70,7 +73,7 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
             <span className="font-mono tabular-nums" data-testid="replay-index">{i + 1}/{steps.length}</span> · {t(`stage.${step.stage}` as MsgKey)}
           </span>
           <span className="font-mono text-gold-300 tabular-nums" data-testid="replay-pot">
-            {t('table.pot')} {formatChips(step.view.hand!.potTotal)}
+            {t('table.pot')} {a.fmt(step.view.hand!.potTotal)}
           </span>
         </div>
         <p className="min-h-5 text-sm font-semibold text-ivory" aria-live="polite" data-testid="replay-step">
@@ -103,13 +106,13 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
           </div>
         </div>
       </div>
-      {step.kind === 'result' && <Settlement hand={hand} name={name} />}
+      {step.kind === 'result' && <Settlement hand={hand} name={name} amounts={a} />}
     </div>
   );
 }
 
 /** Each pot of the hand and who won it, or each player's total for hands recorded before pots were stored. */
-function Settlement({ hand, name }: { hand: ReplayInput; name: (seat: number) => string }) {
+function Settlement({ hand, name, amounts: a }: { hand: ReplayInput; name: (seat: number) => string; amounts: Amounts }) {
   const { t } = useI18n();
   let side = 0;
   return (
@@ -123,12 +126,12 @@ function Settlement({ hand, name }: { hand: ReplayInput; name: (seat: number) =>
               <li key={k} className="rounded-lg bg-white/[0.03] px-2.5 py-1.5" data-testid="replay-pot-row">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="font-semibold text-ink-100">{label}</span>
-                  <span className="font-mono text-gold-300 tabular-nums">{formatChips(pot.amount)}</span>
+                  <span className="font-mono text-gold-300 tabular-nums">{a.fmt(pot.amount)}</span>
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
                   {!pot.uncalled && <span className="text-ink-400">{t('replay.contenders', { names: pot.eligibleSeats.map(name).join(', ') })}</span>}
                   <span className="text-[#9fd8b6]">
-                    {pot.winners.map((w) => `${name(w.seatIndex)} ${pot.uncalled ? '' : '+'}${formatChips(w.amount)}`).join(' · ')}
+                    {pot.winners.map((w) => `${name(w.seatIndex)} ${pot.uncalled ? '' : '+'}${a.fmt(w.amount)}`).join(' · ')}
                   </span>
                 </div>
               </li>
@@ -143,7 +146,7 @@ function Settlement({ hand, name }: { hand: ReplayInput; name: (seat: number) =>
               .map((p) => (
                 <li key={p.seatIndex} className="flex justify-between gap-2">
                   <MemberName name={p.nickname} role={p.role} />
-                  <span className="font-mono text-[#9fd8b6] tabular-nums">+{formatChips(p.won)}</span>
+                  <span className="font-mono text-[#9fd8b6] tabular-nums">+{a.fmt(p.won)}</span>
                 </li>
               ))}
           </ul>

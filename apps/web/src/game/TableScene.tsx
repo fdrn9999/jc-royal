@@ -4,8 +4,9 @@
  * animate the same; it only renders the TableView it is given.
  */
 import { handLabelKey, type Card, type SeatView, type TableView } from '@jc/types';
-import { ChipStack, formatChips, Logo, PlayingCard } from '@jc/ui';
+import { ChipStack, Logo, PlayingCard } from '@jc/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { CueLayer } from './CueLayer';
 import { POT_POINT, seatLayout, type SeatGeometry } from './layout';
@@ -55,6 +56,8 @@ export function useTableLayout(area: { w: number; h: number }, maxSeats: number 
   return { portrait, compact, box, geometry };
 }
 
+const CHIPS = chipAmounts('chips', 0);
+
 export function TableScene({
   s,
   layout,
@@ -67,6 +70,7 @@ export function TableScene({
   cues,
   consumeCues,
   reducedMotion,
+  amounts = CHIPS,
 }: {
   s: TableView;
   layout: TableLayout;
@@ -81,6 +85,8 @@ export function TableScene({
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
   reducedMotion: boolean;
+  /** How amounts read (the player's unit at a real table or a replay; the Academy keeps chips, as its lessons do). */
+  amounts?: Amounts;
 }) {
   const { t } = useI18n();
   const { portrait, compact, box, geometry } = layout;
@@ -110,9 +116,9 @@ export function TableScene({
       {/* pot + board */}
       <div className="absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2" style={{ top: `${POT_POINT.y + 7}%` }}>
         <div className="flex min-h-7 items-center gap-2" data-testid="pot">
-          {collected > 0 && <ChipStack amount={collected} />}
+          {collected > 0 && <ChipStack amount={collected} text={amounts.fmt(collected, true)} />}
           {hand && hand.pots.length > 1 && hand.stage !== 'settled' && (
-            <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] text-ink-200">{hand.pots.map((p, i) => `${i === 0 ? t('table.pot') : t('table.sidePot', { n: i })} ${formatChips(p.amount, true)}`).join(' · ')}</span>
+            <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] text-ink-200">{hand.pots.map((p, i) => `${i === 0 ? t('table.pot') : t('table.sidePot', { n: i })} ${amounts.fmt(p.amount, true)}`).join(' · ')}</span>
           )}
         </div>
         <div className="flex gap-1 rounded-xl bg-black/35 p-1.5 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)] sm:gap-1.5 sm:p-2" data-testid="board">
@@ -156,11 +162,12 @@ export function TableScene({
               onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
               onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? onShow : undefined}
               compact={compact}
+              amounts={amounts}
               style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
             />
             {seat.streetBet > 0 && hand?.stage !== 'settled' && (
               <div className="absolute z-20 -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
-                <ChipStack amount={seat.streetBet} size={compact ? '1rem' : '1.25rem'} />
+                <ChipStack amount={seat.streetBet} size={compact ? '1rem' : '1.25rem'} text={amounts.fmt(seat.streetBet, true)} />
               </div>
             )}
           </div>

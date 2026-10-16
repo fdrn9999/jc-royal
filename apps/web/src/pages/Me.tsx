@@ -13,6 +13,7 @@ import { ReportModal, type ReportSubject } from '../components/Social';
 import { HandReplay } from '../game/HandReplay';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useAmounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
@@ -327,6 +328,8 @@ export function HandDetailPage() {
   const { data, error } = useLoad<HandDetailDto>(`/api/me/hands/${encodeURIComponent(id)}`);
   const tr = useTr();
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
+  // This hand's amounts in the player's unit, at its own big blind; the wallet and the stats above stay in chips.
+  const amt = useAmounts(data?.bigBlind ?? 0);
   if (error) return <Empty>{t('notFound')}</Empty>;
   if (!data) return <Empty>{t('common.loading')}</Empty>;
   const name = (seat: number) => data.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
@@ -375,8 +378,11 @@ export function HandDetailPage() {
                 <span className="flex min-w-0 flex-1 text-sm">
                   <MemberName name={p.nickname} role={p.role} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
                 </span>
-                {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
-                <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{signed(p.net)}</span>
+                {/* Stacked, so an amount in big blinds ("+2.5 BB") leaves the name its room on a phone. */}
+                <span className="flex shrink-0 flex-col items-end leading-tight">
+                  {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
+                  <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`} data-testid="hand-net">{p.net > 0 ? '+' : ''}{amt.fmt(p.net)}</span>
+                </span>
                 {!p.isYou && (
                   <button
                     type="button"
@@ -399,7 +405,7 @@ export function HandDetailPage() {
                 <span className="w-16 shrink-0 text-xs uppercase text-ink-400">{t(`stage.${a.stage}` as MsgKey)}</span>
                 <span className="flex-1">{name(a.seatIndex)}</span>
                 <span className="text-ink-200">{actionText(a.type)}</span>
-                <span className="w-16 text-right font-mono text-gold-300">{a.amount > 0 ? formatChips(a.amount) : ''}</span>
+                <span className="w-20 shrink-0 text-right font-mono text-gold-300">{a.amount > 0 ? amt.fmt(a.amount) : ''}</span>
               </li>
             ))}
           </ol>
