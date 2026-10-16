@@ -77,6 +77,11 @@ export interface PersistedHand {
   buttonSeat: number;
   startedAt: number;
   turnStartedAt: number;
+  /**
+   * Time the player to act added to this turn from their time bank (`extendTurn`), cleared when the turn passes. Absent
+   * in hands kept by older builds: none.
+   */
+  turnExtraMs?: number;
   seats: HandSeat[];
   appliedIntents: string[];
   session: PersistedSession;
@@ -367,8 +372,30 @@ export class HandEngine {
     return this.snapshot.seating.seats.find((s) => s.occupant?.playerId === playerId)?.index ?? null;
   }
 
+  /** When the current turn began (the last accepted event). */
+  get turnStartedAt(): number {
+    return this.meta.turnStartedAt;
+  }
+  /** Time added to the current turn from the actor's time bank (0 when none). */
+  get turnExtraMs(): number {
+    return this.meta.turnExtraMs ?? 0;
+  }
+
+  /** When the current actor times out: the hand's turn time plus anything added to this turn. */
   deadline(): number | null {
-    return this.actorId() ? this.meta.turnStartedAt + this.meta.rules.turnMs : null;
+    return this.actorId() ? this.meta.turnStartedAt + this.meta.rules.turnMs + (this.meta.turnExtraMs ?? 0) : null;
+  }
+
+  /**
+   * Adds `ms` to the current turn of `playerId` (time from their time bank: the room decides how much and takes it from
+   * the bank). Only the player to act, on a turn they can really decide; the added time ends with the turn.
+   */
+  extendTurn(playerId: string, ms: number): ActResult {
+    if (this.isSettled) return { ok: false, code: 'hand_over', reason: 'hand is already settled' };
+    if (this.actorId() !== playerId || this.isStalled()) return { ok: false, code: 'not_your_turn', reason: 'not your turn' };
+    if (!Number.isSafeInteger(ms) || ms <= 0) return { ok: false, code: 'illegal_action', reason: 'invalid extension' };
+    this.meta.turnExtraMs = (this.meta.turnExtraMs ?? 0) + ms;
+    return { ok: true, cues: [] };
   }
 
   private currentRoundContributions(): Map<string, number> {
@@ -536,6 +563,8 @@ export class HandEngine {
     this.meta.appliedIntents.push(intentId);
     if (this.meta.appliedIntents.length > 500) this.meta.appliedIntents.splice(0, this.meta.appliedIntents.length - 500);
     this.meta.turnStartedAt = now;
+    // Time-bank time belongs to the turn it was added to.
+    delete this.meta.turnExtraMs;
     const total = this.totalChips();
     if (total !== startChips) {
       // The engine is property-tested for conservation; if this ever fires the
@@ -722,6 +751,7 @@ export class HandEngine {
       potTotal: this.isSettled ? (s.hand.payouts?.entries ?? []).reduce((a, e) => a + e.amount, 0) : pots.reduce((a, p) => a + p.amount, 0),
       actorSeat: actor ? seatIdx(actor) : null,
       deadline: this.deadline(),
+      ...(actor && this.meta.turnExtraMs ? { extraMs: this.meta.turnExtraMs } : {}),
       result,
     };
   }

@@ -772,6 +772,27 @@ export const botEvents = sqliteTable(
 );
 
 /**
+ * Time bank policy (packages/types/src/timebank.ts), one row per version and never changed: the newest row is in force.
+ * A room reads it with the table and applies it from its next hand; members' banks live in the room, never here (no
+ * one edits a member's time). Times in ms, whole seconds. No row at all means the time bank is off.
+ */
+export const timeBankPolicies = sqliteTable('time_bank_policies', {
+  version: integer('version').primaryKey(),
+  /** On at official tables; `member_rooms` also turns it on in member rooms. */
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  memberRooms: integer('member_rooms', { mode: 'boolean' }).notNull(),
+  initialMs: integer('initial_ms').notNull(),
+  maxMs: integer('max_ms').notNull(),
+  unitMs: integer('unit_ms').notNull(),
+  refillHands: integer('refill_hands').notNull(),
+  refillMs: integer('refill_ms').notNull(),
+  change: text('change', { enum: ['seed', 'policy'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
  * Referral rewards policy (apps/api/src/lib/referral.ts), one row per version and never changed: the newest row is in
  * force. A signup with a code is accepted under the version in force then (its amounts and conditions are copied onto
  * the referral); `paused` holds payouts without closing anything; the caps are read when a referrer side is paid.

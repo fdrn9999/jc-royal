@@ -11,7 +11,7 @@
  * identity forwarded by the API worker in its attachment.
  */
 import { DurableObject } from 'cloudflare:workers';
-import { OpsCounter } from '@jc/db';
+import { OpsCounter, type TimeBankMetric } from '@jc/db';
 import { botView, decideBot, HandEngine, nextButtonSeat, type ActResult, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
   AUTO_REBUY_MAX_TIMES,
@@ -23,6 +23,8 @@ import {
   REACTION_BURST,
   REACTION_SLACK_MS,
   reactionWait,
+  TIME_BANK_MIN_USE_MS,
+  timeBankRulesFor,
   type ChatMessage,
   type ClientMessage,
   type ErrorCode,
@@ -36,6 +38,7 @@ import {
   type ServerMessage,
   type TableCue,
   type TableView,
+  type TimeBankRules,
 } from '@jc/types';
 import {
   buyIn,
@@ -117,6 +120,11 @@ interface SeatState {
    * times out or sits out, and leaves through `leaveAfterHand` like a member — but plays the hand out first.
    */
   bot?: BotLevel;
+  /**
+   * The member's time bank at this table: ms left, and hands dealt in since the last refill. Given at their first hand
+   * (`dealTimeBanks`), kept when they leave the seat (`keepBank`). Never on a bot.
+   */
+  bank?: { ms: number; hands: number } | null;
 }
 
 /** A word for one player about a top-up or rebuy the room carried out on its own. */
@@ -168,6 +176,15 @@ interface RoomState {
   botRetryAt?: number | null;
   /** Bot joins that failed in a row, for the back-off. */
   botFails?: number;
+  /**
+   * The time bank rules the current (or last) hand was dealt with; null or absent: none. Fixed at the deal, so a policy
+   * changed during a hand applies from the next one and never moves a deadline already running.
+   */
+  bankRules?: TimeBankRules | null;
+  /** Time banks of members who gave up their seat here, with when (kept BANK_KEEP_MS): sitting down again brings them back. */
+  banks?: Record<string, { ms: number; hands: number; at: number }>;
+  /** The current hand's time bank counters, moved into its record when it settles (statistics only). */
+  tbCount?: { handId: string; n: Partial<Record<TimeBankMetric, number>> } | null;
 }
 
 const BETWEEN_HANDS_MS = 4_000;
@@ -197,6 +214,9 @@ const BOT_THINK_MS = { min: 700, max: 2_200 };
 const BOT_RETRY_MS = { first: 60_000, max: 30 * 60_000 };
 /** A bot sits down with this many big blinds, within the table's buy-in range. */
 const BOT_BUY_IN_BB = 100;
+/** A member's time bank is kept this long after they leave their seat (and for at most this many members per room). */
+const BANK_KEEP_MS = 6 * 60 * 60_000;
+const BANK_KEEP_MAX = 100;
 
 /** A finished hand kept in room storage until its D1 record is written. */
 interface UnrecordedHand {
@@ -205,6 +225,8 @@ interface UnrecordedHand {
   log: PersistedHand;
   /** Table bots dealt in (absent from hands kept by older builds: none). */
   bots?: number;
+  /** The hand's time bank counters, for the day's statistics (absent: none). */
+  timeBank?: Partial<Record<TimeBankMetric, number>>;
 }
 
 /** A chat line's id from its sender and request id: a line sent again is recognised without storing anything more. */
@@ -549,6 +571,8 @@ export class TableRoom extends DurableObject<Env> {
         switch (action) {
           case 'status':
             return Response.json(await this.adminStatus());
+          case 'timer-recover':
+            return Response.json(await this.recoverTimer());
           case 'reload': {
             // `wrangler dev --var` reaches only the api worker, so local tests pass their timeout along here.
             const idleMs = Number(request.headers.get('x-jc-idle-close-ms'));
@@ -842,6 +866,9 @@ export class TableRoom extends DurableObject<Env> {
       case 'preAction':
         await this.preAction(ws, a.userId, msg);
         return;
+      case 'timeBank':
+        await this.useTimeBank(ws, a.userId, msg);
+        return;
       case 'muck': {
         // Setting a flag: a copy sent again changes nothing. Only the player's own view shows it.
         const i = this.seatIndexOf(a.userId);
@@ -1002,6 +1029,7 @@ export class TableRoom extends DurableObject<Env> {
       if (await this.resolveTopUp(s)) changed = true;
       if (s.phase === 'cashing') {
         await this.cashOutSeat(s);
+        this.keepBank(s);
         this.room.seats[i] = null;
         changed = true;
       } else if (s.leaveAfterHand && !unsettled) {
@@ -1078,6 +1106,7 @@ export class TableRoom extends DurableObject<Env> {
       await this.save();
       await this.cashOutSeat(seat);
     }
+    this.keepBank(seat);
     this.room.seats[i] = null;
     // During maintenance nobody could take it in time: the waitlist is offered the seat when it ends.
     if (this.room.waitlist.length > 0 && !this.room.closing && !this.inMaintenance()) {
@@ -1394,7 +1423,16 @@ export class TableRoom extends DurableObject<Env> {
       // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
       const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
       const bots = h.startingSeats.filter((p) => this.botSeat(p.playerId)).length;
-      const entry: UnrecordedHand = { handNumber: this.room.handNumber, record: h.record(now, this.muckOf(h)), log: h.persist(), ...(bots ? { bots } : {}) };
+      this.refillTimeBanks(h);
+      const tb = this.room.tbCount?.handId === h.handId ? this.room.tbCount.n : null;
+      this.room.tbCount = null;
+      const entry: UnrecordedHand = {
+        handNumber: this.room.handNumber,
+        record: h.record(now, this.muckOf(h)),
+        log: h.persist(),
+        ...(bots ? { bots } : {}),
+        ...(tb ? { timeBank: tb } : {}),
+      };
       await this.save({ [key]: entry });
       this.unrecorded.add(key);
     }
@@ -1510,7 +1548,115 @@ export class TableRoom extends DurableObject<Env> {
       buttonSeat: button,
       now,
     });
+    this.dealTimeBanks(dealt);
     await this.progress([{ kind: 'handStart', handNumber: this.room.handNumber }, { kind: 'deal' }]);
+  }
+
+  // ------------------------------------------------------------------ time bank
+
+  /**
+   * At the deal: fixes the hand's time bank rules (the policy as this room last read it: a change reaches a table from
+   * its next hand, never a deadline already running) and gives each member dealt in their bank. One they already have
+   * here stays, one kept from an earlier seat at this table comes back, and only a first hand brings a new one. A bank
+   * over a lowered maximum is cut to it. Table bots have none.
+   */
+  private dealTimeBanks(dealt: number[]) {
+    const t = this.table!;
+    const rules = timeBankRulesFor(t.timeBank, t.roomType);
+    this.room.bankRules = rules;
+    this.room.tbCount = null;
+    if (!rules) return;
+    for (const i of dealt) {
+      const s = this.room.seats[i]!;
+      if (s.bot) continue;
+      const bank = s.bank ?? this.takeBank(s.userId) ?? { ms: rules.initialMs, hands: 0 };
+      s.bank = { ms: Math.min(bank.ms, rules.maxMs), hands: Math.min(bank.hands, rules.refillHands - 1) };
+    }
+  }
+
+  /** After a hand, for each member dealt in who still has their seat: one more hand, and the refill when it is due. */
+  private refillTimeBanks(h: HandEngine) {
+    const rules = this.room.bankRules;
+    if (!rules) return;
+    for (const p of h.startingSeats) {
+      const i = this.seatIndexOf(p.playerId);
+      const s = i === null ? null : this.room.seats[i]!;
+      if (!s?.bank || s.bot) continue;
+      const hands = s.bank.hands + 1;
+      s.bank = hands >= rules.refillHands ? { ms: Math.min(rules.maxMs, s.bank.ms + rules.refillMs), hands: 0 } : { ms: s.bank.ms, hands };
+    }
+  }
+
+  /** Keeps a member's time bank when they give up their seat, for BANK_KEEP_MS: sitting down again here brings it back. */
+  private keepBank(seat: SeatState) {
+    if (seat.bot || !seat.bank) return;
+    const now = Date.now();
+    const others = Object.entries(this.room.banks ?? {})
+      .filter(([u, b]) => u !== seat.userId && now - b.at < BANK_KEEP_MS)
+      .sort((x, y) => y[1].at - x[1].at)
+      .slice(0, BANK_KEEP_MAX - 1);
+    this.room.banks = Object.fromEntries([...others, [seat.userId, { ms: seat.bank.ms, hands: seat.bank.hands, at: now }]]);
+  }
+
+  /** A member's kept bank (taken out: it is theirs again), or null when none was kept or it is too old. */
+  private takeBank(userId: string): { ms: number; hands: number } | null {
+    const b = this.room.banks?.[userId];
+    if (!b) return null;
+    delete this.room.banks![userId];
+    return Date.now() - b.at < BANK_KEEP_MS ? { ms: b.ms, hands: b.hands } : null;
+  }
+
+  /** The member's bank here: their seat's, or the one kept since they last sat (what `dealTimeBanks` will give back). */
+  private bankOf(userId: string): { ms: number; hands: number } | null {
+    const i = this.seatIndexOf(userId);
+    const s = i === null ? null : this.room.seats[i]!;
+    if (!s || s.bot) return null;
+    if (s.bank) return s.bank;
+    const b = this.room.banks?.[userId];
+    return b && Date.now() - b.at < BANK_KEEP_MS ? { ms: b.ms, hands: b.hands } : null;
+  }
+
+  /** Adds to the current hand's time bank counters (written with its record; statistics only). */
+  private countTimeBank(handId: string, metric: TimeBankMetric, n: number) {
+    if (this.room.tbCount?.handId !== handId) this.room.tbCount = { handId, n: {} };
+    this.room.tbCount.n[metric] = (this.room.tbCount.n[metric] ?? 0) + n;
+  }
+
+  /**
+   * Adds time from the player's time bank to their turn (packages/types/src/timebank.ts). `seq` and `seen` are what the
+   * player saw: a request sent again (same id) is only answered, and a second tap sent before the first one's result
+   * arrived adds nothing (stale_version). The bank pays in the same save that moves the deadline. Using it does not
+   * clear the player's timeouts: a turn that still runs out counts as before.
+   */
+  private async useTimeBank(ws: WebSocket, userId: string, msg: Extract<ClientMessage, { t: 'timeBank' }>) {
+    if (this.room.recentReqs.includes(msg.reqId)) return this.ack(ws, msg.reqId);
+    const seat = this.seatedSeat(userId);
+    const h = this.hand;
+    if (!h || h.isSettled || h.handId !== msg.handId) throw new CommandError('conflict', 'no such hand in progress');
+    if (msg.seq !== h.version || msg.seen !== h.turnExtraMs) throw new CommandError('stale_version', 'table state changed; refresh and retry');
+    if (h.actorId() !== userId || h.isStalled()) throw new CommandError('not_your_turn', 'not your turn');
+    const rules = this.room.bankRules;
+    if (seat.bot || !rules || !seat.bank) throw new CommandError('time_bank_off', 'no time bank at this table');
+    // A closing table or a maintenance under way: the hand plays out at its normal pace. (Not `table_closed`: a client
+    // takes that as the table gone and stops, while this hand still has to be played.)
+    if (this.room.closing) throw new CommandError('time_bank_off', 'table is closing');
+    if (this.inMaintenance()) throw new CommandError('maintenance', 'service maintenance');
+    if (seat.bank.ms < TIME_BANK_MIN_USE_MS) {
+      // (Counted with the next save; nothing else changed.)
+      this.countTimeBank(h.handId, 'tb_empty', 1);
+      throw new CommandError('time_bank_empty', 'time bank is empty');
+    }
+    const ms = Math.min(rules.unitMs, seat.bank.ms);
+    const r = h.extendTurn(userId, ms);
+    if (!r.ok) throw new CommandError(r.code === 'hand_over' ? 'conflict' : 'not_your_turn', r.reason);
+    seat.bank = { ms: seat.bank.ms - ms, hands: seat.bank.hands };
+    this.countTimeBank(h.handId, 'tb_use', 1);
+    this.countTimeBank(h.handId, 'tb_sec', Math.round(ms / 1000));
+    this.remember(msg.reqId);
+    await this.save();
+    this.broadcast();
+    this.ack(ws, msg.reqId);
+    await this.schedule();
   }
 
   private idleCloseMs() {
@@ -1581,20 +1727,7 @@ export class TableRoom extends DurableObject<Env> {
         const actor = this.hand.actorId();
         const botAt = this.botActAt();
         const played = botAt !== null && botAt <= now && (await this.playBotTurn(now));
-        if (!played && d && actor && d <= now) {
-          const r = await this.hand.timeout(actor, now);
-          if (r.ok) {
-            const seat = this.room.seats[this.seatIndexOf(actor) ?? -1];
-            if (seat && !seat.bot) {
-              seat.timeouts += 1;
-              if (seat.timeouts >= TIMEOUTS_BEFORE_SIT_OUT && !seat.sittingOut) {
-                seat.sittingOut = true;
-                seat.sitOutSince = now;
-              }
-            }
-            await this.progress(r.cues);
-          }
-        }
+        if (!played && d && actor && d <= now) await this.timeOutTurn(actor, d, now);
       }
       // Waitlist reservation expiry.
       if (this.room.reservation && this.room.reservation.until <= now) {
@@ -1659,6 +1792,57 @@ export class TableRoom extends DurableObject<Env> {
       }
       await this.schedule();
     });
+  }
+
+  /**
+   * The actor's turn ran out (deadline `d`, time bank time included): the engine checks or folds for them, and a member's
+   * timeout counts toward sitting them out. Returns whether it was applied.
+   */
+  private async timeOutTurn(actor: string, d: number, now: number): Promise<boolean> {
+    const h = this.hand!;
+    const handId = h.handId;
+    const extended = h.turnExtraMs > 0;
+    const r = await h.timeout(actor, now);
+    if (!r.ok) return false;
+    // For the time bank statistics: a turn that ran out although time was added, and a timer that ran late.
+    if (extended) this.countTimeBank(handId, 'tb_expired', 1);
+    if (now - d > OVERDUE_MS) this.countTimeBank(handId, 'tb_late', 1);
+    const seat = this.room.seats[this.seatIndexOf(actor) ?? -1];
+    if (seat && !seat.bot) {
+      seat.timeouts += 1;
+      if (seat.timeouts >= TIMEOUTS_BEFORE_SIT_OUT && !seat.sittingOut) {
+        seat.sittingOut = true;
+        seat.sitOutSince = now;
+      }
+    }
+    await this.progress(r.cues);
+    return true;
+  }
+
+  /**
+   * An admin's timer recovery (POST /api/admin/tables/:id/timer-recover), by the room's own rules only: a turn already
+   * past its deadline is decided now as the alarm would have decided it (a table bot moves, a member's turn times out,
+   * counted as usual); anything else only has its alarm set again from the saved state. No deadline, time bank, card or
+   * stack is set by hand.
+   */
+  private async recoverTimer() {
+    const now = Date.now();
+    const alarmBefore = await this.ctx.storage.getAlarm();
+    const h = this.hand;
+    const live = !!h && !h.isSettled && !h.isStalled();
+    const handId = h && !h.isSettled ? h.handId : null;
+    const d = live ? h!.deadline() : null;
+    const actor = live ? h!.actorId() : null;
+    let result: 'timed_out' | 'bot_moved' | 'rearmed' | 'none' = 'none';
+    if (live && actor && d) {
+      const botAt = this.botActAt();
+      if (botAt !== null && botAt <= now && (await this.playBotTurn(now))) result = 'bot_moved';
+      else if (d <= now && (await this.timeOutTurn(actor, d, now))) result = 'timed_out';
+    }
+    await this.schedule();
+    const alarmAfter = await this.ctx.storage.getAlarm();
+    if (result === 'none' && alarmAfter !== null) result = 'rearmed';
+    return { ok: true, result, handId, deadline: d, lateMs: d ? Math.max(0, now - d) : 0, alarmBefore, alarmAfter };
   }
 
   // ------------------------------------------------------------------ table bots
@@ -1832,11 +2016,11 @@ export class TableRoom extends DurableObject<Env> {
   private botActAt(): number | null {
     const h = this.hand;
     const actor = h && !h.isSettled ? h.actorId() : null;
-    const d = h?.deadline();
-    if (!h || !actor || !d || h.isStalled() || !this.botSeat(actor)) return null;
+    if (!h || !actor || !h.deadline() || h.isStalled() || !this.botSeat(actor)) return null;
     const turnMs = h.rules.turnMs;
     const think = BOT_THINK_MS.min + Math.round(unitHash(`${h.handId}:${h.version}`) * (BOT_THINK_MS.max - BOT_THINK_MS.min));
-    return d - turnMs + Math.min(think, Math.floor(turnMs / 2));
+    // From the start of its turn (a bot has no time bank, so its deadline is always the table's turn time).
+    return h.turnStartedAt + Math.min(think, Math.floor(turnMs / 2));
   }
 
   /**
@@ -1950,10 +2134,14 @@ export class TableRoom extends DurableObject<Env> {
       const u = await this.ctx.storage.get<UnrecordedHand>(key);
       const read = ++this.maintReads;
       try {
-        const r = u ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log, { bots: u.bots ?? 0, botPolicy: !!this.table?.bots.enabled }) : undefined;
+        const r = u
+          ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log, { bots: u.bots ?? 0, botPolicy: !!this.table?.bots.enabled, timeBank: u.timeBank })
+          : undefined;
         if (r && this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
         // Bots switched on or off service-wide: `schedule` seats them or sends them away.
         if (r && r.botPolicyOn !== null && this.table) this.table.botPolicyOn = r.botPolicyOn;
+        // A time bank policy the admin's fan-out did not bring here applies from the next hand all the same.
+        if (r && this.table) this.table.timeBank = r.timeBank;
       } catch (e) {
         this.fault('recordHand failed; will retry', e);
         return;
@@ -2085,6 +2273,9 @@ export class TableRoom extends DurableObject<Env> {
     if (this.unrecorded.size > 0) issues.push('unrecorded_hands');
     if (this.room.closing && !this.room.closed && !live) issues.push('close_unfinished');
     if (this.unfinishedWork() && !alarmAt) issues.push('no_retry_alarm');
+    // A running turn whose alarm is missing or set past its deadline: nothing would time it out.
+    if (live && deadline && !h!.isStalled() && (!alarmAt || alarmAt > Math.max(deadline, now) + 1_000)) issues.push('timer_unarmed');
+    const nextRules = timeBankRulesFor(t.timeBank, t.roomType);
     return {
       tableId: this.tableId,
       handNumber: this.room.handNumber,
@@ -2119,9 +2310,25 @@ export class TableRoom extends DurableObject<Env> {
               topUp: s.topUp ? { state: s.topUp.state, amount: s.topUp.amount, auto: !!s.topUp.auto } : null,
               tableSessionId: s.tableSessionId,
               bot: s.bot ?? null,
+              // Read only: no one sets a member's time.
+              timeBank: s.bank ? { ms: s.bank.ms, hands: s.bank.hands } : null,
             }
           : null,
       ),
+      // The running turn's clock: when it began, the table's turn time, time bank time added, the deadline, the alarm.
+      timer:
+        live && deadline
+          ? { turnStartedAt: h!.turnStartedAt, baseMs: h!.rules.turnMs, extraMs: h!.turnExtraMs, deadline, alarmAt, lateMs: Math.max(0, now - deadline) }
+          : null,
+      timeBank: {
+        // The rules of the hand being played (or the last one), and those the next hand will get from the policy as
+        // this room last read it.
+        hand: this.room.bankRules ?? null,
+        next: nextRules,
+        policyVersion: t.timeBank?.version ?? null,
+        kept: Object.values(this.room.banks ?? {}).filter((b) => now - b.at < BANK_KEEP_MS).length,
+        handUses: live && this.room.tbCount?.handId === h!.handId ? (this.room.tbCount.n.tb_use ?? 0) : 0,
+      },
       waitlist: this.room.waitlist.length,
       paused: t.handsPaused,
       maintenance: this.maint ? { ...this.maint, active: this.inMaintenance(now) } : null,
@@ -2219,6 +2426,7 @@ export class TableRoom extends DurableObject<Env> {
       nextHandAt: t.handsPaused || (this.room.nextHandAt && this.inMaintenance(this.room.nextHandAt)) ? null : this.room.nextHandAt,
       paused: t.handsPaused,
       maintenance: this.maint ? { ...this.maint, active: this.inMaintenance() } : null,
+      timeBank: publicRules(h && !h.isSettled ? (this.room.bankRules ?? null) : timeBankRulesFor(t.timeBank, t.roomType)),
       you: {
         userId: a.userId,
         seatIndex: mySeat,
@@ -2240,6 +2448,8 @@ export class TableRoom extends DurableObject<Env> {
           !!this.room.seats[mySeat]!.autoMuck &&
           !!h!.holeCardsOf(a.userId) &&
           !revealed.has(mySeat),
+        // Only the viewer's own bank, never anyone else's.
+        timeBank: isSeated ? this.bankOf(a.userId) : null,
       },
     };
   }
@@ -2300,6 +2510,11 @@ export class TableRoom extends DurableObject<Env> {
   private revealedSeats(h: HandEngine): Set<number> {
     return new Set((h.handView(this.muckOf(h)).result?.showdown ?? []).map((x) => x.seatIndex));
   }
+}
+
+/** Time bank rules as players see them (the policy version stays with the admin status). */
+function publicRules(r: TimeBankRules | null): TableView['timeBank'] {
+  return r ? { initialMs: r.initialMs, maxMs: r.maxMs, unitMs: r.unitMs, refillHands: r.refillHands, refillMs: r.refillMs } : null;
 }
 
 /** The move a pre-action makes given the legal options, or null when it no longer fits. Never a call, bet or raise. */

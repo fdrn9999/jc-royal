@@ -5,9 +5,27 @@
 
  RUN  v4.1.11 <repo>
 
+ ❯ tests/integration/admin-permissions.test.ts (11 tests | 1 failed) 40169ms
+     × every admin route refuses the wrong caller: no session, a member session, the player site, a plain admin on super-admin routes, and no fresh password 6ms
+ ❯ tests/integration/privacy.test.ts (4 tests | 1 failed) 6996ms
+     × deletes 1:1 messages both ways, inbox, Academy records, hand notes and reset links; keeps ledger and reports 1878ms
 
- Test Files  40 passed (40)
-      Tests  275 passed (275)
-   Start at  05:05:21
-   Duration  1430.94s (transform 683ms, setup 0ms, import 3.17s, tests 1401.69s, environment 4ms)
+ FAIL  tests/integration/admin-permissions.test.ts — the expected super-admin route list had no 'PUT /time-bank/policy' (list updated)
+ FAIL  tests/integration/privacy.test.ts — Error: d1 execute failed (attempt 1): "fetch failed" (the test's own setup INSERT, before the deletion request)
 
+ Test Files  2 failed | 39 passed (41)
+      Tests  2 failed | 280 passed (282)
+   Start at  06:14:05
+   Duration  1498.93s (transform 755ms, setup 0ms, import 3.44s, tests 1468.86s, environment 4ms)
+
+> vitest run --config tests/vitest.config.ts tests/integration/privacy.test.ts tests/integration/admin-permissions.test.ts
+
+ Test Files  2 passed (2)
+      Tests  15 passed (15)
+   Duration  74.93s (transform 63ms, setup 0ms, import 116ms, tests 57.27s, environment 0ms)
+
+> vitest run --config tests/vitest.config.ts tests/integration/time-bank.test.ts
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Duration  83.28s (transform 51ms, setup 0ms, import 82ms, tests 65.87s, environment 0ms)

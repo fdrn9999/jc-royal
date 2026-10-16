@@ -1,5 +1,6 @@
 import type { Card, HandRankClass } from './cards';
 import type { PublicRole } from './social';
+import type { TimeBankRules } from './timebank';
 
 /** Seat counts poker-engine-ts supports (SessionConfig.maxSeats). */
 export const SUPPORTED_MAX_SEATS = [2, 6, 9] as const;
@@ -90,8 +91,10 @@ export interface HandView {
   pots: PotView[];
   potTotal: number;
   actorSeat: number | null;
-  /** Epoch ms when the current actor times out. */
+  /** Epoch ms when the current actor times out (time added from their time bank included). */
   deadline: number | null;
+  /** Time the current actor added to this turn from their time bank (absent when none). */
+  extraMs?: number;
   result: HandResultView | null;
 }
 
@@ -132,6 +135,11 @@ export interface TableView {
    * when none is planned; absent from older rooms.
    */
   maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
+  /**
+   * The time bank rules of the hand being played (between hands: those the next hand will be dealt with, as the room
+   * knows them). Null when the time bank is off here; absent from older rooms.
+   */
+  timeBank?: Omit<TimeBankRules, 'version'> | null;
   you: {
     userId: string;
     seatIndex: number | null;
@@ -153,6 +161,11 @@ export interface TableView {
     autoMuck?: boolean | null;
     /** The seated viewer may show cards from the hand that just ended (auto-muck on, dealt in, not shown at showdown). */
     canShow?: boolean;
+    /**
+     * The seated viewer's own time bank: ms left, and hands dealt in since the last refill. Null before their first hand
+     * here or where there is none; nobody else's bank is ever shown. Absent from older rooms.
+     */
+    timeBank?: { ms: number; hands: number } | null;
   };
 }
 

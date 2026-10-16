@@ -7,7 +7,8 @@
  *   a new day). Only the day is kept, never a time, page or count, and only for ACTIVE_DAYS_RETENTION days: daily,
  *   weekly and monthly active members are counted from it and kept as numbers in `daily_stats`.
  * - `daily_stats`: one number per day and metric. Most are rolled up once a day from the records the service keeps
- *   anyway (accounts, seats, hands, reports); the Academy, free refill, hand note and settings counters are added as events arrive. Day 0
+ *   anyway (accounts, seats, hands, reports); the Academy, free refill, hand note, settings and time bank counters are
+ *   added as events arrive. Day 0
  *   holds markers.
  */
 export const STATS_TZ_OFFSET_MS = 9 * 60 * 60_000;
@@ -73,6 +74,17 @@ export const SETTINGS_METRICS = [
 ] as const;
 export type SettingsMetric = (typeof SETTINGS_METRICS)[number];
 
+/**
+ * Time bank (apps/game-worker/src/room.ts): uses and seconds added, uses refused for an empty bank, turns that timed out
+ * although time was added, turn timeouts the room ran more than a few seconds after the deadline (late timer), and
+ * administrators' timer recoveries. Counted per hand and written with the hand record (once, also when it is written
+ * again), never per member. Kept by the daily rollup.
+ */
+export const TIME_BANK_METRICS = ['tb_use', 'tb_sec', 'tb_empty', 'tb_expired', 'tb_late', 'tb_recover'] as const;
+export type TimeBankMetric = (typeof TIME_BANK_METRICS)[number];
+
+type Metric = AcademyMetric | RefillMetric | HandNoteMetric | SettingsMetric | TimeBankMetric;
+
 /** Markers on day 0: the first day with activity markers, and the last day rolled up. */
 export const STATS_MARKER_DAY = 0;
 
@@ -82,10 +94,26 @@ export function activeDayInsert(d1: D1Database, userId: string, at: number): D1P
 }
 
 /** One statement per counter: adds `n` to the day's row. */
-export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric | RefillMetric | HandNoteMetric | SettingsMetric, number>>): D1PreparedStatement[] {
+export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<Metric, number>>): D1PreparedStatement[] {
   return Object.entries(counts)
     .filter(([, n]) => (n ?? 0) > 0)
     .map(([metric, n]) =>
       d1.prepare('INSERT INTO daily_stats (day, metric, n) VALUES (?1, ?2, ?3) ON CONFLICT (day, metric) DO UPDATE SET n = n + excluded.n').bind(day, metric, n),
+    );
+}
+
+/**
+ * Like statsIncrements, for counters that come with a hand record: each adds only while hand `handId` is not recorded
+ * yet, so it must run in the batch before the hand's INSERT (a record written again adds nothing).
+ */
+export function handStatsIncrements(d1: D1Database, day: number, handId: string, counts: Partial<Record<TimeBankMetric, number>>): D1PreparedStatement[] {
+  return Object.entries(counts)
+    .filter(([, n]) => (n ?? 0) > 0)
+    .map(([metric, n]) =>
+      d1
+        .prepare(
+          'INSERT INTO daily_stats (day, metric, n) SELECT ?1, ?2, ?3 WHERE NOT EXISTS (SELECT 1 FROM hands WHERE id = ?4) ON CONFLICT (day, metric) DO UPDATE SET n = n + excluded.n',
+        )
+        .bind(day, metric, n, handId),
     );
 }

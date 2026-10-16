@@ -4,7 +4,7 @@
  * are plain bars (no chart library), each with a text summary for screen readers and the table below as the source.
  */
 import { Badge, Button, Empty, Panel, Stat } from '@jc/ui';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
 import { useData } from '../lib';
 import { LoadError } from '../ui';
@@ -15,6 +15,7 @@ type Unit = 'day' | 'week' | 'month';
 type RoomPlay = { hands: number; tablesAvg: number | null; seats: number; seatMs: number };
 type AcademyKey = 'ac_lesson_start' | 'ac_lesson_done' | 'ac_scenario_start' | 'ac_scenario_done' | 'ac_answer' | 'ac_correct';
 type HandNoteKey = 'hn_bookmark' | 'hn_tag' | 'hn_memo' | 'hn_fail_conflict' | 'hn_fail_invalid' | 'hn_fail_notfound' | 'hn_fail_limit' | 'hn_fail_error';
+type TimeBankKey = 'tb_use' | 'tb_sec' | 'tb_empty' | 'tb_expired' | 'tb_late' | 'tb_recover';
 type SettingsKey = 'ss_save' | 'ss_legacy' | 'ss_conflict' | 'ss_stale' | 'ss_epoch' | 'ss_fail_invalid' | 'ss_fail_limit' | 'ss_fail_busy' | 'ss_fail_error' | 'ss_load_fail' | 'ss_client_fail' | 'ss_reset' | 'ss_restore';
 interface Period {
   from: string;
@@ -29,6 +30,8 @@ interface Period {
   handNotes: Record<HandNoteKey, number>;
   /** Account settings sync (absent from an older API). */
   settings?: Record<SettingsKey, number>;
+  /** Time bank use and timer problems (absent from an older API). */
+  timeBank?: Record<TimeBankKey, number>;
 }
 interface OpsStats {
   unit: Unit;
@@ -115,6 +118,7 @@ export function StatsPage() {
   const hnFailed = hn.hn_fail_conflict + hn.hn_fail_invalid + hn.hn_fail_notfound + hn.hn_fail_limit + hn.hn_fail_error;
   const now = d.handNotesNow;
   const ss = tot.settings;
+  const tb = tot.timeBank;
   return (
     <div className={`flex flex-col gap-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading} data-testid="stats-page">
       {header}
@@ -248,6 +252,15 @@ export function StatsPage() {
             <Stat label={t('osSsReset')} value={<span data-testid="stats-ss-reset">{num(ss.ss_reset)}</span>} sub={t('osSsResetSub', { r: num(ss.ss_restore) })} />
           </div>
           <p className="mt-3 text-xs text-ink-400">{t('osSsHint')}</p>
+        </Panel>
+      )}
+      {tb && (
+        <Panel title={t('tbTitle')} actions={<Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline">{t('tbManage')} →</Link>}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="stats-time-bank">
+            <Stat label={t('tbUses')} value={<span data-testid="stats-tb-use">{num(tb.tb_use)}</span>} sub={t('osTbUseSub', { s: num(tb.tb_sec), e: num(tb.tb_empty) })} />
+            <Stat label={t('tbExpired')} value={num(tb.tb_expired)} sub={t('tbExpiredHint')} />
+            <Stat label={t('tbLate')} value={<span data-testid="stats-tb-late">{num(tb.tb_late)}</span>} sub={t('osTbLateSub', { r: num(tb.tb_recover) })} />
+          </div>
         </Panel>
       )}
       <Panel title={t('osHourly')}>

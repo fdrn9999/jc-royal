@@ -35,6 +35,7 @@
 | `preAction` | `reqId, handId, stage, toCall, kind` | 사전 액션: 다른 사람 차례 동안 이번 스트리트의 내 다음 액션을 예약. `kind`: `check`·`checkFold`·`fold`, `null`이면 취소. `handId`·`stage`·`toCall`은 고를 때 본 화면 값. 아래 '사전 액션' 참고 |
 | `muck` | `reqId, on` | 패배한 쇼다운 핸드 자동 머크 켜기·끄기. 착석한 플레이어만(아니면 `forbidden`). 같은 값을 다시 보내도 결과가 같음. 아래 '쇼다운 머크' 참고 |
 | `show` | `reqId, card(0·1)` | 끝난 핸드의 내 카드 한 장을 다음 핸드 전까지 테이블에 보여 줌. 자동 머크를 켠 착석 플레이어만. 아래 '패 보이기' 참고 |
+| `timeBank` | `reqId, handId, seq, seen` | 내 시간 은행에서 지금 내 차례에 시간을 더함. `seq`·`seen`은 누를 때 본 `hand.seq`·`hand.extraMs`(없으면 0). 아래 '시간 은행' 참고 |
 | `chat` | `text(1-200), reqId?` | 채팅. 같은 `reqId`로 다시 보내면 한 번만 게시 |
 | `react` | `reaction, reqId?` | 빠른 반응(`clap`·`laugh`·`cry`·`wow`·`cool`·`fire`·`heart`·`gg`). 착석한 플레이어만. 아래 '빠른 반응' 참고 |
 | `ping` | — | → `pong`. 정확히 `{"t":"ping"}`이면 런타임이 룸을 깨우지 않고 답함 |
@@ -60,8 +61,9 @@
 - **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시').
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 자동 머크로 공개되지 않은 패는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
   - `shown`은 핸드가 끝난 뒤 주인이 보이기로 고른 카드입니다. `[카드 또는 null, 카드 또는 null]`로 고른 자리에만 카드가 있고, 고르지 않은 카드는 누구에게도 보내지 않습니다. 쇼다운에서 이미 공개된 좌석과 고른 카드가 없는 좌석에는 이 필드가 없습니다.
-- **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
-- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다. `canShow`(지금 `show`를 보낼 수 있음: 끝난 핸드에 참여했고, 자동 머크가 켜져 있고, 내 패가 쇼다운에서 공개되지 않음. 이전 룸은 보내지 않음).
+- **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`(시간 은행으로 더한 시간 포함), `extraMs`(지금 차례에 시간 은행으로 더한 시간, 없으면 필드 없음), `result`(winners, showdown).
+- **timeBank**(최상위): 이 테이블의 시간 은행 규칙 `{initialMs, maxMs, unitMs, refillHands, refillMs}`. 핸드 중에는 그 핸드를 시작할 때의 규칙, 핸드 사이에는 다음 핸드에 쓸 규칙. 꺼진 테이블은 null, 이전 룸은 보내지 않음.
+- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다. `canShow`(지금 `show`를 보낼 수 있음: 끝난 핸드에 참여했고, 자동 머크가 켜져 있고, 내 패가 쇼다운에서 공개되지 않음. 이전 룸은 보내지 않음), `timeBank`(착석했으면 내 시간 은행 `{ms, hands}`(`hands`는 다음 보충까지 센 핸드 수), 아직 받은 적 없거나 봇·꺼진 테이블이면 null. 다른 사람의 시간 은행은 어디에도 들어가지 않음. 이전 룸은 보내지 않음).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
 - **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음), `maintenance`(서비스 점검 `{startsAt, endsAt, active}` 또는 null. 이전 룸은 보내지 않음).
 
@@ -112,6 +114,21 @@
 - **기록**: 핸드 기록(`hand_players.shown`)·리플레이·커뮤니티 리뷰에는 넣지 않습니다. 보이기는 그 자리에서 보여 주는 것일 뿐이라, 기록의 공개 규칙은 위 '쇼다운 머크' 그대로입니다.
 - **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `show`를 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보내고 `canShow`를 보내지 않으므로, 새 웹은 버튼을 그리지 않습니다.
 
+## 시간 은행 (`timeBank`)
+
+정의는 `packages/types/src/timebank.ts`, 룸은 `apps/game-worker/src/room.ts` "time bank", 정책 관리는 `docs/ADMIN_SECURITY.md` "시간 은행 관리".
+
+- **받는 것**: 회원은 한 테이블에서 처음 카드를 받는 핸드에 `initialMs`를 받고, 자리에 있는 동안 남은 시간을 그대로 가집니다. 재접속·다른 탭·룸 재시작에도 같은 값이고, 일어섰다가 6시간 안에 다시 앉으면 남겼던 시간을 돌려받습니다(테이블당 최근 100명). 떠났다 오거나 다시 앉는다고 새로 받지 않습니다. 카드를 받은 핸드가 `refillHands`개 끝날 때마다 `refillMs`를 더하되 `maxMs`를 넘지 않습니다(같은 테이블의 봇 수와 관계없이 그 회원이 받은 핸드만 셈).
+- **쓰기**: 내 차례에 한 번 보낼 때마다 `unitMs`(남은 것이 적으면 남은 만큼)를 이번 차례의 마감 시각에 더합니다. 한 차례에 여러 번 쓸 수 있고, 더한 시간을 쓰지 않고 행동하면 사라집니다. 남은 시간이 1초(`TIME_BANK_MIN_USE_MS`) 미만이면 `time_bank_empty`. 시간 은행 차감과 마감 시각 이동은 같은 저장에 들어가므로 하나만 반영되는 경우는 없습니다. 모든 연결에 새 `state`(`deadline`·`extraMs`)가 가고 보낸 연결에 `ack`.
+- **중복·늦은 요청**: 같은 `reqId`는 다시 적용하지 않고 `ack`만 보냅니다. 룸이 다시 시작된 뒤 다시 보내도 시간이 늘지 않습니다. `seq`나 `seen`이 지금과 다르면(앞 탭의 결과를 보기 전에 다시 누름) `stale_version`으로 아무것도 더하지 않습니다. 다른 핸드면 `conflict`, 내 차례가 아니면 `not_your_turn`, 착석하지 않았으면 `forbidden`.
+- **거절**: 테이블에 시간 은행이 없거나(정책이 꺼짐, 회원 방에서 꺼짐) 봇이면 `time_bank_off`. 관리자가 닫는 중인 테이블도 `time_bank_off`(이 핸드는 보통 속도로 끝냄, `table_closed`가 아니므로 화면이 연결을 끊지 않음). 서비스 점검 중이면 `maintenance`.
+- **기존 규칙과의 관계**: 마감이 지나면 이전처럼 체크 또는 폴드되고 타임아웃 횟수도 그대로 셉니다(연속 2회면 자리 비움). 사전 액션은 차례가 오자마자 실행되므로 보통 쓸 일이 없고, 실행하지 못해 차례가 남으면 쓸 수 있습니다. 관리자 일시정지는 다음 핸드만 멈추므로 진행 중인 차례와 시간 은행에 영향이 없습니다.
+- **정책 변경의 적용 경계**: 룸은 핸드를 시작할 때 규칙을 고정합니다(버전 포함). 관리자가 바꾼 정책은 각 테이블의 다음 핸드부터 쓰고, 진행 중인 핸드의 단위·최대값과 진행 중인 차례의 마감 시각은 바뀌지 않습니다. 낮아진 `maxMs`를 넘는 남은 시간은 그 회원이 다음 핸드를 받을 때 줄어듭니다.
+- **봇**: 테이블 봇에는 시간 은행이 없고, 회원의 시간 은행을 쓰거나 채우지 않습니다.
+- **통계**: 핸드 기록과 함께 날짜별 개수만 남깁니다(`tb_use` 사용 횟수, `tb_sec` 더한 초, `tb_empty` 빈 은행 요청, `tb_expired` 더한 시간까지 다 쓴 타임아웃, `tb_late` 5초 넘게 늦은 타임아웃, `tb_recover` 관리자 타이머 복구). 회원별 기록은 없습니다.
+- **웹 클라이언트**(`apps/web/src/game/TimeBank.tsx`): 내 차례에만 액션 바 위에 남은 시간, 이번 차례에 더한 시간, `+N초` 버튼을 보입니다. 답을 받을 때까지 버튼을 끄고, 마감 8초 전부터 버튼을 강조합니다. 닫는 중·점검 중에는 그리지 않습니다.
+- **배포 순서**: 마이그레이션 `0025_time_bank` → game-worker → api → web·admin. 이전 룸은 `timeBank`를 모르는 메시지로 보고 `bad_request`를 보내고 `timeBank` 필드를 보내지 않으므로, 새 웹은 버튼을 그리지 않습니다.
+
 ## 빠른 반응 (`react`)
 
 - **보낼 수 있는 사람**: 착석한 플레이어(자리 비움 포함). 관전자·대기 중인 연결은 `forbidden`. 목록에 없는 반응은 스키마 검사에서 `bad_request`(`reqId` 없음).
@@ -139,6 +156,6 @@
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, internal`
 
 `suspended`·`disconnected`가 `reqId` 없이 오면 관리자가 연결을 끝낸 것이고 4004 종료가 뒤따릅니다. `reqId`가 붙은 `suspended`는 정지된 계정의 착석·충전을 지갑이 거절한 것입니다.

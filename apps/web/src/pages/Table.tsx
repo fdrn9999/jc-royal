@@ -1,20 +1,20 @@
 import { sound } from '@jc/audio';
 import type { ActionType, PublicUserDto, SeatView, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
-import { HandRankingChart } from '../academy/HandChart';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
 import { JoinCodeModal } from '../components/JoinCode';
 import { LinkShare } from '../components/Share';
 import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
-import { BotCard, PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
+import type { ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
+import { TimeBankButton } from '../game/TimeBank';
 import { useReactionSender } from '../game/Reactions';
 import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
@@ -28,6 +28,13 @@ import { hasPendingMuck, pullSettings, usePrefs, useSettingsSync } from '../lib/
 import { useAmounts } from '../lib/amount';
 import { when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
+
+// Opened on a tap (a player's card, a report, the hand chart): loaded then, not with the table.
+const loadSocial = () => import('../components/Social');
+const PlayerCard = lazy(() => loadSocial().then((m) => ({ default: m.PlayerCard })));
+const BotCard = lazy(() => loadSocial().then((m) => ({ default: m.BotCard })));
+const ReportModal = lazy(() => loadSocial().then((m) => ({ default: m.ReportModal })));
+const HandRankingChart = lazy(() => import('../academy/HandChart').then((m) => ({ default: m.HandRankingChart })));
 
 function useCountdown(target: number | null) {
   const [now, setNow] = useState(Date.now());
@@ -72,6 +79,9 @@ export function TablePage() {
   const [picked, setPicked] = useState<PublicUserDto | null>(null);
   const [pickedBot, setPickedBot] = useState<SeatView | null>(null);
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
+  // The player card and report dialogs mount on the first tap (their code loads then) and stay mounted.
+  const social = useRef(false);
+  if (picked || pickedBot || reporting) social.current = true;
   // Table chat from players I muted on this device or blocked; it hides their lines for me only.
   const hiddenChat = useHiddenChat(me?.id);
   // Quick reactions: off in the settings, none show and none can be sent; muted or blocked players' are not shown.
@@ -242,6 +252,20 @@ export function TablePage() {
 
 
   const onAct = useCallback((type: ActionType, amount?: number) => sock.act(type, amount), [sock]);
+  // Time bank: a refusal shows for a moment, except a stale one (this screen was behind; the room sends the state again).
+  const addBankTime = useCallback(
+    async (handId: string, seq: number, seen: number) => {
+      try {
+        await sock.request({ t: 'timeBank', handId, seq, seen });
+      } catch (e) {
+        const code = e instanceof RequestError ? e.code : null;
+        if (code === 'stale_version') return;
+        setToast(err(code));
+        setTimeout(() => setToast(null), 3_500);
+      }
+    },
+    [sock, err],
+  );
 
   const academy = useProgress(me?.id);
   const tip = coachActive(academy, s?.you.seatIndex != null) && myTurn && s ? coachTip(s) : null;
@@ -489,6 +513,7 @@ export function TablePage() {
                 ) : (
                   <div className="hidden rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:block sm:self-end">{t('table.yourTurn')}</div>
                 )}
+                <TimeBankButton s={s} onUse={addBankTime} />
                 <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} />
               </>
             )}
@@ -630,21 +655,27 @@ export function TablePage() {
         }
       />
       {s && isHost && <HostRoomModal open={hosting} onClose={() => setHosting(false)} table={s.table} />}
-      {/* The 1:1 chat opens in a new tab so the game connection stays. */}
-      <PlayerCard
-        user={picked}
-        onClose={() => setPicked(null)}
-        newTab
-        chatMute
-        onReport={() => {
-          if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
-          setPicked(null);
-        }}
-      />
-      <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} />
-      <ReportModal subject={reporting} onClose={() => setReporting(null)} />
+      {social.current && (
+        <Suspense fallback={null}>
+          {/* The 1:1 chat opens in a new tab so the game connection stays. */}
+          <PlayerCard
+            user={picked}
+            onClose={() => setPicked(null)}
+            newTab
+            chatMute
+            onReport={() => {
+              if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
+              setPicked(null);
+            }}
+          />
+          <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} />
+          <ReportModal subject={reporting} onClose={() => setReporting(null)} />
+        </Suspense>
+      )}
       <Modal open={chart} onClose={() => setChart(false)} title={t('table.handChart')}>
-        <HandRankingChart compact />
+        <Suspense fallback={<div className="h-40" />}>
+          <HandRankingChart compact />
+        </Suspense>
         <Link to="/academy/hands" className="mt-3 inline-block text-sm text-gold-300 hover:underline">
           {t('table.toAcademy')} →
         </Link>

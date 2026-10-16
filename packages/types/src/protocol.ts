@@ -86,6 +86,17 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('muck'), reqId: ReqId, on: z.boolean() }),
   /** Shows one of the player's two cards (0 or 1) from the hand that just ended, until the next deal. Auto-muck on only. */
   z.object({ t: z.literal('show'), reqId: ReqId, card: z.number().int().min(0).max(1) }),
+  /**
+   * Adds time from the player's time bank to their current turn. `seq` and `seen` (HandView.seq and HandView.extraMs, 0
+   * when absent) are what the player saw: a second tap sent before the first one's result was shown adds nothing.
+   */
+  z.object({
+    t: z.literal('timeBank'),
+    reqId: ReqId,
+    handId: z.string().min(1).max(128),
+    seq: z.number().int().nonnegative(),
+    seen: z.number().int().nonnegative(),
+  }),
   z.object({ t: z.literal('chat'), text: z.string().trim().min(1).max(200), reqId: ReqId.optional() }),
   /** A quick reaction from the sender's seat (seated players only). Sent once: one that missed its moment is not retried. */
   z.object({ t: z.literal('react'), reaction: z.enum(REACTIONS), reqId: ReqId.optional() }),
@@ -128,6 +139,10 @@ export type ErrorCode =
   | 'suspended'
   /** An admin ended this connection (close 4004); the client does not reconnect on its own. */
   | 'disconnected'
+  /** The time bank is off at this table, or the player has none (a table bot, not dealt in). */
+  | 'time_bank_off'
+  /** Less than TIME_BANK_MIN_USE_MS left in the player's time bank. */
+  | 'time_bank_empty'
   | 'internal';
 
 /**

@@ -108,6 +108,9 @@ const BY_CODE: Record<string, Key> = {
   settings_changed: 'errSettingsChanged',
   settings_already_reset: 'errSettingsAlreadyReset',
   settings_not_restorable: 'errSettingsNotRestorable',
+  time_bank_policy_conflict: 'errTimeBankConflict',
+  time_bank_no_change: 'errTimeBankNoChange',
+  time_bank_invalid: 'errTimeBankInvalid',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

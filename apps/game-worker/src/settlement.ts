@@ -5,9 +5,9 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, HAND_STATS_SQL, LEDGER_GUARD, opsUpserts, type LedgerOp, type OpsCount } from '@jc/db';
+import { applyLedger, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
-import { BOT_LEVELS, type BotLevel } from '@jc/types';
+import { BOT_LEVELS, type BotLevel, type TimeBankPolicy } from '@jc/types';
 
 export interface TableRow {
   id: string;
@@ -37,6 +37,8 @@ export interface TableRow {
   bots: { enabled: boolean; level: BotLevel; minHumans: number; max: number; fillTo: number; yieldSeat: boolean };
   /** The service-wide bot switch (bot_policies, newest version) as D1 last showed it; read again with each hand record. */
   botPolicyOn: boolean;
+  /** The time bank policy (time_bank_policies, newest version) as D1 last showed it; read again with each hand record. */
+  timeBank: TimeBankPolicy | null;
 }
 
 /** The next maintenance window that has not finished (the current one while it runs): see maintenance_windows. */
@@ -72,7 +74,7 @@ export async function loadTable(d1: D1Database, tableId: string, now = Date.now(
                 is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
                 room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash,
                 bots_enabled AS botsEnabled, bot_level AS botLevel, bot_min_humans AS botMinHumans, bot_max AS botMax,
-                bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn
+                bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn, (${TIME_BANK_POLICY}) AS timeBank
          FROM tables WHERE id = ?1`,
       )
       .bind(tableId),
@@ -109,11 +111,30 @@ function toTableRow(r: Record<string, unknown>): TableRow {
       yieldSeat: r.botYield == null ? true : !!r.botYield,
     },
     botPolicyOn: Number(r.botPolicyOn) === 1,
+    timeBank: toTimeBankPolicy(r.timeBank),
   };
 }
 
 /** Whether the newest bot policy has bots on (SQL expression; null, read as off, before any policy exists). */
 export const BOT_POLICY_ON = `SELECT enabled FROM bot_policies ORDER BY version DESC LIMIT 1`;
+
+/** The newest time bank policy as one JSON value (SQL expression; null before any policy exists). */
+export const TIME_BANK_POLICY = `SELECT json_object('version', version, 'enabled', enabled, 'memberRooms', member_rooms, 'initialMs', initial_ms,
+  'maxMs', max_ms, 'unitMs', unit_ms, 'refillHands', refill_hands, 'refillMs', refill_ms) FROM time_bank_policies ORDER BY version DESC LIMIT 1`;
+
+/** A policy read with TIME_BANK_POLICY; null (off) for none, or for one this build cannot read. */
+export function toTimeBankPolicy(raw: unknown): TimeBankPolicy | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    const n = (k: string) => (Number.isSafeInteger(p[k]) && (p[k] as number) >= 0 ? (p[k] as number) : null);
+    const [version, initialMs, maxMs, unitMs, refillHands, refillMs] = ['version', 'initialMs', 'maxMs', 'unitMs', 'refillHands', 'refillMs'].map(n);
+    if (version == null || initialMs == null || maxMs == null || unitMs == null || refillHands == null || refillMs == null || unitMs <= 0 || refillHands <= 0) return null;
+    return { version, enabled: p.enabled === 1, memberRooms: p.memberRooms === 1, initialMs, maxMs, unitMs, refillHands, refillMs };
+  } catch {
+    return null;
+  }
+}
 
 export type BuyInResult = { ok: true; balanceAfter: number } | { ok: false; code: 'insufficient_balance' | 'already_seated' | 'suspended' };
 
@@ -243,8 +264,9 @@ async function gzipBase64(text: string): Promise<string> {
  *
  * The same batch reads the maintenance window back (and, with `botPolicy`, the bot switch: only tables that allow bots
  * ask), so a dealing room that was never told of a change (the admin's fan-out did not reach it, and its occupancy did
- * not change) learns of it before its next hand. `bots` is how many table bots were dealt in: hands with bots are kept
- * apart from members-only play in statistics.
+ * not change) learns of it before its next hand; the time bank policy is read back the same way. `bots` is how many
+ * table bots were dealt in: hands with bots are kept apart from members-only play in statistics. `timeBank` is the
+ * hand's time bank counters (added to the day's statistics only with the hand's first write).
  */
 export async function recordHand(
   d1: D1Database,
@@ -252,14 +274,16 @@ export async function recordHand(
   handNumber: number,
   rec: HandRecord,
   engineLog: unknown,
-  opts: { bots?: number; botPolicy?: boolean } = {},
-): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null }> {
+  opts: { bots?: number; botPolicy?: boolean; timeBank?: Partial<Record<TimeBankMetric, number>> } = {},
+): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null; timeBank: TimeBankPolicy | null }> {
   const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
   const policy = opts.botPolicy ? [d1.prepare(`SELECT (${BOT_POLICY_ON}) AS botPolicyOn`)] : [];
   const stmts: D1PreparedStatement[] = [
     maintenanceQuery(d1, Date.now()),
     ...policy,
+    d1.prepare(`SELECT (${TIME_BANK_POLICY}) AS timeBank`),
     // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
+    ...handStatsIncrements(d1, statsDay(rec.endedAt), rec.handId, opts.timeBank ?? {}),
     d1
       .prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM hands WHERE id = ?2)`)
       .bind(tableId, rec.handId),
@@ -304,6 +328,7 @@ export async function recordHand(
   return {
     maintenance: toMaintenance(results[0]?.results[0] as Maintenance | undefined),
     botPolicyOn: policy.length ? Number((results[1]?.results[0] as { botPolicyOn?: unknown } | undefined)?.botPolicyOn) === 1 : null,
+    timeBank: toTimeBankPolicy((results[1 + policy.length]?.results[0] as { timeBank?: unknown } | undefined)?.timeBank),
   };
 }
 

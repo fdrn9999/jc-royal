@@ -23,6 +23,7 @@ import { adminBotRoutes } from './admin-bots';
 import { adminReferralRoutes } from './admin-referral';
 import { adminSettingsRoutes } from './admin-settings';
 import { adminRefillRoutes } from './admin-refill';
+import { adminTimeBankRoutes } from './admin-timebank';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
 import { adminReportRoutes } from './reports';
@@ -1300,4 +1301,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes));

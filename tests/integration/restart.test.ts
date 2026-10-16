@@ -26,10 +26,13 @@ async function runCron(base: string) {
   expect(await r.text()).toBe('ok');
 }
 
-/** An administrator closes or pauses these; at the last a buy-in's outcome is unknown (heads-up, long turns so the clock never acts). */
+/**
+ * An administrator closes or pauses these; at the third a buy-in's outcome is unknown; at the last the time bank is used
+ * across a restart (heads-up, long turns so the clock never acts).
+ */
 const tables = [
   ...TABLES,
-  ...['it-restart-close', 'it-restart-pause', 'it-restart-pending'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  ...['it-restart-close', 'it-restart-pause', 'it-restart-pending', 'it-restart-tb'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
 ];
 
 describe('server restart recovery', () => {
@@ -585,5 +588,61 @@ describe('server restart recovery', () => {
     expect(await cashOuts(ca)).toHaveLength(1);
     expect(await balanceOf(ca)).toBe(10_000);
     again.close();
+  }, 240_000);
+
+  it('time bank time added before a crash is kept after the restart, once: the same deadline and bank, and the request sent again adds nothing', async () => {
+    if (!worker) {
+      await prepareState(state, tables);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const id = 'it-restart-tb';
+    const ca = await user('ta', base);
+    const cb = await user('tb', base);
+    let a = await TableSocket.open(ca, id, { base });
+    let b = await TableSocket.open(cb, id, { base });
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 500 })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 500 })).toMatchObject({ t: 'ack' });
+    await a.waitState(live, 15_000, 'hand start');
+    await b.waitState((s) => live(s) && s.hand!.id === a.state!.hand!.id);
+    const actor = isMyTurn(a.state!) ? 'a' : 'b';
+    const me = actor === 'a' ? a : b;
+    const h = me.state!.hand!;
+    const reqId = `tb-${crypto.randomUUID()}`;
+    const msg = { t: 'timeBank', handId: h.id, seq: h.seq, seen: 0 };
+    const answer = me.waitNext((m) => m.t !== 'state' && 'reqId' in m && m.reqId === reqId, 15_000, 'time bank answer');
+    me.send({ ...msg, reqId });
+    expect(await answer).toMatchObject({ t: 'ack' });
+    const used = me.state!;
+    expect(used.hand).toMatchObject({ id: h.id, deadline: h.deadline! + 10_000, extraMs: 10_000 });
+    expect(used.you.timeBank).toEqual({ ms: 20_000, hands: 0 });
+    a.close();
+    b.close();
+
+    await worker.stop();
+    worker = await startWorker(port, state);
+    a = await TableSocket.open(ca, id, { base });
+    b = await TableSocket.open(cb, id, { base });
+    const back = actor === 'a' ? a : b;
+    expect(back.state!.hand).toMatchObject({ id: h.id, seq: h.seq, deadline: h.deadline! + 10_000, extraMs: 10_000 });
+    expect(back.state!.you.timeBank).toEqual({ ms: 20_000, hands: 0 });
+    // The same request sent again after the restart (as by a client that never saw the answer): nothing more is added.
+    const again = back.waitNext((m) => m.t !== 'state' && 'reqId' in m && m.reqId === reqId, 15_000, 'answer again');
+    back.send({ ...msg, reqId });
+    expect(['ack', 'error']).toContain((await again).t);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(back.state!.hand).toMatchObject({ deadline: h.deadline! + 10_000, extraMs: 10_000 });
+    expect(back.state!.you.timeBank).toEqual({ ms: 20_000, hands: 0 });
+    // A new use from what the screen shows works as before the restart.
+    expect(await back.request({ t: 'timeBank', handId: h.id, seq: h.seq, seen: 10_000 })).toMatchObject({ t: 'ack' });
+    expect(back.state!.hand).toMatchObject({ deadline: h.deadline! + 20_000, extraMs: 20_000 });
+    expect(back.state!.you.timeBank).toEqual({ ms: 10_000, hands: 0 });
+    // The clock still runs: the room's alarm is set for this turn.
+    const admin = await adminOn(base);
+    const detail = (await admin.get(`/api/admin/tables/${id}`)).body;
+    expect(detail.live.timer).toMatchObject({ deadline: h.deadline! + 20_000, extraMs: 20_000 });
+    expect(detail.diagnosis.issues).not.toContain('timer_unarmed');
+    a.close();
+    b.close();
   }, 240_000);
 });

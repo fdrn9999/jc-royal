@@ -131,6 +131,9 @@ const auditNames = labeler({
   'table.create': 'auditTableCreate',
   'table.update': 'auditTableUpdate',
   'table.control': 'auditTableControl',
+  'table.timer_recover': 'auditTimerRecover',
+  'timebank.policy': 'auditTimeBankPolicy',
+  'timebank.view': 'auditTimeBankView',
   'user.chips': 'auditUserChips',
   'user.chips_duplicate': 'auditChipsDuplicate',
   'user.chips_refused': 'auditChipsRefused',
@@ -157,7 +160,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'timebank', 'report', 'board', 'message', 'service', 'maintenance'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -170,6 +173,7 @@ export const auditFamilyLabel = labeler({
   bots: 'famBots',
   referral: 'famReferral',
   settings: 'famSettings',
+  timebank: 'famTimeBank',
   report: 'famReport',
   board: 'famBoard',
   message: 'famMessage',
@@ -189,6 +193,7 @@ export const capabilityLabel = labeler({
   'refill.policy': 'capRefillPolicy',
   'bots.policy': 'capBotsPolicy',
   'referral.policy': 'capReferralPolicy',
+  'timebank.policy': 'capTimeBankPolicy',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({
@@ -238,6 +243,7 @@ export const tableIssueLabel = labeler({
   settings_not_applied: 'issueSettingsNotApplied',
   session_without_seat: 'issueSessionWithoutSeat',
   seat_without_session: 'issueSeatWithoutSession',
+  timer_unarmed: 'issueTimerUnarmed',
 });
 /** Service notices and maintenance windows (the admin service page). */
 export const noticeKindLabel = labeler({ general: 'noticeKindGeneral', urgent: 'noticeKindUrgent', maintenance: 'noticeKindMaintenance' });

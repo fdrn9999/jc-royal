@@ -44,6 +44,8 @@ export const CAPABILITIES = {
   'bots.policy': 'super_admin',
   /** Change the referral policy (on, amounts, caps, hands, review threshold), or resume payouts after an emergency stop (anyone on duty may stop them). */
   'referral.policy': 'super_admin',
+  /** Change the time bank policy (on, member rooms, first grant, maximum, one use, refill). */
+  'timebank.policy': 'super_admin',
 } as const satisfies Record<string, AdminRole>;
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -135,6 +137,12 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'PATCH /tables/:id': r('tables', 'table.update', { target: 'table' }),
   'POST /tables/:id/control': r('tableControl', 'table.control', { reauth, target: 'table' }),
   'POST /tables/:id/close': r('tableControl', 'table.close', { reauth, preview, target: 'table' }),
+  // A turn whose timer failed, recovered by the room's own rules (routes/admin-timebank.ts); no one's time is set by hand.
+  'POST /tables/:id/timer-recover': r('tableControl', 'table.timer_recover', { reauth, target: 'table' }),
+
+  // Time bank (routes/admin-timebank.ts): anyone on table duty reads it; the policy is a super admin's.
+  'GET /time-bank': r('tables', 'timebank.view'),
+  'PUT /time-bank/policy': r('tables', 'timebank.policy', { role: CAPABILITIES['timebank.policy'], reauth, preview }),
 
   'GET /hands': r('hands', 'hand.list'),
   // A finished hand with every player's cards. Hands are written only once settled, so a hand in play cannot be read.

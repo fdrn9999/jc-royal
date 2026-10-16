@@ -237,7 +237,7 @@ export function TableScene({
               isMe={seat.seatIndex === mySeat}
               isActor={!!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled'}
               deadline={hand?.deadline ?? null}
-              turnMs={s.table.turnSeconds * 1000}
+              turnMs={s.table.turnSeconds * 1000 + (hand?.extraMs ?? 0)}
               isDealer={hand?.buttonSeat === seat.seatIndex}
               isHost={!!s.table.hostId && seat.userId === s.table.hostId}
               blind={hand && hand.stage === 'preflop' ? (hand.sbSeat === seat.seatIndex ? 'SB' : hand.bbSeat === seat.seatIndex ? 'BB' : null) : null}

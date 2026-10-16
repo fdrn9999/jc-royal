@@ -35,7 +35,8 @@ export interface TableSocketApi {
       | { t: 'sit'; seatIndex: number; buyIn: number }
       | { t: 'leave' }
       | { t: 'topUp'; amount: number }
-      | { t: 'autoRebuy'; on: boolean; amount?: number; cap?: number; consent?: true },
+      | { t: 'autoRebuy'; on: boolean; amount?: number; cap?: number; consent?: true }
+      | { t: 'timeBank'; handId: string; seq: number; seen: number },
     reqId?: string,
   ) => Promise<void>;
   /**

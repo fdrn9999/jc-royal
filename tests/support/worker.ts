@@ -103,6 +103,9 @@ export const TABLES: TestTable[] = [
   { id: 'it-ref-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Account settings: auto-muck saved from a device, and an administrator's reset, reach the table the member sits at.
   { id: 'it-set-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Time bank: heads-up with long turns, so only the bank moves a deadline; and a short turn that still runs out.
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `it-tb-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  { id: 'it-tb-fast', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 3 },
 ];
 
 async function sha256b64url(s: string) {

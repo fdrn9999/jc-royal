@@ -1,4 +1,4 @@
-import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, HAND_NOTE_METRICS, type HandNoteMetric, SETTINGS_METRICS, type SettingsMetric, STATS_DAY, STATS_MARKER_DAY, STATS_TZ_OFFSET_MS, dayStart, statsDay } from '@jc/db';
+import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, HAND_NOTE_METRICS, type HandNoteMetric, SETTINGS_METRICS, type SettingsMetric, STATS_DAY, TIME_BANK_METRICS, type TimeBankMetric, STATS_MARKER_DAY, STATS_TZ_OFFSET_MS, dayStart, statsDay } from '@jc/db';
 
 /**
  * Operations statistics by day, week and month for the admin console (GET /api/admin/stats).
@@ -185,10 +185,10 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
     put(r.day as number, 'mau', r.mau as number);
   }
 
-  // Replaces the span's own rows: every metric of days a..b but the Academy, refill, hand note and settings counters (added as events arrive)
+  // Replaces the span's own rows: every metric of days a..b but the Academy, refill, hand note, settings and time bank counters (added as events arrive)
   // and the cohorts (kept on their sign-up day), and the cohorts whose week ended in the span. Only non-zero numbers are kept.
   const write = await db.batch([
-    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'rf_*' AND metric NOT GLOB 'hn_*' AND metric NOT GLOB 'ss_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
+    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'rf_*' AND metric NOT GLOB 'hn_*' AND metric NOT GLOB 'ss_*' AND metric NOT GLOB 'tb_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
     db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric GLOB 'cohort_*'`).bind(a - COHORT_DAYS, b - COHORT_DAYS),
     db
       .prepare(
@@ -328,6 +328,7 @@ export function summarize(get: (day: number, metric: string) => number, a: numbe
     handNotes: Object.fromEntries(HAND_NOTE_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<HandNoteMetric, number>,
     // Account settings sync: saves, conflicts, refusals and failures, resets (no count of accounts: that would read them all).
     settings: Object.fromEntries(SETTINGS_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<SettingsMetric, number>,
+    timeBank: Object.fromEntries(TIME_BANK_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<TimeBankMetric, number>,
   };
 }
 export type StatsPeriod = ReturnType<typeof summarize>;

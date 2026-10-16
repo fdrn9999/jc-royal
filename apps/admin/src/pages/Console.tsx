@@ -908,7 +908,10 @@ export function TablesPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-extrabold">{t('tables')}</h1>
-        <Button onClick={() => setOpen(true)} data-testid="create-table">{t('createTable')}</Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline" data-testid="time-bank-link">{t('tbManage')} →</Link>
+          <Button onClick={() => setOpen(true)} data-testid="create-table">{t('createTable')}</Button>
+        </div>
       </div>
       <Feedback note={note} />
       <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); filter(setQ)(text.trim()); }}>
@@ -1004,6 +1007,8 @@ interface LiveSeat {
   topUp?: { state: string; amount: number; auto: boolean } | null;
   /** A table bot's level (the room plays it). */
   bot?: string | null;
+  /** The member's time bank here: ms left, hands since the last refill (read only: no one sets it). */
+  timeBank?: { ms: number; hands: number } | null;
 }
 /** The room's admin status (never cards). Fields after `chipsOnTable` are absent from rooms older than B2. */
 interface LiveStatus {
@@ -1024,7 +1029,12 @@ interface LiveStatus {
   maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
   /** Table bots as the room sees them: allowed now (table setting and service policy), and when it tries a bot again after a failure. */
   bots?: { allowed: boolean; policyOn: boolean; retryAt: number | null; failures: number } | null;
+  /** The running turn's clock (time bank time added included). Absent from rooms older than the time bank. */
+  timer?: { turnStartedAt: number; baseMs: number; extraMs: number; deadline: number; alarmAt: number | null; lateMs: number } | null;
+  /** The time bank rules of the hand being played and those the next hand gets, with banks kept for members who left. */
+  timeBank?: { hand: TimeBankRulesView | null; next: TimeBankRulesView | null; policyVersion: number | null; kept: number; handUses: number } | null;
 }
+interface TimeBankRulesView { version: number; initialMs: number; maxMs: number; unitMs: number; refillHands: number; refillMs: number }
 interface Diagnosis {
   issues: string[];
   sessionsOnlyInD1: { id: string; userId: string; seatIndex: number; buyIn: number; nickname: string | null }[];
@@ -1094,6 +1104,102 @@ function TableBotsPanel({ tb, live, act }: { tb: TableRow; live: LiveStatus | nu
           {dirty && <Button type="button" variant="ghost" onClick={() => setV(saved)}>{t('cancel')}</Button>}
         </div>
       </form>
+    </Panel>
+  );
+}
+
+type RecoverResult = 'bot_moved' | 'timed_out' | 'rearmed' | 'none';
+const RECOVER_TEXT: Record<RecoverResult, 'tbRecoverBotMoved' | 'tbRecoverTimedOut' | 'tbRecoverRearmed' | 'tbRecoverNone'> = {
+  bot_moved: 'tbRecoverBotMoved',
+  timed_out: 'tbRecoverTimedOut',
+  rearmed: 'tbRecoverRearmed',
+  none: 'tbRecoverNone',
+};
+
+/**
+ * The running turn's timer and the table's time bank, read only: when the turn began, its turn time and the time bank
+ * time added, the deadline, the room's alarm and how late it is; the rules of this hand and of the next (a policy change
+ * shows here as a different next version). "Timer recovery" asks the room to apply its own rules now (a turn past its
+ * deadline times out or its bot moves; otherwise the alarm is set again). No one's time is set here.
+ */
+function TimerPanel({ id, live, issues, open, onDone }: { id: string; live: LiveStatus; issues: string[]; open: boolean; onDone: (n: Note) => Promise<void> }) {
+  const { t, locale } = useT();
+  const { api } = useAdmin();
+  const [ask, setAsk] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const tm = live.timer;
+  const tb = live.timeBank;
+  const unarmed = issues.includes('timer_unarmed');
+  const late = !!tm && tm.lateMs > 0;
+  // A turn's clock is read to the second.
+  const time = (ms: number | null | undefined) => (ms ? new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', { timeStyle: 'medium' }).format(ms) : t('none'));
+  const s = (ms: number) => t('tbSeconds', { n: Math.round(ms / 1000) });
+  const recover = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ result: RecoverResult; lateMs: number }>(`/api/admin/tables/${id}/timer-recover`, { body: { reason: reason.trim() } });
+      setAsk(false);
+      setReason('');
+      await onDone({ ok: true, text: t(RECOVER_TEXT[r.result] ?? 'tbRecoverNone') });
+    } catch (e) {
+      setAsk(false);
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) await onDone({ ok: false, text: errText(e, t) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel title={t('tbTimerTitle')} actions={<Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline">{t('tbManage')} →</Link>}>
+      <div className="flex flex-col gap-3 text-sm" data-testid="table-timer" data-state={!tm ? 'idle' : unarmed ? 'unarmed' : late ? 'late' : 'ok'}>
+        {!tm ? (
+          <p className="text-ink-400">{t('tbNoTurn')}</p>
+        ) : (
+          <>
+            <p className="flex flex-wrap items-center gap-1">
+              {unarmed ? <Badge tone="red">{t('tbTimerUnarmed')}</Badge> : late ? <Badge tone="gold">{t('tbTimerLate', { n: s(tm.lateMs) })}</Badge> : <Badge tone="green">{t('tbTimerOk')}</Badge>}
+              {tm.extraMs > 0 && <Badge tone="blue">{t('tbExtraAdded', { n: s(tm.extraMs) })}</Badge>}
+            </p>
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div><dt className="text-xs text-ink-400">{t('tbTurnStarted')}</dt><dd>{time(tm.turnStartedAt)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('tbTurnTime')}</dt><dd className="font-mono">{s(tm.baseMs)} + {s(tm.extraMs)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('tbDeadline')}</dt><dd data-testid="timer-deadline">{time(tm.deadline)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('diagAlarm')}</dt><dd>{time(tm.alarmAt)}</dd></div>
+            </dl>
+          </>
+        )}
+        {tb && (
+          <div className="flex flex-col gap-1 rounded-lg border border-white/10 px-3 py-2 text-xs" data-testid="table-time-bank">
+            <p>
+              {tb.hand ? t('tbHandRules', { v: tb.hand.version, unit: s(tb.hand.unitMs), max: s(tb.hand.maxMs) }) : t('tbHandRulesOff')}
+              {' · '}
+              {tb.next ? t('tbNextRules', { v: tb.next.version }) : t('tbNextRulesOff')}
+            </p>
+            {(tb.hand?.version ?? null) !== (tb.next?.version ?? null) && <p className="text-gold-200">{t('tbPendingVersion')}</p>}
+            <p className="text-ink-400">{t('tbHandUses', { n: tb.handUses, kept: tb.kept })}</p>
+          </div>
+        )}
+        <div className="flex flex-col gap-1">
+          <Button variant={unarmed || late ? 'gold' : 'outline'} disabled={!open} onClick={() => setAsk(true)} data-testid="timer-recover">{t('tbRecover')}</Button>
+          <p className="text-xs text-ink-400">{t('tbRecoverHint')}</p>
+        </div>
+      </div>
+      <Modal
+        open={ask}
+        onClose={() => setAsk(false)}
+        title={t('tbRecover')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAsk(false)}>{t('cancel')}</Button>
+            <Button variant="gold" disabled={reason.trim().length < 2} loading={busy} onClick={recover} data-testid="timer-recover-confirm">{t('confirm')}</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2 text-sm">
+          <p>{t('tbRecoverConfirm')}</p>
+          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="timer-recover-reason" />}</Field>
+        </div>
+      </Modal>
     </Panel>
   );
 }
@@ -1182,6 +1288,7 @@ export function TableDetailPage() {
                       {s.leaveAfterHand && <Badge>{t('leaveAfterHand')}</Badge>}
                       {!!s.timeouts && <Badge>{t('timeoutsN', { n: s.timeouts })}</Badge>}
                       {s.topUp && <Badge tone="blue">{t('topUpN', { amount: formatChips(s.topUp.amount), state: topUpStateLabel(t, s.topUp.state) })}</Badge>}
+                      {s.timeBank && <Badge>{t('tbSeatBank', { n: Math.floor(s.timeBank.ms / 1000) })}</Badge>}
                     </span>
                     <span className="shrink-0 font-mono">{formatChips(s.stack)}</span>
                   </li>
@@ -1256,6 +1363,18 @@ export function TableDetailPage() {
             <p className="text-xs text-ink-400">{t('diagBasis', { time: time(live.at) })} {t('diagCompare')}</p>
           </div>
         </Panel>
+      )}
+      {live && (
+        <TimerPanel
+          id={id}
+          live={live}
+          issues={diag?.issues ?? []}
+          open={controllable}
+          onDone={async (n) => {
+            setNote(n);
+            await reload();
+          }}
+        />
       )}
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('blinds')}>

@@ -3,7 +3,7 @@ import type { AppEnv, Env } from '../env';
 import { INTERNAL_HEADER } from '../routes/tables';
 import { fail } from './http';
 
-type RoomAction = 'status' | 'reload' | 'close' | 'seat-check' | 'kick' | 'role' | 'holdings' | 'muck';
+type RoomAction = 'status' | 'reload' | 'close' | 'seat-check' | 'kick' | 'role' | 'holdings' | 'muck' | 'timer-recover';
 
 /** Calls a table room's internal endpoint with the worker's bindings (also from the cron handler). Null when unreachable. */
 export async function roomCallEnv(env: Env, tableId: string, action: RoomAction, query: Record<string, string> = {}): Promise<Record<string, unknown> | null> {
