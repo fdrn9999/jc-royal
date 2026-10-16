@@ -5,10 +5,11 @@
  */
 import type { SeatView } from '@jc/types';
 import { cx, PlayingCard } from '@jc/ui';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { ReactionBubble, ReactionTray, type ReactionSender, type SeatReaction } from './Reactions';
 
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now());
@@ -60,6 +61,10 @@ export interface SeatProps {
   onPick?: () => void;
   /** My seat after a hand, with auto-muck on: a button over each card turns it face up for the table. */
   onShow?: (card: 0 | 1) => void;
+  /** The quick reaction this player sent, while it shows. */
+  reaction?: SeatReaction | null;
+  /** My seat at a real table, with reactions on: tapping the plate opens the reaction tray. */
+  react?: ReactionSender;
   compact: boolean;
   amounts: Amounts;
   style: CSSProperties;
@@ -69,6 +74,31 @@ export function Seat(p: SeatProps) {
   const { t } = useI18n();
   const s = p.seat;
   const cardSize = p.compact ? (p.isMe ? '2.6rem' : '1.7rem') : p.isMe ? '3.4rem' : '2.5rem';
+  const [tray, setTray] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const trayOpen = tray && !!p.react;
+  // My turn needs the space above my seat (and my attention): the tray gives way.
+  useEffect(() => {
+    if (p.isActor) setTray(false);
+  }, [p.isActor]);
+  useEffect(() => {
+    if (!trayOpen) return;
+    const outside = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setTray(false);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setTray(false);
+      opener.current?.focus();
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [trayOpen]);
 
   if (s.state === 'empty') {
     return (
@@ -108,7 +138,15 @@ export function Seat(p: SeatProps) {
           : 'text-[#9fd8b6]';
 
   return (
-    <div className="absolute z-10 -translate-x-1/2 -translate-y-1/2" style={p.style} data-testid={`seat-${s.seatIndex}`} data-state={s.state}>
+    <div
+      ref={root}
+      // Open, the tray goes above the bets, the board and the effects.
+      className={cx('absolute -translate-x-1/2 -translate-y-1/2', trayOpen ? 'z-40' : 'z-10')}
+      style={p.style}
+      data-testid={`seat-${s.seatIndex}`}
+      data-state={s.state}
+    >
+      {trayOpen && <ReactionTray sender={p.react!} onClose={() => setTray(false)} />}
       <div className={cx('relative flex flex-col items-center', folded && !shown && 'opacity-55')}>
         {/* hole cards */}
         {cards.length > 0 && (
@@ -173,6 +211,7 @@ export function Seat(p: SeatProps) {
             >
               {s.avatarUrl ? <img src={s.avatarUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" /> : initials(s.nickname)}
             </span>
+            {p.reaction && <ReactionBubble key={p.reaction.id} r={p.reaction} compact={p.compact} />}
           </span>
           <span className="flex min-w-0 flex-col leading-tight">
             {/* The width cap sits on a wrapper: MemberName's own max-w-full comes later in the stylesheet and would win. */}
@@ -202,6 +241,22 @@ export function Seat(p: SeatProps) {
           )}
           {p.onPick && (
             <button type="button" className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400" onClick={p.onPick} aria-label={s.nickname} data-testid={`seat-pick-${s.seatIndex}`} />
+          )}
+          {p.react && (
+            <>
+              <button
+                ref={opener}
+                type="button"
+                className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400"
+                onClick={() => setTray((o) => !o)}
+                aria-label={t('react.open')}
+                aria-expanded={trayOpen}
+                data-testid="react-open"
+              />
+              <span aria-hidden className="pointer-events-none absolute -bottom-1 -right-1 grid size-[1.125rem] place-items-center rounded-full border border-gold-500/50 bg-ink-950 text-[10px] leading-none">
+                😊
+              </span>
+            </>
           )}
         </div>
         {/* status line */}

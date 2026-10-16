@@ -17,10 +17,12 @@ export interface Prefs {
   autoMuck: boolean;
   /** Table and replay amounts in chips or in big blinds (reading only; the wallet stays in chips). */
   amountUnit: AmountUnit;
+  /** See the quick emoji reactions at the seats and send them from my seat; off hides both. */
+  reactions: boolean;
 }
 
 const KEY = 'jc.prefs';
-const DEFAULTS: Prefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips' };
+const DEFAULTS: Prefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips', reactions: true };
 let current: Prefs = load();
 const listeners = new Set<() => void>();
 
@@ -29,6 +31,7 @@ function load(): Prefs {
     const p = { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Prefs>) };
     if (!THEMES.includes(p.theme)) p.theme = 'royal';
     if (!AMOUNT_UNITS.includes(p.amountUnit)) p.amountUnit = 'chips';
+    if (typeof p.reactions !== 'boolean') p.reactions = true;
     return p;
   } catch {
     return { ...DEFAULTS };

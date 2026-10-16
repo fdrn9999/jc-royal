@@ -13,6 +13,7 @@ import {
 import { Button, cx, Empty, formatChips, Input, Modal, Panel, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { EmojiPicker } from '../components/EmojiPicker';
 import { JoinCodeModal } from '../components/JoinCode';
 import { MemberName } from '../components/MemberName';
 import { Avatar, BlockConfirm, ReportModal, type ReportSubject } from '../components/Social';
@@ -457,6 +458,7 @@ export function ConversationPage() {
   const [msgs, setMsgs] = useState<DirectMessageDto[]>([]);
   const [missing, setMissing] = useState(false);
   const [text, setText] = useState('');
+  const field = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmBlock, setConfirmBlock] = useState(false);
@@ -698,9 +700,10 @@ export function ConversationPage() {
           <Button size="sm" variant="outline" loading={blockBusy} onClick={() => void setBlocked(false)} data-testid="dm-unblock">{t('block.unblock')}</Button>
         </div>
       ) : conv.isFriend ? (
-        <form className="flex shrink-0 flex-col gap-1" onSubmit={send}>
+        <form className="relative flex shrink-0 flex-col gap-1" onSubmit={send}>
           <div className="flex gap-2">
-            <Input value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder={t('dm.placeholder')} aria-label={t('dm.placeholder')} className="text-base sm:text-sm" data-testid="dm-input" />
+            <Input ref={field} value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder={t('dm.placeholder')} aria-label={t('dm.placeholder')} className="min-w-0 text-base sm:text-sm" data-testid="dm-input" />
+            <EmojiPicker inputRef={field} value={text} onChange={setText} maxLength={500} />
             <Button type="submit" disabled={!text.trim()} loading={sending} data-testid="dm-send">{t('dm.send')}</Button>
           </div>
           {error && <p className="text-sm text-danger" role="alert">{error}</p>}

@@ -5,6 +5,29 @@ import type { TableCue, TableView } from './table';
 /** An automatic rebuy's total limit may cover at most this many rebuys of the chosen amount. */
 export const AUTO_REBUY_MAX_TIMES = 5;
 
+/** Quick reactions a seated player can send: shown for a moment over their avatar, never stored, no effect on play. */
+export const REACTIONS = ['clap', 'laugh', 'cry', 'wow', 'cool', 'fire', 'heart', 'gg'] as const;
+export type ReactionId = (typeof REACTIONS)[number];
+export const REACTION_EMOJI: Record<ReactionId, string> = { clap: '👏', laugh: '😂', cry: '😭', wow: '😮', cool: '😎', fire: '🔥', heart: '❤️', gg: '🤝' };
+/** At least this long between two reactions from one player. */
+export const REACTION_COOLDOWN_MS = 2_000;
+/** And at most `max` of them in any `windowMs`. */
+export const REACTION_BURST = { max: 5, windowMs: 30_000 } as const;
+/** The room forgives this much early arrival: two taps the client spaced correctly can reach it a little closer. */
+export const REACTION_SLACK_MS = 300;
+
+/**
+ * Milliseconds until a player who sent reactions at `times` (oldest first) may send another at `now` (0: now). The room
+ * and the client apply the same rule: the client so that a tap the room would refuse is not offered.
+ */
+export function reactionWait(times: readonly number[], now: number): number {
+  const recent = times.filter((at) => now - at < REACTION_BURST.windowMs);
+  const last = recent[recent.length - 1];
+  const cooldown = last === undefined ? 0 : last + REACTION_COOLDOWN_MS - now;
+  const burst = recent.length >= REACTION_BURST.max ? recent[recent.length - REACTION_BURST.max]! + REACTION_BURST.windowMs - now : 0;
+  return Math.max(0, cooldown, burst);
+}
+
 /**
  * Client-generated id of a command. The room answers it with `ack` (or an `error` carrying it) and applies an id
  * once, so a command whose answer a lost connection swallowed can be sent again unchanged.
@@ -64,6 +87,8 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
   /** Shows one of the player's two cards (0 or 1) from the hand that just ended, until the next deal. Auto-muck on only. */
   z.object({ t: z.literal('show'), reqId: ReqId, card: z.number().int().min(0).max(1) }),
   z.object({ t: z.literal('chat'), text: z.string().trim().min(1).max(200), reqId: ReqId.optional() }),
+  /** A quick reaction from the sender's seat (seated players only). Sent once: one that missed its moment is not retried. */
+  z.object({ t: z.literal('react'), reaction: z.enum(REACTIONS), reqId: ReqId.optional() }),
   z.object({ t: z.literal('ping') }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
@@ -126,6 +151,8 @@ export type ServerMessage =
   | { t: 'state'; state: TableView; cues: TableCue[] }
   | { t: 'chat'; message: ChatMessage }
   | { t: 'chatHistory'; messages: ChatMessage[] }
+  /** A quick reaction, to everyone at the table; `seatIndex` and `userId` are the sender's when the room took it. */
+  | { t: 'react'; seatIndex: number; userId: string; reaction: ReactionId; at: number }
   | { t: 'ack'; reqId: string }
   | { t: 'error'; code: ErrorCode; message: string; reqId?: string }
   | { t: 'notice'; code: NoticeCode; amount?: number }

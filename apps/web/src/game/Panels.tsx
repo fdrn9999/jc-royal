@@ -3,6 +3,7 @@ import { AUTO_REBUY_MAX_TIMES, type ChatMessage, type TableView } from '@jc/type
 import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { EmojiPicker } from '../components/EmojiPicker';
 import { MemberName, RoleBadge } from '../components/MemberName';
 import { useAmounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
@@ -315,6 +316,7 @@ export function ChatPanel({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const shown = hidden?.size ? chat.filter((m) => !hidden.has(m.userId)) : chat;
   useEffect(() => {
     // Block body on purpose: newer Chrome returns a Promise from scrollIntoView,
@@ -347,15 +349,18 @@ export function ChatPanel({
         <div ref={end} />
       </div>
       {canChat && (
-        <form onSubmit={submit} className="mt-2 flex gap-2">
+        <form onSubmit={submit} className="relative mt-2 flex gap-2">
           <input
+            ref={field}
             value={text}
             maxLength={200}
             onChange={(e) => setText(e.target.value)}
             placeholder={t('table.chatPlaceholder')}
             className="h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-3 text-base sm:h-9 sm:text-sm"
             aria-label={t('table.chat')}
+            data-testid="chat-input"
           />
+          <EmojiPicker inputRef={field} value={text} onChange={setText} maxLength={200} small />
           <Button size="sm" type="submit" className="h-11! sm:h-9!" aria-label={t('table.chat')}>
             ↵
           </Button>
@@ -437,6 +442,13 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
               <span className="text-xs text-ink-300">{t('settings.autoMuckHint')}</span>
             </span>
             <input type="checkbox" checked={prefs.autoMuck} onChange={(e) => setPrefs({ autoMuck: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-automuck" />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.reactions')}
+              <span className="text-xs text-ink-300">{t('settings.reactionsHint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.reactions} onChange={(e) => setPrefs({ reactions: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-reactions" />
           </label>
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="flex flex-col gap-0.5" id="amount-unit-label">

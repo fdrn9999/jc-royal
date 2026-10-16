@@ -15,6 +15,7 @@ import { PlayerCard, ReportModal, type ReportSubject } from '../components/Socia
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
+import { useReactionSender } from '../game/Reactions';
 import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { api, ApiError } from '../lib/api';
@@ -72,6 +73,9 @@ export function TablePage() {
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
   // Table chat from players I muted on this device or blocked; it hides their lines for me only.
   const hiddenChat = useHiddenChat(me?.id);
+  // Quick reactions: off in the settings, none show and none can be sent; muted or blocked players' are not shown.
+  const reactSender = useReactionSender(sock.send);
+  const reactions = useMemo(() => (prefs.reactions ? sock.reactions.filter((r) => !hiddenChat.has(r.userId)) : []), [prefs.reactions, sock.reactions, hiddenChat]);
   const [toast, setToast] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [topUpOpen, setTopUpOpen] = useState(false);
@@ -403,6 +407,8 @@ export function TablePage() {
                 onSit={setBuySeat}
                 onSeatClick={(seat) => seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}) })}
                 onShow={(card) => sock.send({ t: 'show', card })}
+                reactions={reactions}
+                react={seated && prefs.reactions ? reactSender : undefined}
                 nextIn={nextIn}
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}

@@ -19,6 +19,9 @@ import {
   MEMBER_IDLE_CLOSE_MS,
   PLAYER_REPORT_WINDOW_MS,
   publicRole,
+  REACTION_BURST,
+  REACTION_SLACK_MS,
+  reactionWait,
   type ChatMessage,
   type ClientMessage,
   type ErrorCode,
@@ -209,6 +212,8 @@ export class TableRoom extends DurableObject<Env> {
   private loaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private buckets = new Map<string, { tokens: number; at: number; lastChat: number }>();
+  /** When each player last sent quick reactions (by player, so a second tab does not double the rate). Memory only. */
+  private reactedAt = new Map<string, number[]>();
   private lastStats = '';
   /** Operations counters (packages/db/src/ops.ts) and the latest problem, not written yet (see `publishStats`). */
   private ops = new OpsCounter();
@@ -710,6 +715,20 @@ export class TableRoom extends DurableObject<Env> {
         this.chat = [...this.chat, line].slice(-CHAT_HISTORY);
         await this.ctx.storage.put('chat', this.chat);
         for (const s of this.sockets()) this.send(s, { t: 'chat', message: line });
+        return this.ack(ws, msg.reqId);
+      }
+      case 'react': {
+        // Shown for a moment and gone: nothing is stored, and nothing about the hand or the seat changes.
+        const i = this.seatIndexOf(a.userId);
+        if (i === null || this.room.seats[i]!.phase !== 'seated') throw new CommandError('forbidden', 'not seated');
+        const now = Date.now();
+        const times = this.reactedAt.get(a.userId) ?? [];
+        if (reactionWait(times, now) > REACTION_SLACK_MS) throw new CommandError('rate_limited', 'slow down');
+        this.reactedAt.set(a.userId, [...times.filter((at) => now - at < REACTION_BURST.windowMs), now]);
+        if (this.reactedAt.size > 100) {
+          for (const [u, ts] of this.reactedAt) if (now - ts[ts.length - 1]! >= REACTION_BURST.windowMs) this.reactedAt.delete(u);
+        }
+        for (const s of this.sockets()) this.send(s, { t: 'react', seatIndex: i, userId: a.userId, reaction: msg.reaction, at: now });
         return this.ack(ws, msg.reqId);
       }
       case 'sit':

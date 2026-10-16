@@ -10,6 +10,7 @@ import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { CueLayer } from './CueLayer';
 import { POT_POINT, seatLayout, type SeatGeometry } from './layout';
+import type { ReactionSender, SeatReaction } from './Reactions';
 import { Seat } from './Seat';
 import type { CueEvent } from './useTableSocket';
 
@@ -66,6 +67,8 @@ export function TableScene({
   onSit,
   onSeatClick,
   onShow,
+  reactions,
+  react,
   nextIn,
   cues,
   consumeCues,
@@ -81,6 +84,10 @@ export function TableScene({
   onSeatClick?: (seat: SeatView) => void;
   /** Shows one of my cards after the hand (the real table only; offered while `you.canShow`). */
   onShow?: (card: 0 | 1) => void;
+  /** Quick reactions showing now (the real table only), each at its sender's seat while that player still sits there. */
+  reactions?: SeatReaction[];
+  /** Sending reactions from my seat (the real table only, while seated). */
+  react?: ReactionSender;
   nextIn: number | null;
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
@@ -161,6 +168,8 @@ export function TableScene({
               onSit={() => onSit(seat.seatIndex)}
               onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
               onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? onShow : undefined}
+              reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
+              react={seat.seatIndex === mySeat ? react : undefined}
               compact={compact}
               amounts={amounts}
               style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
