@@ -1,11 +1,12 @@
 import { schema } from '@jc/db';
-import { HAND_RANK_CLASSES, POSITIONS, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
+import { HAND_RANK_CLASSES, HandListQuerySchema, HandNoteInputSchema, POSITIONS, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { replayLog, replayPlayer, replayUser } from '../lib/community';
-import { fail } from '../lib/http';
+import { countNote, failureMetric, isFiltered, listHands, readNote, savedMetrics, saveNote } from '../lib/handNotes';
+import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
 import { referralMe } from '../lib/referral';
 import { claimRefill, REFILL_RATE, refillSnapshot } from '../lib/refill';
@@ -163,29 +164,19 @@ export const meRoutes = new Hono<AppEnv>()
     };
     return c.json(out);
   })
+  /**
+   * The member's hands, newest first, with their own notes (lib/handNotes.ts). Filters: date range, position, result,
+   * pot size, tag, bookmarked; the next page starts after `before` (and `beforeId`, the last hand shown). A filtered
+   * list is rate limited, since a narrow filter may read many of the member's hands.
+   */
   .get('/hands', async (c) => {
+    const uid = c.var.user!.id;
     const { limit, before } = pageParams((k) => c.req.query(k));
-    const rows = await c.var.db
-      .select({ hp: schema.handPlayers, h: schema.hands, t: { name: schema.tables.name } })
-      .from(schema.handPlayers)
-      .innerJoin(schema.hands, eq(schema.hands.id, schema.handPlayers.handId))
-      .innerJoin(schema.tables, eq(schema.tables.id, schema.hands.tableId))
-      .where(and(eq(schema.handPlayers.userId, c.var.user!.id), before ? lt(schema.handPlayers.endedAt, before) : undefined))
-      .orderBy(desc(schema.handPlayers.endedAt))
-      .limit(limit);
-    const out: HandSummaryDto[] = rows.map(({ hp, h, t }) => ({
-      id: h.id,
-      tableId: h.tableId,
-      tableName: t.name,
-      handNumber: h.handNumber,
-      endedAt: h.endedAt,
-      board: JSON.parse(h.board) as string[],
-      potTotal: h.potTotal,
-      net: hp.net,
-      won: hp.won,
-      holeCards: JSON.parse(hp.holeCards) as string[],
-      rankClass: hp.rankClass,
-    }));
+    const parsed = HandListQuerySchema.safeParse(c.req.query());
+    if (!parsed.success) fail(400, 'bad_request', 'invalid filter', parsed.error.issues.map((i) => ({ path: i.path, message: i.message })));
+    const q = parsed.data;
+    if (isFiltered(q)) await rateLimit(c, `hand-list:${uid}`, 60, 60_000);
+    const out: HandSummaryDto[] = await listHands(c.env.DB, uid, { ...q, limit, before });
     return c.json(out);
   })
   /**
@@ -205,11 +196,14 @@ export const meRoutes = new Hono<AppEnv>()
       .limit(1);
     if (!row) fail(404, 'not_found', 'hand not found');
     const { h: hand, t } = row;
-    const players = await c.var.db
-      .select({ hp: schema.handPlayers, user: replayUser })
-      .from(schema.handPlayers)
-      .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
-      .where(eq(schema.handPlayers.handId, handId));
+    const [players, note] = await Promise.all([
+      c.var.db
+        .select({ hp: schema.handPlayers, user: replayUser })
+        .from(schema.handPlayers)
+        .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
+        .where(eq(schema.handPlayers.handId, handId)),
+      readNote(c.env.DB, uid, handId),
+    ]);
     const out: HandDetailDto = {
       id: hand.id,
       tableId: hand.tableId,
@@ -225,6 +219,30 @@ export const meRoutes = new Hono<AppEnv>()
       players: players
         .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
         .map(({ hp, user }) => ({ ...replayPlayer(hp, user, uid), userId: hp.userId, isYou: hp.userId === uid })),
+      note,
     };
     return c.json(out);
+  })
+  /**
+   * Saves the member's bookmark, tags or memo on a hand they were dealt into (lib/handNotes.ts). 404 not_found for any
+   * other hand; 409 note_conflict, with the saved note in details, when the memo changed since revision `rev`. Saves and
+   * refusals are counted per kind for operations statistics; nothing written is counted, logged or audited.
+   */
+  .put('/hands/:id/note', async (c) => {
+    const uid = c.var.user!.id;
+    const handId = c.req.param('id');
+    try {
+      await rateLimit(c, `hand-note:${uid}`, 60, 60_000);
+      const input = await parseBody(c, HandNoteInputSchema);
+      const r = await saveNote(c.env.DB, uid, handId, input);
+      if (!r.ok) {
+        if (r.code === 'not_found') fail(404, 'not_found', 'hand not found');
+        fail(409, 'note_conflict', 'the memo changed since it was opened', { note: r.note });
+      }
+      await countNote(c.env.DB, savedMetrics(input));
+      return c.json(r.note);
+    } catch (e) {
+      await countNote(c.env.DB, [failureMetric(e)]);
+      throw e;
+    }
   });

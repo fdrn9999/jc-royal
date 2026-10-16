@@ -475,6 +475,71 @@ export interface HandSummaryDto {
   won: number;
   holeCards: string[];
   rankClass: string | null;
+  /** The member's seat position, or null where the hand's statistics were not worked out (see handStats.ts). */
+  position: Position | null;
+  /** The table's big blind now (blinds are not stored per hand). */
+  bigBlind: number;
+  /** The member's own note on the hand: never shown to anyone else. */
+  bookmarked: boolean;
+  tags: HandTag[];
+  hasMemo: boolean;
 }
+
+/** Tags a member can put on their own hands, in the order of their bits in hand_notes.tags. */
+export const HAND_TAGS = ['review', 'bluff', 'hardCall', 'bigPot'] as const;
+export type HandTag = (typeof HAND_TAGS)[number];
+export const HAND_MEMO_MAX = 500;
+export const HAND_RESULTS = ['up', 'down', 'even'] as const;
+export type HandResult = (typeof HAND_RESULTS)[number];
+/** Pot sizes the hand list can be narrowed to, in big blinds of the table's current blind. */
+export const HAND_MIN_POTS = [20, 50, 100] as const;
+
+const epochMs = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/**
+ * The filters of GET /api/me/hands (`limit` and `before` are read as before). `beforeId` is the last hand of the
+ * previous page, with `before` its end; the date range is [from, to) in ms. Every filter is optional; a value outside
+ * its list is refused (400).
+ */
+export const HandListQuerySchema = z.object({
+  beforeId: z.string().min(1).max(128).optional(),
+  from: epochMs.optional(),
+  to: epochMs.optional(),
+  position: z.enum(POSITIONS).optional(),
+  result: z.enum(HAND_RESULTS).optional(),
+  minPot: z.coerce
+    .number()
+    .refine((n) => (HAND_MIN_POTS as readonly number[]).includes(n))
+    .optional(),
+  tag: z.enum(HAND_TAGS).optional(),
+  bookmarked: z.literal('1').optional(),
+});
+export type HandListQuery = z.infer<typeof HandListQuerySchema>;
+
+export interface HandNoteDto {
+  bookmarked: boolean;
+  tags: HandTag[];
+  memo: string | null;
+  /** Memo revision: a memo save names the revision it was written over. 0 before the first memo. */
+  rev: number;
+  /** null before the member saved anything on the hand. */
+  updatedAt: number | null;
+}
+
+/**
+ * PUT /api/me/hands/:id/note. Only the fields sent change: a tag left out keeps its state. A memo save needs `rev`, the
+ * revision it was written over; if the memo changed since (another tab or device), nothing is saved and the answer is
+ * 409 note_conflict with the saved note in details. An empty memo removes it.
+ */
+export const HandNoteInputSchema = z
+  .object({
+    bookmarked: z.boolean().optional(),
+    tags: z.partialRecord(z.enum(HAND_TAGS), z.boolean()).optional(),
+    memo: z.string().max(HAND_MEMO_MAX).optional(),
+    rev: z.number().int().min(0).optional(),
+  })
+  .strict()
+  .refine((b) => b.bookmarked !== undefined || (b.tags && Object.keys(b.tags).length > 0) || b.memo !== undefined, { message: 'nothing to save' })
+  .refine((b) => b.memo === undefined || b.rev !== undefined, { message: 'a memo needs rev', path: ['rev'] });
+export type HandNoteInput = z.infer<typeof HandNoteInputSchema>;
 
 export type ApiError = { error: { code: string; message: string; details?: unknown } };

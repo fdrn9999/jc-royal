@@ -1,4 +1,4 @@
-import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, STATS_DAY, STATS_MARKER_DAY, STATS_TZ_OFFSET_MS, dayStart, statsDay } from '@jc/db';
+import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, HAND_NOTE_METRICS, type HandNoteMetric, STATS_DAY, STATS_MARKER_DAY, STATS_TZ_OFFSET_MS, dayStart, statsDay } from '@jc/db';
 
 /**
  * Operations statistics by day, week and month for the admin console (GET /api/admin/stats).
@@ -185,10 +185,10 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
     put(r.day as number, 'mau', r.mau as number);
   }
 
-  // Replaces the span's own rows: every metric of days a..b but the Academy and refill counters (added as events arrive)
+  // Replaces the span's own rows: every metric of days a..b but the Academy, refill and hand note counters (added as events arrive)
   // and the cohorts (kept on their sign-up day), and the cohorts whose week ended in the span. Only non-zero numbers are kept.
   const write = await db.batch([
-    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'rf_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
+    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'rf_*' AND metric NOT GLOB 'hn_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
     db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric GLOB 'cohort_*'`).bind(a - COHORT_DAYS, b - COHORT_DAYS),
     db
       .prepare(
@@ -325,6 +325,7 @@ export function summarize(get: (day: number, metric: string) => number, a: numbe
     reports: { created: sum('reports'), handled, avgHandleMs: handled ? Math.round(sum('handle_ms') / handled) : null },
     // Counted as events arrive (not rolled up), so the days since they began, rolled up or not.
     academy: Object.fromEntries(ACADEMY_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<(typeof ACADEMY_METRICS)[number], number>,
+    handNotes: Object.fromEntries(HAND_NOTE_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<HandNoteMetric, number>,
   };
 }
 export type StatsPeriod = ReturnType<typeof summarize>;
@@ -366,9 +367,13 @@ export function statsReport(rows: Row[], unit: StatsUnit, n: number, last: numbe
 export async function operationsStats(db: D1Database, unit: StatsUnit, n: number, now = Date.now()) {
   const last = statsDay(now) - 1;
   const from = buckets(unit, n, last)[0]![0];
-  const [rows, mk] = await db.batch([
+  const [rows, mk, notes] = await db.batch([
     db.prepare('SELECT day, metric, n FROM daily_stats WHERE day BETWEEN ?1 AND ?2').bind(from, last),
     db.prepare('SELECT metric, n FROM daily_stats WHERE day = ?1').bind(STATS_MARKER_DAY),
+    // Hand notes kept now, as counts only (never whose, on which hand, or what): one pass over hand_notes.
+    db.prepare(
+      'SELECT count(DISTINCT user_id) AS members, coalesce(sum(bookmarked), 0) AS bookmarked, coalesce(sum(tags != 0), 0) AS tagged, coalesce(sum(memo IS NOT NULL), 0) AS memos FROM hand_notes',
+    ),
   ]);
   const marks = (mk!.results as { metric: string; n: number }[]).reduce<StatsMarkers>(
     (o, r) => {
@@ -379,5 +384,6 @@ export async function operationsStats(db: D1Database, unit: StatsUnit, n: number
     },
     { rolledFrom: null, rolledThrough: null, activitySince: null },
   );
-  return { ...statsReport(rows!.results as Row[], unit, n, last, marks), rowsRead: rowsRead([rows!, mk!]) };
+  const handNotesNow = (notes!.results as { members: number; bookmarked: number; tagged: number; memos: number }[])[0]!;
+  return { ...statsReport(rows!.results as Row[], unit, n, last, marks), handNotesNow, rowsRead: rowsRead([rows!, mk!, notes!]) };
 }

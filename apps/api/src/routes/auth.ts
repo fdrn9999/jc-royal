@@ -377,6 +377,8 @@ export const authRoutes = new Hono<AppEnv>()
       // The member's referral code stops working. Their referrals stay (ledger rows name them) but close: as the new
       // member, sides not paid yet are not paid; as the referrer, their side is skipped (the new member is still paid).
       db.delete(schema.referralCodes).where(eq(schema.referralCodes.userId, me.id)),
+      // The member's own bookmarks, tags and memos on hands (the hands themselves stay, below).
+      db.delete(schema.handNotes).where(eq(schema.handNotes.userId, me.id)),
       db
         .update(schema.referrals)
         .set({

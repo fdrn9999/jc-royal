@@ -14,6 +14,7 @@ import { dur } from './Reports';
 type Unit = 'day' | 'week' | 'month';
 type RoomPlay = { hands: number; tablesAvg: number | null; seats: number; seatMs: number };
 type AcademyKey = 'ac_lesson_start' | 'ac_lesson_done' | 'ac_scenario_start' | 'ac_scenario_done' | 'ac_answer' | 'ac_correct';
+type HandNoteKey = 'hn_bookmark' | 'hn_tag' | 'hn_memo' | 'hn_fail_conflict' | 'hn_fail_invalid' | 'hn_fail_notfound' | 'hn_fail_limit' | 'hn_fail_error';
 interface Period {
   from: string;
   to: string;
@@ -24,6 +25,7 @@ interface Period {
   play: { hands: number; handsPerDay: number | null; tablesAvg: number | null; seats: number; avgSeatMs: number | null; peak: number | null; official: RoomPlay; member: RoomPlay; bots?: { hands: number; tablesAvg: number | null } };
   reports: { created: number; handled: number; avgHandleMs: number | null };
   academy: Record<AcademyKey, number>;
+  handNotes: Record<HandNoteKey, number>;
 }
 interface OpsStats {
   unit: Unit;
@@ -38,6 +40,8 @@ interface OpsStats {
   total: Period;
   hourly: { avg: number | null; max: number | null }[];
   rolled: { days: number; behind: number } | { failed: true } | null;
+  /** Hand notes kept now, counted when the page loads (never whose or what). */
+  handNotesNow: { members: number; bookmarked: number; tagged: number; memos: number };
 }
 
 const UNITS: [Unit, Key][] = [
@@ -104,6 +108,9 @@ export function StatsPage() {
   const labels = d.periods.map(label);
   const faded = d.periods.map((p) => !p.complete);
   const ac = tot.academy;
+  const hn = tot.handNotes;
+  const hnFailed = hn.hn_fail_conflict + hn.hn_fail_invalid + hn.hn_fail_notfound + hn.hn_fail_limit + hn.hn_fail_error;
+  const now = d.handNotesNow;
   return (
     <div className={`flex flex-col gap-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading} data-testid="stats-page">
       {header}
@@ -200,6 +207,26 @@ export function StatsPage() {
         </Panel>
       </div>
 
+      <Panel title={t('osHandNotes')}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="stats-hand-notes">
+          <Stat
+            label={t('osHnSaved')}
+            value={<span data-testid="stats-hn-saved">{num(hn.hn_bookmark + hn.hn_tag + hn.hn_memo)}</span>}
+            sub={t('osHnSavedSub', { b: num(hn.hn_bookmark), t: num(hn.hn_tag), m: num(hn.hn_memo) })}
+          />
+          <Stat
+            label={t('osHnFailed')}
+            value={<span data-testid="stats-hn-failed">{num(hnFailed)}</span>}
+            sub={t('osHnFailedSub', { c: num(hn.hn_fail_conflict), i: num(hn.hn_fail_invalid), n: num(hn.hn_fail_notfound), l: num(hn.hn_fail_limit), e: num(hn.hn_fail_error) })}
+          />
+          <Stat
+            label={t('osHnNow')}
+            value={<span data-testid="stats-hn-now">{num(now.members)}</span>}
+            sub={t('osHnNowSub', { b: num(now.bookmarked), t: num(now.tagged), m: num(now.memos) })}
+          />
+        </div>
+        <p className="mt-3 text-xs text-ink-400">{t('osHnHint')}</p>
+      </Panel>
       <Panel title={t('osHourly')}>
         <figure data-testid="stats-hourly">
           <div

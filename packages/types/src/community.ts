@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { HandNoteDto } from './api';
 import type { PublicRole } from './social';
 
 export const PostInputSchema = z.object({
@@ -103,6 +104,8 @@ export interface HandDetailDto extends HandReplayFields {
   handNumber: number;
   endedAt: number;
   players: (HandReplayPlayer & { userId: string; isYou: boolean })[];
+  /** The viewer's own bookmark, tags and memo on the hand (only ever sent to the viewer). */
+  note: HandNoteDto;
 }
 
 export interface CommentDto {

@@ -249,6 +249,30 @@ export const handPlayers = sqliteTable(
   ],
 );
 
+/**
+ * A member's own bookmark, tags and memo on a hand they were dealt into (apps/api/src/lib/handNotes.ts). Only the
+ * member reads or writes it: no admin route returns it, and audit and logs carry ids and error codes, never the memo or
+ * the tags. A row that is emptied stays (so `rev` keeps counting); it is removed when the member withdraws.
+ */
+export const handNotes = sqliteTable(
+  'hand_notes',
+  {
+    userId: text('user_id').notNull(),
+    handId: text('hand_id').notNull(),
+    /** The hand's end, copied from hand_players so lists of bookmarked or tagged hands read in order from this table. */
+    endedAt: integer('ended_at').notNull(),
+    bookmarked: integer('bookmarked', { mode: 'boolean' }).notNull().default(false),
+    /** HAND_TAGS as bits: review 1, bluff 2, hard call 4, big pot 8. */
+    tags: integer('tags').notNull().default(0),
+    memo: text('memo'),
+    /** Memo revision, raised on every memo change; a memo save names the revision it started from. */
+    rev: integer('rev').notNull().default(0),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.handId] }), index('hand_notes_user_idx').on(t.userId, t.endedAt)],
+);
+
 export const adminAuditLog = sqliteTable(
   'admin_audit_log',
   {

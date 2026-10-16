@@ -7,7 +7,7 @@
  *   a new day). Only the day is kept, never a time, page or count, and only for ACTIVE_DAYS_RETENTION days: daily,
  *   weekly and monthly active members are counted from it and kept as numbers in `daily_stats`.
  * - `daily_stats`: one number per day and metric. Most are rolled up once a day from the records the service keeps
- *   anyway (accounts, seats, hands, reports); the Academy and free refill counters are added as events arrive. Day 0
+ *   anyway (accounts, seats, hands, reports); the Academy, free refill and hand note counters are added as events arrive. Day 0
  *   holds markers.
  */
 export const STATS_TZ_OFFSET_MS = 9 * 60 * 60_000;
@@ -32,6 +32,23 @@ export type AcademyMetric = (typeof ACADEMY_METRICS)[number];
 export const REFILL_METRICS = ['rf_off', 'rf_paused', 'rf_cooldown', 'rf_above', 'rf_suspended', 'rf_held', 'rf_changed'] as const;
 export type RefillMetric = (typeof REFILL_METRICS)[number];
 
+/**
+ * Hand notes (PUT /api/me/hands/:id/note, apps/api/src/lib/handNotes.ts): saves per kind of change, and saves refused
+ * or failed per reason. Numbers only, never per member or hand, never what was written. Added as they happen and kept by
+ * the daily rollup.
+ */
+export const HAND_NOTE_METRICS = [
+  'hn_bookmark',
+  'hn_tag',
+  'hn_memo',
+  'hn_fail_conflict',
+  'hn_fail_invalid',
+  'hn_fail_notfound',
+  'hn_fail_limit',
+  'hn_fail_error',
+] as const;
+export type HandNoteMetric = (typeof HAND_NOTE_METRICS)[number];
+
 /** Markers on day 0: the first day with activity markers, and the last day rolled up. */
 export const STATS_MARKER_DAY = 0;
 
@@ -41,7 +58,7 @@ export function activeDayInsert(d1: D1Database, userId: string, at: number): D1P
 }
 
 /** One statement per counter: adds `n` to the day's row. */
-export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric | RefillMetric, number>>): D1PreparedStatement[] {
+export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric | RefillMetric | HandNoteMetric, number>>): D1PreparedStatement[] {
   return Object.entries(counts)
     .filter(([, n]) => (n ?? 0) > 0)
     .map(([metric, n]) =>

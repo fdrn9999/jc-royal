@@ -1,7 +1,9 @@
 import { Logo, Spinner } from '@jc/ui';
 import { lazy, StrictMode, Suspense, useEffect, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, useLocation } from 'react-router';
+// The react-dom build of the provider: it honours `flushSync` on a navigation (the hand filters use it).
+import { RouterProvider } from 'react-router/dom';
 import { startAcademySync } from './academy/sync';
 import { AppShell } from './components/AppShell';
 import './index.css';
@@ -60,6 +62,7 @@ function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, nam
   );
 }
 const loadMe = () => import('./pages/Me');
+const loadHands = () => import('./pages/Hands');
 const loadBoard = () => import('./pages/Board');
 const loadMaintenance = () => import('./pages/Maintenance');
 const loadFriends = () => import('./pages/Friends');
@@ -115,6 +118,7 @@ const router = createBrowserRouter([
     children: [
       { path: '/', element: <LobbyPage /> },
       { path: '/me', element: onDemand(loadMe, 'MePage') },
+      { path: '/me/hands', element: onDemand(loadHands, 'HandsPage') },
       { path: '/me/hands/:id', element: onDemand(loadMe, 'HandDetailPage') },
       { path: '/board', element: onDemand(loadBoard, 'BoardPage') },
       { path: '/board/write', element: onDemand(loadBoard, 'PostEditorPage') },

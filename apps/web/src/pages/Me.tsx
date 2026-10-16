@@ -6,6 +6,7 @@ import { BadgeShelf } from '../academy/Badges';
 import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
+import { HandNotePanel, HandRow } from '../components/HandNotes';
 import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
 import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
@@ -13,6 +14,7 @@ import { ReferralCard } from '../components/Referral';
 import { RefillCard } from '../components/Refill';
 import { ReportModal, type ReportSubject } from '../components/Social';
 import { HandReplay } from '../game/HandReplay';
+import { oddsRatio, potOddsFor } from '../game/potOdds';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAmounts } from '../lib/amount';
@@ -33,7 +35,7 @@ function useLoad<T>(path: string) {
   useEffect(() => {
     void reload();
   }, [reload]);
-  return { data, error, reload };
+  return { data, error, reload, set: setData };
 }
 
 function signed(n: number) {
@@ -173,28 +175,11 @@ export function MePage() {
       </Panel>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Panel title={t('me.recent')}>
+        <Panel title={t('me.recent')} actions={<Link to="/me/hands" className="jc-tap py-1 text-xs text-gold-300 hover:underline" data-testid="me-all-hands">{t('me.allHands')} →</Link>}>
           {hands.data && hands.data.length === 0 && <Empty>{t('me.none')}</Empty>}
           <ul className="divide-y divide-white/5">
             {hands.data?.map((h) => (
-              <li key={h.id} className="flex items-center gap-3 py-2.5">
-                <span className="flex gap-0.5">
-                  {h.holeCards.map((c) => (
-                    <PlayingCard key={c} card={c as Card} size="1.6rem" />
-                  ))}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{h.tableName}</div>
-                  <div className="text-xs text-ink-400">
-                    #{h.handNumber} · {formatDate(h.endedAt, locale)}
-                    {h.rankClass && ` · ${t(`hand.${handLabelKey(h.rankClass, [])}` as MsgKey)}`}
-                  </div>
-                </div>
-                <span className={`font-mono text-sm font-semibold tabular-nums ${h.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{signed(h.net)}</span>
-                <Link to={`/me/hands/${encodeURIComponent(h.id)}`} className="text-xs text-gold-300 hover:underline">
-                  {t('me.viewHand')}
-                </Link>
-              </li>
+              <HandRow key={h.id} hand={h} onChange={(n) => hands.set(hands.data!.map((x) => (x.id === n.id ? n : x)))} />
             ))}
           </ul>
         </Panel>
@@ -340,6 +325,7 @@ export function HandDetailPage() {
   if (!data) return <Empty>{t('common.loading')}</Empty>;
   const name = (seat: number) => data.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const links = lessonLinksFor(data);
+  const odds = potOddsFor(data);
   const actionText = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   return (
     <div className="flex flex-col gap-6">
@@ -360,6 +346,7 @@ export function HandDetailPage() {
           <HandReplay hand={data} heroSeat={data.players.find((p) => p.isYou)?.seatIndex ?? null} />
         </div>
       </Panel>
+      <HandNotePanel key={data.id} handId={data.id} initial={data.note} />
       {links.length > 0 && (
         <Panel title={t('replay.lessons')}>
           <ul className="flex flex-col gap-2" data-testid="hand-lessons">
@@ -410,15 +397,28 @@ export function HandDetailPage() {
         </Panel>
         <Panel title={t('replay.actions')}>
           <ol className="flex flex-col gap-1 text-sm">
-            {data.actions.map((a, i) => (
-              <li key={i} className="flex gap-2">
-                <span className="w-16 shrink-0 text-xs uppercase text-ink-400">{t(`stage.${a.stage}` as MsgKey)}</span>
-                <span className="min-w-0 flex-1 truncate" title={name(a.seatIndex)}>{name(a.seatIndex)}</span>
-                <span className="shrink-0 whitespace-nowrap text-ink-200">{actionText(a.type)}</span>
-                <span className="w-20 shrink-0 text-right font-mono text-gold-300">{a.amount > 0 ? amt.fmt(a.amount) : ''}</span>
-              </li>
-            ))}
+            {data.actions.map((a, i) => {
+              const o = odds.get(i);
+              return (
+                <li key={i} className="flex flex-wrap gap-x-2">
+                  <span className="w-16 shrink-0 text-xs uppercase text-ink-400">{t(`stage.${a.stage}` as MsgKey)}</span>
+                  <span className="min-w-0 flex-1 truncate" title={name(a.seatIndex)}>{name(a.seatIndex)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-ink-200">{actionText(a.type)}</span>
+                  <span className="w-20 shrink-0 text-right font-mono text-gold-300">{a.amount > 0 ? amt.fmt(a.amount) : ''}</span>
+                  {o && (
+                    <span className="basis-full pb-1 pl-[4.5rem] text-xs text-ink-300" data-testid="pot-odds">
+                      {t('odds.line', { pot: amt.fmt(o.pot), call: amt.fmt(o.toCall), ratio: oddsRatio(o), need: o.need })}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ol>
+          {odds.size > 0 && (
+            <p className="mt-3 text-xs text-ink-400" data-testid="pot-odds-note">
+              {t('odds.note')}
+            </p>
+          )}
         </Panel>
       </div>
       <ReportModal subject={reporting} onClose={() => setReporting(null)} />

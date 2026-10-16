@@ -59,6 +59,7 @@ export function build(id: string, maxSeats: number, button: number, board: strin
       rankClass: s.rank ?? null,
       bestFive: s.best ?? null,
     })),
+    note: { bookmarked: false, tags: [], memo: null, rev: 0, updatedAt: null },
   };
 }
 
