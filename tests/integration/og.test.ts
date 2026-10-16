@@ -69,11 +69,11 @@ describe('link previews', () => {
   });
 
   it('a public table shows its name and blinds; the query string is never echoed', async () => {
-    const r = await crawl('/table/it-admin-0?code=royal-777&token=abc123');
+    const r = await crawl('/table/it-og-0?code=royal-777&token=abc123');
     expect(r.status).toBe(200);
-    expect(meta(r.html, 'og:title')).toBe('it-admin-0 | JC ROYAL');
+    expect(meta(r.html, 'og:title')).toBe('it-og-0 | JC ROYAL');
     expect(meta(r.html, 'og:description')).toContain('5/10');
-    expect(meta(r.html, 'og:url')).toBe('https://jc-royal.site/table/it-admin-0');
+    expect(meta(r.html, 'og:url')).toBe('https://jc-royal.site/table/it-og-0');
     expect(r.html).not.toMatch(/royal-777|abc123/);
   });
 
@@ -134,7 +134,7 @@ describe('link previews', () => {
 
   it('the pages the worker writes keep the static pages\' security headers', async () => {
     const plain = await crawl('/me');
-    const shared = await crawl('/table/it-admin-0');
+    const shared = await crawl('/table/it-og-0');
     for (const h of ['content-security-policy', 'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy'])
       expect(shared.headers.get(h), h).toBe(plain.headers.get(h));
     expect(shared.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");

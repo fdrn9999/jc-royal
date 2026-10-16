@@ -82,6 +82,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-role-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Reports and blocks against staff: members report players they share this table with.
   { id: 'it-staff-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  // Link previews: a public table no other file closes (admin.test.ts closes it-admin-0, and the files run in any order).
+  { id: 'it-og-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
   // Quick reactions: seated players and a spectator; long turns keep the clock out of it.
   ...Array.from({ length: 3 }, (_, i) => ({ id: `it-react-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Free refill: chips on a table (a hand's bets included), and a table whose room holds no seat D1 has open.
