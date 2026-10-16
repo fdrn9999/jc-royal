@@ -4,6 +4,7 @@ import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
+import { InstallSettingsLazy } from '../components/InstallLazy';
 import { RefillHintLazy } from '../components/RefillHintLazy';
 import { MemberName, RoleBadge } from '../components/MemberName';
 import { useAmounts } from '../lib/amount';
@@ -498,6 +499,7 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
             </select>
           )}
         </Field>
+        <InstallSettingsLazy />
         {onLogout && (
           <>
             <div className="jc-divider" />

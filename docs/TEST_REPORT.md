@@ -1395,3 +1395,50 @@ E2E가 남긴 스크린샷 7장을 직접 열어 확인했다(`test-results/`, �
 - STATUS 알려진 문제 31: 팟 크기 필터는 그 테이블의 지금 빅 블라인드 기준, 필터 목록의 읽기 비용과 요청 제한, '지금' 수치의 전체 읽기, 북마크·태그의 마지막 저장 우선.
 - 노트 패널의 동작은 E2E로만 확인한다(웹 단위 테스트에 DOM 환경이 없음).
 - 휴대폰은 Pixel 7 에뮬레이션만 확인했고 iOS Safari·Android Chrome 실기기는 확인하지 않았다.
+
+### PWA 설치
+
+#### 구현
+
+- 매니페스트(`apps/web/public/manifest.webmanifest`, 기존 파일 재사용): `id`·`scope` `/`, `description`(가상 칩 안내 포함), `lang` `ko`, `dir`, `categories` `games`를 더했다. 아이콘은 기존 `icon-192.png`·`icon-512.png`(`purpose: any`)만 쓴다. `index.html`에 iOS 홈 화면 이름 `apple-mobile-web-app-title`을 더했다(OG 블록 밖).
+- 서비스 워커는 두지 않는다. 게임·인증·비공개 카드 응답을 기기에 캐시하지 않으며, 설치한 앱도 연결이 없으면 열리지 않는다(안내 문구에 표시).
+- 판단(`apps/web/src/lib/install.ts`, 순수 함수 + 앱 시작 때 한 번 붙는 감시): 사용자 에이전트와 터치 지점 수로 iOS Safari·iOS 다른 브라우저·iOS/Android 앱 안 브라우저(카카오톡·인스타그램·네이버 등, Android WebView `; wv)`)·삼성 인터넷·Android Chrome·Android 다른 브라우저·컴퓨터를 나눈다(iPadOS의 `Macintosh` + 터치는 iOS). 앱으로 열림은 `display-mode: standalone`·`fullscreen`·`minimal-ui`·`window-controls-overlay`와 iOS `navigator.standalone === true`. `beforeinstallprompt`는 막아 두었다가 버튼을 누를 때만 띄우고, `appinstalled`이면 설치됨으로 기억한다(브라우저가 다시 설치 창을 넘기면 지움).
+- 로비 안내(`InstallOffer`, 패널 하나, 모달·고정 배너 아님): 앱으로 열렸거나 설치됐거나 숨긴 기간이면 없음. 브라우저가 설치 창을 넘겼으면 '지금 설치', 아니면 '설치 방법'(휴대폰만, 컴퓨터는 설치 창이 있을 때만). '나중에'는 3일, '30일 동안 보지 않기'는 30일 숨기고 기기의 `localStorage`(`jc.install`)에 남긴다. 기기 시계를 되돌려 남은 기간이 30일보다 길어 보이면 무시한다. 테이블 화면(`/table/:id`)·아카데미 연습 테이블은 로비가 아니라 안내가 없다.
+- 설치 방법(기기별 탭, 지금 기기 탭이 먼저): iPhone·iPad는 'Safari에서 열기 → 공유 → 홈 화면에 추가 → (iOS 26 이상) 웹 앱으로 열기 → 추가'와 Chrome 등 다른 브라우저 안내, Android는 Chrome 메뉴(앱 설치·홈 화면에 추가)와 삼성 인터넷(메뉴 → 페이지 추가 → 홈 화면), 컴퓨터는 Chrome·Edge 주소창의 설치 아이콘과 Mac Safari의 'Dock에 추가'. 앱 안 브라우저면 '다른 앱 안의 브라우저에서는 설치할 수 없습니다'와 주소 복사 버튼.
+- 설정(⚙, 테이블 설정 포함)의 '앱으로 설치' 칸: 상태(앱으로 사용 중·이 브라우저에 설치됨·브라우저에서 사용 중), 설치 창이 있으면 설치 버튼, 설치 방법 펼치기(설정 안에 펼침, 두 번째 모달 없음), 숨긴 기간과 '다시 보이기'.
+- 문구는 지연 로드되는 `Install.tsx` 안의 한·영 사전(첫 번들에 넣으면 650 KB를 넘음). 계정 언어를 따른다.
+
+#### 재현과 확인
+
+- 타입 검사 9개 0. 엔진 63/63, API 단위 58/58, 웹 단위 220/220(`apps/web/test/install.test.ts` 6건 추가: 13개 사용자 에이전트의 기기 판단(iPad 데스크톱 모드와 Mac 구분, iOS Chrome, 카카오톡, 인스타그램, 네이버, Android WebView, 삼성 인터넷, Pixel Chrome, Android Edge·Firefox, Windows Chrome), 안내 탭, 앱으로 열림 판단(`'true'` 문자열은 아님), 깨진 저장값, 3일·30일 경계와 시계를 1년 되돌린 경우, 안내를 보일지 표). 빌드 0, 첫 번들 642/650 KB(이전 639), 설치 청크 14.9 KB 따로.
+- E2E(에뮬레이션, 실제 Chrome, 재시도 0). 사용자 에이전트·`navigator.standalone`·`display-mode`는 페이지 안에서 바꾸고, `beforeinstallprompt`·`appinstalled`는 테스트가 직접 보낸다. 브라우저가 스스로 보낸 설치 창은 세기만 하고 페이지에 넘기지 않는다(헤드리스 Chrome에서 데스크톱·Pixel 7 모두 0회).
+  - `install-mobile.spec.ts`(Pixel 7) 3건: Android Chrome 로비 안내가 화면 폭 안·버튼 높이 40px 이상, 설치 방법은 Android 탭이 먼저(Chrome 4단계·삼성 3단계), iOS 탭 5단계와 '웹 앱으로 열기', '나중에' 3일·새로고침 뒤 유지·설정에 숨긴 기간과 '다시 보이기'로 바로 돌아옴, 30일, 설정 안에 펼친 설치 방법(모달 1개), 시계를 400일 되돌린 저장값은 무시 / 설치 창을 닫으면 '설치하지 않았습니다'와 다시 설치 방법(설치 창은 한 번만), 설치하면 숨고 새로고침 뒤 '이 브라우저에 설치됨', 브라우저가 다시 설치 창을 넘기면 다시 보임, 테이블 설정에는 칸과 설치 버튼이 있고 안내는 없음, 앱으로 열리면 안내·설치 방법 없음 / iPhone Safari는 iOS 탭 5단계, 카카오톡 iOS는 앱 안 브라우저 안내와 주소 복사(클립보드 = 사이트 주소), 영어 화면('Install JC ROYAL as an app', 'Add to Home Screen', 'Open as Web App'), `navigator.standalone`이면 '앱으로 사용 중'.
+  - `install.spec.ts`(데스크톱) 1건: 설치 창 없이는 안내 없음, 설정은 '브라우저에서 사용 중'과 컴퓨터 탭(2단계)·Mac 'Dock에 추가', 설치 창을 받으면 로비에 '지금 설치' → 설치 → 숨김 → 새로고침 뒤 설치됨, 영어.
+  - 첫 실행 2/4: 영어 확인 두 건이 실패했다. 가입한 회원은 로그인 때 계정에 저장된 언어를 적용해(`apps/web/src/lib/auth.tsx`의 `setLocale(me.locale)`) 테스트가 넣은 `localStorage`의 `jc.locale`이 덮였다. 제품이 맞게 동작한 것이라 테스트가 설정의 언어 선택으로 바꾸게 고쳤다. 두 번째 실행 4/4(51.8초).
+
+#### 화면 확인(실제 Chrome)
+
+E2E가 남긴 스크린샷 8장을 직접 열어 확인했다(`test-results/`, 저장소에 넣지 않음). `install-offer-mobile.png`(검색 줄과 빠른 참가 사이의 패널, 로고·문구·버튼 3개가 화면 안), `install-guide-android-mobile.png`(바텀시트, Android 탭, Chrome·삼성 단계, 오프라인 안내), `install-settings-mobile.png`(상태·숨긴 기간 '…까지'·다시 보이기·펼친 설치 방법), `install-guide-ios-mobile.png`(5단계), `install-inapp-mobile.png`(앱 안 브라우저 안내와 '주소를 복사했습니다.'), `install-guide-ios-en-mobile.png`(영어), `install-offer-desktop.png`, `install-settings-desktop.png`. 겹치거나 화면 밖으로 나간 요소는 없었다.
+
+#### 전체 회귀
+
+- 모바일 프로젝트 전체(Pixel 7, 36건, 8.1분): 35 통과, 1 실패. 실패한 `muck-mobile.spec.ts`는 설정 칸 확인까지 통과한 뒤 패배 쇼다운을 기다리는 핸드 반복 중에 90초 테스트 제한에 걸렸다. 원인은 테스트 자신의 시간 제한이고 설치 변경과 관계없다(아래 'muck-mobile 시간 제한'). 고친 뒤 `muck-mobile`·`install-mobile`을 함께 다시 돌려 4/4(1.4분).
+- 이 실행에는 리플레이 타임라인 때 다시 돌리지 않은 모바일 사양(역할 표시, 룸, 공유, 쇼, 소셜 2건, 스태프 안전, 통계, 충전)이 들어 있다.
+- 데스크톱: `action-keys`·`install`·`locale` 3건·`share` 2건 7/7(1.1분), 브라우저가 스스로 보낸 설치 창 0회. `install-mobile` 단독 3/3(44.0초).
+
+#### 기각한 방안
+
+- 서비스 워커와 오프라인 캐시: Chrome의 설치 조건에 필요하지 않고, 게임·인증·비공개 카드 응답을 기기에 남길 위험이 있다.
+- 화면 위에 뜨는 배너·모달 안내: '게임 중 불필요한 모달 금지'. 로비 패널로만 둔다.
+- 모든 화면(AppShell)에 안내: 리플레이 조작과 하단 메뉴의 자리를 밀어낸다.
+- 설정 안에서 설치 방법을 두 번째 모달로 열기: 설정 안에 펼친다.
+- 문구를 앱 공용 사전에 넣기: 첫 번들이 650 KB를 넘는다.
+- maskable 아이콘: 지금 아이콘 그림이 가장자리까지 차 있어 안전 영역에 맞지 않는다(새 그림이 필요).
+- `getInstalledRelatedApps`, 카카오톡 외부 브라우저 열기 스킴, 설치 지표 수집 API: 지원이 고르지 않거나 요청·쓰기 비용이 생긴다.
+- E2E에서 `localStorage`의 `jc.locale`로 영어 바꾸기: 계정 언어가 이긴다(위).
+
+#### 남은 한계
+
+- STATUS 알려진 문제 32. 실기기(iPhone Safari·Android Chrome·삼성 인터넷)에서 설치·홈 화면 실행을 확인하지 않았다. 위 결과는 모두 Chrome 에뮬레이션이다.
+- iOS·삼성 인터넷·카카오톡 등은 설치 API가 없어 글 안내뿐이고, 메뉴 이름·위치는 버전마다 다를 수 있다.
+- 관리자 쪽 PWA 진단(매니페스트·아이콘 응답)은 OG 상태와 묶어 관리자 통합 단계(브랜드 상태)에서 한 화면으로 만든다. 설치 수 지표는 비용 때문에 만들지 않았다.

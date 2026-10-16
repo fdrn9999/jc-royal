@@ -9,12 +9,15 @@ import { AppShell } from './components/AppShell';
 import './index.css';
 import { AuthProvider, useAuth } from './lib/auth';
 import { I18nProvider, initialLocale, loadLocale, useI18n } from './lib/i18n';
+import { startInstallWatch } from './lib/install';
 import { applyInitialTheme } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { LobbyPage } from './pages/Lobby';
 import { TableRoute } from './pages/Table';
 
 applyInitialTheme();
+// Before the browser can offer its install prompt, so the lobby and settings can hand it on.
+startInstallWatch();
 
 function Splash() {
   return (
