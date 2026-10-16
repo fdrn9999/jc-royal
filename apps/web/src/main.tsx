@@ -6,7 +6,7 @@ import { startAcademySync } from './academy/sync';
 import { AppShell } from './components/AppShell';
 import './index.css';
 import { AuthProvider, useAuth } from './lib/auth';
-import { I18nProvider, useI18n } from './lib/i18n';
+import { I18nProvider, initialLocale, loadLocale, useI18n } from './lib/i18n';
 import { applyInitialTheme } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { ConversationPage, FriendSettingsPage, FriendsPage } from './pages/Friends';
@@ -137,13 +137,16 @@ const router = createBrowserRouter([
   },
 ]);
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <I18nProvider>
-      <AuthProvider>
-        <AcademySync />
-        <RouterProvider router={router} />
-      </AuthProvider>
-    </I18nProvider>
-  </StrictMode>,
-);
+// English is a separate chunk: load it first for someone who chose it, so the first screen is not Korean.
+const render = () =>
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <I18nProvider>
+        <AuthProvider>
+          <AcademySync />
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </I18nProvider>
+    </StrictMode>,
+  );
+loadLocale(initialLocale()).then(render, render);
