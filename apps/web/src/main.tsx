@@ -9,9 +9,7 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { I18nProvider, initialLocale, loadLocale, useI18n } from './lib/i18n';
 import { applyInitialTheme } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
-import { ConversationPage, FriendSettingsPage, FriendsPage } from './pages/Friends';
 import { LobbyPage } from './pages/Lobby';
-import { MessagesPage } from './pages/Messages';
 import { TableRoute } from './pages/Table';
 
 applyInitialTheme();
@@ -52,7 +50,7 @@ function Legal({ kind }: { kind: 'privacy' | 'terms' }) {
   );
 }
 
-/** My page (with the statistics) and the board are away from the lobby and the table, so they load on demand too. */
+/** My page (with the statistics), the board, friends and messages are away from the lobby and the table, so they load on demand too. */
 function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, name: keyof M & string) {
   const C = lazy(() => load().then((m) => ({ default: m[name] as ComponentType })));
   return (
@@ -64,6 +62,8 @@ function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, nam
 const loadMe = () => import('./pages/Me');
 const loadBoard = () => import('./pages/Board');
 const loadMaintenance = () => import('./pages/Maintenance');
+const loadFriends = () => import('./pages/Friends');
+const loadMessages = () => import('./pages/Messages');
 
 /** Keeps Academy progress in sync with the server while someone is signed in. */
 function AcademySync() {
@@ -120,10 +120,10 @@ const router = createBrowserRouter([
       { path: '/board/write', element: onDemand(loadBoard, 'PostEditorPage') },
       { path: '/board/:id', element: onDemand(loadBoard, 'PostPage') },
       { path: '/board/:id/edit', element: onDemand(loadBoard, 'PostEditorPage') },
-      { path: '/messages', element: <MessagesPage /> },
-      { path: '/friends', element: <FriendsPage /> },
-      { path: '/friends/settings', element: <FriendSettingsPage /> },
-      { path: '/friends/:userId', element: <ConversationPage /> },
+      { path: '/messages', element: onDemand(loadMessages, 'MessagesPage') },
+      { path: '/friends', element: onDemand(loadFriends, 'FriendsPage') },
+      { path: '/friends/settings', element: onDemand(loadFriends, 'FriendSettingsPage') },
+      { path: '/friends/:userId', element: onDemand(loadFriends, 'ConversationPage') },
       { path: '/academy', element: <Academy page="AcademyPage" /> },
       { path: '/academy/cards', element: <Academy page="CardsLesson" /> },
       { path: '/academy/hands', element: <Academy page="HandsLesson" /> },
