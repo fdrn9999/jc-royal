@@ -13,6 +13,8 @@
 - **칩 무결성**: 멱등 원장, 매 액션 칩 보존 검사, 정합성 검사를 한다.
 - **포커 아카데미**: 카드 기초부터 족보, 홀덤 규칙, 베팅 액션, 실제 테이블 화면의 연습 게임(브라우저 내 엔진, 칩·기록 미사용)까지. 게임 중 족보표와 초보자 모드를 제공한다.
 - **UI**: [Elite-Poker](https://github.com/opadips/Elite-Poker) UI를 JC ROYAL 브랜드로 재작성했다. 테마 4종, 애니메이션, Web Audio, 한국어/영어, 모바일을 지원한다.
+- **플레이 기능**: 무료 6인 토너먼트(대회 칩은 지갑·원장과 분리), 공식 테이블의 서버 봇, 무료 칩 보충·추천 보상(모두 원장 기록), 시간 은행, 빠른 반응, 리플레이 타임라인·핸드 복기, 기기 간 설정 동기화, 링크 미리보기·앱 설치 안내.
+- **운영**: 관리자별 기능 스위치(기본 거부)와 최고관리자 전용 경제·대회 정책, 재확인·사유·충돌 감지·감사 로그.
 
 ## 빠른 시작
 
@@ -54,7 +56,10 @@ docs/               문서
 | [docs/API.md](docs/API.md) | REST API 명세 |
 | [docs/WEBSOCKET_PROTOCOL.md](docs/WEBSOCKET_PROTOCOL.md) | WebSocket 이벤트 명세 |
 | [docs/ENGINE_NOTES.md](docs/ENGINE_NOTES.md) | 엔진 통합 · 발견 결함과 보정 |
-| [docs/ADMIN_SECURITY.md](docs/ADMIN_SECURITY.md) | 관리자 보안 구성 |
+| [docs/ADMIN_SECURITY.md](docs/ADMIN_SECURITY.md) | 관리자 보안 구성 · 권한 표 · 기능 스위치 |
+| [docs/TOURNAMENT.md](docs/TOURNAMENT.md) | 무료 6인 토너먼트 규칙 · 운영 · 복구 |
+| [docs/PRIVACY_OPERATIONS.md](docs/PRIVACY_OPERATIONS.md) | 개인정보 처리 · 보관 · 운영 절차 |
+| [docs/LOAD_TEST.md](docs/LOAD_TEST.md) | 로컬 부하 시나리오 · 결과 해석 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 로컬 개발 · 테스트 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Cloudflare 배포 · 비용 |
 | [docs/TEST_REPORT.md](docs/TEST_REPORT.md) | 테스트 결과(실행 로그 포함) |
