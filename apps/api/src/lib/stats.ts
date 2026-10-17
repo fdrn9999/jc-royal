@@ -1,4 +1,4 @@
-import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, STATS_DAY, STATS_MARKER_DAY, STATS_TZ_OFFSET_MS, dayStart, statsDay } from '@jc/db';
+import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, HAND_NOTE_METRICS, type HandNoteMetric, SETTINGS_METRICS, type SettingsMetric, STATS_DAY, TIME_BANK_METRICS, type TimeBankMetric, STATS_MARKER_DAY, STATS_TZ_OFFSET_MS, dayStart, statsDay } from '@jc/db';
 
 /**
  * Operations statistics by day, week and month for the admin console (GET /api/admin/stats).
@@ -8,6 +8,9 @@ import { ACADEMY_METRICS, ACTIVE_DAYS_RETENTION, STATS_DAY, STATS_MARKER_DAY, ST
  * (table_sessions: count, length, concurrency), hands, reports, and the activity markers of `active_days`. A day is
  * rolled up whole and replaced whole, so running it twice (the cron and an administrator opening the page at the same
  * time) writes the same numbers. The page reads only `daily_stats`.
+ *
+ * Table bots are left out of members' numbers: their seats and sign-ups are not counted, and hands they played in are
+ * counted as `hands_bots` instead of by room.
  *
  * Cost of one day: every `tables` row once (hands are reached through hands_table_idx), the day's hands and closed
  * seats (tsess_closed_idx), the seats open during it, every `users` row once (no created_at index), the reports filed in it
@@ -86,21 +89,23 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
     // tables first (CROSS JOIN keeps the order), each table's hands of the span through hands_table_idx.
     db
       .prepare(
-        `SELECT CAST((h.ended_at + ?3) / 86400000 AS INTEGER) AS day, t.room_type AS room, COUNT(*) AS n, COUNT(DISTINCT h.table_id) AS tables
-           FROM tables t CROSS JOIN hands h ON h.table_id = t.id AND h.ended_at >= ?1 AND h.ended_at < ?2 GROUP BY day, room`,
+        `SELECT CAST((h.ended_at + ?3) / 86400000 AS INTEGER) AS day, t.room_type AS room, h.bots > 0 AS bots, COUNT(*) AS n, COUNT(DISTINCT h.table_id) AS tables
+           FROM tables t CROSS JOIN hands h ON h.table_id = t.id AND h.ended_at >= ?1 AND h.ended_at < ?2 GROUP BY day, room, bots`,
       )
       .bind(s, e, tz),
+    // Members' seats only (table bots' are not play to count; the few bot accounts are read through users_bot_idx).
     db
       .prepare(
         `SELECT CAST((s.closed_at + ?3) / 86400000 AS INTEGER) AS day, t.room_type AS room, COUNT(*) AS n, SUM(s.closed_at - s.created_at) AS ms
-           FROM table_sessions s CROSS JOIN tables t ON t.id = s.table_id WHERE s.closed_at >= ?1 AND s.closed_at < ?2 GROUP BY day, room`,
+           FROM table_sessions s CROSS JOIN tables t ON t.id = s.table_id
+          WHERE s.closed_at >= ?1 AND s.closed_at < ?2 AND s.user_id NOT IN (SELECT id FROM users WHERE is_bot = 1) GROUP BY day, room`,
       )
       .bind(s, e, tz),
     // Seats open at some point of the span: closed after it began (tsess_closed_idx), or still open.
     db
       .prepare(
-        `SELECT created_at AS a, closed_at AS b FROM table_sessions WHERE closed_at >= ?1 AND created_at < ?2
-         UNION ALL SELECT created_at AS a, NULL AS b FROM table_sessions WHERE status = 'seated' AND created_at < ?2`,
+        `SELECT created_at AS a, closed_at AS b FROM table_sessions WHERE closed_at >= ?1 AND created_at < ?2 AND user_id NOT IN (SELECT id FROM users WHERE is_bot = 1)
+         UNION ALL SELECT created_at AS a, NULL AS b FROM table_sessions WHERE status = 'seated' AND created_at < ?2 AND user_id NOT IN (SELECT id FROM users WHERE is_bot = 1)`,
       )
       .bind(s, e),
     // Sign-ups, and whether each took a seat within a day / a week: from COHORT_DAYS before the span, whose week ends in it.
@@ -109,7 +114,7 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
         `SELECT CAST((u.created_at + ?3) / 86400000 AS INTEGER) AS day, COUNT(*) AS n,
                 SUM(EXISTS (SELECT 1 FROM table_sessions s WHERE s.user_id = u.id AND s.created_at < u.created_at + 86400000)) AS d1,
                 SUM(EXISTS (SELECT 1 FROM table_sessions s WHERE s.user_id = u.id AND s.created_at < u.created_at + ?4)) AS d7
-           FROM users u WHERE u.created_at >= ?1 AND u.created_at < ?2 GROUP BY day`,
+           FROM users u WHERE u.created_at >= ?1 AND u.created_at < ?2 AND u.is_bot = 0 GROUP BY day`,
       )
       .bind(s - COHORT_DAYS * DAY, e, tz, COHORT_DAYS * DAY),
     db.prepare(`SELECT CAST((created_at + ?3) / 86400000 AS INTEGER) AS day, COUNT(*) AS n FROM reports WHERE created_at >= ?1 AND created_at < ?2 GROUP BY day`).bind(s, e, tz),
@@ -144,9 +149,11 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
   const put = (day: number, metric: string, n: number | null | undefined) => {
     if (n) rows.push({ day, metric, n: Math.round(n) });
   };
+  // Hands a table bot played in are counted apart (hands_bots): the rooms' counts are members-only play.
   for (const r of hands!) {
-    put(r.day as number, `hands_${r.room as Room}`, r.n as number);
-    put(r.day as number, `tables_${r.room as Room}`, r.tables as number);
+    const kind = r.bots ? 'bots' : (r.room as Room);
+    put(r.day as number, `hands_${kind}`, r.n as number);
+    put(r.day as number, `tables_${kind}`, r.tables as number);
   }
   for (const r of seats!) {
     put(r.day as number, `seats_${r.room as Room}`, r.n as number);
@@ -178,10 +185,10 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
     put(r.day as number, 'mau', r.mau as number);
   }
 
-  // Replaces the span's own rows: every metric of days a..b but the Academy counters (added as events arrive) and the
-  // cohorts (kept on their sign-up day), and the cohorts whose week ended in the span. Only non-zero numbers are kept.
+  // Replaces the span's own rows: every metric of days a..b but the Academy, refill, hand note, settings and time bank counters (added as events arrive)
+  // and the cohorts (kept on their sign-up day), and the cohorts whose week ended in the span. Only non-zero numbers are kept.
   const write = await db.batch([
-    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
+    db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric NOT GLOB 'ac_*' AND metric NOT GLOB 'rf_*' AND metric NOT GLOB 'hn_*' AND metric NOT GLOB 'ss_*' AND metric NOT GLOB 'tb_*' AND metric NOT GLOB 'cohort_*'`).bind(a, b),
     db.prepare(`DELETE FROM daily_stats WHERE day BETWEEN ?1 AND ?2 AND metric GLOB 'cohort_*'`).bind(a - COHORT_DAYS, b - COHORT_DAYS),
     db
       .prepare(
@@ -312,10 +319,16 @@ export function summarize(get: (day: number, metric: string) => number, a: numbe
       peak: days ? Math.max(...dayList.map((d) => get(d, 'peak'))) : null,
       official,
       member,
+      /** Hands a table bot played in (not in the counts above), and the tables that dealt them per day. */
+      bots: { hands: sum('hands_bots'), tablesAvg: perDay(sum('tables_bots'), days) },
     },
     reports: { created: sum('reports'), handled, avgHandleMs: handled ? Math.round(sum('handle_ms') / handled) : null },
     // Counted as events arrive (not rolled up), so the days since they began, rolled up or not.
     academy: Object.fromEntries(ACADEMY_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<(typeof ACADEMY_METRICS)[number], number>,
+    handNotes: Object.fromEntries(HAND_NOTE_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<HandNoteMetric, number>,
+    // Account settings sync: saves, conflicts, refusals and failures, resets (no count of accounts: that would read them all).
+    settings: Object.fromEntries(SETTINGS_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<SettingsMetric, number>,
+    timeBank: Object.fromEntries(TIME_BANK_METRICS.map((k) => [k, sum(k, range(a, b))])) as Record<TimeBankMetric, number>,
   };
 }
 export type StatsPeriod = ReturnType<typeof summarize>;
@@ -357,9 +370,13 @@ export function statsReport(rows: Row[], unit: StatsUnit, n: number, last: numbe
 export async function operationsStats(db: D1Database, unit: StatsUnit, n: number, now = Date.now()) {
   const last = statsDay(now) - 1;
   const from = buckets(unit, n, last)[0]![0];
-  const [rows, mk] = await db.batch([
+  const [rows, mk, notes] = await db.batch([
     db.prepare('SELECT day, metric, n FROM daily_stats WHERE day BETWEEN ?1 AND ?2').bind(from, last),
     db.prepare('SELECT metric, n FROM daily_stats WHERE day = ?1').bind(STATS_MARKER_DAY),
+    // Hand notes kept now, as counts only (never whose, on which hand, or what): one pass over hand_notes.
+    db.prepare(
+      'SELECT count(DISTINCT user_id) AS members, coalesce(sum(bookmarked), 0) AS bookmarked, coalesce(sum(tags != 0), 0) AS tagged, coalesce(sum(memo IS NOT NULL), 0) AS memos FROM hand_notes',
+    ),
   ]);
   const marks = (mk!.results as { metric: string; n: number }[]).reduce<StatsMarkers>(
     (o, r) => {
@@ -370,5 +387,6 @@ export async function operationsStats(db: D1Database, unit: StatsUnit, n: number
     },
     { rolledFrom: null, rolledThrough: null, activitySince: null },
   );
-  return { ...statsReport(rows!.results as Row[], unit, n, last, marks), rowsRead: rowsRead([rows!, mk!]) };
+  const handNotesNow = (notes!.results as { members: number; bookmarked: number; tagged: number; memos: number }[])[0]!;
+  return { ...statsReport(rows!.results as Row[], unit, n, last, marks), handNotesNow, rowsRead: rowsRead([rows!, mk!, notes!]) };
 }

@@ -292,4 +292,46 @@ describe('two administrators at once', () => {
       await d1(`UPDATE maintenance_windows SET cancelled_at = ${Date.now()} WHERE ended_at IS NULL AND cancelled_at IS NULL`);
     }
   });
+
+  it('one edits a table while the other blocks its entry: the block and both edits hold, and an edit from an older page is refused', async () => {
+    const [x, y] = await both();
+    const T = 'it-conc-4';
+    const row = async () =>
+      (await d1<{ name: string; entry_blocked: number; allow_spectators: number; beginner: number }>(`SELECT name, entry_blocked, allow_spectators, beginner FROM tables WHERE id = '${T}'`))[0]!;
+    const shown = async () => (await x.get(`/api/admin/tables/${T}`)).body as { table: { name: string; updatedAt: number }; live: { known: { entryBlocked: boolean } } };
+    try {
+      // A rename (which names nothing else) and a block sent together, the block a little later each round; and two edits
+      // of different settings at once. Neither writes back what it read of the other's setting.
+      for (let i = 0; i < 12; i++) {
+        expect((await y.post(`/api/admin/tables/${T}/control`, { action: 'unblock', reason: 'reopen' })).status).toBe(200);
+        const [rename, block, spectators, beginner] = await Promise.all([
+          x.patch(`/api/admin/tables/${T}`, { name: `동시 수정 ${i}` }),
+          sleep(i % 4).then(() => y.post(`/api/admin/tables/${T}/control`, { action: 'block', reason: 'emergency' })),
+          x.patch(`/api/admin/tables/${T}`, { allowSpectators: i % 2 === 0 }),
+          y.patch(`/api/admin/tables/${T}`, { beginner: i % 2 === 1 }),
+        ]);
+        expect([rename, block, spectators, beginner].map((r) => r.status), JSON.stringify([rename.body, block.body, spectators.body, beginner.body])).toEqual([200, 200, 200, 200]);
+        expect(await row(), `round ${i}`).toEqual({ name: `동시 수정 ${i}`, entry_blocked: 1, allow_spectators: i % 2 === 0 ? 1 : 0, beginner: i % 2 === 1 ? 1 : 0 });
+        // The room holds the block too: the last reload it took read the row after it.
+        expect((await shown()).live.known.entryBlocked, `round ${i}`).toBe(true);
+      }
+
+      // A page loaded before another administrator's change: its save is refused and nothing of it is written.
+      const before = (await shown()).table;
+      expect((await y.patch(`/api/admin/tables/${T}`, { beginner: true, ifUpdatedAt: before.updatedAt })).status).toBe(200);
+      const stale = await x.patch(`/api/admin/tables/${T}`, { name: 'from an older page', ifUpdatedAt: before.updatedAt });
+      expect(stale.status, JSON.stringify(stale.body)).toBe(409);
+      expect(stale.body.error.code).toBe('table_conflict');
+      expect((await row()).name).toBe(before.name);
+      expect((await audits('table.update.failed', T)).map((r) => JSON.parse(r.detail))).toContainEqual(expect.objectContaining({ status: 409, code: 'table_conflict' }));
+      // Loaded again, it saves.
+      const now = (await shown()).table;
+      expect(now.updatedAt).toBeGreaterThan(before.updatedAt);
+      expect((await x.patch(`/api/admin/tables/${T}`, { name: 'from the page loaded again', ifUpdatedAt: now.updatedAt })).status).toBe(200);
+      expect(await row()).toMatchObject({ name: 'from the page loaded again', entry_blocked: 1, beginner: 1 });
+    } finally {
+      await y.post(`/api/admin/tables/${T}/control`, { action: 'unblock', reason: 'test over' });
+      await x.patch(`/api/admin/tables/${T}`, { name: T, allowSpectators: true, beginner: false });
+    }
+  });
 });

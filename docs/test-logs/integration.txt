@@ -1,279 +1,145 @@
+== P12 full integration, 2026-10-17 (local workerd + D1 + Durable Objects, one wrangler dev, wrangler 4.150.0).
+   Every one of the 307 tests passed in at least one of the two full runs. The three failures stopped in test setup,
+   before any assertion (see docs/TEST_REPORT.md, 전체 검증(P12) > 통합 실패 조사).
 
- RUN  v4.1.11 <repo>
+> vitest run --config tests/vitest.config.ts        (run 1)
 
-(node:34968) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/restart.test.ts > server restart recovery > resumes an in-progress hand after a hard process kill 21628ms
- ✓ tests/integration/restart.test.ts > server restart recovery > a top-up queued before a crash is applied once after the restart, and another restart does not repeat it 9881ms
- ✓ tests/integration/restart.test.ts > server restart recovery > a close the room never heard about is finished when the room next loads, or by the daily sweep, paying each player once 13281ms
- ✓ tests/integration/restart.test.ts > server restart recovery > cash-outs and the hand record D1 refuses while a room closes are retried by the room until they land, once 13151ms
- ✓ tests/integration/restart.test.ts > server restart recovery > a hand that ends while D1 is down, then a crash before any retry: after the restart it is recorded once and the leaver paid once 20762ms
- ✓ tests/integration/restart.test.ts > server restart recovery > a member room only D1 knows about (its opening call never reached it) is woken by the daily sweep and closes itself 23369ms
- ✓ tests/integration/restart.test.ts > server restart recovery > an administrator closes a table mid-hand and the server dies before the hand ends: after the restart the hand finishes, each seat is paid once, the table closes once 27343ms
- ✓ tests/integration/restart.test.ts > server restart recovery > a table paused mid-hand keeps every stack across a restart, deals nothing while paused, and the next hand when resumed 29973ms
- ✓ tests/integration/restart.test.ts > server restart recovery > a player who leaves while the buy-in outcome is still unknown is paid back once the ledger shows it landed, not kept seated 25625ms
-(node:19328) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > suspend the same member: one change and one notice, the socket ends once and the seat is paid out once 19359ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > suspending a member who is already suspended, or whose account was withdrawn, changes nothing 7387ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > a suspension that committed but never reached the tables is finished by asking again: the seat is left, the socket ends 12021ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > close the same table during a hand: the hand plays out, each seat is paid once, the table closes once 18358ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > one suspends a member while the other closes their table mid-hand: both seats are paid once 15901ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > close the same empty table a moment apart: it stays closed, never set back to closing 2324ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > two super admins revert the same mismatch: one correction, one refusal, one notice 8702ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > send the same chip grant (one idempotency key): applied once, the other told it was a repeat 8652ms
- ✓ tests/integration/admin-concurrency.test.ts > two administrators at once > plan maintenance at once: one window; stop it at once: stopped once 10117ms
-(node:43584) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/service.test.ts > service notices > shown between their times in both languages, on the board and in every inbox when asked; ended and deleted ones drop out 7708ms
- ✓ tests/integration/service.test.ts > service notices > a new urgent notice is never crowded out by older ones; when the list is cut, the page is told when to ask again 732ms
- ✓ tests/integration/service.test.ts > maintenance > changes need a fresh password check; one window at a time, at most 48 hours, planned at most 90 days ahead; a planned one blocks nothing 9067ms
- ✓ tests/integration/service.test.ts > maintenance > under way: the running hand plays out, nobody new sits or queues, members cannot sign in (staff can); the table close and pause still work; play resumes when it ends 32568ms
- ✓ tests/integration/service.test.ts > maintenance > a planned window begins and ends on its own: the table shows it, finishes the hand, deals nothing during it and again after 24912ms
- ✓ tests/integration/service.test.ts > maintenance > a table the start was never sent to learns of it when it records its hand, and deals no more until it ends 15828ms
-(node:41068) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/economy.test.ts > reconciliation events > keeps one open event for a mismatch while the member keeps playing 1663ms
- ✓ tests/integration/economy.test.ts > reconciliation events > does not reopen a mismatch an administrator acknowledged with a note 1612ms
- ✓ tests/integration/economy.test.ts > reconciliation events > records a table whose open sessions the room does not hold once while it lasts 3000ms
- ✓ tests/integration/economy.test.ts > chip adjustments > records refused and repeated adjustments 3011ms
- ✓ tests/integration/economy.test.ts > chip adjustments > leaves large adjustments to a super admin 3071ms
- ✓ tests/integration/economy.test.ts > economy page > adds new chips to what was issued and a wallet change without a ledger row to the gap 1577ms
- ✓ tests/integration/economy.test.ts > economy page > lists repeated grants, large adjustments and refused or repeated requests 408ms
- ✓ tests/integration/economy.test.ts > economy page > lists seats left on closed or closing tables and seats held for long 3035ms
- ✓ tests/integration/economy.test.ts > economy page > counts a cash-out that failed, and the seat is paid once when it is retried 4371ms
- ✓ tests/integration/economy.test.ts > mismatch evidence and correction > shows where the wallet left its ledger 4656ms
- ✓ tests/integration/economy.test.ts > mismatch evidence and correction > records a difference in the ledger without changing the balance 8790ms
- ✓ tests/integration/economy.test.ts > mismatch evidence and correction > reverts a balance to its ledger after a note, and tells the member 7314ms
- ✓ tests/integration/economy.test.ts > mismatch evidence and correction > refuses corrections from a plain admin, on a table, below zero, and notes twice 8899ms
-(node:28264) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/emergency.test.ts > suspending or disconnecting a member > a suspension ends the open socket; the other player finishes the hand and the seat is paid out once 11309ms
- ✓ tests/integration/emergency.test.ts > suspending or disconnecting a member > the wallet refuses a buy-in or top-up for a suspended account, even from a socket opened before 8662ms
- ✓ tests/integration/emergency.test.ts > suspending or disconnecting a member > leaving a seat whose buy-in never reached D1 pays nothing out 4395ms
- ✓ tests/integration/emergency.test.ts > suspending or disconnecting a member > ending connections without a suspension: re-confirmation, the member signs in again and still has the seat 6939ms
- ✓ tests/integration/emergency.test.ts > table emergency controls > pause lets the running hand finish and deals no other until resumed; block keeps out new players only 11041ms
- ✓ tests/integration/emergency.test.ts > table emergency controls > the diagnosis compares D1 with the room and never carries cards 5811ms
-(node:21284) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/members.test.ts > member list > filters by status and role, sorts by sign-in, nickname or balance, and pages with a total 11905ms
- ✓ tests/integration/members.test.ts > member list > remembers the last member sign-in (kept after sign-out), not admin console sign-ins 10090ms
- ✓ tests/integration/members.test.ts > internal notes > refuse personal data, are deleted only by their author or a super admin, and leave no text in the audit log 4565ms
- ✓ tests/integration/members.test.ts > internal notes > go with the account at withdrawal, as does the last sign-in; the audit trail stays 4368ms
- ✓ tests/integration/members.test.ts > member history > records each sanction with before, after and the reason; filters by kind; pages without skipping ties 10583ms
- ✓ tests/integration/members.test.ts > member page > shows recent tables, reports by and about the member, and play activity by day 6094ms
-(node:35700) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/admin-permissions.test.ts > permission table > refuses super-admin-only actions to plain administrators and records each attempt as failed 3182ms
- ✓ tests/integration/admin-permissions.test.ts > permission table > every admin route refuses the wrong caller: no session, a member session, the player site, a plain admin on super-admin routes, and no fresh password 5428ms
- ✓ tests/integration/admin-permissions.test.ts > permission table > records failed changes and refusals, but not a missing password confirmation or a read that found nothing 7463ms
- ✓ tests/integration/admin-permissions.test.ts > permission table > blocking entry through the settings route asks for the password like the table control does; other settings do not 5858ms
- ✓ tests/integration/admin-permissions.test.ts > role and status changes apply on the next request > a member whose role was taken away in the database is refused and recorded; demotion and suspension end the session 7539ms
- ✓ tests/integration/admin-permissions.test.ts > console sessions > lists and ends your own sessions; only a super admin sees and ends other administrators’ sessions 5905ms
- ✓ tests/integration/admin-permissions.test.ts > audit log search > filters by actor, action family, outcome, target, time and text, pages by cursor and counts the first page 1888ms
- ✓ tests/integration/admin-permissions.test.ts > audit log search > shows a plain administrator only their own entries 1693ms
- ✓ tests/integration/admin-permissions.test.ts > previews write nothing > chip adjustment: balance before and after, the duplicate key, and refusals without a refused-adjustment row 2981ms
- ✓ tests/integration/admin-permissions.test.ts > previews write nothing > suspension, disconnection and table closing: the effect is listed, nothing changes 1749ms
- ✓ tests/integration/admin-permissions.test.ts > previews write nothing > a preview is shown before the password is asked again; the change itself still asks, and the role is checked for both 1637ms
-(node:35468) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/admin-bulk.test.ts > admin lists over thousands of rows > members: 5000 found, listed once each in every sort (ties included), filters counted exactly 1614ms
- ✓ tests/integration/admin-bulk.test.ts > admin lists over thousands of rows > ledger: the whole ledger, one member, and a rare type, page by page, each row once in order 11049ms
- ✓ tests/integration/admin-bulk.test.ts > admin lists over thousands of rows > audit log: 25000 entries walked to the end; the count stops at its cap, filters count exactly 7040ms
-stdout | tests/integration/admin-bulk.test.ts > admin lists over thousands of rows
-BULK timings (ms, local workerd)
-users created n=25 median=27.5 max=33.8
-users balance (all tied) n=25 median=26.5 max=40.6
-users suspended n=3 median=36.2 max=37.4
-users en n=1 median=33.8 max=33.8
-ledger all n=266 median=17.8 max=413.0
-ledger one member n=15 median=21.1 max=22.4
-ledger rare type n=1 median=23.5 max=23.5
-audit all n=250 median=13.6 max=21.3
-audit one action n=63 median=14.0 max=21.7
-audit family user.* n=125 median=16.1 max=24.5
-audit failed n=13 median=16.8 max=21.1
-audit text n=1 median=25.7 max=25.7
-audit target n=1 median=17.8 max=17.8
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
 
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > rejects unauthenticated sockets and cross-site origins 152ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > heads-up: buy-in debits the wallet, hand auto-starts, each player sees only own cards 2916ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > validates sit requests: range, occupied seat, double seat, insufficient wallet 982ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > server validates actions: wrong turn, stale seq, duplicate intent 2992ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > 6-handed: plays full hands, conserves table chips, records hands and stats 4747ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > reconnect restores the seat and own cards; a second tab replaces the first 3219ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > leaving mid-hand: the leaver is folded when their turn comes (or at once when it is theirs), keeps nothing in that hand, is paid their stack once after it, and the others play on 7402ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > leaving cashes the stack out to the wallet exactly once 219ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > turn timer: an idle player is checked/folded automatically by the server 8828ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > private table: join code required to sit; spectating allowed 416ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > spectators disabled: non-seated viewers get no hand details or chat 2926ms
- ✓ tests/integration/multiplayer.test.ts > table room over WebSocket (real workerd + Durable Objects) > chat is broadcast to the table and length/rate limited 275ms
-(node:31244) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/admin-analytics.test.ts > operations statistics > rolls days up from the records, and rolling them up again changes nothing 9967ms
- ✓ tests/integration/admin-analytics.test.ts > operations statistics > is for administrators only and refuses malformed periods 161ms
- ✓ tests/integration/admin-analytics.test.ts > operations statistics > marks a member active on signing in and on the first request of a new day, the day only 8613ms
- ✓ tests/integration/admin-analytics.test.ts > operations statistics > counts Academy events per day, not per member 2921ms
- ✓ tests/integration/admin-analytics.test.ts > operations statistics > deletes a member's activity markers when the member leaves 4461ms
- ✓ tests/integration/admin-analytics.test.ts > operations statistics > rolls up in the daily cron, then deletes markers older than the retention 5615ms
-(node:42804) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/stats.test.ts > play statistics > count the contested pot (not uncalled chips handed back), wins, VPIP, PFR, showdowns and positions, for fold wins, split pots and side pots 8966ms
- ✓ tests/integration/stats.test.ts > play statistics > net chips by day for the last 7, 30 or 90 days, cut at the caller’s time zone 11730ms
- ✓ tests/integration/stats.test.ts > play statistics from a real table > are filled when the game worker records the hand, for the players dealt in and not for a spectator 3296ms
-(node:27080) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/admin-lists.test.ts > chip ledger, page by page > narrows to a member by id, email or nickname, by type and period, pages without overlap, and records every look 6179ms
- ✓ tests/integration/admin-lists.test.ts > finished hands, page by page > by table and by member without overlap; only a look at a member’s hands is recorded 7302ms
- ✓ tests/integration/admin-lists.test.ts > tables, board posts and sent messages, by offset > tables: name or id, state, kind and issue, with the number that match 1544ms
- ✓ tests/integration/admin-lists.test.ts > tables, board posts and sent messages, by offset > board posts by title and state, and sent messages, say whether more follow 444ms
- ✓ tests/integration/admin-lists.test.ts > the confirmation of a report decision > says what the decision would do and writes nothing 8475ms
-(node:43904) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/topup.test.ts > table top-ups and automatic rebuy (real workerd + Durable Objects) > between hands a top-up applies at once, keeps the stack within the buy-in range and a retried request takes chips once 2180ms
- ✓ tests/integration/topup.test.ts > table top-ups and automatic rebuy (real workerd + Durable Objects) > a top-up that cannot reach D1 takes nothing, its retry applies once, and a replay after the room forgot its request id adds no chips 1887ms
- ✓ tests/integration/topup.test.ts > table top-ups and automatic rebuy (real workerd + Durable Objects) > during a hand a top-up waits, can be replaced or cancelled, and is applied after the hand without passing the maximum 3458ms
- ✓ tests/integration/topup.test.ts > table top-ups and automatic rebuy (real workerd + Durable Objects) > automatic rebuy is off by default and turns on only with consent, an amount and a limit 379ms
- ✓ tests/integration/topup.test.ts > table top-ups and automatic rebuy (real workerd + Durable Objects) > automatic rebuy refills a busted stack once per hand and turns off at its limit, after which the player stands up 18948ms
- ✓ tests/integration/topup.test.ts > table top-ups and automatic rebuy (real workerd + Durable Objects) > automatic rebuy with an empty wallet turns itself off and takes nothing; a waiting top-up is refused up front 3262ms
- ✓ tests/integration/rooms.test.ts > member rooms > validates the stakes and lets a member keep at most two rooms open 477ms
- ✓ tests/integration/rooms.test.ts > member rooms > only the host changes the room, and only its name, spectating and join code 581ms
- ✓ tests/integration/rooms.test.ts > member rooms > the host closes the room: the hand in play finishes, then every seated player gets their chips back 3177ms
- ✓ tests/integration/rooms.test.ts > member rooms > a room nobody sits in closes by itself; a room with someone seated stays open 16660ms
- ✓ tests/integration/rooms.test.ts > member rooms > suspended members cannot open rooms 164ms
- ✓ tests/integration/pre-action.test.ts > pre-actions (check, check/fold, fold chosen while waiting) > a check chosen in the big blind is made when the turn comes, without the player acting 3023ms
- ✓ tests/integration/pre-action.test.ts > pre-actions (check, check/fold, fold chosen while waiting) > a bet cancels a chosen check with a notice, and the player then decides on the turn 2926ms
- ✓ tests/integration/pre-action.test.ts > pre-actions (check, check/fold, fold chosen while waiting) > a check/fold folds against a raise; a fold chosen in the small blind folds; chips are kept 2967ms
- ✓ tests/integration/pre-action.test.ts > pre-actions (check, check/fold, fold chosen while waiting) > keeps nothing the table has moved past, and refuses what was never allowed 3097ms
- ✓ tests/integration/pre-action.test.ts > pre-actions (check, check/fold, fold chosen while waiting) > a choice sent again after it was cleared does not come back, and clearing stops it 2967ms
- ✓ tests/integration/pre-action.test.ts > pre-actions (check, check/fold, fold chosen while waiting) > a choice the street ended without using is dropped quietly and never carried to the next street 2949ms
-(node:37440) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/reports-workflow.test.ts > working a report > severity, the person handling it, notes and every change are recorded; two admins cannot both take it 7761ms
- ✓ tests/integration/reports-workflow.test.ts > working a report > tells the members how it ended only when asked: each reporter and the reported member in their own language, once 2120ms
- ✓ tests/integration/reports-workflow.test.ts > the queue > filters, sorts and pages; shows how long open reports have waited; statistics by reason and target 2269ms
- ✓ tests/integration/reports-workflow.test.ts > the queue > members reported again and again are listed for review only: many reports never suspend anyone by themselves 1958ms
- ✓ tests/integration/reports-workflow.test.ts > the queue > a suspension given from a report is linked both ways; the report shows the member's earlier sanctions 1939ms
- ✓ tests/integration/social.test.ts > friends > request by nickname → accept; decline, cancel and unfriend remove the link 728ms
- ✓ tests/integration/social.test.ts > friends > deleting an account removes its friendships, pending requests and unread-message badge 483ms
- ✓ tests/integration/social.test.ts > 1:1 messages > friends only; unread counts, read receipts, polling with ?after and paging with ?before 1965ms
-stdout | tests/integration/social.test.ts > 1:1 message sync by seq > a burst from both sides while one of them polls: every message once, in seq order, nothing missed
-dm burst: of 23 neighbouring pairs, 19 share a millisecond and 0 run backwards in clock time
+ FAIL  tests/integration/members.test.ts > member history > records each sanction with before, after and the reason; filters by kind; pages without skipping ties
+Error: d1 execute failed (attempt 1): {
+  "error": {
+    "text": "fetch failed"
+  }
+}
+ ❯ d1 tests/support/d1.ts:36:41
+     34|       const why = (stdout || stderr || message).trim().slice(0, 2000);
+     35|       const busy = why.includes('SQLITE_BUSY') || (readOnly && /fetch …
+     36|       if (!busy || attempt >= 10) throw new Error(`d1 execute failed (…
+       |                                         ^
+     37|       await new Promise((r) => setTimeout(r, 100 * attempt + Math.rand…
+     38|     }
+ ❯ tests/integration/members.test.ts:260:7
 
- ✓ tests/integration/social.test.ts > 1:1 message sync by seq > a burst from both sides while one of them polls: every message once, in seq order, nothing missed 908ms
- ✓ tests/integration/social.test.ts > 1:1 message sync by seq > afterSeq and beforeSeq page across the 50-message boundary with no gap or repeat 1668ms
- ✓ tests/integration/social.test.ts > 1:1 message sync by seq > reading up to a seq leaves a later message unread; the sender sees how far, even in a poll with nothing new 533ms
- ✓ tests/integration/social.test.ts > blocking and receive settings > a block ends the friendship, stops requests and messages both ways, and unblocking restores nothing 688ms
- ✓ tests/integration/social.test.ts > blocking and receive settings > a block drops pending requests, and a request racing a block never gets through 1307ms
- ✓ tests/integration/social.test.ts > blocking and receive settings > receive settings: nobody can send requests; message notifications can be turned off; blocked senders never count 616ms
- ✓ tests/integration/social.test.ts > table invites > friends only, open tables only; the card carries no join code, and the table still checks seats and codes 1121ms
- ✓ tests/integration/social.test.ts > reports > posts and comments: one open report per member, evidence snapshot, admin resolves and hides 637ms
- ✓ tests/integration/social.test.ts > reports > players: only someone at the same table; the server attaches their recent table chat 484ms
- ✓ tests/integration/social.test.ts > reports > 1:1 messages: only someone in the conversation can report one, and the text is the server copy 932ms
- ✓ tests/integration/social.test.ts > reports > players: after leaving, a report is checked against seat history and carries no hidden cards 3205ms
- ✓ tests/integration/social.test.ts > reports > admins handling the same report at once: exactly one decision, one decision row, the others audited as refused 430ms
- ✓ tests/integration/private-access.test.ts > private table join tickets > trades the code for an HttpOnly ticket scoped to the table socket; the code itself is never accepted in a URL 620ms
- ✓ tests/integration/private-access.test.ts > private table join tickets > wrong codes are refused and limited per member 530ms
- ✓ tests/integration/private-access.test.ts > private table join tickets > without spectators, a socket without the code is closed with 4003; a code change revokes old tickets but never a seat 13155ms
- ✓ tests/integration/private-access.test.ts > private table join tickets > with spectators, a code change keeps viewers watching but asks them for the new code to sit 346ms
-(node:45076) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/privacy.test.ts > account deletion > deletes 1:1 messages both ways, inbox, Academy records and reset links; keeps ledger and reports 6137ms
- ✓ tests/integration/privacy.test.ts > account deletion > board shows a withdrawn author without the tombstone nickname, and drops reply mentions of them 358ms
- ✓ tests/integration/privacy.test.ts > operator access is recorded > member list, member detail and report list each leave an audit row 439ms
- ✓ tests/integration/privacy.test.ts > daily clean-up (cron) > deletes rows expired for more than a day and leaves live or recently expired ones 4336ms
-(node:42952) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/muck.test.ts > showdown muck > a losing covered hand stays face down for the table and in others’ history; its owner keeps it 6251ms
- ✓ tests/integration/muck.test.ts > showdown muck > when the betting ended all in, every hand is shown whatever the settings 4381ms
- ✓ tests/integration/admin.test.ts > admin authentication & access control > regular users cannot log in to the admin console or use its API 119ms
- ✓ tests/integration/admin.test.ts > admin authentication & access control > admin API rejects requests from the player-site origin 4ms
- ✓ tests/integration/admin.test.ts > admin authentication & access control > sets a separate SameSite=Strict admin cookie 23ms
- ✓ tests/integration/admin.test.ts > admin authentication & access control > dashboard reports platform figures 14ms
- ✓ tests/integration/admin.test.ts > member management > chip adjustment requires password re-confirmation, is idempotent, and cannot go negative 269ms
- ✓ tests/integration/admin.test.ts > member management > suspension revokes sessions and blocks login until lifted 182ms
- ✓ tests/integration/admin.test.ts > member management > only super admins change roles; demotion ends existing admin sessions immediately 229ms
- ✓ tests/integration/admin.test.ts > member management > plain admins cannot act on administrators (reset link, chips, unsuspend) 571ms
- ✓ tests/integration/admin.test.ts > member management > issues a one-time password reset link for a member 240ms
- ✓ tests/integration/admin.test.ts > table management & game audit > creates tables with validation; they appear in the lobby 144ms
- ✓ tests/integration/admin.test.ts > table management & game audit > closing a table finishes at a safe point and refunds seated players 309ms
- ✓ tests/integration/admin.test.ts > table management & game audit > audits finished hands (with re-confirmation) and never exposes hands in progress 3434ms
- ✓ tests/integration/admin.test.ts > table management & game audit > reconciliation detects a wallet that no longer matches its ledger 2491ms
- ✓ tests/integration/admin.test.ts > table management & game audit > records administrator actions in the audit log 43ms
- ✓ tests/integration/admin.test.ts > member data: account language, profile fields, CSV export > lists and filters members by account language and shows the sign-up fields 160ms
- ✓ tests/integration/admin.test.ts > member data: account language, profile fields, CSV export > exports selected members (super admins, after re-confirmation), escapes formulas and records the export 648ms
- ✓ tests/integration/admin.test.ts > member data: account language, profile fields, CSV export > writes sanction and chip notices and reset links in the member language 248ms
-(node:37216) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-stdout | tests/integration/ops.test.ts > admin live dashboard > is admin-only and reports live figures from the rooms and sessions in one bounded read
-ops/live rowsRead=811 d1LatencyMs=5
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
 
- ✓ tests/integration/ops.test.ts > admin live dashboard > is admin-only and reports live figures from the rooms and sessions in one bounded read 216ms
- ✓ tests/integration/ops.test.ts > admin live dashboard > counts reconnects (?r=1) but not first connections 1632ms
- ✓ tests/integration/ops.test.ts > admin live dashboard > counts a connection that ended without a close frame, and not one that closed normally 1679ms
- ✓ tests/integration/ops.test.ts > admin live dashboard > counts a failed room operation and shows it as the table issue once D1 is back 1671ms
- ✓ tests/integration/ops.test.ts > admin live dashboard > warns about open mismatches, unfinished closes and seats left on closed tables, and lists open reports 1696ms
- ✓ tests/integration/community.test.ts > messages (one-way, admin → user) > a welcome message arrives on signup; read and delete work; users cannot send 319ms
- ✓ tests/integration/community.test.ts > messages (one-way, admin → user) > admin sends to several users at once; sanctions and chip events notify automatically 395ms
- ✓ tests/integration/community.test.ts > board > members post, edit and delete their own posts and comments only; my page lists them 489ms
- ✓ tests/integration/community.test.ts > board > replies form two-level threads; deleted parents with replies remain as placeholders 538ms
- ✓ tests/integration/community.test.ts > board > notices are admin-only and pinned above posts; members cannot edit them 164ms
- ✓ tests/integration/community.test.ts > board > admins can hide posts and comments (moderation is audited) 226ms
- ✓ tests/integration/community.test.ts > board > hand review: attach own finished hands; other players’ hidden cards stay hidden 3494ms
-(node:45788) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/quickplay.test.ts > quick play > sends newcomers to beginner tables first and experienced players elsewhere first 3192ms
- ✓ tests/integration/quickplay.test.ts > quick play > honours table size and blind filters, and the chosen seat goes through the normal paid buy-in 273ms
- ✓ tests/integration/quickplay.test.ts > quick play > never picks private or entry-blocked tables 135ms
- ✓ tests/integration/quickplay.test.ts > quick play > asks the table room, not the lobby counts: a full table is never returned 1772ms
- ✓ tests/integration/quickplay.test.ts > quick play > says when the wallet cannot cover any matching table, with the cheapest minimum 124ms
- ✓ tests/integration/quickplay.test.ts > quick play > prefers tables where players are already seated 291ms
- ✓ tests/integration/ws-reliability.test.ts > command delivery over WebSocket > answers a ping from the runtime, without the room 173ms
- ✓ tests/integration/ws-reliability.test.ts > command delivery over WebSocket > a sit sent again on a new connection after the first closed seats once and debits the wallet once 209ms
- ✓ tests/integration/ws-reliability.test.ts > command delivery over WebSocket > acknowledges an action, and one sent again after its connection closed counts once 2939ms
- ✓ tests/integration/ws-reliability.test.ts > command delivery over WebSocket > posts a chat line sent twice with the same id once and answers both 396ms
- ✓ tests/integration/ws-reliability.test.ts > command delivery over WebSocket > acknowledges sit out, sit in, the waitlist and cancelling a top-up, and a late copy changes nothing 338ms
- ✓ tests/integration/auth.test.ts > auth & sessions > registers with a Korean nickname, grants signup chips once, and records it in the ledger 140ms
- ✓ tests/integration/auth.test.ts > auth & sessions > rejects duplicate nicknames case-insensitively and duplicate emails 187ms
- ✓ tests/integration/auth.test.ts > auth & sessions > sets an HttpOnly SameSite session cookie and supports logout 84ms
- ✓ tests/integration/auth.test.ts > auth & sessions > 자동 로그인: a 30-day cookie only when asked, otherwise one that ends with the browser; app loads renew it 240ms
- ✓ tests/integration/auth.test.ts > auth & sessions > blocks state-changing requests without an allowed Origin (CSRF) 92ms
- ✓ tests/integration/auth.test.ts > auth & sessions > login: wrong password is rejected, suspended/unknown accounts get the same error 193ms
- ✓ tests/integration/auth.test.ts > auth & sessions > password reset token works once and revokes existing sessions 172ms
- ✓ tests/integration/auth.test.ts > auth & sessions > profile update validates nickname uniqueness and avatar URL scheme 206ms
- ✓ tests/integration/auth.test.ts > auth & sessions > account deletion requires password and blocks future login 137ms
- ✓ tests/integration/auth.test.ts > auth & sessions > rate-limits repeated failed logins per account (429 + Retry-After) 272ms
- ✓ tests/integration/auth.test.ts > auth & sessions > password changes and resets enforce the password policy 134ms
- ✓ tests/integration/auth.test.ts > auth & sessions > unauthenticated access to protected routes is refused 16ms
- ✓ tests/integration/auth.test.ts > sign-up: email code, birth date, agreements, password policy > advertises email verification outside production 4ms
- ✓ tests/integration/auth.test.ts > sign-up: email code, birth date, agreements, password policy > refuses sign-up without a verified email, and a proof only works for its own address 134ms
- ✓ tests/integration/auth.test.ts > sign-up: email code, birth date, agreements, password policy > counts wrong codes, locks after five, and throttles resends 135ms
- ✓ tests/integration/auth.test.ts > sign-up: email code, birth date, agreements, password policy > a code for an unknown request is reported as expired 15ms
- ✓ tests/integration/auth.test.ts > sign-up: email code, birth date, agreements, password policy > requires the 14+ age, a valid birth date and both agreements 157ms
- ✓ tests/integration/auth.test.ts > sign-up: email code, birth date, agreements, password policy > rejects passwords that miss a rule 116ms
- ✓ tests/integration/auth.test.ts > sign-up: email code, birth date, agreements, password policy > stores the account language and writes system messages in it 202ms
- ✓ tests/integration/academy.test.ts > academy progress sync > stores per user, last write wins by updatedAt, other accounts never see it 285ms
- ✓ tests/integration/academy.test.ts > academy progress sync > rejects oversized or malformed payloads and anonymous callers 117ms
- ✓ tests/integration/academy.test.ts > badges (cosmetic, chip-free) > are awarded once from progress and never touch the wallet or ledger 186ms
- ✓ tests/integration/academy.test.ts > badges (cosmetic, chip-free) > forged or impossible progress is still stored but earns nothing 493ms
- ✓ tests/integration/academy.test.ts > badges (cosmetic, chip-free) > concurrent syncs award each badge once with a stable time, and a later reset keeps them 351ms
- ✓ tests/integration/academy.test.ts > anonymous academy statistics > aggregates counters without user ids; admin-only read 150ms
- ✓ tests/integration/academy.test.ts > beginner tables > admin marks a table as beginner and the lobby shows the flag 212ms
-(node:40468) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/hand-stats.test.ts > hand statistics (HAND_STATS_SQL, migration 0010) > migration 0010 backfilled with the statement the game worker runs, except that the worker starts from the hands still to do 2ms
- ✓ tests/integration/hand-stats.test.ts > hand statistics (HAND_STATS_SQL, migration 0010) > positions, VPIP, PFR, saw-flop and pot won match the engine for random hands, before and after the migration 471ms
-(node:27440) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- ✓ tests/integration/dm-migration.test.ts > migration 0009_dm_seq > numbers existing 1:1 messages per conversation by (time, id) and then refuses a repeated seq 16ms
- ✓ tests/integration/production-config.test.ts > production addresses > production uses jc-royal.site for origins, mail links and the sender 12ms
- ✓ tests/integration/production-config.test.ts > production addresses > development keeps localhost and sends no mail 2ms
- ✓ tests/integration/production-config.test.ts > production addresses > api production config leaves the domains to the dashboard and keeps workers.dev 1ms
- ✓ tests/integration/production-config.test.ts > production addresses > admin production config leaves the domains to the dashboard and keeps workers.dev 1ms
- ✓ tests/integration/production-config.test.ts > production addresses > the game worker has no public address 1ms
+ FAIL  tests/integration/tournaments.test.ts > registration > an operator starts with the minimum, re-reading each registration, and never twice
+Error: verification request failed 500 "Error: Network connection lost.\n    at async Object.fetch (file:///<repo>/node_modules/.pnpm/miniflare@5.20261006.2-beta_@types+node@26.6.5/node_modules/miniflare/dist/src/workers/core/entry.worker.js:5347:22)"
+ ❯ verifyEmail tests/support/client.ts:75:50
+     73| export async function verifyEmail(c: Client, email: string): Promise<s…
+     74|   const r = await c.post('/api/auth/email-verification/request', { ema…
+     75|   if (r.status !== 200 || !r.body.devCode) throw new Error(`verificati…
+       |                                                  ^
+     76|   const v = await c.post('/api/auth/email-verification/confirm', { ema…
+     77|   if (v.status !== 200) throw new Error(`verification confirm failed $…
+ ❯ signupBody tests/support/client.ts:83:123
+ ❯ newUser tests/support/client.ts:89:48
+ ❯ tests/integration/tournaments.test.ts:302:20
 
- Test Files  30 passed (30)
-      Tests  210 passed (210)
-   Start at  06:35:58
-   Duration  931.02s (transform 534ms, setup 0ms, import 2.65s, tests 904.55s, environment 3ms)
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
 
+
+ Test Files  2 failed | 41 passed (43)
+      Tests  2 failed | 305 passed (307)
+   Start at  14:03:55
+   Duration  1630.97s (transform 774ms, setup 0ms, import 3.32s, tests 1599.65s, environment 4ms)
+
+
+> vitest run --config tests/vitest.config.ts tests/integration/members.test.ts tests/integration/tournaments.test.ts   (the two failed files again)
+
+
+ Test Files  2 passed (2)
+      Tests  17 passed (17)
+   Start at  14:31:52
+   Duration  167.65s (transform 81ms, setup 0ms, import 143ms, tests 146.28s, environment 0ms)
+
+
+> vitest run --config tests/vitest.config.ts        (run 2)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/admin-permissions.test.ts > audit log search > filters by actor, action family, outcome, target, time and text, pages by cursor and counts the first page
+Error: d1 execute failed (attempt 1): {
+  "error": {
+    "text": "fetch failed"
+  }
+}
+ ❯ d1 tests/support/d1.ts:36:41
+     34|       const why = (stdout || stderr || message).trim().slice(0, 2000);
+     35|       const busy = why.includes('SQLITE_BUSY') || (readOnly && /fetch …
+     36|       if (!busy || attempt >= 10) throw new Error(`d1 execute failed (…
+       |                                         ^
+     37|       await new Promise((r) => setTimeout(r, 100 * attempt + Math.rand…
+     38|     }
+ ❯ plainAdmin tests/integration/admin-permissions.test.ts:38:3
+ ❯ tests/integration/admin-permissions.test.ts:472:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 42 passed (43)
+      Tests  1 failed | 306 passed (307)
+   Start at  14:36:25
+   Duration  1603.48s (transform 749ms, setup 0ms, import 3.27s, tests 1572.70s, environment 4ms)
+
+== G014 (Codex review fixes) full integration, 2026-10-17 (same environment as P12). 312 tests after the new ones.
+   311 passed; the one failure stopped in test setup, before any assertion, and passed when the file ran again
+   (see docs/TEST_REPORT.md, Codex 브랜치 리뷰(G014) > 통합 실패 조사).
+
+> vitest run --config tests/vitest.config.ts
+
+ ❯ tests/integration/tournaments.test.ts (11 tests | 1 failed) 96989ms
+     × an operator starts with the minimum, re-reading each registration, and never twice 111ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/tournaments.test.ts > registration > an operator starts with the minimum, re-reading each registration, and never twice
+Error: verification request failed 500 "Error: Network connection lost.\n    at async Object.fetch (file:///<repo>/node_modules/.pnpm/miniflare@5.20261006.2-beta_@types+node@26.6.5/node_modules/miniflare/dist/src/workers/core/entry.worker.js:5347:22)"
+ ❯ verifyEmail tests/support/client.ts:75:50
+     73| export async function verifyEmail(c: Client, email: string): Promise<s…
+     74|   const r = await c.post('/api/auth/email-verification/request', { ema…
+     75|   if (r.status !== 200 || !r.body.devCode) throw new Error(`verificati…
+       |                                                  ^
+     76|   const v = await c.post('/api/auth/email-verification/confirm', { ema…
+     77|   if (v.status !== 200) throw new Error(`verification confirm failed $…
+ ❯ signupBody tests/support/client.ts:83:123
+ ❯ newUser tests/support/client.ts:89:48
+ ❯ tests/integration/tournaments.test.ts:302:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 42 passed (43)
+      Tests  1 failed | 311 passed (312)
+   Start at  16:46:58
+   Duration  1697.58s (transform 767ms, setup 0ms, import 3.30s, tests 1665.70s, environment 4ms)
+
+> vitest run --config tests/vitest.config.ts tests/integration/tournaments.test.ts        (the failed file again)
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Duration  122.09s (transform 63ms, setup 0ms, import 96ms, tests 102.28s, environment 0ms)
+
+== Investigation runs of tournaments.test.ts (wrangler dev output kept, not part of the suite):
+   whole file, plain:  iso1 1 failed | 10 passed    iso2 1 failed | 10 passed
+                       iso4 2 failed | 9 passed (debug log on; also the restart test: migration "bad port", then
+                            afterAll "read ECONNRESET")
+                       (iso3 left out: the debug log leaked into the d1 helper's output, a setup mistake)
+   chosen tests (-t), registration tests only:
+     an operator starts                                                          1 passed
+     closes and reopens | an operator starts                                     2 passed
+     registers once | an operator starts                                         2 passed
+     are checked | registers once | many arrive at once | closes and reopens |
+       an operator starts                                                        5 passed
+     registers once | many arrive at once | closes and reopens | an operator starts  4 passed
+     are checked | registers once | closes and reopens | an operator starts      4 passed
+     are checked | many arrive at once | closes and reopens | an operator starts  1 failed | 3 passed  (same error)
+   idle-time probes (own test files against the same dev server, never part of the suite):
+     probe1  idle 1/3/5/7/10/15 s, then concurrent POSTs                         192 requests, 0 dropped
+     probe5  idle 4.95-5.30 s in 10 ms steps, twice, then concurrent POSTs        576 requests, 0 dropped
+     probe6  six real sign-ups at once, idle 4.96-5.30 s in 10 ms steps, then two  288 sign-ups, 0 dropped
+   whole file, warm (8 x GET /api/health at once every second from global setup) vs plain, alternating:
+     warm1 11 passed   warm2 11 passed   base1 11 passed   warm3 11 passed   warm4 11 passed
+     base2 2 failed | 9 passed (same error at :302; the restart test's migration "bad port", then
+           afterAll "read ECONNRESET")
+     warm runs: 3,152 health requests, 0 failed, 0 dropped connections in the dev log

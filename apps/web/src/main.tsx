@@ -1,20 +1,23 @@
 import { Logo, Spinner } from '@jc/ui';
 import { lazy, StrictMode, Suspense, useEffect, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, useLocation } from 'react-router';
+// The react-dom build of the provider: it honours `flushSync` on a navigation (the hand filters use it).
+import { RouterProvider } from 'react-router/dom';
 import { startAcademySync } from './academy/sync';
 import { AppShell } from './components/AppShell';
 import './index.css';
 import { AuthProvider, useAuth } from './lib/auth';
-import { I18nProvider, useI18n } from './lib/i18n';
-import { applyInitialTheme } from './lib/prefs';
+import { I18nProvider, initialLocale, loadLocale, useI18n } from './lib/i18n';
+import { startInstallWatch } from './lib/install';
+import { applyInitialTheme, closeAccount, openAccount, setSyncState } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
-import { ConversationPage, FriendSettingsPage, FriendsPage } from './pages/Friends';
 import { LobbyPage } from './pages/Lobby';
-import { MessagesPage } from './pages/Messages';
 import { TableRoute } from './pages/Table';
 
 applyInitialTheme();
+// Before the browser can offer its install prompt, so the lobby and settings can hand it on.
+startInstallWatch();
 
 function Splash() {
   return (
@@ -52,7 +55,7 @@ function Legal({ kind }: { kind: 'privacy' | 'terms' }) {
   );
 }
 
-/** My page (with the statistics) and the board are away from the lobby and the table, so they load on demand too. */
+/** My page (with the statistics), the board, friends and messages are away from the lobby and the table, so they load on demand too. */
 function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, name: keyof M & string) {
   const C = lazy(() => load().then((m) => ({ default: m[name] as ComponentType })));
   return (
@@ -62,13 +65,48 @@ function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, nam
   );
 }
 const loadMe = () => import('./pages/Me');
+const loadHands = () => import('./pages/Hands');
 const loadBoard = () => import('./pages/Board');
 const loadMaintenance = () => import('./pages/Maintenance');
+const loadFriends = () => import('./pages/Friends');
+const loadMessages = () => import('./pages/Messages');
+const loadTournaments = () => import('./pages/Tournaments');
 
 /** Keeps Academy progress in sync with the server while someone is signed in. */
 function AcademySync() {
   const { me } = useAuth();
   useEffect(() => (me ? startAcademySync(me.id) : undefined), [me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+/**
+ * The account's settings and favourite tables while someone is signed in (prefs.ts); signed out, or another account,
+ * the previous one's leave the screen. The sync loads on demand: the settings already apply from this device meanwhile.
+ */
+function SettingsSync() {
+  const { me, loading, refresh } = useAuth();
+  const id = me?.id;
+  useEffect(() => {
+    if (loading) return;
+    if (!id) {
+      closeAccount();
+      return;
+    }
+    openAccount(id);
+    let gone = false;
+    let stop: (() => void) | undefined;
+    import('./lib/settings-sync').then(
+      (m) => {
+        if (!gone) stop = m.startSettingsSync(id, () => void refresh().catch(() => {}));
+      },
+      () => setSyncState('error'),
+    );
+    return () => {
+      gone = true;
+      stop?.();
+      closeAccount();
+    };
+  }, [id, loading]); // eslint-disable-line react-hooks/exhaustive-deps
   return null;
 }
 
@@ -115,15 +153,18 @@ const router = createBrowserRouter([
     children: [
       { path: '/', element: <LobbyPage /> },
       { path: '/me', element: onDemand(loadMe, 'MePage') },
+      { path: '/me/hands', element: onDemand(loadHands, 'HandsPage') },
       { path: '/me/hands/:id', element: onDemand(loadMe, 'HandDetailPage') },
+      { path: '/tournaments', element: onDemand(loadTournaments, 'TournamentsPage') },
+      { path: '/tournaments/:id', element: onDemand(loadTournaments, 'TournamentPage') },
       { path: '/board', element: onDemand(loadBoard, 'BoardPage') },
       { path: '/board/write', element: onDemand(loadBoard, 'PostEditorPage') },
       { path: '/board/:id', element: onDemand(loadBoard, 'PostPage') },
       { path: '/board/:id/edit', element: onDemand(loadBoard, 'PostEditorPage') },
-      { path: '/messages', element: <MessagesPage /> },
-      { path: '/friends', element: <FriendsPage /> },
-      { path: '/friends/settings', element: <FriendSettingsPage /> },
-      { path: '/friends/:userId', element: <ConversationPage /> },
+      { path: '/messages', element: onDemand(loadMessages, 'MessagesPage') },
+      { path: '/friends', element: onDemand(loadFriends, 'FriendsPage') },
+      { path: '/friends/settings', element: onDemand(loadFriends, 'FriendSettingsPage') },
+      { path: '/friends/:userId', element: onDemand(loadFriends, 'ConversationPage') },
       { path: '/academy', element: <Academy page="AcademyPage" /> },
       { path: '/academy/cards', element: <Academy page="CardsLesson" /> },
       { path: '/academy/hands', element: <Academy page="HandsLesson" /> },
@@ -137,13 +178,17 @@ const router = createBrowserRouter([
   },
 ]);
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <I18nProvider>
-      <AuthProvider>
-        <AcademySync />
-        <RouterProvider router={router} />
-      </AuthProvider>
-    </I18nProvider>
-  </StrictMode>,
-);
+// English is a separate chunk: load it first for someone who chose it, so the first screen is not Korean.
+const render = () =>
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <I18nProvider>
+        <AuthProvider>
+          <AcademySync />
+          <SettingsSync />
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </I18nProvider>
+    </StrictMode>,
+  );
+loadLocale(initialLocale()).then(render, render);

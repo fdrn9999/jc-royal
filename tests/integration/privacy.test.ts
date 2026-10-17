@@ -19,7 +19,7 @@ async function befriend(a: User, b: User) {
 }
 
 describe('account deletion', () => {
-  it('deletes 1:1 messages both ways, inbox, Academy records and reset links; keeps ledger and reports', async () => {
+  it('deletes 1:1 messages both ways, inbox, Academy records, hand notes and reset links; keeps ledger and reports', async () => {
     const a = await newUser();
     const b = await newUser();
     await befriend(a, b);
@@ -35,26 +35,30 @@ describe('account deletion', () => {
     await d1(
       `INSERT INTO academy_progress (user_id, data, version, updated_at) VALUES ('${id}', '{}', 1, ${now});` +
         `INSERT INTO user_badges (user_id, badge, awarded_at) VALUES ('${id}', 'first-lesson', ${now});` +
+        `INSERT INTO hand_notes (user_id, hand_id, ended_at, bookmarked, tags, memo, rev, created_at, updated_at) VALUES ('${id}', 'del-${id}', ${now}, 1, 1, 'memo', 1, ${now}, ${now});` +
         `INSERT INTO password_resets (token_hash, user_id, expires_at, created_at) VALUES ('del-${id}', '${id}', ${now + 1_800_000}, ${now});`,
     );
+    // Account settings and a favourite table, saved the way a device does.
+    const saved = await a.client.req('PUT', '/api/me/settings', { user: id, epoch: 0, base: 0, prefs: { theme: { v: 'crimson', ago: 0 } }, fav: [{ id: 'del-table', on: true, ago: 0 }] });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     const state = () =>
       counts(
         `SELECT (SELECT COUNT(*) FROM direct_messages WHERE sender_id = '${id}' OR recipient_id = '${id}') AS dms, ` +
-          ['messages', 'academy_progress', 'user_badges', 'password_resets', 'sessions', 'chip_ledger'].map((t) => `(SELECT COUNT(*) FROM ${t} WHERE user_id = '${id}') AS ${t}`).join(', ') +
+          ['messages', 'academy_progress', 'user_badges', 'hand_notes', 'user_settings', 'password_resets', 'sessions', 'chip_ledger'].map((t) => `(SELECT COUNT(*) FROM ${t} WHERE user_id = '${id}') AS ${t}`).join(', ') +
           `, (SELECT COUNT(*) FROM friendships WHERE user_a = '${id}' OR user_b = '${id}') AS friendships` +
           `, (SELECT COUNT(*) FROM reports WHERE reporter_id = '${id}' OR target_user_id = '${id}') AS reports`,
       );
     const before = await state();
-    expect(before).toMatchObject({ dms: 2, academy_progress: 1, user_badges: 1, password_resets: 1, friendships: 1, reports: 2 });
+    expect(before).toMatchObject({ dms: 2, academy_progress: 1, user_badges: 1, hand_notes: 1, user_settings: 1, password_resets: 1, friendships: 1, reports: 2 });
     expect(before.messages).toBeGreaterThan(0); // the welcome message
     expect(before.sessions).toBeGreaterThan(0);
     expect(before.chip_ledger).toBeGreaterThan(0);
 
     expect((await a.client.post('/api/auth/me/delete', { password: PASSWORD })).status).toBe(200);
 
-    // Gone: 1:1 messages both ways, inbox, Academy records, reset links, sessions and friendships.
+    // Gone: 1:1 messages both ways, inbox, Academy records, hand notes, account settings, reset links, sessions and friendships.
     // Kept under the member id: the ledger (chip integrity) and both reports, with the evidence copied at report time.
-    expect(await state()).toEqual({ dms: 0, messages: 0, academy_progress: 0, user_badges: 0, password_resets: 0, sessions: 0, friendships: 0, chip_ledger: before.chip_ledger, reports: 2 });
+    expect(await state()).toEqual({ dms: 0, messages: 0, academy_progress: 0, user_badges: 0, hand_notes: 0, user_settings: 0, password_resets: 0, sessions: 0, friendships: 0, chip_ledger: before.chip_ledger, reports: 2 });
     const reported = (await admin.get(`/api/admin/reports?userId=${id}`)).body.items as { targetId: string; context: { body: string } }[];
     expect(reported.find((r) => r.targetId === fromA.id)?.context.body).toBe('from a');
     const [u] = await d1<{ email: string; birth_date: string | null; status: string }>(`SELECT email, birth_date, status FROM users WHERE id = '${id}'`);

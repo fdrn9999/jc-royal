@@ -1,4 +1,8 @@
 import type { Card, HandRankClass } from './cards';
+import type { ReactionRules } from './protocol';
+import type { PublicRole } from './social';
+import type { TimeBankRules } from './timebank';
+import type { TournamentTableView } from './tournament';
 
 /** Seat counts poker-engine-ts supports (SessionConfig.maxSeats). */
 export const SUPPORTED_MAX_SEATS = [2, 6, 9] as const;
@@ -27,12 +31,31 @@ export type LegalOption =
 
 export type SeatState = 'empty' | 'waiting' | 'active' | 'folded' | 'allin' | 'sittingOut';
 
+/**
+ * Levels of the table bots an official table may seat (apps/game-worker/src/bots.ts): rule-based players that use the
+ * same engine and legal options as everybody and see only what a player in their seat sees.
+ */
+export const BOT_LEVELS = ['easy', 'normal', 'hard'] as const;
+export type BotLevel = (typeof BOT_LEVELS)[number];
+
 export interface SeatView {
   seatIndex: number;
   state: SeatState;
   userId?: string;
   nickname?: string;
   avatarUrl?: string | null;
+  /**
+   * Staff only (see PublicRole): refreshed when the player connects and when an admin changes the role; left out when
+   * the social policy hides that role's badge.
+   */
+  role?: PublicRole;
+  /**
+   * A table bot of this level, not a member: it has no profile, and cannot be befriended, messaged or reported. `true`
+   * in the replay of a past hand, which records that a seat was a bot but not how well it played.
+   */
+  bot?: BotLevel | true;
+  /** A bot that gives up its seat once the current hand ends (to a member waiting for one, or the bots were turned off). */
+  botLeaving?: boolean;
   stack: number;
   /** Chips committed on the current street. */
   streetBet: number;
@@ -42,6 +65,11 @@ export interface SeatView {
   hasCards: boolean;
   /** Only present for the viewer's own seat or cards revealed at showdown. */
   holeCards?: Card[] | null;
+  /**
+   * Cards the player chose to show after the hand ended (the `show` command), by position: a card not shown is null.
+   * Only on a seat whose cards the showdown did not already turn over, and only until the next deal.
+   */
+  shown?: (Card | null)[];
 }
 
 export interface PotView {
@@ -68,8 +96,10 @@ export interface HandView {
   pots: PotView[];
   potTotal: number;
   actorSeat: number | null;
-  /** Epoch ms when the current actor times out. */
+  /** Epoch ms when the current actor times out (time added from their time bank included). */
   deadline: number | null;
+  /** Time the current actor added to this turn from their time bank (absent when none). */
+  extraMs?: number;
   result: HandResultView | null;
 }
 
@@ -84,7 +114,8 @@ export interface TableConfigView {
   turnSeconds: number;
   allowSpectators: boolean;
   isPrivate: boolean;
-  roomType: 'official' | 'member';
+  /** 'tournament': a Sit & Go's table, played with tournament chips (TableView.tournament). */
+  roomType: 'official' | 'member' | 'tournament';
   /** The member who opened a member room; null for official tables. */
   hostId: string | null;
 }
@@ -110,6 +141,18 @@ export interface TableView {
    * when none is planned; absent from older rooms.
    */
   maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
+  /**
+   * The time bank rules of the hand being played (between hands: those the next hand will be dealt with, as the room
+   * knows them). Null when the time bank is off here; absent from older rooms.
+   */
+  timeBank?: Omit<TimeBankRules, 'version'> | null;
+  /**
+   * Quick reactions here: the limits the room holds seated players to (the social policy, as the room last read it).
+   * Null when the policy has them off (none are taken or shown); absent from older rooms, which keep the defaults.
+   */
+  reactions?: ReactionRules | null;
+  /** A tournament table's tournament: levels, players left, places and the viewer's standing. Absent elsewhere. */
+  tournament?: TournamentTableView | null;
   you: {
     userId: string;
     seatIndex: number | null;
@@ -129,6 +172,13 @@ export interface TableView {
     preAction?: PreActionKind | null;
     /** The seated viewer's auto-muck setting as the room holds it; null when not seated. Absent from older rooms. */
     autoMuck?: boolean | null;
+    /** The seated viewer may show cards from the hand that just ended (auto-muck on, dealt in, not shown at showdown). */
+    canShow?: boolean;
+    /**
+     * The seated viewer's own time bank: ms left, and hands dealt in since the last refill. Null before their first hand
+     * here or where there is none; nobody else's bank is ever shown. Absent from older rooms.
+     */
+    timeBank?: { ms: number; hands: number } | null;
   };
 }
 

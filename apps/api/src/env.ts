@@ -57,5 +57,7 @@ export type AppEnv = {
     session?: AuthSession;
     /** An admin_audit_log row was written for this request (lib/audit.ts). */
     audited?: boolean;
+    /** A plain administrator's features switched on, read once per request (lib/permissions.ts grantsOf). */
+    grants?: import('./lib/permissions').Grant[];
   };
 };

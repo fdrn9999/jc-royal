@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
 import { d1 } from '../support/d1';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 /** The bootstrapped super admin. */
@@ -21,7 +22,7 @@ let second: Promise<{ c: Client; id: string }> | null = null;
 function plainAdmin() {
   second ??= (async () => {
     const u = await newUser();
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${u.me.id}'`);
+    await d1(promoteSql(`id = '${u.me.id}'`));
     const c = new Client(ADMIN_ORIGIN);
     expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
     return { c, id: u.me.id };

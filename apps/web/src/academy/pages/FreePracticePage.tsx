@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { ActionHelp, CurrentHandPill } from '../../game/BeginnerAids';
 import { ActionBar } from '../../game/ActionBar';
-import { TableScene, useBoxSize, useTableLayout } from '../../game/TableScene';
+import { TableScene, useBoxSize, useStackRoom, useTableLayout } from '../../game/TableScene';
 import { useAuth } from '../../lib/auth';
 import { useI18n, type MsgKey } from '../../lib/i18n';
 import { l, useTr } from '../content';
@@ -94,7 +94,8 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
   const [fault, setFault] = useState(false);
   const [chart, setChart] = useState(false);
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
-  const layout = useTableLayout(area, view.table.maxSeats, 0);
+  const layout = useTableLayout(area, view.table.maxSeats, 0, { me: true, footer: true });
+  const room = useStackRoom('');
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => sound.installAutoUnlock(), []);
@@ -152,11 +153,11 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
           </Button>
         </div>
       </header>
-      <div className="jc-game-surface relative flex min-h-0 flex-1 flex-col">
-        <div ref={areaRef} className="relative mx-2 mb-[12rem] mt-2 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-28">
+      <div ref={room.colRef} className="jc-game-surface relative flex min-h-0 flex-1 flex-col">
+        <div ref={areaRef} className="relative mx-2 mt-2 flex min-h-0 flex-1 items-center justify-center sm:mx-6" style={room.style}>
           <TableScene s={view} layout={layout} mySeat={0} canSit={false} onSit={() => {}} nextIn={null} cues={cues} consumeCues={(up) => (s.consumeCues(up), setCues([...s.cues]))} reducedMotion={reducedMotion} />
         </div>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
+        <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
           {fault && (
             <div className="jc-panel pointer-events-auto flex w-full max-w-md flex-col gap-2 border-danger/50 p-4" role="alert" data-testid="practice-fault">
               <p className="text-sm text-[#f3c3c4]">{tr(T.fault)}</p>

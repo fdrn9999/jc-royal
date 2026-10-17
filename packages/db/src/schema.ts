@@ -30,6 +30,11 @@ export const users = sqliteTable(
     dmNotifications: integer('dm_notifications', { mode: 'boolean' }).notNull().default(true),
     /** Last member sign-in (signup or login), kept after the session itself ends. Null before it was recorded. */
     lastLoginAt: integer('last_login_at'),
+    /**
+     * A table bot's account (apps/game-worker/src/bots.ts): it cannot sign in, never appears among members, and its
+     * chips come from the bot fund (chip_ledger type bot_fund), never from the signup grant.
+     */
+    isBot: integer('is_bot', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -38,6 +43,8 @@ export const users = sqliteTable(
     uniqueIndex('users_nickname_uq').on(sql`lower(${t.nickname})`),
     // Administrators only (the people a report can be assigned to), without reading every member.
     index('users_staff_idx').on(t.role, t.status).where(sql`role != 'user'`),
+    // Bot accounts only, for a room picking an idle one.
+    index('users_bot_idx').on(t.status).where(sql`is_bot = 1`),
   ],
 );
 
@@ -92,7 +99,7 @@ export const chipLedger = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id),
     type: text('type', {
-      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'],
+      enum: ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'free_refill', 'bot_fund', 'referral'],
     }).notNull(),
     /** Signed delta applied to users.balance. */
     amount: integer('amount').notNull(),
@@ -134,15 +141,29 @@ export const tables = sqliteTable(
     liveWaitlist: integer('live_waitlist').notNull().default(0),
     liveSpectators: integer('live_spectators').notNull().default(0),
     liveConnections: integer('live_connections').notNull().default(0),
+    /** Of live_seated, the table bots. */
+    liveBots: integer('live_bots').notNull().default(0),
     handsPlayed: integer('hands_played').notNull().default(0),
     lastIssue: text('last_issue'),
     liveUpdatedAt: integer('live_updated_at'),
     createdBy: text('created_by').references(() => users.id),
     /**
      * 'official' tables are opened by admins. A 'member' room is opened by a member (createdBy, the host), who can
-     * rename it, change spectating and the join code, and close it; never touch chips, cards or results.
+     * rename it, change spectating and the join code, and close it; never touch chips, cards or results. A 'tournament'
+     * table is opened by a tournament's start (tournaments.table_id) and plays tournament chips only (docs/TOURNAMENT.md).
      */
-    roomType: text('room_type', { enum: ['official', 'member'] }).notNull().default('official'),
+    roomType: text('room_type', { enum: ['official', 'member', 'tournament'] }).notNull().default('official'),
+    /**
+     * Table bots (official tables only, and only while the bot policy is on): once ot_min_humans members sit, bots
+     * of ot_level join one at a time until ot_fill_to players sit, never more than ot_max bots. With
+     * ot_yield a bot leaves after its hand for each member waiting for a seat.
+     */
+    botsEnabled: integer('bots_enabled', { mode: 'boolean' }).notNull().default(false),
+    botLevel: text('bot_level', { enum: ['easy', 'normal', 'hard'] }).notNull().default('normal'),
+    botMinHumans: integer('bot_min_humans').notNull().default(1),
+    botMax: integer('bot_max').notNull().default(1),
+    botFillTo: integer('bot_fill_to').notNull().default(2),
+    botYield: integer('bot_yield', { mode: 'boolean' }).notNull().default(true),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -185,6 +206,8 @@ export const hands = sqliteTable(
     engineVersion: text('engine_version').notNull(),
     /** Full engine event log incl. hole cards. Restricted: audit only, finished hands only. */
     eventLog: text('event_log').notNull(),
+    /** Table bots dealt in, so statistics can keep hands with bots apart from hands among members only. */
+    bots: integer('bots').notNull().default(0),
   },
   (t) => [index('hands_table_idx').on(t.tableId, t.endedAt)],
 );
@@ -227,6 +250,60 @@ export const handPlayers = sqliteTable(
   ],
 );
 
+/**
+ * A member's own bookmark, tags and memo on a hand they were dealt into (apps/api/src/lib/handNotes.ts). Only the
+ * member reads or writes it: no admin route returns it, and audit and logs carry ids and error codes, never the memo or
+ * the tags. A row that is emptied stays (so `rev` keeps counting); it is removed when the member withdraws.
+ */
+export const handNotes = sqliteTable(
+  'hand_notes',
+  {
+    userId: text('user_id').notNull(),
+    handId: text('hand_id').notNull(),
+    /** The hand's end, copied from hand_players so lists of bookmarked or tagged hands read in order from this table. */
+    endedAt: integer('ended_at').notNull(),
+    bookmarked: integer('bookmarked', { mode: 'boolean' }).notNull().default(false),
+    /** HAND_TAGS as bits: review 1, bluff 2, hard call 4, big pot 8. */
+    tags: integer('tags').notNull().default(0),
+    memo: text('memo'),
+    /** Memo revision, raised on every memo change; a memo save names the revision it started from. */
+    rev: integer('rev').notNull().default(0),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.handId] }), index('hand_notes_user_idx').on(t.userId, t.endedAt)],
+);
+
+/**
+ * A member's account settings (apps/api/src/lib/settings.ts): the table look and aids and the favourite tables, the
+ * same on every device. Each value carries when it was changed (by the server's clock) and the revision that changed
+ * it, so the newest change wins one setting or table at a time. An administrator may reset it (never edit it): the
+ * values before are kept in `prev` for SETTINGS_RESTORE_MS, and `epoch` tells devices to drop what they had not saved.
+ * Removed when the member withdraws.
+ */
+export const userSettings = sqliteTable('user_settings', {
+  userId: text('user_id').primaryKey(),
+  /** {setting: [value, changedAt, rev]}: only settings the account has a value for. */
+  prefs: text('prefs').notNull().default('{}'),
+  /** {tableId: [1 on | 0 off, changedAt, rev]}: tables taken off stay a while, so an older device can't add them back. */
+  fav: text('fav').notNull().default('{}'),
+  rev: integer('rev').notNull().default(0),
+  epoch: integer('epoch').notNull().default(0),
+  schemaVersion: integer('schema_version').notNull().default(1),
+  createdAt: integer('created_at').notNull().default(now),
+  updatedAt: integer('updated_at').notNull().default(now),
+  /** The member's devices last loaded or saved them (written at most every SETTINGS_SYNC_MARK_MS). */
+  syncedAt: integer('synced_at'),
+  resetAt: integer('reset_at'),
+  resetBy: text('reset_by'),
+  /** The revision the reset made: it can be undone only while `rev` is still this. */
+  resetRev: integer('reset_rev'),
+  /** {prefs, fav} before the reset, until it is undone or the member changes something. */
+  prev: text('prev'),
+  /** When the last reset was undone (null while it stands). */
+  restoredAt: integer('restored_at'),
+});
+
 export const adminAuditLog = sqliteTable(
   'admin_audit_log',
   {
@@ -251,6 +328,21 @@ export const adminAuditLog = sqliteTable(
     index('audit_failed_idx').on(t.createdAt).where(sql`outcome = 'failed'`),
   ],
 );
+
+/**
+ * What one plain administrator may use (apps/api/src/lib/permissions.ts GRANTS), set by a super admin. A feature not in
+ * the list is off, and an administrator without a row has none: a new administrator starts with nothing. Super admins
+ * hold every feature and need no row. `version` counts the saves, so two super admins editing at once are told of the
+ * conflict. Removed when the account's role changes.
+ */
+export const adminPermissions = sqliteTable('admin_permissions', {
+  userId: text('user_id').primaryKey(),
+  /** JSON array of the features that are on. */
+  grants: text('grants').notNull().default('[]'),
+  version: integer('version').notNull().default(1),
+  updatedBy: text('updated_by'),
+  updatedAt: integer('updated_at').notNull().default(now),
+});
 
 /**
  * Internal notes administrators leave on a member for handover (why a sanction was given, what to watch). Never shown
@@ -611,4 +703,327 @@ export const maintenanceWindows = sqliteTable(
     cancelledAt: integer('cancelled_at'),
   },
   (t) => [index('maintenance_windows_ends_idx').on(t.endsAt)],
+);
+
+/**
+ * Free chip refill policy (apps/api/src/lib/refill.ts), one row per version and never changed: the newest row is the
+ * policy in force. A member whose wallet and table chips together are below `below` may claim `amount` chips once per
+ * `cooldown_ms`. `paused` is the emergency stop (new claims only). No row at all means the refill is off.
+ */
+export const refillPolicies = sqliteTable('refill_policies', {
+  version: integer('version').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  below: integer('below').notNull(),
+  amount: integer('amount').notNull(),
+  cooldownMs: integer('cooldown_ms').notNull(),
+  /** What made this version: the first policy, a policy edit, an emergency pause or a resume. */
+  change: text('change', { enum: ['seed', 'policy', 'pause', 'resume'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * Free chip refills paid, one row per chip_ledger row of type free_refill (same id), written in the same batch and
+ * never changed or deleted: what the member held when it was decided, the policy version applied, and the earliest
+ * next claim (fixed when paid, so a later policy change never shortens or lengthens a wait already running).
+ */
+export const refillClaims = sqliteTable(
+  'refill_claims',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    /** 1, 2, … per member: the claim's idempotency key is `refill:<user>:<seq>`. */
+    seq: integer('seq').notNull(),
+    policyVersion: integer('policy_version').notNull(),
+    amount: integer('amount').notNull(),
+    /** Wallet and chips on tables when the claim was decided. */
+    wallet: integer('wallet').notNull(),
+    tableChips: integer('table_chips').notNull(),
+    nextAt: integer('next_at').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('refill_claims_user_seq_uq').on(t.userId, t.seq), index('refill_claims_created_idx').on(t.createdAt)],
+);
+/**
+ * Table bot policy (apps/game-worker/src/bots.ts), one row per version and never changed: the newest row is in force.
+ * Off, no bot joins a table and seated bots leave after their hand. `fund_limit` caps the chips ever issued to bots
+ * (bot_fund.issued); `max_bots` caps the bots seated across all tables at once.
+ */
+export const botPolicies = sqliteTable('bot_policies', {
+  version: integer('version').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  fundLimit: integer('fund_limit').notNull(),
+  maxBots: integer('max_bots').notNull(),
+  change: text('change', { enum: ['seed', 'policy'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * The bot fund's one row (id 1): chips issued to bot accounts so far, raised in the same batch as each chip_ledger row
+ * of type bot_fund (and only when that row was written), so it always equals their sum.
+ */
+export const botFund = sqliteTable('bot_fund', {
+  id: integer('id').primaryKey(),
+  issued: integer('issued').notNull().default(0),
+  updatedAt: integer('updated_at').notNull().default(now),
+});
+
+/** What table bots did that an operator may need to see: joins, leaves, an empty fund, a failed decision or write. */
+export const botEvents = sqliteTable(
+  'bot_events',
+  {
+    id: text('id').primaryKey(),
+    tableId: text('table_id').notNull(),
+    botId: text('bot_id'),
+    kind: text('kind', { enum: ['join', 'leave', 'fund_exhausted', 'join_failed', 'action_failed'] }).notNull(),
+    /** An error code or reason, never cards. */
+    code: text('code'),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('bot_events_created_idx').on(t.createdAt), index('bot_events_table_idx').on(t.tableId, t.createdAt)],
+);
+
+/**
+ * Time bank policy (packages/types/src/timebank.ts), one row per version and never changed: the newest row is in force.
+ * A room reads it with the table and applies it from its next hand; members' banks live in the room, never here (no
+ * one edits a member's time). Times in ms, whole seconds. No row at all means the time bank is off.
+ */
+export const timeBankPolicies = sqliteTable('time_bank_policies', {
+  version: integer('version').primaryKey(),
+  /** On at official tables; `member_rooms` also turns it on in member rooms. */
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  memberRooms: integer('member_rooms', { mode: 'boolean' }).notNull(),
+  initialMs: integer('initial_ms').notNull(),
+  maxMs: integer('max_ms').notNull(),
+  unitMs: integer('unit_ms').notNull(),
+  refillHands: integer('refill_hands').notNull(),
+  refillMs: integer('refill_ms').notNull(),
+  change: text('change', { enum: ['seed', 'policy'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * Social policy (packages/types/src/social.ts SocialSettings), one row per version and never changed: the newest row is
+ * in force. Quick reactions (on, and how fast one seated player may send them) and which staff roles carry their badge
+ * next to their name. Rooms read it with the table; the api reads it when a reply would show a staff role. No row at
+ * all means what the service did before it existed (SOCIAL_DEFAULTS: reactions on at the old limits, both badges shown).
+ */
+export const socialPolicies = sqliteTable('social_policies', {
+  version: integer('version').primaryKey(),
+  reactionsEnabled: integer('reactions_enabled', { mode: 'boolean' }).notNull(),
+  reactionCooldownMs: integer('reaction_cooldown_ms').notNull(),
+  reactionBurstMax: integer('reaction_burst_max').notNull(),
+  reactionBurstWindowMs: integer('reaction_burst_window_ms').notNull(),
+  showSuperAdmin: integer('show_super_admin', { mode: 'boolean' }).notNull(),
+  showAdmin: integer('show_admin', { mode: 'boolean' }).notNull(),
+  change: text('change', { enum: ['seed', 'policy'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * Referral rewards policy (apps/api/src/lib/referral.ts), one row per version and never changed: the newest row is in
+ * force. A signup with a code is accepted under the version in force then (its amounts and conditions are copied onto
+ * the referral); `paused` holds payouts without closing anything; the caps are read when a referrer side is paid.
+ */
+export const referralPolicies = sqliteTable('referral_policies', {
+  version: integer('version').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  /** Chips for the member who shared the code, and for the new member who used it. */
+  referrerAmount: integer('referrer_amount').notNull(),
+  inviteeAmount: integer('invitee_amount').notNull(),
+  /** Referrer rewards one member may receive per KST day, and in total. */
+  dailyCap: integer('daily_cap').notNull(),
+  totalCap: integer('total_cap').notNull(),
+  /** Hands the new member must finish before either side is paid (0: paid at signup). */
+  minHands: integer('min_hands').notNull(),
+  /** Signups for one referrer from one network within 24 hours from which new ones wait for review. */
+  burstLimit: integer('burst_limit').notNull(),
+  change: text('change', { enum: ['seed', 'policy', 'pause', 'resume'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/** A member's own referral code, made the first time they open it; removed when the member withdraws. */
+export const referralCodes = sqliteTable('referral_codes', {
+  userId: text('user_id').primaryKey(),
+  code: text('code').notNull().unique(),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
+ * One signup made with a referral code (at most one per new member). Each side is paid at most once through
+ * chip_ledger type 'referral' with the key `referral:<id>:invitee` / `referral:<id>:referrer`; the side's status and
+ * ledger id are written in the same batch, and only when that ledger row was written. Kept when either member
+ * withdraws, under the tombstoned account, so a rejoin with the same email is recognised (docs/PRIVACY_OPERATIONS.md).
+ */
+export const referrals = sqliteTable(
+  'referrals',
+  {
+    id: text('id').primaryKey(),
+    code: text('code').notNull(),
+    referrerId: text('referrer_id').notNull(),
+    inviteeId: text('invitee_id').notNull().unique(),
+    /** pending: waiting to pay; review: held for an operator; settled: both sides final; unpaid: closed without pay. */
+    status: text('status', { enum: ['pending', 'review', 'settled', 'unpaid'] }).notNull(),
+    referrerStatus: text('referrer_status', { enum: ['pending', 'paid', 'capped', 'skipped', 'unpaid'] }).notNull(),
+    inviteeStatus: text('invitee_status', { enum: ['pending', 'paid', 'capped', 'skipped', 'unpaid'] }).notNull(),
+    /** The policy in force at signup and what it promised. */
+    policyVersion: integer('policy_version').notNull(),
+    referrerAmount: integer('referrer_amount').notNull(),
+    inviteeAmount: integer('invitee_amount').notNull(),
+    minHands: integer('min_hands').notNull(),
+    referrerLedgerId: text('referrer_ledger_id'),
+    inviteeLedgerId: text('invitee_ledger_id'),
+    referrerPaidAt: integer('referrer_paid_at'),
+    inviteePaidAt: integer('invitee_paid_at'),
+    /** SHA-256 of the normalised email (lower case, no +tag, no Gmail dots): the same inbox signing up again. */
+    emailHash: text('email_hash').notNull(),
+    /** Keyed hash of the signup network, cleared after 30 days; only ever a signal, never a verdict on its own. */
+    ipHash: text('ip_hash'),
+    sameIp: integer('same_ip', { mode: 'boolean' }).notNull().default(false),
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
+    /** Why it is waiting or was not paid (lib/referral.ts REFERRAL_FAILURES). */
+    failureCode: text('failure_code'),
+    reviewedBy: text('reviewed_by'),
+    reviewReason: text('review_reason'),
+    reviewedAt: integer('reviewed_at'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [
+    index('referrals_referrer_idx').on(t.referrerId, t.createdAt),
+    index('referrals_status_idx').on(t.status, t.createdAt),
+    index('referrals_email_idx').on(t.emailHash),
+  ],
+);
+
+/**
+ * A tournament template (docs/TOURNAMENT.md): the structure a super admin sets, from which operators open tournaments.
+ * A tournament copies it when it is opened, so a template edited or archived later changes no tournament already open.
+ * `levels` is a JSON array of {sb, bb}; times in ms. `version` counts edits (two editors: the second is told).
+ */
+export const tournamentTemplates = sqliteTable(
+  'tournament_templates',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    capacity: integer('capacity').notNull(),
+    /** The fewest eligible players an operator's start needs (2 to capacity). */
+    minPlayers: integer('min_players').notNull(),
+    startStack: integer('start_stack').notNull(),
+    levels: text('levels').notNull(),
+    levelMs: integer('level_ms').notNull(),
+    turnSeconds: integer('turn_seconds').notNull(),
+    tbEnabled: integer('tb_enabled', { mode: 'boolean' }).notNull(),
+    tbInitialMs: integer('tb_initial_ms').notNull(),
+    tbMaxMs: integer('tb_max_ms').notNull(),
+    tbUnitMs: integer('tb_unit_ms').notNull(),
+    tbRefillHands: integer('tb_refill_hands').notNull(),
+    tbRefillMs: integer('tb_refill_ms').notNull(),
+    /** Registration conditions: hands played (any table) and a verified email. */
+    minHands: integer('min_hands').notNull().default(0),
+    requireVerified: integer('require_verified', { mode: 'boolean' }).notNull().default(false),
+    /** Starts by itself when the last seat is taken. */
+    autoStart: integer('auto_start', { mode: 'boolean' }).notNull().default(true),
+    status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+    version: integer('version').notNull().default(1),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('tournament_templates_status_idx').on(t.status, t.updatedAt)],
+);
+
+/**
+ * One tournament (docs/TOURNAMENT.md "대회 상태"): the template's structure as copied when it was opened, its state, and
+ * the progress its table's room writes back after each hand (level, clock, hands, players left: a mirror for the lists
+ * and the admin; the room's own storage is the authority while it runs). `version` rises with every change an admin
+ * sees (status, pause request); `roster` with every registration change. Never deleted.
+ */
+export const tournaments = sqliteTable(
+  'tournaments',
+  {
+    id: text('id').primaryKey(),
+    templateId: text('template_id'),
+    name: text('name').notNull(),
+    status: text('status', { enum: ['registering', 'closed', 'running', 'finished', 'cancelled', 'aborted'] }).notNull(),
+    capacity: integer('capacity').notNull(),
+    minPlayers: integer('min_players').notNull(),
+    startStack: integer('start_stack').notNull(),
+    levels: text('levels').notNull(),
+    levelMs: integer('level_ms').notNull(),
+    turnSeconds: integer('turn_seconds').notNull(),
+    tbEnabled: integer('tb_enabled', { mode: 'boolean' }).notNull(),
+    tbInitialMs: integer('tb_initial_ms').notNull(),
+    tbMaxMs: integer('tb_max_ms').notNull(),
+    tbUnitMs: integer('tb_unit_ms').notNull(),
+    tbRefillHands: integer('tb_refill_hands').notNull(),
+    tbRefillMs: integer('tb_refill_ms').notNull(),
+    minHands: integer('min_hands').notNull(),
+    requireVerified: integer('require_verified', { mode: 'boolean' }).notNull(),
+    autoStart: integer('auto_start', { mode: 'boolean' }).notNull(),
+    version: integer('version').notNull().default(1),
+    roster: integer('roster').notNull().default(0),
+    /** The table opened at the start (tables.room_type 'tournament'). */
+    tableId: text('table_id'),
+    /** Progress as the room last wrote it: level index, when it ends (running clock) or what was left (stopped clock). */
+    level: integer('level').notNull().default(0),
+    levelEndsAt: integer('level_ends_at'),
+    levelLeftMs: integer('level_left_ms'),
+    /** An admin asked for a pause from the next hand (and when that request last changed); `paused_at`: the clock stopped. */
+    pauseRequested: integer('pause_requested', { mode: 'boolean' }).notNull().default(false),
+    pauseChangedAt: integer('pause_changed_at'),
+    pausedAt: integer('paused_at'),
+    playersLeft: integer('players_left'),
+    hands: integer('hands').notNull().default(0),
+    /** When the room last wrote its progress (a silent room is shown as needing recovery). */
+    roomSeenAt: integer('room_seen_at'),
+    startedAt: integer('started_at'),
+    finishedAt: integer('finished_at'),
+    cancelledAt: integer('cancelled_at'),
+    abortedAt: integer('aborted_at'),
+    winnerId: text('winner_id'),
+    /** completed (one player left), cancelled, aborted. */
+    endReason: text('end_reason', { enum: ['completed', 'cancelled', 'aborted'] }),
+    /** The operator's reason for a cancel or an abort (staff only). */
+    endNote: text('end_note'),
+    endedBy: text('ended_by'),
+    createdBy: text('created_by'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('tournaments_status_idx').on(t.status, t.createdAt), uniqueIndex('tournaments_table_idx').on(t.tableId)],
+);
+
+/**
+ * A member's entry in a tournament (docs/TOURNAMENT.md "참가자 상태"). `stack` mirrors the room's after each hand
+ * (tournament chips, never wallet chips); `place` is final once set.
+ */
+export const tournamentEntries = sqliteTable(
+  'tournament_entries',
+  {
+    tournamentId: text('tournament_id').notNull(),
+    userId: text('user_id').notNull(),
+    status: text('status', { enum: ['registered', 'unregistered', 'dropped', 'playing', 'eliminated', 'won', 'stopped'] }).notNull(),
+    seatIndex: integer('seat_index'),
+    stack: integer('stack'),
+    place: integer('place'),
+    registeredAt: integer('registered_at').notNull(),
+    eliminatedAt: integer('eliminated_at'),
+    /** The room's hand number in which the player busted. */
+    eliminatedHand: integer('eliminated_hand'),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.tournamentId, t.userId] }), index('tournament_entries_user_idx').on(t.userId, t.status)],
 );

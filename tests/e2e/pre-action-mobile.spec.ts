@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, test, widerThanDevice } from './helpers';
+import { checkOrCall, setAccountPrefs, signUp, test, widerThanDevice } from './helpers';
 
 interface Seen {
   handId: string;
@@ -32,7 +32,7 @@ test('mobile: a check chosen while the other player acts is made on the turn, an
   const b = await signUp(browser);
   const wa = watch(a.page);
   // Beginner mode stacks the most above the seat on a phone: the street note and current hand join the row.
-  await a.page.evaluate(() => localStorage.setItem('jc.prefs', JSON.stringify({ beginner: true })));
+  await setAccountPrefs(a.page, { beginner: true });
   await a.page.goto('/table/e2e-pre?sit=1');
   await a.page.getByTestId('buyin-confirm').tap();
   await b.page.goto('/table/e2e-pre?sit=1');

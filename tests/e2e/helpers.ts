@@ -33,13 +33,16 @@ export async function widerThanDevice(page: Page) {
   return page.evaluate((w) => document.documentElement.scrollWidth > w + 1, width);
 }
 
-/** Signs up through the real UI and lands on the lobby. */
-export async function signUp(browser: Browser, opts: { mobile?: boolean } = {}) {
+/**
+ * Signs up through the real UI and lands on the lobby. `ref` opens a referral link (/register?ref=…) instead, and
+ * `beforeSubmit` looks at the filled form before it is sent.
+ */
+export async function signUp(browser: Browser, opts: { mobile?: boolean; ref?: string; beforeSubmit?: (page: Page) => Promise<void> } = {}) {
   const ctx = await browser.newContext(opts.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   const nickname = uid('p');
   const email = `${nickname}@e2e.dev`;
-  await page.goto('/register');
+  await page.goto(opts.ref ? `/register?ref=${encodeURIComponent(opts.ref)}` : '/register');
   // Split email field: local part + domain picker ("직접입력" for other domains).
   await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
@@ -57,6 +60,7 @@ export async function signUp(browser: Browser, opts: { mobile?: boolean } = {}) 
   await page.getByLabel(/^(비밀번호 확인|Confirm password)$/).fill(PASSWORD);
   await page.getByLabel(/전체 동의|Agree to all/).check();
   await expect(page.getByText(/사용 가능한 닉네임|Nickname available/)).toBeVisible();
+  await opts.beforeSubmit?.(page);
   await page.getByRole('button', { name: /회원가입|Create account/ }).click();
   await expect(page).toHaveURL(/\/$/);
   return { page, email, nickname };
@@ -109,4 +113,19 @@ export async function sitWith(page: Page, tableId: string, buyIn: number) {
 /** Wallet balance as reported by the server for this page's session. */
 export async function balanceOf(page: Page): Promise<number> {
   return page.evaluate(async () => ((await (await fetch('/api/auth/me')).json()) as { balance: number }).balance);
+}
+
+/**
+ * Sets synced settings of the account signed in on this page, as another device would (they are the account's, not the
+ * device's); the page shows them once it reads the account's settings, on its next load at the latest.
+ */
+export async function setAccountPrefs(page: Page, prefs: Record<string, unknown>) {
+  const status = await page.evaluate(async (p) => {
+    const me = (await (await fetch('/api/auth/me')).json()) as { id: string };
+    const s = (await (await fetch(`/api/me/settings?for=${me.id}`)).json()) as { epoch: number; rev: number };
+    const body = { user: me.id, epoch: s.epoch, base: s.rev, prefs: Object.fromEntries(Object.entries(p).map(([k, v]) => [k, { v, ago: 0 }])) };
+    const r = await fetch('/api/me/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return r.status;
+  }, prefs);
+  expect(status).toBe(200);
 }

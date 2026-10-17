@@ -1,6 +1,7 @@
 import { schema, type Db } from '@jc/db';
-import type { HandPotDto, HandReplayFields, HandReplayPlayer, HandReviewDto, MessageCategory } from '@jc/types';
+import { publicRole, type HandPotDto, type HandReplayFields, type HandReplayPlayer, type HandReviewDto, type MessageCategory } from '@jc/types';
 import { and, eq, inArray } from 'drizzle-orm';
+import type { Badge } from './badges';
 
 /**
  * Whether a player's hole cards were face up for the table: shown down, not mucked. Rows recorded before muck existed
@@ -23,16 +24,24 @@ export function replayLog(eventLog: string): Pick<HandReplayFields, 'actions' | 
   };
 }
 
+/** The columns of `users` a replay player is drawn with. */
+export type ReplayUser = { nickname: string; role: string; status: string; isBot: boolean };
+export const replayUser = { nickname: schema.users.nickname, role: schema.users.role, status: schema.users.status, isBot: schema.users.isBot };
+
 /**
  * A player of a finished hand as `viewerId` may see it: hole cards, rank and best five only for the viewer and for
- * hands that were face up at showdown (see shownAtShowdown).
+ * hands that were face up at showdown (see shownAtShowdown). `user` is the member's row now: a deleted account shows no
+ * role, and a staff role only when the social policy shows its badge (`badge`, from lib/badges.ts).
  */
-export function replayPlayer(hp: typeof schema.handPlayers.$inferSelect, nickname: string, viewerId: string): HandReplayPlayer {
+export function replayPlayer(hp: typeof schema.handPlayers.$inferSelect, user: ReplayUser, viewerId: string, badge: Badge = publicRole): HandReplayPlayer {
   const visible = hp.userId === viewerId || shownAtShowdown(hp);
   const ranked = visible && hp.wentToShowdown;
+  const role = user.status === 'deleted' ? undefined : badge(user.role);
   return {
     seatIndex: hp.seatIndex,
-    nickname,
+    nickname: user.nickname,
+    ...(role ? { role } : {}),
+    ...(user.isBot ? { bot: true as const } : {}),
     holeCards: visible ? (JSON.parse(hp.holeCards) as string[]) : null,
     stackStart: hp.stackStart,
     net: hp.net,
@@ -45,9 +54,15 @@ export function replayPlayer(hp: typeof schema.handPlayers.$inferSelect, nicknam
 /**
  * Finished hands as seen from `perspectiveUserId`: board and actions are public;
  * hole cards are included only for that user and for players whose cards were
- * face up at showdown (see shownAtShowdown). Hands not played by that user are not returned.
+ * face up at showdown (see shownAtShowdown). Hands not played by that user are not returned. `badges` gives the staff
+ * badges the players' roles show (lib/badges.ts badgesFor).
  */
-export async function handReviews(db: Db, handIds: string[], perspectiveUserId: string): Promise<HandReviewDto[]> {
+export async function handReviews(
+  db: Db,
+  handIds: string[],
+  perspectiveUserId: string,
+  badges: (roles: string[]) => Promise<Badge> = async () => publicRole,
+): Promise<HandReviewDto[]> {
   if (handIds.length === 0) return [];
   const own = await db
     .select({ handId: schema.handPlayers.handId })
@@ -62,10 +77,11 @@ export async function handReviews(db: Db, handIds: string[], perspectiveUserId: 
     .innerJoin(schema.tables, eq(schema.tables.id, schema.hands.tableId))
     .where(inArray(schema.hands.id, ids));
   const players = await db
-    .select({ hp: schema.handPlayers, nickname: schema.users.nickname })
+    .select({ hp: schema.handPlayers, user: replayUser })
     .from(schema.handPlayers)
     .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
     .where(inArray(schema.handPlayers.handId, ids));
+  const badge = await badges(players.map((p) => p.user.role));
   const byId = new Map(hands.map((x) => [x.h.id, x]));
   return ids
     .map((id) => byId.get(id))
@@ -84,7 +100,7 @@ export async function handReviews(db: Db, handIds: string[], perspectiveUserId: 
       players: players
         .filter((p) => p.hp.handId === h.id)
         .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
-        .map(({ hp, nickname }) => ({ ...replayPlayer(hp, nickname, perspectiveUserId), isAuthor: hp.userId === perspectiveUserId })),
+        .map(({ hp, user }) => ({ ...replayPlayer(hp, user, perspectiveUserId, badge), isAuthor: hp.userId === perspectiveUserId })),
     }));
 }
 

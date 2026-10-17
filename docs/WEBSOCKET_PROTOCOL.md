@@ -11,7 +11,7 @@
   - 방장이 코드나 공개 여부를 바꾸면 이미 열린 연결에도 적용됩니다: 이전 코드로 들어온 대기 명단은 빠지고, 관전이 꺼진 방에서는 코드 없는 미착석 연결을 4003으로 닫습니다. 착석한 플레이어는 그대로입니다.
 - **메시지 형식**: JSON 텍스트, 최대 2,000바이트.
 - **검증**: 모든 클라이언트 메시지는 zod `ClientMessageSchema`로 검증하고, 실패하면 `bad_request`를 보냅니다.
-- **속도 제한**: 소켓당 토큰 버킷(용량 20, 초당 10)이고, 채팅은 1초에 1회입니다.
+- **속도 제한**: 소켓당 토큰 버킷(용량 20, 초당 10)이고, 채팅은 1초에 1회, 빠른 반응은 회원당 2초에 1회·30초에 5회입니다.
 - **중복 접속**: 사용자당 연결 1개만 유지합니다. 새 탭이 연결되면 기존 연결에 `replaced`를 보내고 4001로 닫습니다. 4003으로 거절되는 연결은 다른 탭을 밀어내지 않습니다.
 - **관리자의 연결 종료(4004)**: 관리자가 회원을 정지하거나 강제 연결 종료하면 룸은 그 회원의 연결마다 `reqId` 없는 `error suspended` 또는 `error disconnected`를 보내고 **4004**로 닫습니다. 클라이언트는 4004에서 재연결하지 않고, 남은 요청을 실패로 끝내며, 마지막 화면을 지우고 안내만 보입니다.
   - 룸은 종료 시각을 60초 동안 기억하고, api가 그 시각(시계 차이 2초 허용) 이전에 인증한 핸드셰이크를 같은 방식으로 거절합니다(api가 세션을 지우기 전에 인증된 연결이 늦게 도착하는 경우). 그래서 종료 직후 2초 안에 다시 로그인한 연결은 4004로 거절될 수 있고, 그 뒤에는 정상 연결됩니다. 정지된 계정은 로그인 자체가 막힙니다.
@@ -34,7 +34,10 @@
 | `action` | `intentId, handId, seq, type, amount?` | `type`: fold/check/call/bet/raise/allin. bet·raise의 `amount`는 이번 스트리트 총액("to"). `seq`는 현재 `hand.seq`와 같아야 함. 적용되면 `intentId`로 `ack` |
 | `preAction` | `reqId, handId, stage, toCall, kind` | 사전 액션: 다른 사람 차례 동안 이번 스트리트의 내 다음 액션을 예약. `kind`: `check`·`checkFold`·`fold`, `null`이면 취소. `handId`·`stage`·`toCall`은 고를 때 본 화면 값. 아래 '사전 액션' 참고 |
 | `muck` | `reqId, on` | 패배한 쇼다운 핸드 자동 머크 켜기·끄기. 착석한 플레이어만(아니면 `forbidden`). 같은 값을 다시 보내도 결과가 같음. 아래 '쇼다운 머크' 참고 |
+| `show` | `reqId, card(0·1)` | 끝난 핸드의 내 카드 한 장을 다음 핸드 전까지 테이블에 보여 줌. 자동 머크를 켠 착석 플레이어만. 아래 '패 보이기' 참고 |
+| `timeBank` | `reqId, handId, seq, seen` | 내 시간 은행에서 지금 내 차례에 시간을 더함. `seq`·`seen`은 누를 때 본 `hand.seq`·`hand.extraMs`(없으면 0). 아래 '시간 은행' 참고 |
 | `chat` | `text(1-200), reqId?` | 채팅. 같은 `reqId`로 다시 보내면 한 번만 게시 |
+| `react` | `reaction, reqId?` | 빠른 반응(`clap`·`laugh`·`cry`·`wow`·`cool`·`fire`·`heart`·`gg`). 착석한 플레이어만. 아래 '빠른 반응' 참고 |
 | `ping` | — | → `pong`. 정확히 `{"t":"ping"}`이면 런타임이 룸을 깨우지 않고 답함 |
 
 `reqId`는 8~64자 문자열입니다. `?`가 붙은 `reqId`는 이전 클라이언트 호환을 위해 생략할 수 있고, 생략하면 `ack`가 오지 않습니다.
@@ -44,7 +47,8 @@
 | t | 내용 |
 |---|---|
 | `state` | `{ state: TableView, cues: TableCue[] }`. 이 화면을 보는 사람 기준으로 투영된 전체 상태 |
-| `chatHistory` / `chat` | 최근 채팅 50개, 새 메시지 |
+| `chatHistory` / `chat` | 최근 채팅 50개, 새 메시지. 관리자가 쓴 줄에는 `role`(아래 '운영진 표시') |
+| `react` | `{seatIndex, userId, reaction, at}`: 테이블의 모든 연결(보낸 사람·관전자 포함)에 보내는 빠른 반응. 좌석과 회원은 룸이 받을 때의 값 |
 | `ack` | `{reqId}`: `reqId`를 단 명령의 성공(대기열에 들어간 충전 포함). 액션은 `reqId` 자리에 `intentId`. 이미 처리한 명령을 다시 받아도 `ack`만 다시 보냄 |
 | `error` | `{code, message, reqId?}` |
 | `notice` | `{code, amount?}`: 해당 플레이어에게만 보냄. 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과: `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐). 사전 액션을 지키지 못했을 때: `preaction_cancelled` |
@@ -54,10 +58,12 @@
 ### TableView (요약, 정의는 `packages/types/src/table.ts`)
 
 - **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정, 회원 방이면 `roomType:'member'`와 방장 `hostId`), `status`(waiting/playing/closing/closed).
-- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`.
+- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시').
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 자동 머크로 공개되지 않은 패는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
-- **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`, `result`(winners, showdown).
-- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다.
+  - `shown`은 핸드가 끝난 뒤 주인이 보이기로 고른 카드입니다. `[카드 또는 null, 카드 또는 null]`로 고른 자리에만 카드가 있고, 고르지 않은 카드는 누구에게도 보내지 않습니다. 쇼다운에서 이미 공개된 좌석과 고른 카드가 없는 좌석에는 이 필드가 없습니다.
+- **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`(시간 은행으로 더한 시간 포함), `extraMs`(지금 차례에 시간 은행으로 더한 시간, 없으면 필드 없음), `result`(winners, showdown).
+- **timeBank**(최상위): 이 테이블의 시간 은행 규칙 `{initialMs, maxMs, unitMs, refillHands, refillMs}`. 핸드 중에는 그 핸드를 시작할 때의 규칙, 핸드 사이에는 다음 핸드에 쓸 규칙. 꺼진 테이블은 null, 이전 룸은 보내지 않음.
+- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다. `canShow`(지금 `show`를 보낼 수 있음: 끝난 핸드에 참여했고, 자동 머크가 켜져 있고, 내 패가 쇼다운에서 공개되지 않음. 이전 룸은 보내지 않음), `timeBank`(착석했으면 내 시간 은행 `{ms, hands}`(`hands`는 다음 보충까지 센 핸드 수), 아직 받은 적 없거나 봇·꺼진 테이블이면 null. 다른 사람의 시간 은행은 어디에도 들어가지 않음. 이전 룸은 보내지 않음).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
 - **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음), `maintenance`(서비스 점검 `{startsAt, endsAt, active}` 또는 null. 이전 룸은 보내지 않음).
 
@@ -95,8 +101,52 @@
   - 주인은 언제나 자기 패를 봅니다.
 - **설정 시점**: 룸은 정산 순간의 좌석 설정으로 그 핸드의 머크 대상을 정해 상태에 저장합니다. 정산 뒤에 설정을 바꿔도 이미 끝난 핸드의 공개 여부는 바뀌지 않습니다.
 - **기록**: 같은 결정이 `hand_players.shown`(1 공개, 0 머크)에 들어가고, `/api/me/hands/:id`와 커뮤니티 핸드 리뷰는 본인이 아닌 머크된 패의 `holeCards`·`rankClass`를 null로 줍니다. 이 열이 NULL인 이전 기록은 `went_to_showdown`을 따릅니다. 관리자 감사 화면(종료 핸드 전체)은 그대로 모든 카드를 봅니다.
-- **웹 클라이언트**: 설정은 기기에 저장되고(`jc.prefs`), 착석해 있고 연결이 열려 있을 때 룸의 `you.autoMuck`이 다르면 한 번 보냅니다. 연결이 끊긴 동안 보낸 명령은 남지 않으므로 재연결 뒤에 다시 맞춥니다. 머크된 본인의 패는 결과의 `showdown`에 없어 자리 아래에 족보 이름이 나오지 않습니다(카드는 보임).
-- **배포 순서**: 마이그레이션 `0011_hand_shown` → game-worker → api → web. 열이 없으면 새 game-worker의 핸드 기록 INSERT가 실패합니다. 이전 룸은 `autoMuck`을 보내지 않으므로 새 웹은 아무것도 보내지 않습니다.
+- **웹 클라이언트**: 자동 머크는 계정 설정입니다(로그인하면 `/api/me/settings`로 모든 기기에 같고, 로그아웃 상태에서는 기기의 `jc.prefs`). 착석해 있고 연결이 열려 있을 때 룸의 `you.autoMuck`이 이 기기의 값과 다르면 한 번 보냅니다. 연결이 끊긴 동안 보낸 명령은 남지 않으므로 재연결 뒤에 다시 맞춥니다. 머크된 본인의 패는 결과의 `showdown`에 없어 자리 아래에 족보 이름이 나오지 않습니다(카드는 보임).
+- **다른 기기·관리자 초기화**: 계정의 자동 머크가 바뀌면(다른 기기의 저장, 관리자의 설정 초기화·복구) api가 회원이 착석한 모든 룸에 내부 동작 `muck`(`?user=&on=1|0`)을 보냅니다. 룸은 좌석의 `autoMuck`을 바꿔 저장하고 그 회원에게만 화면을 다시 보냅니다. `muck` 명령과 같이 다음 정산부터 적용되고, 이미 정산된 핸드는 바뀌지 않습니다. 룸이 응답하지 않아도 설정 저장은 실패하지 않으며, 그 테이블 화면이 연결될 때 위의 비교로 맞춥니다.
+- **순서(`rev`)**: 내부 동작은 그 값이 저장된 계정 설정 버전 `rev`를 함께 보냅니다(`?user=&on=&rev=`). 보내기는 응답 뒤 백그라운드에서 돌아서, 빠르게 두 번 저장하면 룸에 거꾸로 도착할 수 있습니다. 룸은 좌석이 마지막으로 받은 `rev`(`muckRev`)보다 크지 않은 보내기를 무시합니다. 늦게 도착한 예전의 '끄기'가 다음 쇼다운에서 진 패를 공개하지 않게 하려는 것입니다(`apps/game-worker/src/muck.ts`). 플레이어의 `muck` 명령은 `rev`를 바꾸지 않습니다. `rev`가 없거나 형식이 틀린 보내기(이전 api)는 예전처럼 그대로 적용합니다.
+- **배포 순서**: 마이그레이션 `0011_hand_shown` → game-worker → api → web. 열이 없으면 새 game-worker의 핸드 기록 INSERT가 실패합니다. 이전 룸은 `autoMuck`을 보내지 않으므로 새 웹은 아무것도 보내지 않습니다. 내부 동작 `muck`은 game-worker를 먼저 배포해야 하며, 이전 룸은 404로 답해 api가 반영하지 못한 테이블로 셉니다(`reached`). `rev`를 보내는 api보다 game-worker를 먼저 배포합니다. 이전 룸은 모르는 `rev`를 무시하고 값만 적용하므로, 순서가 바뀌어도 동작은 이 변경 전과 같습니다.
+
+## 패 보이기 (`show`)
+
+- **보낼 수 있는 때**: 핸드가 정산된 뒤 다음 핸드가 시작되기 전(보통 4초, 다음 핸드를 시작할 인원이 없으면 그보다 김). 핸드 중이거나 끝난 핸드가 없으면 `conflict`, 착석하지 않았거나 그 핸드에 카드를 받지 않았거나 자동 머크가 꺼져 있으면 `forbidden`입니다.
+- **대상**: 폴드한 패, 쇼다운 없이 이긴 패, 쇼다운에서 머크된 패. 쇼다운에서 이미 공개된 패는 보낼 수 있지만 아무것도 바뀌지 않고 `ack`만 옵니다. 이미 보인 카드를 다시 보내도 같습니다(상태 버전이 늘지 않음).
+- **보이는 것**: 고른 카드만 `seats[].shown`으로 모든 사람(관전자 포함)에게 갑니다. 다른 카드는 뒷면으로 그려지고 그 값은 어떤 메시지에도 들어가지 않습니다. 결과의 `showdown`과 족보 표시는 바뀌지 않습니다.
+- **유지 기간**: 룸 상태에 저장되므로 재접속해도 같은 핸드 동안 남고, 다음 핸드를 시작할 때 지웁니다. 이후 설정을 꺼도 이미 보인 카드는 그 핸드 동안 남습니다.
+- **기록**: 핸드 기록(`hand_players.shown`)·리플레이·커뮤니티 리뷰에는 넣지 않습니다. 보이기는 그 자리에서 보여 주는 것일 뿐이라, 기록의 공개 규칙은 위 '쇼다운 머크' 그대로입니다.
+- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `show`를 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보내고 `canShow`를 보내지 않으므로, 새 웹은 버튼을 그리지 않습니다.
+
+## 시간 은행 (`timeBank`)
+
+정의는 `packages/types/src/timebank.ts`, 룸은 `apps/game-worker/src/room.ts` "time bank", 정책 관리는 `docs/ADMIN_SECURITY.md` "시간 은행 관리".
+
+- **받는 것**: 회원은 한 테이블에서 처음 카드를 받는 핸드에 `initialMs`를 받고, 자리에 있는 동안 남은 시간을 그대로 가집니다. 재접속·다른 탭·룸 재시작에도 같은 값이고, 일어섰다가 6시간 안에 다시 앉으면 남겼던 시간을 돌려받습니다(테이블당 최근 100명). 떠났다 오거나 다시 앉는다고 새로 받지 않습니다. 카드를 받은 핸드가 `refillHands`개 끝날 때마다 `refillMs`를 더하되 `maxMs`를 넘지 않습니다(같은 테이블의 봇 수와 관계없이 그 회원이 받은 핸드만 셈).
+- **쓰기**: 내 차례에 한 번 보낼 때마다 `unitMs`(남은 것이 적으면 남은 만큼)를 이번 차례의 마감 시각에 더합니다. 한 차례에 여러 번 쓸 수 있고, 더한 시간을 쓰지 않고 행동하면 사라집니다. 남은 시간이 1초(`TIME_BANK_MIN_USE_MS`) 미만이면 `time_bank_empty`. 시간 은행 차감과 마감 시각 이동은 같은 저장에 들어가므로 하나만 반영되는 경우는 없습니다. 모든 연결에 새 `state`(`deadline`·`extraMs`)가 가고 보낸 연결에 `ack`.
+- **중복·늦은 요청**: 같은 `reqId`는 다시 적용하지 않고 `ack`만 보냅니다. 룸이 다시 시작된 뒤 다시 보내도 시간이 늘지 않습니다. `seq`나 `seen`이 지금과 다르면(앞 탭의 결과를 보기 전에 다시 누름) `stale_version`으로 아무것도 더하지 않습니다. 다른 핸드면 `conflict`, 내 차례가 아니면 `not_your_turn`, 착석하지 않았으면 `forbidden`.
+- **거절**: 테이블에 시간 은행이 없거나(정책이 꺼짐, 회원 방에서 꺼짐) 봇이면 `time_bank_off`. 관리자가 닫는 중인 테이블도 `time_bank_off`(이 핸드는 보통 속도로 끝냄, `table_closed`가 아니므로 화면이 연결을 끊지 않음). 서비스 점검 중이면 `maintenance`.
+- **기존 규칙과의 관계**: 마감이 지나면 이전처럼 체크 또는 폴드되고 타임아웃 횟수도 그대로 셉니다(연속 2회면 자리 비움). 사전 액션은 차례가 오자마자 실행되므로 보통 쓸 일이 없고, 실행하지 못해 차례가 남으면 쓸 수 있습니다. 관리자 일시정지는 다음 핸드만 멈추므로 진행 중인 차례와 시간 은행에 영향이 없습니다.
+- **정책 변경의 적용 경계**: 룸은 핸드를 시작할 때 규칙을 고정합니다(버전 포함). 관리자가 바꾼 정책은 각 테이블의 다음 핸드부터 쓰고, 진행 중인 핸드의 단위·최대값과 진행 중인 차례의 마감 시각은 바뀌지 않습니다. 낮아진 `maxMs`를 넘는 남은 시간은 그 회원이 다음 핸드를 받을 때 줄어듭니다.
+- **봇**: 테이블 봇에는 시간 은행이 없고, 회원의 시간 은행을 쓰거나 채우지 않습니다.
+- **통계**: 핸드 기록과 함께 날짜별 개수만 남깁니다(`tb_use` 사용 횟수, `tb_sec` 더한 초, `tb_empty` 빈 은행 요청, `tb_expired` 더한 시간까지 다 쓴 타임아웃, `tb_late` 5초 넘게 늦은 타임아웃, `tb_recover` 관리자 타이머 복구). 회원별 기록은 없습니다.
+- **웹 클라이언트**(`apps/web/src/game/TimeBank.tsx`): 내 차례에만 액션 바 위에 남은 시간, 이번 차례에 더한 시간, `+N초` 버튼을 보입니다. 답을 받을 때까지 버튼을 끄고, 마감 8초 전부터 버튼을 강조합니다. 닫는 중·점검 중에는 그리지 않습니다.
+- **배포 순서**: 마이그레이션 `0025_time_bank` → game-worker → api → web·admin. 이전 룸은 `timeBank`를 모르는 메시지로 보고 `bad_request`를 보내고 `timeBank` 필드를 보내지 않으므로, 새 웹은 버튼을 그리지 않습니다.
+
+## 빠른 반응 (`react`)
+
+- **보낼 수 있는 사람**: 착석한 플레이어(자리 비움 포함). 관전자·대기 중인 연결은 `forbidden`. 목록에 없는 반응은 스키마 검사에서 `bad_request`(`reqId` 없음).
+- **켜기·속도(소셜 정책)**: 관리자 콘솔의 소셜 정책(`social_policies`, 최신 버전)이 정한다. 마이그레이션 0028의 버전 1은 이전과 같은 값(켜짐, 회원당 앞 반응에서 2초 뒤, 30초 동안 5회까지)이고, 정책은 간격 0.5–30초·횟수 1–20회·구간 5–300초 안에서 바꾼다. 룸은 테이블을 읽을 때와 핸드를 기록할 때(같은 D1 batch) 정책을 읽고, 관리자가 바꾸면 연결이 있는 테이블(최대 100곳)이 바로 다시 읽는다. 정책이 끄면 `reactions_off`(착석 검사보다 먼저). 판정은 `packages/types` `reactionWait`(웹도 같은 함수와 룸이 보낸 값으로 버튼을 미리 끔). 네트워크 지연으로 일찍 도착하는 것은 300ms까지 봐줍니다. 넘으면 `rate_limited`. 기록은 회원 ID 기준이라 다시 연결해도 줄지 않고, 룸 메모리에만 있어 룸이 다시 시작되면 지워집니다.
+- **상태의 `reactions`**: `TableView.reactions`는 룸이 지키는 값 `{cooldownMs, burstMax, burstWindowMs}`, 정책이 끄면 `null`(웹은 버튼과 받은 반응을 모두 그리지 않음). 이전 룸은 필드가 없고 웹은 기본값을 씁니다.
+- **전달**: 룸은 보낸 좌석 번호와 회원 ID를 붙여 그 순간 열린 모든 연결에 `react`를 보내고 `reqId`가 있으면 `ack`. 저장하지 않으므로 상태 `version`이 바뀌지 않고, 새로 연결하거나 다시 연결한 사람은 지난 반응을 받지 않습니다. 핸드·칩·카드와 무관합니다.
+- **웹 클라이언트**: `reqId` 없이 한 번만 보내고 다시 시도하지 않습니다. 받은 반응은 좌석마다 마지막 것만 2.6초 보여 주고, 숨긴 탭에서는 무시합니다. 설정에서 끄면 받지도 보내지도 않고, 뮤트·차단한 회원의 반응은 그리지 않습니다.
+- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `react`를 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보냅니다. 이전 웹은 모르는 `react` 메시지를 무시합니다. 소셜 정책(0028)은 마이그레이션 → game-worker → api → web·admin. 이전 룸은 정책을 읽지 않고 고정값(2초·30초 5회, 켜짐)을 지키며 `reactions`를 보내지 않는다. 정책이 끈 동안 이전 웹은 버튼을 보이고, 누르면 `reactions_off`가 일반 오류 문장으로 보인다.
+
+## 운영진 표시 (`role`)
+
+- **값**: `'super_admin'` 또는 `'admin'`. 일반 회원의 좌석·채팅 줄에는 필드가 없습니다. 출처는 api가 세션을 확인하며 D1 `users.role`에서 읽어 핸드셰이크 신원에 넣은 값뿐이고, 클라이언트가 보낸 `role`(`sit`·`chat` 등)은 스키마가 버립니다.
+- **좌석**: 앉을 때 그 연결의 역할을 좌석에 붙이고, 이후 핸드셰이크마다 다시 맞춥니다(역할이 바뀐 뒤 처음 연결할 때 반영).
+- **채팅**: 게시할 때 그 연결의 역할을 줄에 붙입니다. 이미 게시된 줄은 바뀌지 않습니다.
+- **소셜 정책의 표시 숨김**: 정책이 최고 관리자·관리자 표시를 끄면 룸은 그 역할의 `role`을 좌석과 채팅 줄(새 줄과 접속 때의 `chatHistory`)에서 빼고 보낸다. 저장된 좌석·채팅 줄은 역할을 그대로 가지므로 다시 켜면 돌아온다. 정책을 다시 읽어 표시가 바뀌면 화면의 채팅을 `chatHistory`로 다시 보내고, 좌석은 다음 `state`부터 바뀐다. 운영진 신고·차단 규칙(`block_staff`·`report_super_admin`)은 표시와 상관없이 실제 역할로 정한다.
+- **역할 변경 즉시 반영**: 관리자 콘솔에서 역할을 바꾸면 api가 그 회원이 앉아 있는 테이블의 룸에 내부 요청 `role`(`?user=&role=`, 값은 D1에 저장된 역할)을 보냅니다. 룸은 그 회원의 열린 연결 신원을 고치고(다음 채팅부터 새 역할), 좌석 표시가 바뀌면 저장한 뒤 모두에게 `state`를 보냅니다(`version` 증가). 응답 `{ok, seated}`. 앉아 있지 않은 테이블의 관전 연결은 다시 연결할 때 맞춰집니다.
+- **배포 순서**: api와 game-worker를 먼저, 웹을 나중에. 이전 룸은 `role`을 보내지 않으므로 새 웹은 표시 없이 그대로 그립니다. 이전 룸이 내부 `role` 요청을 모르면 api는 `reached`에서 빼고 역할 변경은 그대로 저장합니다.
 
 ## 웹 클라이언트의 전달 규칙 (`apps/web/src/game/link.ts`, `useTableSocket.ts`)
 
@@ -109,6 +159,10 @@
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, tournament_table, reactions_off, internal`
 
 `suspended`·`disconnected`가 `reqId` 없이 오면 관리자가 연결을 끝낸 것이고 4004 종료가 뒤따릅니다. `reqId`가 붙은 `suspended`는 정지된 계정의 착석·충전을 지갑이 거절한 것입니다.
+
+## 토너먼트 테이블 (`roomType: 'tournament'`)
+
+대회 테이블의 `state`는 최상위 `tournament`(레벨·블라인드·다음 레벨·시계·일시정지·생존 인원·정해진 순위·보는 사람의 처지)를 더한다. 필드는 `docs/TOURNAMENT.md` "테이블 상태(WebSocket)". 좌석은 대회가 시작할 때 룸이 D1 등록으로 만들고, 스택은 대회 칩이다. 착석·일어서기·충전·리바이·대기열 요청은 `tournament_table`로 거절된다. 블라인드는 핸드를 시작할 때의 레벨로 끝까지 가고, 운영자의 일시정지는 다음 핸드부터 적용된다. 접속이 끊긴 참가자도 좌석에 남아 블라인드를 내고 차례에는 체크 또는 폴드된다. 배포 순서는 `0026_tournaments` → game-worker → api → web·admin.

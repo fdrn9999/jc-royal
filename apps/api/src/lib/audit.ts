@@ -91,12 +91,14 @@ export async function searchAudit(DB: D1Database, f: AuditQuery) {
     DB.prepare(
       `SELECT a.id, a.action, a.outcome, a.actor_id AS actorId, u.nickname AS actorNickname, u.role AS actorRole,
               a.target_type AS targetType, a.target_id AS targetId,
-              CASE a.target_type WHEN 'user' THEN tu.nickname WHEN 'table' THEN tt.name END AS targetLabel,
+              CASE a.target_type WHEN 'user' THEN tu.nickname WHEN 'table' THEN tt.name WHEN 'tournament' THEN tn.name WHEN 'tournament_template' THEN tpl.name END AS targetLabel,
               a.detail, a.ip, a.created_at AS createdAt
          FROM admin_audit_log a
          LEFT JOIN users u ON u.id = a.actor_id
          LEFT JOIN users tu ON a.target_type = 'user' AND tu.id = a.target_id
          LEFT JOIN tables tt ON a.target_type = 'table' AND tt.id = a.target_id
+         LEFT JOIN tournaments tn ON a.target_type = 'tournament' AND tn.id = a.target_id
+         LEFT JOIN tournament_templates tpl ON a.target_type = 'tournament_template' AND tpl.id = a.target_id
          ${pageWhere}
         ORDER BY a.created_at DESC, a.id DESC LIMIT ?`,
     ).bind(...pageBinds, f.limit + 1),

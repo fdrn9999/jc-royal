@@ -10,6 +10,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError } from '../lib/api';
 import { useI18n } from '../lib/i18n';
+import { RefillHintLazy } from './RefillHintLazy';
 import { Choice } from './Rooms';
 
 /** 0 means any. */
@@ -79,6 +80,7 @@ export function QuickMissNote({ miss, filtered, onReset, onRetry, onCreateRoom }
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-gold-500/25 bg-gold-500/10 px-3 py-2.5 text-sm text-ivory" role="status" data-testid="quick-miss" data-code={miss.code}>
       <p>{text}</p>
+      {miss.code === 'insufficient_balance' && <RefillHintLazy />}
       <div className="flex flex-wrap gap-2">
         {filtered && onReset && (
           <Button size="sm" variant="outline" onClick={onReset} data-testid="quick-reset">
@@ -128,11 +130,14 @@ export function QuickPlayPanel({
   blinds,
   onFilters,
   onCreateRoom,
+  paused = false,
 }: {
   filters: QuickFilters;
   blinds: [number, number][];
   onFilters: (f: QuickFilters) => void;
   onCreateRoom: () => void;
+  /** Maintenance under way: quick play and new rooms wait (the server refuses both). */
+  paused?: boolean;
 }) {
   const { t } = useI18n();
   const { run, busy, miss, clear } = useQuickPlay();
@@ -173,12 +178,12 @@ export function QuickPlayPanel({
               ))}
             </select>
           </label>
-          <Button className="h-11 sm:ml-auto sm:min-w-36" loading={busy} onClick={() => run(filters)} data-testid="quick-go">
+          <Button className="h-11 sm:ml-auto sm:min-w-36" loading={busy} disabled={paused} onClick={() => run(filters)} data-testid="quick-go">
             {t('quick.go')}
           </Button>
         </div>
       </div>
-      {miss && (
+      {miss && !paused && (
         <QuickMissNote
           miss={miss}
           filtered={!!(filters.maxSeats || filters.bigBlind)}

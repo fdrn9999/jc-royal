@@ -367,6 +367,17 @@
 .jc-shake {
   animation: jc-shake 0.36s ease-in-out;
 }
+/* A quick reaction over a seat's avatar: pops in, holds, fades (the table removes it once this has run). */
+@keyframes jc-react {
+  0% { opacity: 0; transform: scale(0.4); }
+  12% { opacity: 1; transform: scale(1.18); }
+  22% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.9); }
+}
+.jc-react {
+  animation: jc-react 2.4s ease-out forwards;
+}
 /* Highlight ring the academy tour draws around a table element. */
 .jc-spot {
   position: absolute;
@@ -377,13 +388,76 @@
   z-index: 45;
 }
 
+/* Staff names (web MemberName): champagne gold for the super admin, sapphire for admins. Other members keep theirs. */
+.jc-role-name[data-role='super_admin'] {
+  color: #f8e3b0;
+  text-shadow: 0 0 8px rgba(226, 183, 92, 0.55);
+}
+.jc-role-name[data-role='admin'] {
+  color: #8fd0ff;
+  text-shadow: 0 0 8px rgba(64, 140, 255, 0.5);
+}
+.jc-role-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  border: 1px solid;
+  border-radius: 9999px;
+  padding: 0 0.4rem;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 15px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.jc-role-badge[data-role='super_admin'] {
+  background: linear-gradient(135deg, #fff3d1, #e2bd6a 55%, #b8862f);
+  border-color: rgba(255, 236, 190, 0.65);
+  color: #2a1c05;
+}
+.jc-role-badge[data-role='admin'] {
+  background: linear-gradient(135deg, #1d4fbf, #1877b4);
+  border-color: rgba(160, 215, 255, 0.55);
+  color: #fff;
+}/* A table bot (web MemberName's BotBadge): a quiet teal pill, apart from the staff colors. */
+.jc-bot-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  border: 1px solid rgba(111, 216, 198, 0.55);
+  border-radius: 9999px;
+  padding: 0 0.35rem;
+  background: rgba(16, 58, 56, 0.9);
+  color: #a6efe2;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 15px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+/* A staff member's line in the table chat: a quiet tint, not a banner. */
+.jc-role-line {
+  border-left: 2px solid transparent;
+  border-radius: 0.25rem;
+  padding-left: 0.25rem;
+}
+.jc-role-line[data-role='super_admin'] {
+  background: linear-gradient(90deg, rgba(226, 183, 92, 0.13), rgba(226, 183, 92, 0.02));
+  border-left-color: rgba(226, 183, 92, 0.6);
+}
+.jc-role-line[data-role='admin'] {
+  background: linear-gradient(90deg, rgba(64, 140, 255, 0.13), rgba(64, 140, 255, 0.02));
+  border-left-color: rgba(90, 170, 255, 0.6);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .jc-flip-in,
   .jc-deal-in,
   .jc-pulse-gold,
   .jc-winner,
   .jc-pop,
-  .jc-shake {
+  .jc-shake,
+  .jc-react {
     animation: none !important;
   }
   .jc-spot {

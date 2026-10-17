@@ -1,4 +1,82 @@
 import { z } from 'zod';
+import { DEFAULT_REACTION_RULES, type ReactionRules } from './protocol';
+
+// ------------------------------------------------------------------ public role
+
+/**
+ * The staff role other players see next to a name (SUPER ADMIN, ADMIN). Taken from `users.role` on the server only;
+ * ordinary members carry none, so the field is simply absent for them.
+ */
+export type PublicRole = 'admin' | 'super_admin';
+
+/** The public role of a stored `users.role` value: staff roles only. */
+export function publicRole(role: string | null | undefined): PublicRole | undefined {
+  return role === 'admin' || role === 'super_admin' ? role : undefined;
+}
+
+/** The badge `role` carries under `policy` (see SocialSettings): none for a member, or for a staff role it hides. */
+export function shownRole(role: string | null | undefined, policy: Pick<SocialSettings, 'showAdmin' | 'showSuperAdmin'> | null | undefined): PublicRole | undefined {
+  const r = publicRole(role);
+  const p = policy ?? SOCIAL_DEFAULTS;
+  return r === 'super_admin' ? (p.showSuperAdmin ? r : undefined) : r === 'admin' ? (p.showAdmin ? r : undefined) : undefined;
+}
+
+// ------------------------------------------------------------------ social policy
+
+/**
+ * The service-wide social policy (social_policies, newest version; a super admin's). Quick reactions: on, and how fast
+ * one seated player may send them (ReactionRules, applied by the room and mirrored by the client). Staff badges: which
+ * roles carry theirs next to their name wherever other players see it (seats, table chat, the lobby's host, the board,
+ * friends and blocks, hand replays). A hidden badge is left out of what the server sends; the role itself is unchanged.
+ */
+export interface SocialSettings extends ReactionRules {
+  reactionsEnabled: boolean;
+  showSuperAdmin: boolean;
+  showAdmin: boolean;
+}
+export interface SocialPolicy extends SocialSettings {
+  version: number;
+}
+
+/** What the service did before the policy existed, and what a reader uses when it cannot read one. */
+export const SOCIAL_DEFAULTS: SocialSettings = { reactionsEnabled: true, ...DEFAULT_REACTION_RULES, showSuperAdmin: true, showAdmin: true };
+
+export const SOCIAL_LIMITS = {
+  cooldownMs: { min: 500, max: 30_000 },
+  burstMax: { min: 1, max: 20 },
+  burstWindowMs: { min: 5_000, max: 300_000 },
+} as const;
+
+/** A policy read with SOCIAL_POLICY_JSON (@jc/db): null for none, or for one this build cannot read (the defaults then). */
+export function toSocialPolicy(raw: unknown): SocialPolicy | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    const n = (k: keyof typeof SOCIAL_LIMITS) => {
+      const v = p[k];
+      return Number.isSafeInteger(v) && (v as number) >= SOCIAL_LIMITS[k].min && (v as number) <= SOCIAL_LIMITS[k].max ? (v as number) : null;
+    };
+    const [cooldownMs, burstMax, burstWindowMs] = [n('cooldownMs'), n('burstMax'), n('burstWindowMs')];
+    if (!Number.isSafeInteger(p.version) || cooldownMs == null || burstMax == null || burstWindowMs == null) return null;
+    return {
+      version: p.version as number,
+      reactionsEnabled: p.reactionsEnabled === 1,
+      cooldownMs,
+      burstMax,
+      burstWindowMs,
+      showSuperAdmin: p.showSuperAdmin === 1,
+      showAdmin: p.showAdmin === 1,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The reaction limits a table shows its players under `policy`: null when reactions are off. */
+export function reactionRulesOf(policy: SocialSettings | null | undefined): ReactionRules | null {
+  const p = policy ?? SOCIAL_DEFAULTS;
+  return p.reactionsEnabled ? { cooldownMs: p.cooldownMs, burstMax: p.burstMax, burstWindowMs: p.burstWindowMs } : null;
+}
 
 // ------------------------------------------------------------------ friends
 
@@ -7,6 +85,8 @@ export interface PublicUserDto {
   id: string;
   nickname: string;
   avatarUrl: string | null;
+  /** Staff only (see PublicRole). */
+  role?: PublicRole;
 }
 
 export interface FriendDto extends PublicUserDto {

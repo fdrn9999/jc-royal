@@ -1,7 +1,8 @@
-import type { ActionType, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ServerMessage, TableCue, TableView } from '@jc/types';
+import type { ActionType, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ReactionId, ServerMessage, TableCue, TableView } from '@jc/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Heartbeat, Outbox, type Outgoing } from './link';
 import { preActionSpot } from './preAction';
+import { REACTION_SHOW_MS, type SeatReaction } from './Reactions';
 
 /** `locked`: a private table that needs the join code first (the room closed the socket with 4003). */
 export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'closed' | 'unauthorized' | 'locked' | 'kicked';
@@ -19,6 +20,8 @@ export interface TableSocketApi {
   chat: ChatMessage[];
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
+  /** Quick reactions showing now: the latest per seat, each for REACTION_SHOW_MS. */
+  reactions: SeatReaction[];
   lastError: { code: ErrorCode; message: string; at: number } | null;
   /** Latest top-up / automatic rebuy outcome the room reported to this player. */
   lastNotice: { code: NoticeCode; amount?: number; at: number } | null;
@@ -32,12 +35,25 @@ export interface TableSocketApi {
       | { t: 'sit'; seatIndex: number; buyIn: number }
       | { t: 'leave' }
       | { t: 'topUp'; amount: number }
-      | { t: 'autoRebuy'; on: boolean; amount?: number; cap?: number; consent?: true },
+      | { t: 'autoRebuy'; on: boolean; amount?: number; cap?: number; consent?: true }
+      | { t: 'timeBank'; handId: string; seq: number; seen: number },
     reqId?: string,
   ) => Promise<void>;
-  /** Like request, without a result: a refusal shows in `lastError`. */
+  /**
+   * Like request, without a result: a refusal shows in `lastError`. A reaction goes once, as is: one that missed its
+   * moment is not worth sending again after a reconnect.
+   */
   send: (
-    msg: { t: 'sitOut' } | { t: 'sitIn' } | { t: 'waitlist'; join: boolean } | { t: 'chat'; text: string } | { t: 'sync' } | { t: 'cancelTopUp' } | { t: 'muck'; on: boolean },
+    msg:
+      | { t: 'sitOut' }
+      | { t: 'sitIn' }
+      | { t: 'waitlist'; join: boolean }
+      | { t: 'chat'; text: string }
+      | { t: 'sync' }
+      | { t: 'cancelTopUp' }
+      | { t: 'muck'; on: boolean }
+      | { t: 'show'; card: 0 | 1 }
+      | { t: 'react'; reaction: ReactionId },
   ) => void;
   act: (type: ActionType, amount?: number) => boolean;
   /**
@@ -86,6 +102,8 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const [state, setState] = useState<TableView | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [cues, setCues] = useState<CueEvent[]>([]);
+  const [reactions, setReactions] = useState<SeatReaction[]>([]);
+  const reactionSeq = useRef(0);
   const [lastError, setLastError] = useState<TableSocketApi['lastError']>(null);
   const [lastNotice, setLastNotice] = useState<TableSocketApi['lastNotice']>(null);
   const [acting, setActing] = useState(false);
@@ -173,6 +191,14 @@ export function useTableSocket(tableId: string): TableSocketApi {
           case 'chat':
             setChat((c) => [...c, m.message].slice(-100));
             return;
+          case 'react': {
+            // A page in the background would only queue them up to play all at once on return.
+            if (document.hidden) return;
+            const r: SeatReaction = { id: ++reactionSeq.current, seatIndex: m.seatIndex, userId: m.userId, reaction: m.reaction };
+            setReactions((q) => [...q.filter((x) => x.seatIndex !== r.seatIndex), r]);
+            setTimeout(() => setReactions((q) => q.filter((x) => x.id !== r.id)), REACTION_SHOW_MS);
+            return;
+          }
           case 'ack':
             box.take(m.reqId)?.h.resolve?.();
             return;
@@ -340,7 +366,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
 
   const send = useCallback<TableSocketApi['send']>(
     (msg) => {
-      if (msg.t === 'sync') {
+      if (msg.t === 'sync' || msg.t === 'react') {
         raw(msg);
         return;
       }
@@ -386,5 +412,5 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const reconnect = useCallback(() => kick.current(), []);
   const reopen = useCallback(() => fresh.current(), []);
 
-  return { status, state, chat, cues, consumeCues, lastError, lastNotice, request, send, act, preAct, acting, reconnect, reopen };
+  return { status, state, chat, cues, consumeCues, reactions, lastError, lastNotice, request, send, act, preAct, acting, reconnect, reopen };
 }

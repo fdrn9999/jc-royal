@@ -1,6 +1,6 @@
-import { ageOn, isoDate, MIN_SIGNUP_AGE, NICKNAME_RE, passwordOk, type MeDto, type SignupOptionsDto } from '@jc/types';
+import { ageOn, isoDate, MIN_SIGNUP_AGE, NICKNAME_RE, normalizeReferralCode, passwordOk, type MeDto, type SignupOptionsDto } from '@jc/types';
 import { Button, Field, Input } from '@jc/ui';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AuthLayout } from '../components/AppShell';
 import { EmailVerify } from '../components/EmailVerify';
@@ -85,9 +85,16 @@ export function LoginPage() {
   );
 }
 
+// The referral code field and its text load on their own chunk, so the entry chunk stays within its budget.
+const ReferralField = lazy(() => import('../components/ReferralField').then((m) => ({ default: m.ReferralField })));
+
 export function RegisterPage() {
   const { t, err, locale } = useI18n();
   const done = useAfterLogin();
+  const [params] = useSearchParams();
+  // A shared link (/register?ref=JC…) fills the code; the member may clear or change it.
+  const [linkCode] = useState(() => normalizeReferralCode(params.get('ref') ?? '').slice(0, 40));
+  const [referralCode, setReferralCode] = useState(linkCode);
   const [options, setOptions] = useState<SignupOptionsDto | null>(null);
   const [email, setEmail] = useState('');
   const [verificationToken, setVerificationToken] = useState<string | null>(null);
@@ -131,7 +138,7 @@ export function RegisterPage() {
     try {
       done(
         await api<MeDto>('/api/auth/register', {
-          body: { email, password, nickname, birthDate, locale, agreements: { age14: true, privacy: true }, emailVerificationToken: verificationToken ?? undefined },
+          body: { email, password, nickname, birthDate, locale, agreements: { age14: true, privacy: true }, emailVerificationToken: verificationToken ?? undefined, referralCode: referralCode || undefined },
         }),
       );
     } catch (x) {
@@ -180,6 +187,9 @@ export function RegisterPage() {
             </div>
           )}
         </Field>
+        <Suspense fallback={null}>
+          <ReferralField value={referralCode} onChange={setReferralCode} fromLink={!!linkCode && referralCode === linkCode} />
+        </Suspense>
         <SignupConsent value={agreements} onChange={setAgreements} />
         <p className="text-xs text-gold-300/80">{t('auth.welcomeGrant', { amount: '10,000' })}</p>
         {error && <p role="alert" className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-[#f3b0b2]">{error}</p>}

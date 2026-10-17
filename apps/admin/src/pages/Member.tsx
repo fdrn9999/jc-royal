@@ -58,14 +58,15 @@ type Counts = { open: number; resolved: number; dismissed: number; total: number
 type ReportBrief = { id: string; targetType: string; reason: ReportReason; status: ReportStatus; createdAt: number; otherNickname: string };
 export interface MemberReports { filed: Counts; against: Counts; recentFiled: ReportBrief[]; recentAgainst: ReportBrief[] }
 
-export function MemberReportsPanel({ userId, reports }: { userId: string; reports: MemberReports }) {
+/** `hidden`: the reports feature is off for this administrator, so the server sent the counts without the latest reports. */
+export function MemberReportsPanel({ userId, reports, hidden = false }: { userId: string; reports: MemberReports; hidden?: boolean }) {
   const { t, locale } = useT();
   const side = (title: string, counts: Counts, recent: ReportBrief[], link: string, other: 'reportBy' | 'reportAbout', testid: string) => (
     <div className="flex min-w-0 flex-col gap-2" data-testid={testid}>
       <div className="flex flex-wrap items-baseline gap-2">
         <h3 className="text-sm font-bold">{title}</h3>
         <span className="font-mono text-lg font-semibold">{counts.total}</span>
-        {counts.total > 0 && <Link to={link} className="ml-auto text-xs text-gold-300 hover:underline">{t('viewAll')} →</Link>}
+        {counts.total > 0 && !hidden && <Link to={link} className="ml-auto text-xs text-gold-300 hover:underline">{t('viewAll')} →</Link>}
       </div>
       <p className="text-xs text-ink-400">{t('reportCounts', counts)}</p>
       {recent.length > 0 && (
@@ -84,6 +85,7 @@ export function MemberReportsPanel({ userId, reports }: { userId: string; report
   );
   return (
     <Panel title={t('memberReportsTitle')}>
+      {hidden && <p className="mb-3 text-xs text-ink-400" data-testid="reports-hidden">{t('hiddenReports')}</p>}
       <div className="grid gap-6 sm:grid-cols-2">
         {side(t('reportsAgainst'), reports.against, reports.recentAgainst, `/reports?status=all&userId=${userId}`, 'reportBy', 'reports-against')}
         {side(t('reportsFiled'), reports.filed, reports.recentFiled, `/reports?status=all&reporterId=${userId}`, 'reportAbout', 'reports-filed')}

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { SUPPORTED_MAX_SEATS } from './table';
+import type { PublicRole } from './social';
+import { BOT_LEVELS, SUPPORTED_MAX_SEATS, type BotLevel } from './table';
 
 export const NICKNAME_RE = /^[\p{L}\p{N}_]{2,16}$/u;
 
@@ -18,7 +19,7 @@ export const NicknameSchema = z.string().trim().regex(NICKNAME_RE);
 
 export const LocaleSchema = z.enum(['ko', 'en']);
 /** Version of the signup privacy notice. Bump it when the notice text changes; each signup stores the version it accepted. */
-export const PRIVACY_NOTICE_VERSION = '2026-10-15';
+export const PRIVACY_NOTICE_VERSION = '2026-10-16';
 
 /** Youngest age (full years) allowed to sign up; matches the "14 or older" agreement. */
 export const MIN_SIGNUP_AGE = 14;
@@ -52,6 +53,8 @@ export const RegisterSchema = z.object({
   agreements: z.object({ age14: z.literal(true), privacy: z.literal(true) }),
   /** Proof from /email-verification/confirm. Required while sign-up email verification is on. */
   emailVerificationToken: z.string().min(20).max(200).optional(),
+  /** A referral code (from the link's `?ref=` or typed); empty is no code. Checked by the server: `referral_invalid`. */
+  referralCode: z.string().max(40).optional(),
 });
 export const EmailVerificationRequestSchema = z.object({ email: EmailSchema, locale: LocaleSchema.default('ko') });
 export const EmailVerificationConfirmSchema = z.object({ email: EmailSchema, code: z.string().regex(/^\d{6}$/) });
@@ -84,6 +87,30 @@ export const ResetRequestSchema = z.object({ email: EmailSchema });
 export const ResetConfirmSchema = z.object({ token: z.string().min(20).max(200), newPassword: PasswordSchema });
 export const DeleteAccountSchema = z.object({ password: z.string().min(1).max(128) });
 
+/**
+ * An official table's table bots: whether they may sit in, how well they play, how many members must be seated first
+ * (minHumans), how many bots at most (max), the player count they fill up to (fillTo), and whether one stands up after
+ * the hand for a member waiting for a seat (yieldSeat). Member rooms never have bots.
+ */
+const BotSettingsShape = {
+  botsEnabled: z.boolean().default(false),
+  botLevel: z.enum(BOT_LEVELS).default('normal'),
+  botMinHumans: z.number().int().min(1).max(8).default(1),
+  botMax: z.number().int().min(1).max(8).default(1),
+  botFillTo: z.number().int().min(2).max(9).default(2),
+  botYield: z.boolean().default(true),
+};
+export type BotSettings = { botsEnabled: boolean; botLevel: BotLevel; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
+
+/** What makes a table's bot settings unusable at its size (also checked against the stored row on a patch). */
+export function botSettingsIssues(b: Pick<BotSettings, 'botMinHumans' | 'botMax' | 'botFillTo'>, maxSeats: number): { message: string; path: string[] }[] {
+  const out: { message: string; path: string[] }[] = [];
+  if (b.botFillTo > maxSeats) out.push({ message: 'botFillTo must be <= maxSeats', path: ['botFillTo'] });
+  if (b.botMax > maxSeats - 1) out.push({ message: 'botMax must leave a seat for a member', path: ['botMax'] });
+  if (b.botMinHumans >= b.botFillTo) out.push({ message: 'botMinHumans must be < botFillTo', path: ['botMinHumans'] });
+  return out;
+}
+
 export const TableInputSchema = z
   .object({
     name: z.string().trim().min(2).max(40),
@@ -97,11 +124,13 @@ export const TableInputSchema = z
     beginner: z.boolean().default(false),
     isPrivate: z.boolean().default(false),
     joinCode: z.string().trim().min(4).max(32).optional(),
+    ...BotSettingsShape,
   })
   .refine((t) => t.bigBlind >= t.smallBlind, { message: 'bigBlind must be >= smallBlind', path: ['bigBlind'] })
   .refine((t) => t.minBuyIn >= t.bigBlind * 10, { message: 'minBuyIn must be >= 10 BB', path: ['minBuyIn'] })
   .refine((t) => t.maxBuyIn >= t.minBuyIn, { message: 'maxBuyIn must be >= minBuyIn', path: ['maxBuyIn'] })
-  .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private tables need a join code', path: ['joinCode'] });
+  .refine((t) => !t.isPrivate || !!t.joinCode, { message: 'private tables need a join code', path: ['joinCode'] })
+  .superRefine((t, ctx) => botSettingsIssues(t, t.maxSeats).forEach((i) => ctx.addIssue({ code: 'custom', ...i })));
 export type TableInput = z.infer<typeof TableInputSchema>;
 
 /** Blinds a member can choose for their own room (small blind is half the big blind). */
@@ -153,6 +182,14 @@ export const TablePatchSchema = z.object({
   allowSpectators: z.boolean().optional(),
   beginner: z.boolean().optional(),
   entryBlocked: z.boolean().optional(),
+  botsEnabled: z.boolean().optional(),
+  botLevel: z.enum(BOT_LEVELS).optional(),
+  botMinHumans: BotSettingsShape.botMinHumans.removeDefault().optional(),
+  botMax: BotSettingsShape.botMax.removeDefault().optional(),
+  botFillTo: BotSettingsShape.botFillTo.removeDefault().optional(),
+  botYield: z.boolean().optional(),
+  /** The table's updatedAt the change was made from (what the console's table page showed); a table changed since is a table_conflict. */
+  ifUpdatedAt: z.number().int().nonnegative().optional(),
 });
 
 /** Hands played below which quick play counts a player as a newcomer and prefers beginner tables. */
@@ -170,6 +207,8 @@ export const ChipAdjustSchema = z.object({
   amount: z.number().int().refine((n) => n !== 0, 'amount must be non-zero').refine((n) => Math.abs(n) <= 100_000_000),
   memo: z.string().trim().min(2).max(200),
   idempotencyKey: z.string().min(8).max(64),
+  /** The transaction this adjustment corrects (a free refill paid by mistake, say), shown with both. */
+  refLedgerId: z.string().min(8).max(64).optional(),
 });
 
 export type Role = 'user' | 'admin' | 'super_admin';
@@ -186,14 +225,14 @@ export interface MeDto {
   createdAt: number;
 }
 
-export type RoomType = 'official' | 'member';
+export type RoomType = 'official' | 'member' | 'tournament';
 
 export interface LobbyTableDto {
   id: string;
   name: string;
   roomType: RoomType;
   /** The member who opened a member room. */
-  host: { id: string; nickname: string } | null;
+  host: { id: string; nickname: string; role?: PublicRole } | null;
   maxSeats: number;
   smallBlind: number;
   bigBlind: number;
@@ -207,6 +246,10 @@ export interface LobbyTableDto {
   status: 'open' | 'closed';
   /** Live occupancy reported by the table room. */
   seated: number;
+  /** Of seated, the table bots. */
+  bots: number;
+  /** Table bots may sit in while few members play (official tables only): how well they play; null when they may not. */
+  botLevel: BotLevel | null;
   playing: boolean;
   waitlist: number;
   spectators: number;
@@ -220,6 +263,133 @@ export interface LobbyTableDto {
 export interface QuickPlayDto {
   table: LobbyTableDto;
   seatIndex: number;
+}
+
+/**
+ * Why a free chip refill would not pay now (GET/POST /api/me/refill): the refill is off or paused, the wait since the
+ * last one is not over, wallet and table chips together are not below the line, the account is suspended, or `held`:
+ * the chips on a table could not be confirmed (see `RefillHold`) and the claim waits until they can.
+ */
+export type RefillReason = 'off' | 'paused' | 'cooldown' | 'above' | 'suspended' | 'held';
+/** `busy`: chips are moving between wallet and seat; `unreachable`: a table did not answer; `mismatch`: an open seat the table does not have. */
+export type RefillHold = 'busy' | 'unreachable' | 'mismatch';
+export interface RefillPolicyDto {
+  version: number;
+  enabled: boolean;
+  paused: boolean;
+  /** Paid when wallet + table chips are below this. */
+  below: number;
+  amount: number;
+  cooldownMs: number;
+}
+export interface RefillStatusDto {
+  /** Null when no policy was ever set (the refill is off). */
+  policy: RefillPolicyDto | null;
+  wallet: number;
+  /** Chips at tables (open seats' stacks, a hand's bets included); null when not counted or not confirmed. */
+  tables: number | null;
+  eligible: boolean;
+  reason: RefillReason | null;
+  hold: RefillHold | null;
+  /** When the next refill may be claimed (the wait after the last one), server time. */
+  nextAt: number | null;
+  last: { at: number; amount: number } | null;
+  /** Refills received so far. */
+  received: number;
+  /** Server time of this answer. */
+  now: number;
+}
+export interface RefillClaimDto {
+  amount: number;
+  balance: number;
+  nextAt: number;
+  /** Another request (a second tab, a retry) had already claimed this refill: nothing more was paid. */
+  duplicate: boolean;
+  status: RefillStatusDto;
+}
+
+/** A member's referral code as shared: JC and 5–10 capital letters or digits (the codes made now have 5). */
+export const REFERRAL_CODE_RE = /^JC[A-Z0-9]{5,10}$/;
+/** A code as typed or pasted, before it is checked: no spaces, capital letters. */
+export const normalizeReferralCode = (s: string) => s.replace(/\s+/g, '').toUpperCase();
+
+/**
+ * A signup made with a code (apps/api/src/lib/referral.ts). `pending`: not paid yet (the new member's hands, a pause,
+ * a suspension); `review`: held for an operator; `settled`: both sides final; `unpaid`: closed without a reward.
+ */
+export type ReferralStatus = 'pending' | 'review' | 'settled' | 'unpaid';
+/** One side's reward: `capped` when the referrer had reached a cap, `skipped` when that member had withdrawn. */
+export type ReferralSideStatus = 'pending' | 'paid' | 'capped' | 'skipped' | 'unpaid';
+/** Why a referral is waiting or closed without a reward. */
+export type ReferralFailure =
+  | 'off'
+  | 'paused'
+  | 'hands'
+  | 'email'
+  | 'repeat_email'
+  | 'burst'
+  | 'rejected'
+  | 'daily_cap'
+  | 'total_cap'
+  | 'invitee_deleted'
+  | 'invitee_suspended'
+  | 'referrer_deleted'
+  | 'referrer_suspended';
+/** What members are told of the referral policy (the review threshold is not shown). */
+export interface ReferralPolicyDto {
+  version: number;
+  enabled: boolean;
+  paused: boolean;
+  referrerAmount: number;
+  inviteeAmount: number;
+  /** Referrer rewards per day (KST) and in total. */
+  dailyCap: number;
+  totalCap: number;
+  /** Hands the new member finishes before either side is paid. */
+  minHands: number;
+}
+/** One side of one referral, as its member sees it. */
+export interface ReferralRewardDto {
+  status: ReferralStatus;
+  side: ReferralSideStatus;
+  /** Chips promised to this side when the signup was accepted. */
+  amount: number;
+  paidAt: number | null;
+  failure: ReferralFailure | null;
+  /**
+   * Hands the new member still has to finish (0 once done), told to the new member only: in the referrer's list it is
+   * null, and `failure: 'hands'` says only that the reward waits for them.
+   */
+  handsLeft: number | null;
+  createdAt: number;
+}
+export interface ReferralInviteeDto extends ReferralRewardDto {
+  /** Null once that member has withdrawn. */
+  nickname: string | null;
+}
+/** GET /api/me/referral: the member's code and link, the policy, and what their referrals paid. */
+export interface ReferralMeDto {
+  code: string;
+  link: string;
+  policy: ReferralPolicyDto | null;
+  counts: { invited: number; paid: number; pending: number; unpaid: number };
+  /** Chips received as the referrer, and promised ones not paid yet. */
+  earned: number;
+  waiting: number;
+  /** The member who invited this one, if any, and this member's own reward. */
+  invitedBy: (ReferralRewardDto & { nickname: string | null }) | null;
+  /** The newest members invited (up to 20). */
+  recent: ReferralInviteeDto[];
+  /** Chips this request paid to the member (waiting rewards settled as the card opened): the wallet changed. */
+  paidNow: number;
+  now: number;
+}
+/** GET /api/auth/referral/:code, for the signup form: whose code it is and what the new member would get now. */
+export interface ReferralCodeCheckDto {
+  valid: boolean;
+  inviter: string | null;
+  /** Null when referral rewards are off (the code is still accepted). */
+  reward: { amount: number; minHands: number; paused: boolean } | null;
 }
 
 export interface LedgerEntryDto {
@@ -307,6 +477,71 @@ export interface HandSummaryDto {
   won: number;
   holeCards: string[];
   rankClass: string | null;
+  /** The member's seat position, or null where the hand's statistics were not worked out (see handStats.ts). */
+  position: Position | null;
+  /** The table's big blind now (blinds are not stored per hand). */
+  bigBlind: number;
+  /** The member's own note on the hand: never shown to anyone else. */
+  bookmarked: boolean;
+  tags: HandTag[];
+  hasMemo: boolean;
 }
+
+/** Tags a member can put on their own hands, in the order of their bits in hand_notes.tags. */
+export const HAND_TAGS = ['review', 'bluff', 'hardCall', 'bigPot'] as const;
+export type HandTag = (typeof HAND_TAGS)[number];
+export const HAND_MEMO_MAX = 500;
+export const HAND_RESULTS = ['up', 'down', 'even'] as const;
+export type HandResult = (typeof HAND_RESULTS)[number];
+/** Pot sizes the hand list can be narrowed to, in big blinds of the table's current blind. */
+export const HAND_MIN_POTS = [20, 50, 100] as const;
+
+const epochMs = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/**
+ * The filters of GET /api/me/hands (`limit` and `before` are read as before). `beforeId` is the last hand of the
+ * previous page, with `before` its end; the date range is [from, to) in ms. Every filter is optional; a value outside
+ * its list is refused (400).
+ */
+export const HandListQuerySchema = z.object({
+  beforeId: z.string().min(1).max(128).optional(),
+  from: epochMs.optional(),
+  to: epochMs.optional(),
+  position: z.enum(POSITIONS).optional(),
+  result: z.enum(HAND_RESULTS).optional(),
+  minPot: z.coerce
+    .number()
+    .refine((n) => (HAND_MIN_POTS as readonly number[]).includes(n))
+    .optional(),
+  tag: z.enum(HAND_TAGS).optional(),
+  bookmarked: z.literal('1').optional(),
+});
+export type HandListQuery = z.infer<typeof HandListQuerySchema>;
+
+export interface HandNoteDto {
+  bookmarked: boolean;
+  tags: HandTag[];
+  memo: string | null;
+  /** Memo revision: a memo save names the revision it was written over. 0 before the first memo. */
+  rev: number;
+  /** null before the member saved anything on the hand. */
+  updatedAt: number | null;
+}
+
+/**
+ * PUT /api/me/hands/:id/note. Only the fields sent change: a tag left out keeps its state. A memo save needs `rev`, the
+ * revision it was written over; if the memo changed since (another tab or device), nothing is saved and the answer is
+ * 409 note_conflict with the saved note in details. An empty memo removes it.
+ */
+export const HandNoteInputSchema = z
+  .object({
+    bookmarked: z.boolean().optional(),
+    tags: z.partialRecord(z.enum(HAND_TAGS), z.boolean()).optional(),
+    memo: z.string().max(HAND_MEMO_MAX).optional(),
+    rev: z.number().int().min(0).optional(),
+  })
+  .strict()
+  .refine((b) => b.bookmarked !== undefined || (b.tags && Object.keys(b.tags).length > 0) || b.memo !== undefined, { message: 'nothing to save' })
+  .refine((b) => b.memo === undefined || b.rev !== undefined, { message: 'a memo needs rev', path: ['rev'] });
+export type HandNoteInput = z.infer<typeof HandNoteInputSchema>;
 
 export type ApiError = { error: { code: string; message: string; details?: unknown } };

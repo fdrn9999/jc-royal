@@ -32,7 +32,7 @@ export const PRIVACY_NOTICE: Record<'ko' | 'en', PrivacyNotice> = {
         items: [
           '필수: 이메일 주소, 비밀번호(복원할 수 없는 일방향 암호화(해시)로 저장), 닉네임, 생년월일, 이용 언어',
           '이메일 인증 과정에서 생성: 인증번호(일방향 암호화(해시)로 저장), 인증 일시',
-          '서비스 이용 중 자동 생성·수집: 접속 IP 주소, 브라우저·기기 정보(User-Agent), 로그인·접속 기록, 게임 참여와 핸드 기록, 가상 칩 내역, 테이블 채팅, 게시글·댓글, 친구·차단 목록, 1:1 대화 내용, 신고 내용과 증거, 아카데미 학습 진도',
+          '서비스 이용 중 자동 생성·수집: 접속 IP 주소, 브라우저·기기 정보(User-Agent), 로그인·접속 기록, 게임 참여와 핸드 기록, 가상 칩 내역, 테이블 채팅, 게시글·댓글, 친구·차단 목록, 1:1 대화 내용, 신고 내용과 증거, 아카데미 학습 진도, 추천 코드를 쓰거나 내 코드로 친구가 가입했을 때의 추천 관계·보상 기록과 가입 이메일 주소·접속 네트워크의 해시 값',
           '선택: 프로필 이미지 주소(URL)',
         ],
       },
@@ -71,6 +71,7 @@ export const PRIVACY_NOTICE: Record<'ko' | 'en', PrivacyNotice> = {
           '만료된 로그인 세션(IP 주소·브라우저 정보 포함), 가입을 마치지 않은 이메일 인증 요청(이메일 주소, 인증번호), 비밀번호 재설정 링크, 요청 횟수 기록은 만료 1일 뒤 하루 한 번 실행하는 정리 작업으로 삭제합니다.',
           '테이블 채팅은 테이블이 닫히고 24시간이 지나면 삭제합니다.',
           '게시글·댓글, 가상 칩 원장, 게임 기록, 신고 기록과 증거는 게임 무결성과 분쟁 대응을 위해 탈퇴 후에도 회원 번호(무작위 값)로 남으며, 게시글·댓글의 작성자는 "탈퇴한 회원"으로 표시합니다.',
+          '추천 기록과 가입 이메일 주소의 해시 값은 보상 지급의 근거이자 같은 메일함으로 다시 가입해 보상을 또 받는 것을 막기 위해 탈퇴 후에도 남습니다. 접속 네트워크의 해시 값은 30일 뒤 삭제하고, 추천 코드는 탈퇴하면 삭제합니다.',
           '관계 법령에 따라 보존해야 하는 정보는 해당 법령이 정한 기간 동안 보관합니다.',
         ],
       },
@@ -91,7 +92,7 @@ export const PRIVACY_NOTICE: Record<'ko' | 'en', PrivacyNotice> = {
         items: [
           'Required: email address, password (stored with one-way encryption), nickname, date of birth, preferred language',
           'Created during email verification: verification code (stored as a one-way hash), verification time',
-          'Generated while you use the Service: IP address, browser and device information (User-Agent), sign-in and access records, game participation and hand records, virtual chip history, table chat, posts and comments, friends and block list, 1:1 messages, reports and their evidence, Academy progress',
+          'Generated while you use the Service: IP address, browser and device information (User-Agent), sign-in and access records, game participation and hand records, virtual chip history, table chat, posts and comments, friends and block list, 1:1 messages, reports and their evidence, Academy progress, and, when you use a referral code or a friend signs up with yours, who invited whom, the rewards, and hashes of the sign-up email address and network',
           'Optional: profile image address (URL)',
         ],
       },
@@ -130,6 +131,7 @@ export const PRIVACY_NOTICE: Record<'ko' | 'en', PrivacyNotice> = {
           'Expired sign-in sessions (including IP address and browser information), email verification requests that never became an account (email address, code), password reset links and request counters are deleted by a clean-up job that runs once a day, one day after they expire.',
           'Table chat is deleted 24 hours after the table closes.',
           'Posts and comments, virtual chip ledgers, game records, and reports with their evidence remain after account deletion under your member ID (a random value), to protect game integrity and resolve disputes; posts and comments show the author as "Withdrawn member".',
+          'Referral records and the hash of the sign-up email address remain after account deletion, as the basis of rewards paid and so that signing up again with the same inbox does not earn another reward. The network hash is deleted after 30 days, and your referral code is deleted when you delete your account.',
           'Information that a law requires us to keep is kept for the period that law sets.',
         ],
       },

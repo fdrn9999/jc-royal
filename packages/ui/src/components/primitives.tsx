@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
 import logo128 from '../../assets/logo-128.webp';
 import logo192 from '../../assets/logo-192.webp';
 import { cx } from '../util';
@@ -80,7 +80,8 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
   );
 }
 
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+/** A text field; `ref` passes through to the input (a picker places the caret). */
+export function Input({ className, ...rest }: ComponentProps<'input'>) {
   return (
     <input
       {...rest}

@@ -27,19 +27,50 @@ export interface ReplayInput extends HandReplayFields {
 
 export type ReplayAction = HandReplayFields['actions'][number];
 
+/**
+ * What a step did, piece by piece, for the line read out under the replay. An action's amount is what a player would
+ * say: a bet, raise or all-in to its total on the street, a blind or a call by what it put in.
+ */
+export type ReplayLinePart =
+  | { kind: 'deal' }
+  | { kind: 'act'; seat: number; type: string; amount: number }
+  | { kind: 'board'; cards: Card[] }
+  | { kind: 'shows'; seat: number; rankClass: string; bestFive: Card[] }
+  | { kind: 'wins'; seat: number; amount: number };
+
 export interface ReplayStep {
   /** deal: cards dealt and blinds posted · action: one action · street: new board cards · showdown: hands shown · result: pots paid. */
   kind: 'deal' | 'action' | 'street' | 'showdown' | 'result';
   stage: HandStage;
   /** The action of an action step, or the blinds posted on the deal step. */
   actions: ReplayAction[];
+  line: ReplayLinePart[];
   view: TableView;
+}
+
+/** The parts of a hand on the replay's timeline: the four streets, the showdown and the payout. */
+export const REPLAY_PHASES = ['preflop', 'flop', 'turn', 'river', 'showdown', 'result'] as const;
+export type ReplayPhase = (typeof REPLAY_PHASES)[number];
+export const replayPhase = (s: ReplayStep): ReplayPhase => (s.stage === 'settled' ? 'result' : s.stage);
+
+/** Where each part the hand reached begins and ends (step indexes); a hand over early has no later parts. */
+export function replayParts(steps: readonly ReplayStep[]) {
+  const parts: { phase: ReplayPhase; first: number; last: number }[] = [];
+  steps.forEach((s, k) => {
+    const phase = replayPhase(s);
+    const prev = parts.at(-1);
+    if (prev?.phase === phase) prev.last = k;
+    else parts.push({ phase, first: k, last: k });
+  });
+  return parts;
 }
 
 const STREETS: HandStage[] = ['preflop', 'flop', 'turn', 'river'];
 const BOARD_AT: Record<HandStage, number> = { preflop: 0, flop: 3, turn: 4, river: 5, showdown: 5, settled: 5 };
 const BLINDS = new Set(['post-sb', 'post-bb']);
 const FOLDS = new Set(['fold', 'timeout-fold']);
+/** Actions read to their street total ("raises to 300"); the rest by what they put in ("calls 200"). */
+const TO_TOTAL = new Set(['bet', 'raise', 'allin']);
 
 /** The action shown on a seat plate: posted blinds show none, a time-out shows what it became. */
 function plateAction(type: string): ActionType | null {
@@ -115,7 +146,7 @@ export function buildReplay(h: ReplayInput, heroSeat: number | null): ReplayStep
   let stage: HandStage = 'preflop';
   const steps: ReplayStep[] = [];
 
-  const snap = (kind: ReplayStep['kind'], actions: ReplayAction[], o: { actor?: number; reveal?: boolean; result?: HandResultView } = {}) => {
+  const snap = (kind: ReplayStep['kind'], actions: ReplayAction[], line: ReplayLinePart[], o: { actor?: number; reveal?: boolean; result?: HandResultView } = {}) => {
     const final = kind === 'result';
     const seats: SeatView[] = Array.from({ length: maxSeats }, (_, i): SeatView => {
       const p = bySeat.get(i);
@@ -127,6 +158,8 @@ export function buildReplay(h: ReplayInput, heroSeat: number | null): ReplayStep
         seatIndex: i,
         state: out ? 'folded' : (final ? stack === 0 : allIn.has(i)) ? 'allin' : 'active',
         nickname: p.nickname,
+        ...(p.role ? { role: p.role } : {}),
+        ...(p.bot ? { bot: true as const } : {}),
         stack,
         streetBet: final ? 0 : (streetBets.get(i) ?? 0),
         connected: true,
@@ -175,43 +208,48 @@ export function buildReplay(h: ReplayInput, heroSeat: number | null): ReplayStep
       nextHandAt: null,
       you: { userId: '', seatIndex: heroSeat, legal: [], sittingOut: false, leaving: false, inWaitlist: false, canSit: false, needsCode: false, topUpQueued: null, autoRebuy: null },
     };
-    steps.push({ kind, stage, actions, view });
+    steps.push({ kind, stage, actions, line, view });
   };
 
-  const apply = (a: ReplayAction) => {
+  /** Applies an action and returns how the line reads it. */
+  const apply = (a: ReplayAction): ReplayLinePart => {
     const total = (put.get(a.seatIndex) ?? 0) + a.amount;
     put.set(a.seatIndex, total);
-    streetBets.set(a.seatIndex, (streetBets.get(a.seatIndex) ?? 0) + a.amount);
+    const street = (streetBets.get(a.seatIndex) ?? 0) + a.amount;
+    streetBets.set(a.seatIndex, street);
     if (FOLDS.has(a.type)) folded.add(a.seatIndex);
     const start = bySeat.get(a.seatIndex)?.stackStart ?? 0;
     if (start > 0 && total >= start) allIn.add(a.seatIndex);
     const shown = plateAction(a.type);
     if (shown) plates.set(a.seatIndex, { type: shown, amount: a.amount });
+    return { kind: 'act', seat: a.seatIndex, type: a.type, amount: TO_TOTAL.has(a.type) ? street : a.amount };
   };
 
   /** Deals the streets up to `to` (one step each), clearing the street's bets and plate actions. */
   const dealTo = (to: HandStage) => {
     while (STREETS.indexOf(stage) < STREETS.indexOf(to)) {
+      const from = BOARD_AT[stage];
       stage = STREETS[STREETS.indexOf(stage) + 1]!;
       streetBets.clear();
       plates.clear();
-      snap('street', []);
+      const cards = board.slice(from, BOARD_AT[stage]);
+      snap('street', [], cards.length > 0 ? [{ kind: 'board', cards }] : []);
     }
   };
 
   let i = 0;
   const blinds: ReplayAction[] = [];
+  const posted: ReplayLinePart[] = [];
   while (i < h.actions.length && BLINDS.has(h.actions[i]!.type)) {
-    apply(h.actions[i]!);
+    posted.push(apply(h.actions[i]!));
     blinds.push(h.actions[i]!);
     i += 1;
   }
-  snap('deal', blinds);
+  snap('deal', blinds, [{ kind: 'deal' }, ...posted]);
   for (; i < h.actions.length; i += 1) {
     const a = h.actions[i]!;
     if (STREETS.includes(a.stage as HandStage)) dealTo(a.stage as HandStage);
-    apply(a);
-    snap('action', [a], { actor: a.seatIndex });
+    snap('action', [a], [apply(a)], { actor: a.seatIndex });
   }
 
   // Ranks come only for hands the viewer may see that went to showdown (the API leaves the rest null).
@@ -226,9 +264,12 @@ export function buildReplay(h: ReplayInput, heroSeat: number | null): ReplayStep
     // Streets dealt with nobody left to act (all in): the rest of the board, one street at a time.
     for (const s of STREETS) if (BOARD_AT[s] <= board.length && STREETS.indexOf(s) > STREETS.indexOf(stage)) dealTo(s);
     stage = 'showdown';
-    snap('showdown', [], { reveal: true, result: { winners: [], showdown } });
+    const shows = showdown.map((x): ReplayLinePart => ({ kind: 'shows', seat: x.seatIndex, rankClass: x.rankClass, bestFive: x.bestFive }));
+    snap('showdown', [], shows, { reveal: true, result: { winners: [], showdown } });
   }
   stage = 'settled';
-  snap('result', [], { reveal: contenders.length >= 2, result: { winners: resultWinners(h), showdown } });
+  const winners = resultWinners(h);
+  const wins = winners.map((w): ReplayLinePart => ({ kind: 'wins', seat: w.seatIndex, amount: w.amount }));
+  snap('result', [], wins, { reveal: contenders.length >= 2, result: { winners, showdown } });
   return steps;
 }

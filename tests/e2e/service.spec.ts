@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { balanceOf, PASSWORD, signUp, test, widerThanDevice } from './helpers';
+import { promoteSql } from '../support/grants';
 
 const ADMIN = 'http://localhost:5174';
 
@@ -30,7 +31,7 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
   const member = await signUp(browser);
   const phone = await signUp(browser, { mobile: true });
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const visitorCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await visitorCtx.addInitScript(() => localStorage.setItem('jc.locale', 'en'));
   const visitor = await visitorCtx.newPage();
@@ -151,7 +152,8 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
     await expect(vb.getByTestId('notice-maintenance')).toHaveCount(0);
 
     // Now maintenance under way: a seated member keeps the seat and can leave; nobody sits; sign-in waits.
-    await member.page.goto('/table/e2e-maint?sit=1');
+    // (The member's post from before, to open during it.)
+    const postId = await member.page.evaluate(async () => ((await (await fetch('/api/board/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'E2E 점검 전 글', body: '점검 전에 쓴 글' }) })).json()) as { id: string }).id);    await member.page.goto('/table/e2e-maint?sit=1');
     await member.page.getByTestId('buyin-confirm').click();
     await expect(member.page.locator('[data-testid^=seat-]').filter({ hasText: member.nickname })).toBeVisible();
     await phone.page.goto('/table/e2e-maint');
@@ -182,7 +184,44 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
     await visitor.screenshot({ path: 'test-results/web-login-maintenance-en.png' });
     await member.page.goto('/maintenance');
     await expect(member.page.getByTestId('maintenance-state')).toHaveText('지금 서비스 점검 중입니다.');
+    await expect(member.page.getByTestId('maintenance-page')).toContainText('게시판 글과 댓글 쓰기도 멈춥니다');
 
+    // The lobby: new rooms, quick play and joining wait, with a note saying why and until when; watching stays.
+    await member.page.goto('/');
+    await expect(member.page.getByTestId('maint-note-games')).toContainText('새 방 만들기, 빠른 참가, 테이블 참여가 잠시 멈췄습니다');
+    await expect(member.page.getByTestId('room-create-open-wide')).toBeDisabled();
+    await expect(member.page.getByTestId('quick-go')).toBeDisabled();
+    await expect(member.page.getByTestId('lobby-enter').first()).toBeDisabled();
+    await expect(member.page.getByTestId('lobby-enter').first()).toHaveText('점검 중');
+    await member.page.screenshot({ path: 'test-results/lobby-maintenance.png' });
+    await phone.page.setViewportSize({ width: 360, height: 740 });
+    await phone.page.goto('/');
+    await expect(phone.page.getByTestId('room-create-open')).toBeDisabled();
+    await expect(phone.page.getByTestId('quick-go')).toBeDisabled();
+    await expect(phone.page.getByTestId('maint-note-games')).toBeVisible();
+    expect(await widerThanDevice(phone.page)).toBe(false);
+    await phone.page.screenshot({ path: 'test-results/lobby-maintenance-mobile.png' });
+
+    // The board: members can't write, comment or edit (the server refuses it too); reading stays. Staff can post.
+    await member.page.goto('/board');
+    await expect(member.page.getByTestId('write-post')).toBeDisabled();
+    await expect(member.page.getByTestId('maint-note-posting')).toContainText('글과 댓글 쓰기가 잠시 멈췄습니다');
+    await member.page.goto(`/board/${postId}`);
+    await expect(member.page.getByText('점검 전에 쓴 글')).toBeVisible();
+    await expect(member.page.getByTestId('comment-input')).toBeDisabled();
+    await expect(member.page.getByTestId('comment-submit')).toBeDisabled();
+    await expect(member.page.getByTestId('post-edit')).toHaveAttribute('aria-disabled', 'true');
+    const refused = await member.page.evaluate(async (id) => (await fetch(`/api/board/posts/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: '점검 중 댓글' }) })).status, postId);
+    expect(refused).toBe(503);
+    await phone.page.goto(`/board/${postId}`);
+    await expect(phone.page.getByTestId('maint-note-posting')).toBeVisible();
+    await expect(phone.page.getByTestId('comment-submit')).toBeDisabled();
+    expect(await widerThanDevice(phone.page)).toBe(false);
+    await phone.page.screenshot({ path: 'test-results/board-maintenance-mobile.png' });
+    await op.page.goto('/board');
+    await expect(op.page.getByTestId('write-post')).toBeEnabled();
+    await expect(op.page.getByTestId('maint-note-posting')).toHaveCount(0);
+    await phone.page.goto('/table/e2e-maint');
     // Ended early: seats open again at once and sign-in works.
     await page.getByTestId('maint-stop-reason').fill('E2E 점검 완료');
     await page.getByTestId('maint-stop').click();
@@ -191,6 +230,11 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
     await expect(page.getByTestId('maint-new')).toBeVisible();
     await expect(phone.page.locator('[data-testid^=sit-]').first()).toBeVisible();
     await expect(phone.page.getByRole('status').filter({ hasText: '서비스 점검 중이라' })).toHaveCount(0);
+    // The lobby buttons come back.
+    await member.page.goto('/');
+    await expect(member.page.getByTestId('room-create-open-wide')).toBeEnabled();
+    await expect(member.page.getByTestId('quick-go')).toBeEnabled();
+    await expect(member.page.getByTestId('maint-note-games')).toHaveCount(0);
     await visitor.getByRole('button', { name: 'Log in', exact: true }).click();
     await expect(visitor).toHaveURL(/\/$/);
 
@@ -210,7 +254,7 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
 test('a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent', async ({ browser }) => {
   const member = await signUp(browser);
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);

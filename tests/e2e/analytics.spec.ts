@@ -1,10 +1,11 @@
 import { expect } from '@playwright/test';
 import { ADMIN, adminLogin, iso, seedStats, sql, today } from './analytics-helpers';
 import { signUp, test } from './helpers';
+import { promoteSql } from '../support/grants';
 
 test('operations stats: empty until a day is rolled up, then totals, trends and a table by day, week and month in Korean and English', async ({ browser }) => {
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   // Nothing rolled up yet: every account in this run was created today, and today is rolled up tomorrow.
   sql(`DELETE FROM daily_stats WHERE day = 0`);
   const page = await adminLogin(browser, op.email);

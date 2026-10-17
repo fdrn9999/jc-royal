@@ -5,7 +5,7 @@
  * what they would change without changing it.
  */
 import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
-import { ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
+import { botSettingsIssues, ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, ne, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -15,10 +15,18 @@ import { assertRecentReauth, requireAdmin } from '../lib/auth';
 import { randomToken, sha256 } from '../lib/crypto';
 import { toCsv } from '../lib/csv';
 import { fail, isPreview, parseBody } from '../lib/http';
-import { can, capabilitiesOf, matchedRoute, requirePermission } from '../lib/permissions';
+import { can, capabilitiesOf, hasGrant, matchedRoute, parseGrants, requirePermission } from '../lib/permissions';
 import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
+import { adminBotRoutes } from './admin-bots';
+import { adminReferralRoutes } from './admin-referral';
+import { adminSettingsRoutes } from './admin-settings';
+import { adminSocialRoutes } from './admin-social';
+import { adminBrandRoutes } from './admin-brand';
+import { adminRefillRoutes } from './admin-refill';
+import { adminTimeBankRoutes } from './admin-timebank';
+import { adminTournamentRoutes } from './admin-tournaments';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
 import { adminReportRoutes } from './reports';
@@ -28,7 +36,7 @@ import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
 import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
-import { kickEverywhere, roomCall } from '../lib/room';
+import { kickEverywhere, refreshRoleEverywhere, roomCall } from '../lib/room';
 
 /** "Online": a member session used within this long (the dashboard counts the same way). */
 const ONLINE_MS = 5 * 60_000;
@@ -53,12 +61,14 @@ type LiveSeat = { userId: string; nickname: string; phase: string; tableSessionI
  * What the room reports, held against D1: settings the room has not taken on, and seats the two disagree about. A seat
  * whose buy-in is still being confirmed has no session row yet, so it is left out. The two reads are not one snapshot:
  * a player sitting down or leaving in between can show here once; a mismatch that stays is worth a look. Nothing is
- * changed here, in the wallet or anywhere else.
+ * changed here, in the wallet or anywhere else. A tournament table has no session rows (its seats hold tournament chips,
+ * not wallet chips), so its seats are not compared.
  */
 async function diagnose(d1: D1Database, t: typeof schema.tables.$inferSelect, live: Record<string, unknown>) {
   const issues = Array.isArray(live.issues) ? live.issues.filter((x): x is string => typeof x === 'string') : [];
   const known = live.known as { status?: string; entryBlocked?: boolean; handsPaused?: boolean } | undefined;
   if (known && (known.status !== t.status || known.entryBlocked !== t.entryBlocked || known.handsPaused !== t.handsPaused)) issues.push('settings_not_applied');
+  if (t.roomType === 'tournament') return { issues, sessionsOnlyInD1: [], seatsOnlyInRoom: [] };
   const { results: open } = await d1
     .prepare(`SELECT s.id, s.user_id AS userId, s.seat_index AS seatIndex, s.buy_in AS buyIn, s.created_at AS createdAt, u.nickname FROM table_sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.table_id = ?1 AND s.status = 'seated'`)
     .bind(t.id)
@@ -189,6 +199,11 @@ async function findMember(d1: D1Database, q: string) {
     .first<{ id: string; nickname: string }>();
 }
 
+/** Table bots are run by the service: no sanction, role, chip adjustment or reset link applies to them (봇 운영 does). */
+function refuseBot(u: { isBot?: boolean } | undefined) {
+  if (u?.isBot) fail(409, 'bot_account', 'table bot accounts are managed from the bots page');
+}
+
 /** One page and the cursor of the next (the extra row asked for says whether there is one). */
 function keysetPage<T extends { seq: number }>(rows: T[], limit: number, timeOf: ((r: T) => number) | null) {
   const items = rows.slice(0, limit);
@@ -305,21 +320,28 @@ const admin = new Hono<AppEnv>()
   .get('/dashboard', async (c) => {
     const t0 = Date.now();
     const db = c.env.DB;
+    // Members only: table bots (users.is_bot) are counted apart, as `seatedBots`.
     const [users, online, tables, hands, today, seats, issues] = await db.batch([
-      db.prepare(`SELECT COUNT(*) AS n FROM users WHERE status != 'deleted'`),
+      db.prepare(`SELECT COUNT(*) AS n FROM users WHERE status != 'deleted' AND is_bot = 0`),
       db.prepare(`SELECT COUNT(DISTINCT user_id) AS n FROM sessions WHERE kind = 'user' AND last_seen_at > ?1`).bind(Date.now() - 5 * 60_000),
-      db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status != 'closed' THEN 1 ELSE 0 END) AS active, SUM(live_playing) AS playing, SUM(live_connections) AS conns, SUM(live_seated) AS seated FROM tables`),
+      db.prepare(
+        `SELECT COUNT(*) AS total, SUM(CASE WHEN status != 'closed' THEN 1 ELSE 0 END) AS active, SUM(live_playing) AS playing, SUM(live_connections) AS conns,
+                SUM(live_seated) AS seated, SUM(live_bots) AS bots FROM tables`,
+      ),
       db.prepare(`SELECT COUNT(*) AS n FROM hands`),
       db.prepare(`SELECT COUNT(*) AS n FROM hands WHERE ended_at > ?1`).bind(Date.now() - 24 * 60 * 60_000),
-      db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(buy_in), 0) AS chips FROM table_sessions WHERE status = 'seated'`),
+      db.prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(buy_in), 0) AS chips FROM table_sessions
+          WHERE status = 'seated' AND user_id NOT IN (SELECT id FROM users WHERE is_bot = 1)`,
+      ),
       db.prepare(`SELECT id, name, last_issue AS issue FROM tables WHERE last_issue IS NOT NULL ORDER BY updated_at DESC LIMIT 10`),
     ]);
     const one = <T>(r: D1Result | undefined) => (r?.results[0] ?? {}) as T;
-    const tb = one<{ total: number; active: number; playing: number; conns: number; seated: number }>(tables);
+    const tb = one<{ total: number; active: number; playing: number; conns: number; seated: number; bots: number }>(tables);
     return c.json({
       users: one<{ n: number }>(users).n,
       onlineUsers: one<{ n: number }>(online).n,
-      tables: { total: tb.total ?? 0, active: tb.active ?? 0, playing: tb.playing ?? 0, seatedPlayers: tb.seated ?? 0 },
+      tables: { total: tb.total ?? 0, active: tb.active ?? 0, playing: tb.playing ?? 0, seatedPlayers: (tb.seated ?? 0) - (tb.bots ?? 0), seatedBots: tb.bots ?? 0 },
       websocketConnections: tb.conns ?? 0,
       handsCompleted: one<{ n: number }>(hands).n,
       handsLast24h: one<{ n: number }>(today).n,
@@ -342,6 +364,8 @@ const admin = new Hono<AppEnv>()
     const locale = c.req.query('locale');
     const onlineOnly = c.req.query('online') === '1';
     const role = c.req.query('role');
+    // Table bots are listed only when asked for (`bots=1`), and then alone.
+    const bots = c.req.query('bots') === '1';
     const sortKey = c.req.query('sort') ?? 'created';
     const dir = c.req.query('dir') === 'asc' ? asc : desc;
     const U = schema.users;
@@ -354,6 +378,7 @@ const admin = new Hono<AppEnv>()
       locale === 'ko' || locale === 'en' ? eq(U.locale, locale) : undefined,
       role === 'user' || role === 'admin' || role === 'super_admin' ? eq(U.role, role) : undefined,
       onlineOnly ? online : undefined,
+      eq(U.isBot, bots),
     );
     // Members with no recorded sign-in sort last in both directions; ties keep the newest member first.
     const order =
@@ -377,7 +402,7 @@ const admin = new Hono<AppEnv>()
       .limit(limit)
       .offset(offset);
     // The list shows email addresses, so every look is recorded (search terms and how many members it showed).
-    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, role: role ?? null, online: onlineOnly, sort: sortKey, offset, count: rows.length });
+    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, role: role ?? null, online: onlineOnly, ...(bots ? { bots } : {}), sort: sortKey, offset, count: rows.length });
     const items = rows.map((r) => ({ ...r, online: !!r.online }));
     // `paged=1` adds the number of matching members for page controls; without it the plain array, as before.
     if (c.req.query('paged') !== '1') return c.json(items);
@@ -407,7 +432,8 @@ const admin = new Hono<AppEnv>()
     const rows: Awaited<ReturnType<typeof selectChunk>> = [];
     // D1 caps bound parameters per statement.
     function selectChunk(chunk: string[]) {
-      return c.var.db.select(cols).from(u).where(inArray(u.id, chunk));
+      // (Table bots are not members: they have no data to export.)
+      return c.var.db.select(cols).from(u).where(and(inArray(u.id, chunk), eq(u.isBot, false)));
     }
     for (let i = 0; i < ids.length; i += 90) rows.push(...(await selectChunk(ids.slice(i, i + 90))));
     rows.sort((a, b) => b.createdAt - a.createdAt);
@@ -426,8 +452,11 @@ const admin = new Hono<AppEnv>()
     if (!u) fail(404, 'not_found', 'user not found');
     const S = schema.sessions;
     const DB = c.env.DB;
+    // The ledger rows and the latest reports belong to those features: an administrator with them off sees neither here.
+    const seeLedger = await hasGrant(c, 'ledger');
+    const seeReports = await hasGrant(c, 'reports');
     const [ledger, seats, hands, sessions, history] = await Promise.all([
-      c.var.db.select().from(schema.chipLedger).where(eq(schema.chipLedger.userId, id)).orderBy(desc(schema.chipLedger.createdAt)).limit(50),
+      seeLedger ? c.var.db.select().from(schema.chipLedger).where(eq(schema.chipLedger.userId, id)).orderBy(desc(schema.chipLedger.createdAt)).limit(50) : [],
       c.var.db.select().from(schema.tableSessions).where(and(eq(schema.tableSessions.userId, id), eq(schema.tableSessions.status, 'seated'))),
       DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
       // Sign-ins only: no token, address or browser string.
@@ -476,7 +505,14 @@ const admin = new Hono<AppEnv>()
       sessions,
       online,
       recentTables: recentTables?.results ?? [],
-      reports: { filed: counts(filed), against: counts(against), recentFiled: recentFiled?.results ?? [], recentAgainst: recentAgainst?.results ?? [] },
+      reports: {
+        filed: counts(filed),
+        against: counts(against),
+        recentFiled: seeReports ? (recentFiled?.results ?? []) : [],
+        recentAgainst: seeReports ? (recentAgainst?.results ?? []) : [],
+      },
+      // Parts left out because the feature is off for this administrator (the console says so instead of "none").
+      hidden: [...(seeLedger ? [] : ['ledger']), ...(seeReports ? [] : ['reports'])],
     });
   })
   /**
@@ -539,7 +575,8 @@ const admin = new Hono<AppEnv>()
           WHERE a.target_type = 'user' AND a.target_id = ?1 AND a.action IN (${marks}) AND ${page('a')}`,
       ).bind(id, before, limit + 1, beforeId || '￿', ...actions),
     ];
-    if (kind === 'all' || kind === 'sanction') {
+    // How reports about the member were handled: part of the reports feature.
+    if ((kind === 'all' || kind === 'sanction') && (await hasGrant(c, 'reports'))) {
       stmts.push(
         DB.prepare(
           `SELECT a.id, a.action, a.detail, a.created_at AS createdAt, a.actor_id AS actorId, u.nickname AS actorNickname
@@ -608,6 +645,7 @@ const admin = new Hono<AppEnv>()
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     // A withdrawn account is gone (its notices went with it); it is not suspended back into existence.
     if (!target || target.status === 'deleted') fail(404, 'not_found', 'user not found');
+    refuseBot(target);
     if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can suspend administrators');
     if (body.reportId) {
       const rep = await c.var.db.query.reports.findFirst({ where: eq(schema.reports.id, body.reportId), columns: { targetUserId: true } });
@@ -656,8 +694,10 @@ const admin = new Hono<AppEnv>()
     const preview = await isPreview(c);
     const body = await parseBody(c, preview ? DisconnectSchema.partial({ reason: true }) : DisconnectSchema);
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot disconnect yourself');
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, nickname: true, status: true } });
-    if (!target) fail(404, 'not_found', 'user not found');
+    const found = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, nickname: true, status: true, isBot: true } });
+    if (!found) fail(404, 'not_found', 'user not found');
+    refuseBot(found);
+    const { isBot: _bot, ...target } = found;
     if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can disconnect administrators');
     if (preview) return c.json({ preview: true, member: target, removeFromTable: body.removeFromTable, ...(await sanctionPreview(c.env.DB, id)) });
     const ended = await c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)).returning({ kind: schema.sessions.kind });
@@ -669,8 +709,9 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const preview = await isPreview(c);
     const body = await parseBody(c, z.object({ reason: preview ? ReasonSchema.optional() : ReasonSchema }));
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, status: true, suspendedReason: true, nickname: true } });
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, status: true, suspendedReason: true, nickname: true, isBot: true } });
     if (!target) fail(404, 'not_found', 'user not found');
+    refuseBot(target);
     if (target.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can unsuspend administrators');
     if (preview) {
       return c.json({ preview: true, member: { nickname: target.nickname, role: target.role }, from: target.status, to: target.status === 'suspended' ? 'active' : target.status, suspendedReason: target.suspendedReason });
@@ -693,6 +734,11 @@ const admin = new Hono<AppEnv>()
     if (id === c.var.user!.id) fail(400, 'bad_request', 'cannot change your own role');
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!target || target.status !== 'active') fail(404, 'not_found', 'active user not found');
+    refuseBot(target);
+    // A plain administrator's feature switches belong to that role: any role change clears them, so a new (or returning)
+    // administrator starts with every feature off until a super admin turns some on.
+    const switches = await c.var.db.query.adminPermissions.findFirst({ where: eq(schema.adminPermissions.userId, id), columns: { grants: true } });
+    const cleared = parseGrants(switches?.grants);
     if (preview) {
       const sessions = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?1 AND kind = 'admin' AND expires_at > ?2`).bind(id, Date.now()).first<{ n: number }>();
       const before = capabilitiesOf(target.role);
@@ -706,32 +752,51 @@ const admin = new Hono<AppEnv>()
         // Saving ends the member's console sessions; the new role applies from their next sign-in.
         adminSessions: sessions?.n ?? 0,
         capabilities: { gained: after.filter((k) => !before.includes(k)), lost: before.filter((k) => !after.includes(k)) },
+        // The feature switches turned off by the change ([] when none were on); a new plain administrator has none.
+        grantsCleared: cleared,
       });
     }
-    await c.var.db.update(schema.users).set({ role: body.role, updatedAt: Date.now() }).where(eq(schema.users.id, id));
-    // Role changes take effect immediately: drop existing admin sessions of the target.
-    await c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
+    // Role changes take effect immediately: drop existing admin sessions of the target, and the switches with the role.
+    await c.var.db.batch([
+      c.var.db.update(schema.users).set({ role: body.role, updatedAt: Date.now() }).where(eq(schema.users.id, id)),
+      c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin'))),
+      c.var.db.delete(schema.adminPermissions).where(eq(schema.adminPermissions.userId, id)),
+    ]);
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
-    return c.json({ ok: true });
+    if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
+    // The staff badge other players see at the tables where the member sits.
+    const tables = await refreshRoleEverywhere(c.env, id, body.role);
+    return c.json({ ok: true, tables });
   })
   /**
    * `preview` (the same body, idempotency key included): the balance before and after, whether it is a large
    * adjustment and whether this key was already applied. Refused the same way, but a refused preview is not listed with
    * the refused adjustments (the attempt is on the audit log as `user.chips.failed`).
+   *
+   * `refLedgerId`: the member's own transaction this adjustment corrects (a free refill paid in error): kept as the
+   * adjustment's `ref_id` and in the audit row, so the original is never edited and the two stay linked.
    */
   .post('/users/:id/chips', async (c) => {
     const id = c.req.param('id');
     const preview = await isPreview(c);
     const body = await parseBody(c, ChipAdjustSchema);
-    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, nickname: true, status: true, balance: true } });
+    const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { role: true, locale: true, nickname: true, status: true, balance: true, isBot: true } });
     const role = c.var.user!.role;
     // A refused adjustment is audited too: the economy page lists them.
     const refuse = async (reason: string, status: 403 | 409, code: string, message: string): Promise<never> => {
       if (!preview) await audit(c, 'user.chips_refused', { type: 'user', id }, { reason, amount: body.amount, memo: body.memo }, 'failed');
       fail(status, code, message);
     };
+    // A bot's chips come only from the bot fund and its play (the fund's total must stay its issuance).
+    if (target?.isBot) await refuse('bot_account', 409, 'bot_account', 'table bot accounts are managed from the bots page');
     if (target && target.role !== 'user' && !can(role, 'admins.manage')) await refuse('forbidden', 403, 'forbidden', 'only a super admin can adjust chips of administrators');
     if (Math.abs(body.amount) >= LARGE_ADJUSTMENT && !can(role, 'chips.large')) await refuse('large_adjustment', 403, 'large_adjustment', `only a super admin can adjust ${LARGE_ADJUSTMENT} chips or more at once`);
+    const ref = body.refLedgerId
+      ? await c.env.DB.prepare(`SELECT id, type, amount, created_at AS createdAt FROM chip_ledger WHERE id = ?1 AND user_id = ?2`)
+          .bind(body.refLedgerId, id)
+          .first<{ id: string; type: string; amount: number; createdAt: number }>()
+      : null;
+    if (body.refLedgerId && !ref) fail(400, 'ref_not_found', 'the linked transaction is not one of this member\'s');
     if (preview) {
       const done = await c.env.DB.prepare(`SELECT 1 AS x FROM chip_ledger WHERE idempotency_key = ?1`).bind(`admin:${body.idempotencyKey}`).first();
       if (!target || (!done && target.balance + body.amount < 0)) await refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
@@ -743,6 +808,7 @@ const admin = new Hono<AppEnv>()
         balanceAfter: done ? target!.balance : target!.balance + body.amount,
         large: Math.abs(body.amount) >= LARGE_ADJUSTMENT,
         duplicate: !!done,
+        ref,
       });
     }
     const r = await applyLedger(c.env.DB, {
@@ -752,10 +818,11 @@ const admin = new Hono<AppEnv>()
       idempotencyKey: `admin:${body.idempotencyKey}`,
       actorId: c.var.user!.id,
       memo: body.memo,
+      refId: ref?.id ?? null,
     });
     if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
     // The same request again (a retry, a double click): nothing changed, and that is on record.
-    if (r.status === 'duplicate') await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
+    if (r.status === 'duplicate') await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
     if (r.status === 'applied') {
       await sendMessages(c.var.db, {
         userIds: [id],
@@ -763,7 +830,7 @@ const admin = new Hono<AppEnv>()
         ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
       });
-      await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId });
+      await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id, refType: ref.type } : {}) });
     }
     return c.json({ ok: true, duplicate: r.status === 'duplicate', balanceAfter: r.balanceAfter });
   })
@@ -776,6 +843,7 @@ const admin = new Hono<AppEnv>()
     if (id === c.var.user!.id) fail(400, 'bad_request', 'use the change-password flow for your own account');
     const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.id, id), eq(schema.users.status, 'active')) });
     if (!u) fail(404, 'not_found', 'user not found');
+    refuseBot(u);
     // A reset link is an account takeover token: plain admins may only issue them for members.
     if (u.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can issue reset links for administrators');
     const token = randomToken();
@@ -791,7 +859,7 @@ const admin = new Hono<AppEnv>()
   // ---------------------------------------------------------------- tables
   /**
    * Tables, newest first. Without `paged=1` every table as a plain array, as before. With it: `q` (part of the name, or
-   * the exact id), `status` (open | closing | closed, or active = not closed), `roomType` (official | member), `issue=1`
+   * the exact id), `status` (open | closing | closed, or active = not closed), `roomType` (official | member | tournament), `issue=1`
    * (a last issue recorded), `limit` / `offset`, and the number of matching tables.
    */
   .get('/tables', async (c) => {
@@ -804,7 +872,7 @@ const admin = new Hono<AppEnv>()
       ? and(
           q ? or(like(T.name, `%${q}%`), eq(T.id, q)) : undefined,
           status === 'open' || status === 'closing' || status === 'closed' ? eq(T.status, status) : status === 'active' ? ne(T.status, 'closed') : undefined,
-          roomType === 'official' || roomType === 'member' ? eq(T.roomType, roomType) : undefined,
+          roomType === 'official' || roomType === 'member' || roomType === 'tournament' ? eq(T.roomType, roomType) : undefined,
           c.req.query('issue') === '1' ? isNotNull(T.lastIssue) : undefined,
         )
       : undefined;
@@ -837,6 +905,12 @@ const admin = new Hono<AppEnv>()
       joinCodeHash: body.isPrivate && body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null,
       allowSpectators: body.allowSpectators,
       beginner: body.beginner,
+      botsEnabled: body.botsEnabled,
+      botLevel: body.botLevel,
+      botMinHumans: body.botMinHumans,
+      botMax: body.botMax,
+      botFillTo: body.botFillTo,
+      botYield: body.botYield,
       createdBy: c.var.user!.id,
     });
     await audit(c, 'table.create', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : undefined });
@@ -848,8 +922,10 @@ const admin = new Hono<AppEnv>()
     if (!t) fail(404, 'not_found', 'table not found');
     const live = t.status === 'closed' ? null : await roomCall(c, id, 'status');
     const { joinCodeHash, ...rest } = t;
+    const tournament =
+      t.roomType === 'tournament' ? await c.env.DB.prepare('SELECT id, name, status FROM tournaments WHERE table_id = ?1').bind(id).first<{ id: string; name: string; status: string }>() : null;
     // The live status never includes hole cards or deck information.
-    return c.json({ table: { ...rest, hasJoinCode: !!joinCodeHash }, live, diagnosis: live ? await diagnose(c.env.DB, t, live) : null });
+    return c.json({ table: { ...rest, hasJoinCode: !!joinCodeHash }, live, diagnosis: live ? await diagnose(c.env.DB, t, live) : null, tournament });
   })
   /**
    * Emergency controls, each confirmed by the room before the admin is told it took effect: `pause` deals no new hand
@@ -861,6 +937,8 @@ const admin = new Hono<AppEnv>()
     const body = await parseBody(c, TableControlSchema);
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
+    // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
+    if (t.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
     const set =
       body.action === 'pause' || body.action === 'resume' ? { handsPaused: body.action === 'pause' } : { entryBlocked: body.action === 'block' };
     await c.var.db.update(schema.tables).set({ ...set, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
@@ -874,36 +952,105 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const body = await parseBody(c, TablePatchSchema);
     // Blocking entry is a table control (POST /tables/:id/control asks for the password again); this route does not
-    // become a way around that. Other settings do not need it.
-    if (body.entryBlocked !== undefined) assertRecentReauth(c);
-    const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
-    if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
-    const merged = { sb: body.smallBlind ?? t.smallBlind, bb: body.bigBlind ?? t.bigBlind, min: body.minBuyIn ?? t.minBuyIn, max: body.maxBuyIn ?? t.maxBuyIn };
-    if (merged.bb < merged.sb || merged.min < merged.bb * 10 || merged.max < merged.min) fail(400, 'bad_request', 'invalid blind / buy-in combination');
-    const isPrivate = body.isPrivate ?? t.isPrivate;
-    let joinCodeHash = t.joinCodeHash;
-    if (body.joinCode !== undefined) joinCodeHash = body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null;
-    if (isPrivate && !joinCodeHash) fail(400, 'bad_request', 'private tables need a join code');
-    await c.var.db
-      .update(schema.tables)
-      .set({
-        name: body.name ?? t.name,
-        smallBlind: merged.sb,
-        bigBlind: merged.bb,
-        minBuyIn: merged.min,
-        maxBuyIn: merged.max,
-        isPrivate,
-        joinCodeHash: isPrivate ? joinCodeHash : null,
-        allowSpectators: body.allowSpectators ?? t.allowSpectators,
-        beginner: body.beginner ?? t.beginner,
-        entryBlocked: body.entryBlocked ?? t.entryBlocked,
-        updatedAt: Date.now(),
-      })
-      .where(eq(schema.tables.id, id));
-    // Blind changes apply from the next hand; the running hand keeps its config. A room that does not confirm keeps
-    // its old settings (entry blocking included) until it reloads, so the admin is told to send the change again.
+    // become a way around that, nor around its switch (tableControl). Other settings need neither.
+    if (body.entryBlocked !== undefined) {
+      if (!(await hasGrant(c, 'tableControl'))) fail(403, 'permission_off', 'this feature is turned off for your account');
+      assertRecentReauth(c);
+    }
+    const T = schema.tables;
+    const botFields = (['botsEnabled', 'botLevel', 'botMinHumans', 'botMax', 'botFillTo', 'botYield'] as const).filter((k) => body[k] !== undefined);
+    const joinCodeHash = body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null;
+    const conflict = (now: { updatedAt: number } | undefined): never => fail(409, 'table_conflict', 'the table changed meanwhile', { updatedAt: now?.updatedAt ?? null });
+    // The row is written only if every column this sets still holds what was read, and the status too: a change another
+    // administrator made in between (a block from /control, another edit, a close) is never overwritten with what this
+    // request read. The body names only what it changes, so it is merged onto a fresh read and tried again. With
+    // `ifUpdatedAt` (the console sends what it was showing) any change since then is a conflict instead.
+    const save = async () => {
+      for (let attempt = 0; ; attempt++) {
+        if (attempt === 3) conflict(await c.var.db.query.tables.findFirst({ where: eq(T.id, id) }));
+        const r = await c.var.db.query.tables.findFirst({ where: eq(T.id, id) });
+        if (!r || r.status === 'closed') fail(404, 'not_found', 'table not found');
+        // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
+        if (r.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
+        if (body.ifUpdatedAt !== undefined && body.ifUpdatedAt !== r.updatedAt) conflict(r);
+        const merged = { sb: body.smallBlind ?? r.smallBlind, bb: body.bigBlind ?? r.bigBlind, min: body.minBuyIn ?? r.minBuyIn, max: body.maxBuyIn ?? r.maxBuyIn };
+        if (merged.bb < merged.sb || merged.min < merged.bb * 10 || merged.max < merged.min) fail(400, 'bad_request', 'invalid blind / buy-in combination');
+        const isPrivate = body.isPrivate ?? r.isPrivate;
+        const code = body.joinCode !== undefined ? joinCodeHash : r.joinCodeHash;
+        if (isPrivate && !code) fail(400, 'bad_request', 'private tables need a join code');
+        const bots = {
+          botsEnabled: body.botsEnabled ?? r.botsEnabled,
+          botLevel: body.botLevel ?? r.botLevel,
+          botMinHumans: body.botMinHumans ?? r.botMinHumans,
+          botMax: body.botMax ?? r.botMax,
+          botFillTo: body.botFillTo ?? r.botFillTo,
+          botYield: body.botYield ?? r.botYield,
+        };
+        // Table bots sit only at official tables; a member's room is theirs and other members'.
+        if (botFields.length && r.roomType !== 'official') fail(400, 'bad_request', 'member rooms have no table bots');
+        const botIssue = botFields.length ? botSettingsIssues(bots, r.maxSeats)[0] : undefined;
+        if (botIssue) fail(400, 'bad_request', botIssue.message);
+        const saved = await c.var.db
+          .update(T)
+          .set({
+            name: body.name ?? r.name,
+            smallBlind: merged.sb,
+            bigBlind: merged.bb,
+            minBuyIn: merged.min,
+            maxBuyIn: merged.max,
+            isPrivate,
+            joinCodeHash: isPrivate ? code : null,
+            allowSpectators: body.allowSpectators ?? r.allowSpectators,
+            beginner: body.beginner ?? r.beginner,
+            entryBlocked: body.entryBlocked ?? r.entryBlocked,
+            ...bots,
+            // Always later than what was read, so a form loaded before this change sees it as one.
+            updatedAt: Math.max(Date.now(), r.updatedAt + 1),
+          })
+          .where(
+            and(
+              eq(T.id, id),
+              eq(T.status, r.status),
+              eq(T.updatedAt, r.updatedAt),
+              eq(T.name, r.name),
+              eq(T.smallBlind, r.smallBlind),
+              eq(T.bigBlind, r.bigBlind),
+              eq(T.minBuyIn, r.minBuyIn),
+              eq(T.maxBuyIn, r.maxBuyIn),
+              eq(T.isPrivate, r.isPrivate),
+              r.joinCodeHash === null ? isNull(T.joinCodeHash) : eq(T.joinCodeHash, r.joinCodeHash),
+              eq(T.allowSpectators, r.allowSpectators),
+              eq(T.beginner, r.beginner),
+              eq(T.entryBlocked, r.entryBlocked),
+              eq(T.botsEnabled, r.botsEnabled),
+              eq(T.botLevel, r.botLevel),
+              eq(T.botMinHumans, r.botMinHumans),
+              eq(T.botMax, r.botMax),
+              eq(T.botFillTo, r.botFillTo),
+              eq(T.botYield, r.botYield),
+            ),
+          )
+          .returning({ id: T.id });
+        if (saved.length) return r;
+      }
+    };
+    const t = await save();
+    // Blind changes apply from the next hand; the running hand keeps its config. Bot settings apply at once without
+    // touching the running hand: a bot over the new limits stands up after it, and a bot that sits down meanwhile is dealt
+    // in from the next one. A room that does not confirm keeps its old settings (entry blocking included) until it
+    // reloads, so the admin is told to send the change again.
     const live = (await roomCall(c, id, 'reload')) ?? (await roomCall(c, id, 'reload'));
-    await audit(c, 'table.update', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : body.joinCode, roomConfirmed: !!live });
+    await audit(
+      c,
+      'table.update',
+      { type: 'table', id },
+      {
+        ...body,
+        joinCode: body.joinCode ? '***' : body.joinCode,
+        ...(botFields.length ? { botsBefore: Object.fromEntries(botFields.map((k) => [k, t[k]])) } : {}),
+        roomConfirmed: !!live,
+      },
+    );
     if (!live) fail(503, 'room_unavailable', 'saved, but the table did not confirm; try again', { saved: true });
     return c.json({ ok: true, appliesFrom: live.appliesFrom ?? 'next hand' });
   })
@@ -912,6 +1059,8 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
+    // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
+    if (t.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
     if (await isPreview(c)) {
       const live = await roomCall(c, id, 'status');
       const { results: open } = await c.env.DB.prepare(
@@ -1227,4 +1376,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes));

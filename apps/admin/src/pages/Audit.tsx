@@ -37,7 +37,7 @@ type Cursor = { at: number; id: string };
 const PAGE = 50;
 const selectCls = 'h-10 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm';
 const chipCls = 'rounded-full bg-gold-500/15 px-3 py-1 text-xs font-semibold text-gold-300';
-const TARGET_TYPES = ['user', 'table', 'hand', 'report', 'post', 'comment', 'notice', 'maintenance', 'reconciliation', 'batch', 'session'] as const;
+const TARGET_TYPES = ['user', 'table', 'hand', 'report', 'post', 'comment', 'notice', 'maintenance', 'reconciliation', 'batch', 'session', 'tournament', 'tournament_template'] as const;
 const FILTER_KEYS = ['actor', 'action', 'outcome', 'targetType', 'targetId', 'from', 'to', 'q'] as const;
 
 function detailText(d: unknown): string {
@@ -216,8 +216,11 @@ export function AuditPage() {
                               {a.target.label ?? <span className="font-mono">{a.target.id}</span>}
                             </button>
                           ) : null}
-                          {a.target.id && (a.target.type === 'user' || a.target.type === 'table') && (
-                            <Link to={`/${a.target.type === 'user' ? 'users' : 'tables'}/${a.target.id}`} className="ml-1 text-gold-300" aria-label={t('detail')}>→</Link>
+                          {a.target.id && (a.target.type === 'user' || a.target.type === 'table' || a.target.type === 'tournament') && (
+                            <Link to={`/${a.target.type === 'user' ? 'users' : a.target.type === 'table' ? 'tables' : 'tournaments'}/${a.target.id}`} className="ml-1 text-gold-300" aria-label={t('detail')}>→</Link>
+                          )}
+                          {a.target.type === 'tournament_template' && (
+                            <Link to="/tournaments/templates" className="ml-1 text-gold-300" aria-label={t('detail')}>→</Link>
                           )}
                         </>
                       ) : (

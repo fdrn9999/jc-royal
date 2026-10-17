@@ -1,14 +1,16 @@
 /**
  * Console security: open console sessions (your own; a super admin sees everyone's) with a way to end them, what this
- * administrator may do, and the permission table read from the API. The table is code-defined (lib/permissions.ts in
- * the API), so this page shows it and never edits it.
+ * administrator may do (role abilities and feature switches), and the permission table read from the API. The table is
+ * code-defined (lib/permissions.ts in the API), so this page shows it and never edits it; a super admin edits each plain
+ * administrator's switches below it (AdminGrants).
  */
 import { Badge, Button, Empty, formatDate, Panel } from '@jc/ui';
 import { useState } from 'react';
 import { useT } from '../i18n';
-import { auditActionLabel, capabilityLabel, featureLabel, roleLabel } from '../labels';
-import { errText, useAdmin, useData } from '../lib';
+import { auditActionLabel, capabilityLabel, featureLabel, grantLabel, roleLabel } from '../labels';
+import { canDo, errText, useAdmin, useData } from '../lib';
 import { Modal } from '../ui';
+import { AdminGrantsPanel, type FeatureRow } from './AdminGrants';
 import { Table } from './Console';
 
 interface SessionItem {
@@ -28,7 +30,11 @@ interface PermissionsDto {
   role: string;
   capabilities: string[];
   capabilityRoles: Record<string, string>;
-  features: { feature: string; admin: Level; reauth: Level; actions: { route: string; action: string; role: string; reauth: boolean }[] }[];
+  features: (Omit<FeatureRow, 'grant'> & { grant?: string })[];
+  /** The feature switches (absent from an older API), those on for this administrator and what they may use per feature. */
+  grantKeys?: string[];
+  grants?: string[];
+  effective?: { feature: string; grant: string; allowed: number; total: number }[];
 }
 
 /** Browser and system from a user agent, enough to tell sessions apart (the full string is in the tooltip). */
@@ -42,6 +48,15 @@ function device(ua: string | null): string {
 const ADMIN_LEVEL = { all: 'secAdminAll', some: 'secAdminSome', none: 'secAdminNone' } as const;
 const REAUTH_LEVEL = { all: 'secReauthAll', some: 'secReauthSome', none: 'secReauthNone' } as const;
 
+/** The switch a feature stands behind: its name, every administrator, or super admins only. */
+function GrantCell({ grant }: { grant: string | undefined }) {
+  const { t } = useT();
+  if (!grant) return <span className="text-ink-400">—</span>;
+  if (grant === 'always') return <span className="text-ink-300">{t('secGrantAlways')}</span>;
+  if (grant === 'super') return <Badge tone="gold" className="whitespace-nowrap">{t('secSuperOnly')}</Badge>;
+  return <span>{grantLabel(t, grant)}</span>;
+}
+
 export function SecurityPage() {
   const { t, locale } = useT();
   const { api, me, refresh } = useAdmin();
@@ -52,6 +67,9 @@ export function SecurityPage() {
   const [msg, setMsg] = useState<{ text: string; error: boolean } | null>(null);
   const time = (ms: number | null | undefined) => (ms ? formatDate(ms, locale) : '—');
   const mine = sessions.data?.items.filter((s) => s.user.id === me?.user.id && !s.current).length ?? 0;
+  const grantKeys = perms.data?.grantKeys;
+  const myGrants = perms.data?.grants ?? [];
+  const allowed = perms.data?.effective?.reduce((n, f) => n + f.allowed, 0) ?? 0;
 
   const end = async () => {
     const target = ending;
@@ -150,6 +168,27 @@ export function SecurityPage() {
               })}
             </ul>
           )}
+          {grantKeys && (
+            <div className="flex flex-col gap-2" data-testid="my-grants">
+              <h3 className="text-sm font-semibold">{t('secMyGrants')}</h3>
+              <p className="text-xs text-ink-400">
+                {me?.user.role === 'super_admin' ? t('secMyGrantsSuper') : t('secMyGrantsNote', { on: myGrants.length, total: grantKeys.length, allowed })}
+              </p>
+              {me?.user.role !== 'super_admin' && (
+                <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {grantKeys.map((g) => {
+                    const has = myGrants.includes(g);
+                    return (
+                      <li key={g} className="flex items-center justify-between gap-2 rounded-lg border border-white/5 px-3 py-1.5" data-testid="my-grant" data-on={has ? '1' : '0'}>
+                        <span className="min-w-0">{grantLabel(t, g)}</span>
+                        <Badge tone={has ? 'green' : 'neutral'} className="whitespace-nowrap">{has ? t('secOn') : t('secOff')}</Badge>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       </Panel>
 
@@ -158,12 +197,13 @@ export function SecurityPage() {
           <p className="text-xs text-ink-400">{t('secMatrixNote')}</p>
           {perms.error && <Empty>{perms.error}</Empty>}
           {perms.data && (
-            <Table head={[t('secFeature'), t('roleAdmin'), t('roleSuperAdmin'), t('secReauth'), t('secRestricted')]}>
+            <Table head={[t('secFeature'), t('secGrant'), t('roleAdmin'), t('roleSuperAdmin'), t('secReauth'), t('secRestricted')]}>
               {perms.data.features.map((f) => {
                 const restricted = f.actions.filter((a) => a.role === 'super_admin' || a.reauth);
                 return (
                   <tr key={f.feature}>
                     <td className="px-2 py-1.5 font-semibold">{featureLabel(t, f.feature)}</td>
+                    <td className="px-2 py-1.5 text-xs"><GrantCell grant={f.grant} /></td>
                     <td className="px-2 py-1.5 text-xs">
                       <Badge tone={f.admin === 'all' ? 'green' : f.admin === 'some' ? 'gold' : 'red'} className="whitespace-nowrap">{t(ADMIN_LEVEL[f.admin])}</Badge>
                     </td>
@@ -194,9 +234,14 @@ export function SecurityPage() {
         </div>
       </Panel>
 
+      {perms.data && grantKeys && canDo(me, 'admins.grants') && (
+        <AdminGrantsPanel features={perms.data.features.map((f) => ({ ...f, grant: f.grant ?? 'always' }))} grantKeys={grantKeys} />
+      )}
+
       <Panel title={t('secPolicy')}>
         <ul className="list-disc space-y-1.5 pl-5 text-sm text-ink-200" data-testid="security-policy">
           <li>{t('secNoteCode')}</li>
+          <li>{t('secNoteGrants')}</li>
           <li>{t('secNotePreview')}</li>
           <li>{t('secNoteFailed')}</li>
           <li>{t('secNoteImmediate')}</li>

@@ -5,6 +5,7 @@ import {
   FriendRequestSchema,
   MAX_BLOCKS,
   MAX_FRIENDS,
+  publicRole,
   SocialSettingsSchema,
   TableInviteSchema,
   type BlockedUserDto,
@@ -23,6 +24,7 @@ import { and, desc, eq, gt, isNull, lt, lte, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
+import { badgesFor, type Badge } from '../lib/badges';
 import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
 
@@ -37,22 +39,42 @@ async function relation(c: Context<AppEnv>, me: string, other: string) {
   return c.var.db.query.friendships.findFirst({ where: and(eq(schema.friendships.userA, a), eq(schema.friendships.userB, b)) });
 }
 
+/**
+ * A member as other players see them, with the staff role (see PublicRole) drawn from `users.role` when the social
+ * policy shows that role's badge (`badge`, from badgesFor).
+ */
+const toPublic = (u: { id: string; nickname: string; avatarUrl: string | null; role: string }, badge: Badge = publicRole): PublicUserDto => {
+  const role = badge(u.role);
+  return { id: u.id, nickname: u.nickname, avatarUrl: u.avatarUrl, ...(role ? { role } : {}) };
+};
+
+/** The player friend requests, blocks and messages are about. Table bots are not members and take none of them. */
 async function publicUser(c: Context<AppEnv>, where: { id?: string; nickname?: string }): Promise<PublicUserDto | null> {
   const u = await c.var.db.query.users.findFirst({
     where: where.id ? eq(schema.users.id, where.id) : sql`lower(${schema.users.nickname}) = lower(${where.nickname ?? ''})`,
-    columns: { id: true, nickname: true, avatarUrl: true, status: true },
+    columns: { id: true, nickname: true, avatarUrl: true, role: true, status: true, isBot: true },
   });
   if (!u || u.status === 'deleted') return null;
-  return { id: u.id, nickname: u.nickname, avatarUrl: u.avatarUrl };
+  if (u.isBot) fail(409, 'bot_account', 'table bots take no friend requests, blocks or messages');
+  return toPublic(u, await badgesFor(c, [u.role]));
 }
+
+/**
+ * Staff (admins and the super admin) cannot be blocked. A block made before that rule, or before the player became
+ * staff, stays in `user_blocks` but has no effect and is not listed while they are staff; it applies again if they
+ * go back to being a member. Every block check joins the blocked player's role for that.
+ */
+const IN_FORCE = `JOIN users bu ON bu.id = ub.blocked_id AND bu.role = 'user'`;
 
 /** SQL condition: neither of the two placeholders has blocked the other. */
 const notBlocked = (a: string, b: string) =>
-  `NOT EXISTS (SELECT 1 FROM user_blocks WHERE (blocker_id = ${a} AND blocked_id = ${b}) OR (blocker_id = ${b} AND blocked_id = ${a}))`;
+  `NOT EXISTS (SELECT 1 FROM user_blocks ub ${IN_FORCE} WHERE (ub.blocker_id = ${a} AND ub.blocked_id = ${b}) OR (ub.blocker_id = ${b} AND ub.blocked_id = ${a}))`;
 
 /** 'mine' when I blocked them, 'theirs' when they blocked me (which is never shown to me as such). */
 async function blockState(c: Context<AppEnv>, me: string, other: string): Promise<'none' | 'mine' | 'theirs'> {
-  const { results } = await c.env.DB.prepare(`SELECT blocker_id AS blocker FROM user_blocks WHERE (blocker_id = ?1 AND blocked_id = ?2) OR (blocker_id = ?2 AND blocked_id = ?1)`)
+  const { results } = await c.env.DB.prepare(
+    `SELECT ub.blocker_id AS blocker FROM user_blocks ub ${IN_FORCE} WHERE (ub.blocker_id = ?1 AND ub.blocked_id = ?2) OR (ub.blocker_id = ?2 AND ub.blocked_id = ?1)`,
+  )
     .bind(me, other)
     .all<{ blocker: string }>();
   if (results.some((r) => r.blocker === me)) return 'mine';
@@ -77,7 +99,7 @@ async function accept(c: Context<AppEnv>, me: string, other: string): Promise<bo
 /** The same answer whether they blocked me or turned requests off, so a block is never revealed. */
 const requestUnavailable = (): never => fail(403, 'request_unavailable', 'this player is not taking friend requests from you');
 
-type FriendRow = { status: 'pending' | 'accepted'; requesterId: string; createdAt: number; acceptedAt: number | null; id: string; nickname: string; avatarUrl: string | null; unread: number; last: string | null };
+type FriendRow = { status: 'pending' | 'accepted'; requesterId: string; createdAt: number; acceptedAt: number | null; id: string; nickname: string; avatarUrl: string | null; role: string; unread: number; last: string | null };
 
 /** Friends, received and sent requests. */
 export const friendRoutes = new Hono<AppEnv>()
@@ -86,7 +108,7 @@ export const friendRoutes = new Hono<AppEnv>()
     const uid = c.var.user!.id;
     const { results } = await c.env.DB.prepare(
       `SELECT f.status, f.requester_id AS requesterId, f.created_at AS createdAt, f.accepted_at AS acceptedAt,
-              u.id, u.nickname, u.avatar_url AS avatarUrl,
+              u.id, u.nickname, u.avatar_url AS avatarUrl, u.role,
               (SELECT COUNT(*) FROM direct_messages d WHERE d.pair_key = f.user_a || ':' || f.user_b AND d.recipient_id = ?1 AND d.read_at IS NULL) AS unread,
               (SELECT json_object('body', d.body, 'senderId', d.sender_id, 'at', d.created_at, 'kind', d.kind) FROM direct_messages d
                 WHERE d.pair_key = f.user_a || ':' || f.user_b ORDER BY d.created_at DESC LIMIT 1) AS last
@@ -97,8 +119,9 @@ export const friendRoutes = new Hono<AppEnv>()
       .bind(uid)
       .all<FriendRow>();
     const out: FriendsDto = { friends: [], incoming: [], outgoing: [] };
+    const badge = await badgesFor(c, results.map((r) => r.role));
     for (const r of results) {
-      const user = { id: r.id, nickname: r.nickname, avatarUrl: r.avatarUrl };
+      const user = toPublic(r, badge);
       if (r.status === 'pending') {
         const req: FriendRequestDto = { ...user, at: r.createdAt };
         (r.requesterId === uid ? out.outgoing : out.incoming).push(req);
@@ -214,19 +237,20 @@ export const friendRoutes = new Hono<AppEnv>()
 
 /**
  * My block list. Blocking is personal: it deletes the friendship or pending requests with that player and stops new
- * requests and 1:1 messages both ways. It keeps nobody off a table; admin sanctions are a separate thing.
+ * requests and 1:1 messages both ways. It keeps nobody off a table; admin sanctions are a separate thing. Staff cannot
+ * be blocked (see IN_FORCE): they answer members and send them notices.
  */
 export const blockRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
   .get('/', async (c) => {
     const { results } = await c.env.DB.prepare(
-      `SELECT u.id, u.nickname, u.avatar_url AS avatarUrl, b.created_at AS at
+      `SELECT u.id, u.nickname, u.avatar_url AS avatarUrl, u.role, b.created_at AS at
          FROM user_blocks b JOIN users u ON u.id = b.blocked_id
-        WHERE b.blocker_id = ?1 AND u.status != 'deleted' ORDER BY b.created_at DESC`,
+        WHERE b.blocker_id = ?1 AND u.status != 'deleted' AND u.role = 'user' ORDER BY b.created_at DESC`,
     )
       .bind(c.var.user!.id)
-      .all<BlockedUserDto>();
-    return c.json(results);
+      .all<{ id: string; nickname: string; avatarUrl: string | null; role: string; at: number }>();
+    return c.json(results.map((r): BlockedUserDto => ({ ...toPublic(r), at: r.at })));
   })
   .put('/:userId', async (c) => {
     const me = c.var.user!.id;
@@ -234,8 +258,9 @@ export const blockRoutes = new Hono<AppEnv>()
     if (other === me) fail(400, 'block_self', 'you cannot block yourself');
     const user = await publicUser(c, { id: other });
     if (!user) fail(404, 'user_not_found', 'no such player');
+    if (user.role) fail(403, 'block_staff', 'admins and the super admin cannot be blocked');
     await rateLimit(c, `block:${me}`, 60, 60 * 60_000);
-    const n = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM user_blocks WHERE blocker_id = ?1`).bind(me).first<{ n: number }>();
+    const n = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM user_blocks ub ${IN_FORCE} WHERE ub.blocker_id = ?1`).bind(me).first<{ n: number }>();
     if ((n?.n ?? 0) >= MAX_BLOCKS && (await blockState(c, me, other)) !== 'mine') fail(409, 'block_limit', `at most ${MAX_BLOCKS} blocked players`);
     const [a, b] = pairOf(me, other);
     // One transaction: the block row and the end of any friendship or request between the two.

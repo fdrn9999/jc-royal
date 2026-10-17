@@ -126,3 +126,12 @@ export class TableSocket {
 }
 
 export const isMyTurn = (s: TableView) => !!s.hand && s.you.seatIndex !== null && s.hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
+
+/**
+ * The next state on any of these sockets. The room sends every socket the same state at once, but this process reads
+ * each connection on its own: one socket's state can end a wait while another's is still unread, so a loop that looks
+ * for whoever is to act waits on all of them (not on one) before it looks again.
+ */
+export function nextState(socks: TableSocket[], ms = 15_000, label = 'next state'): Promise<ServerMessage> {
+  return Promise.race(socks.map((w) => w.waitNext((m) => m.t === 'state', ms, label)));
+}

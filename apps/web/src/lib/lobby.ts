@@ -1,6 +1,7 @@
 /**
- * Lobby helpers: what a table card offers, the list request that keeps only the newest answer, and the favourite and
- * recently visited tables (kept on this device per account; nothing about them is sent to the server).
+ * Lobby helpers: what a table card offers, the list request that keeps only the newest answer, and the recently visited
+ * tables (kept on this device per account; nothing about them is sent to the server). The favourite tables are the
+ * account's now (prefs.ts); the ones kept here before are handed over once (takeLegacyFavourites).
  */
 import type { LobbyTableDto } from '@jc/types';
 import { useEffect, useSyncExternalStore } from 'react';
@@ -164,7 +165,13 @@ function update(me: string, change: (p: TablePrefs) => TablePrefs) {
 }
 
 export const rememberVisit = (me: string, id: string) => update(me, (p) => withVisit(p, id, Date.now()));
-export const setFavourite = (me: string, id: string, on: boolean) => update(me, (p) => withFav(p, id, on));
+
+/** The favourite tables this device kept for the account before they were the account's: handed over once, then dropped here. */
+export function takeLegacyFavourites(me: string): string[] {
+  const { fav } = read(me);
+  if (fav.length) update(me, (p) => ({ ...p, fav: [] }));
+  return fav;
+}
 
 export function useTablePrefs(me: string | undefined): TablePrefs {
   // Another tab changed them: read again.

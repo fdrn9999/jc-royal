@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { expect, type Browser, type Page } from '@playwright/test';
 import { balanceOf, PASSWORD, signUp, test } from './helpers';
+import { promoteSql } from '../support/grants';
 
 const ADMIN = 'http://localhost:5174';
 
@@ -54,7 +55,7 @@ test('permissions and audit: a plain admin is refused super-admin work and sees 
   const a = await signUp(browser);
   const plain = await signUp(browser);
   const boss = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${plain.email}'`);
+  sql(promoteSql(`email = '${plain.email}'`));
   sql(`UPDATE users SET role = 'super_admin' WHERE email = '${boss.email}'`);
   // Sixty earlier notes by the super admin about the member: more than one page of the log.
   sql(
@@ -88,7 +89,8 @@ test('permissions and audit: a plain admin is refused super-admin work and sees 
   // Their security page: every super-admin ability marked as such, export not allowed, and only their own sessions.
   await p.getByRole('link', { name: /^보안$|^Security$/ }).click();
   const mine = p.getByTestId('my-permissions');
-  await expect(mine.getByText(/^최고관리자 전용$|^Super admin only$/)).toHaveCount(8);
+  // One per capability in CAPABILITIES (apps/api/src/lib/permissions.ts); a plain administrator holds none of them.
+  await expect(mine.getByText(/^최고관리자 전용$|^Super admin only$/)).toHaveCount(15);
   await expect(mine.getByText(/^가능$|^Allowed$/)).toHaveCount(0);
   await expect(p.getByTestId('permission-matrix').locator('tr').filter({ hasText: /회원 정보 내보내기|Member data export/ })).toContainText(/불가|None/);
   await expect(p.getByTestId('admin-session').first()).toBeVisible();
@@ -156,7 +158,7 @@ test('previews and sessions: suspending and closing a table show what will happe
   const a = await signUp(browser);
   const plain = await signUp(browser);
   const boss = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${plain.email}'`);
+  sql(promoteSql(`email = '${plain.email}'`));
   sql(`UPDATE users SET role = 'super_admin' WHERE email = '${boss.email}'`);
   const aId = await idOf(a.page);
   const plainId = await idOf(plain.page);

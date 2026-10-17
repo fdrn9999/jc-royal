@@ -13,7 +13,9 @@ import {
 import { Button, cx, Empty, formatChips, Input, Modal, Panel, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { EmojiPicker } from '../components/EmojiPicker';
 import { JoinCodeModal } from '../components/JoinCode';
+import { MemberName } from '../components/MemberName';
 import { Avatar, BlockConfirm, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -60,7 +62,9 @@ function RequestRow({ r, children }: { r: FriendRequestDto; children: React.Reac
     <li className="flex items-center gap-3 py-2.5" data-testid="friend-request">
       <Avatar user={r} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-semibold text-ivory">{r.nickname}</span>
+        <span className="flex min-w-0">
+          <MemberName name={r.nickname} role={r.role} badge className="font-semibold text-ivory" />
+        </span>
         <span className="text-xs text-ink-400">{shortTime(r.at, locale)}</span>
       </span>
       <span className="flex shrink-0 gap-1.5">{children}</span>
@@ -224,7 +228,9 @@ export function FriendsPage() {
                     <Link to={`/friends/${f.id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-white/[0.03]" data-testid="friend-row">
                       <Avatar user={f} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate font-semibold text-ivory">{f.nickname}</span>
+                        <span className="flex min-w-0">
+                          <MemberName name={f.nickname} role={f.role} badge className="font-semibold text-ivory" />
+                        </span>
                         <span className={cx('block truncate text-xs', f.unread ? 'font-semibold text-ink-100' : 'text-ink-400')}>
                           {f.lastMessage
                             ? `${f.lastMessage.fromMe ? `${t('friends.me')}: ` : ''}${f.lastMessage.kind === 'invite' ? t('invite.preview', { name: f.lastMessage.body }) : f.lastMessage.body}`
@@ -364,7 +370,9 @@ export function FriendSettingsPage() {
               <li key={u.id} className="flex items-center gap-3 py-2.5" data-testid="blocked-row">
                 <Avatar user={u} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold text-ivory">{u.nickname}</span>
+                  <span className="flex min-w-0">
+                    <MemberName name={u.nickname} role={u.role} badge className="font-semibold text-ivory" />
+                  </span>
                   <span className="text-xs text-ink-400">{shortTime(u.at, locale)}</span>
                 </span>
                 <span className="flex shrink-0 flex-wrap justify-end gap-1.5">
@@ -450,6 +458,7 @@ export function ConversationPage() {
   const [msgs, setMsgs] = useState<DirectMessageDto[]>([]);
   const [missing, setMissing] = useState(false);
   const [text, setText] = useState('');
+  const field = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmBlock, setConfirmBlock] = useState(false);
@@ -618,16 +627,22 @@ export function ConversationPage() {
       <header className="flex shrink-0 items-center gap-3">
         <Link to="/friends" className="grid size-10 place-items-center rounded-full text-gold-300 hover:bg-white/5" aria-label={t('friends.title')}>←</Link>
         <Avatar user={conv.user} />
-        <h1 className="min-w-0 flex-1 truncate text-lg font-bold text-ivory" data-testid="dm-title">{conv.user.nickname}</h1>
+        <h1 className="flex min-w-0 flex-1 text-lg font-bold text-ivory" data-testid="dm-title">
+          <MemberName name={conv.user.nickname} role={conv.user.role} badge />
+        </h1>
         {conv.isFriend && (
           <Button size="sm" variant="ghost" className="text-ink-300" onClick={unfriend} data-testid="unfriend">{t('friends.remove')}</Button>
         )}
-        {!conv.blocked && (
+        {!conv.blocked && !conv.user.role && (
           <Button size="sm" variant="ghost" className="text-[#f0a0a2]" onClick={() => setConfirmBlock((v) => !v)} aria-expanded={confirmBlock} data-testid="dm-block">{t('block.action')}</Button>
         )}
       </header>
       {confirmBlock && <BlockConfirm name={conv.user.nickname} busy={blockBusy} onConfirm={() => void setBlocked(true)} onCancel={() => setConfirmBlock(false)} />}
-      {msgs.some((m) => !m.fromMe) && <p className="-mt-1 shrink-0 text-[11px] text-ink-400">{t('dm.reportTip')}</p>}
+      {conv.user.role === 'super_admin' ? (
+        <p className="-mt-1 shrink-0 text-[11px] text-ink-400" data-testid="dm-staff-note">{t('staff.noReportBlock')}</p>
+      ) : (
+        msgs.some((m) => !m.fromMe) && <p className="-mt-1 shrink-0 text-[11px] text-ink-400">{t('dm.reportTip')}</p>
+      )}
 
       <div ref={box} className="jc-panel min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4" data-testid="dm-messages">
         {conv.hasMore && (
@@ -650,7 +665,8 @@ export function ConversationPage() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setSelected((s) => (s === m.id ? null : m.id))}
+                      // A message is picked to report it; the super admin's cannot be reported.
+                      onClick={() => conv.user.role !== 'super_admin' && setSelected((s) => (s === m.id ? null : m.id))}
                       aria-pressed={selected === m.id}
                       className={cx('whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm bg-ink-700 px-3 py-2 text-left text-sm text-ink-100', selected === m.id && 'ring-2 ring-danger/60')}
                     >
@@ -661,7 +677,7 @@ export function ConversationPage() {
                     {m === lastMine && m.readAt && <span className="text-gold-300" data-testid="dm-read">{t('dm.read')}</span>}
                     {timeFmt.format(m.at)}
                   </span>
-                  {selected === m.id && (
+                  {selected === m.id && conv.user.role !== 'super_admin' && (
                     <button
                       type="button"
                       className="jc-tap shrink-0 self-center rounded-full border border-danger/50 px-3 py-1.5 text-xs font-semibold text-[#f0a0a2] hover:bg-danger/10"
@@ -684,9 +700,10 @@ export function ConversationPage() {
           <Button size="sm" variant="outline" loading={blockBusy} onClick={() => void setBlocked(false)} data-testid="dm-unblock">{t('block.unblock')}</Button>
         </div>
       ) : conv.isFriend ? (
-        <form className="flex shrink-0 flex-col gap-1" onSubmit={send}>
+        <form className="relative flex shrink-0 flex-col gap-1" onSubmit={send}>
           <div className="flex gap-2">
-            <Input value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder={t('dm.placeholder')} aria-label={t('dm.placeholder')} className="text-base sm:text-sm" data-testid="dm-input" />
+            <Input ref={field} value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder={t('dm.placeholder')} aria-label={t('dm.placeholder')} className="min-w-0 text-base sm:text-sm" data-testid="dm-input" />
+            <EmojiPicker inputRef={field} value={text} onChange={setText} maxLength={500} />
             <Button type="submit" disabled={!text.trim()} loading={sending} data-testid="dm-send">{t('dm.send')}</Button>
           </div>
           {error && <p className="text-sm text-danger" role="alert">{error}</p>}

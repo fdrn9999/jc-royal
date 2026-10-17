@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { PASSWORD, signUp, test, widerThanDevice } from './helpers';
+import { promoteSql } from '../support/grants';
 
 const ADMIN = 'http://localhost:5174';
 
@@ -35,7 +36,7 @@ test('report workflow: severity, assignment, internal notes, a suspension given 
   const r1 = await signUp(browser);
   const r2 = await signUp(browser);
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
 
   // Two members report the same post.
   const title = `E2E 반복 광고 ${Date.now().toString(36)}`;

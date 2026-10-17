@@ -20,6 +20,8 @@ export interface TestTable {
   allowSpectators?: boolean;
   beginner?: boolean;
   entryBlocked?: boolean;
+  /** Table bots allowed here (an official table), with these settings; the service-wide policy still has to turn them on. */
+  bots?: { level?: 'easy' | 'normal' | 'hard'; minHumans?: number; max?: number; fillTo?: number; yieldSeat?: boolean };
 }
 
 /** Tables seeded for integration tests (admin API arrives in Phase 7). */
@@ -59,6 +61,8 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-pre-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Showdown muck: heads-up, so a checked-down hand has one covered loser.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-muck-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Showing cards after a hand: six seats, so a third player can sit down during a hand without being dealt in.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-show-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Operations dashboard: connection counters and a room failure.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-ops-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Emergency controls: forced disconnects (a suspended player's open socket) and paused tables.
@@ -70,12 +74,45 @@ export const TABLES: TestTable[] = [
   // Service maintenance: tables that stop dealing and seating while it runs, and one with a waitlist.
   ...Array.from({ length: 5 }, (_, i) => ({ id: `it-mt-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-mt-wl', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
-  // Two administrators doing the same thing at once (a suspension, a close) while a hand runs.
-  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-conc-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Two administrators doing the same thing at once (a suspension, a close) while a hand runs; one edits a table's
+  // settings while the other blocks its entry.
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `it-conc-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Leaving mid-hand: three players, long turns so only the players (and the room's fold for a leaver) act.
   { id: 'it-leave-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Administrator permissions: a table whose settings a plain administrator changes.
   { id: 'it-perm-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Staff marks: a member whose role changes while seated, heads-up so one fold ends a hand for the history.
+  { id: 'it-role-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Reports and blocks against staff: members report players they share this table with.
+  { id: 'it-staff-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  // Link previews: a public table no other file closes (admin.test.ts closes it-admin-0, and the files run in any order).
+  { id: 'it-og-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
+  // Quick reactions: seated players and a spectator; long turns keep the clock out of it.
+  ...Array.from({ length: 3 }, (_, i) => ({ id: `it-react-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Free refill: chips on a table (a hand's bets included), a table whose room holds no seat D1 has open, and one member
+  // seated at two tables.
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-refill-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Table bots (off until bots.test.ts turns the policy on): heads-up, a six-seat table three bots fill, short stacks
+  // all in for side pots (a three-big-blind minimum no admin could set, so an easy bot calls), a seat given up to a member waiting,
+  // the emergency stop, and a buy-in larger than the fund has left.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-bot-hu-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: {} })),
+  { id: 'it-bot-six', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'easy', max: 3, fillTo: 4 } },
+  { id: 'it-bot-pot', maxSeats: 6, sb: 5, bb: 10, min: 30, max: 1000, turnSeconds: 60, bots: { level: 'easy', max: 1, fillTo: 3 } },
+  { id: 'it-bot-yield', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { yieldSeat: true } },
+  { id: 'it-bot-stop', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'hard' } },
+  { id: 'it-bot-fund', maxSeats: 2, sb: 50, bb: 100, min: 10000, max: 10000, turnSeconds: 60, bots: {} },
+  // Referral rewards: a new member plays the hand the policy asks for, heads-up so one fold ends it.
+  { id: 'it-ref-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Account settings: auto-muck saved from a device, and an administrator's reset, reach the table the member sits at;
+  // quick saves whose pushes overlap.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-set-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Time bank: heads-up with long turns, so only the bank moves a deadline; and a short turn that still runs out.
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `it-tb-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  { id: 'it-tb-fast', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 3 },
+  // Social policy: reactions turned off and limited while players sit; a staff member's badge hidden and shown again
+  // (heads-up, so one fold ends a hand for the history).
+  { id: 'it-social-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  { id: 'it-social-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {
@@ -90,8 +127,10 @@ export async function prepareState(state: string, tables: TestTable[] = TABLES) 
   const rows: string[] = [];
   for (const t of tables) {
     const code = t.joinCode ? `'${await sha256b64url(`${t.id}:${t.joinCode}`)}'` : 'NULL';
+    const b = t.bots;
+    const bots = b ? `1, '${b.level ?? 'normal'}', ${b.minHumans ?? 1}, ${b.max ?? 1}, ${b.fillTo ?? 2}, ${b.yieldSeat === false ? 0 : 1}` : `0, 'normal', 1, 1, 2, 1`;
     rows.push(
-      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators, beginner, entry_blocked) VALUES ('${t.id}', '${t.id}', ${t.maxSeats}, ${t.sb}, ${t.bb}, ${t.min}, ${t.max}, ${t.turnSeconds ?? 20}, ${t.isPrivate ? 1 : 0}, ${code}, ${t.allowSpectators === false ? 0 : 1}, ${t.beginner ? 1 : 0}, ${t.entryBlocked ? 1 : 0});`,
+      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators, beginner, entry_blocked, bots_enabled, bot_level, bot_min_humans, bot_max, bot_fill_to, bot_yield) VALUES ('${t.id}', '${t.id}', ${t.maxSeats}, ${t.sb}, ${t.bb}, ${t.min}, ${t.max}, ${t.turnSeconds ?? 20}, ${t.isPrivate ? 1 : 0}, ${code}, ${t.allowSpectators === false ? 0 : 1}, ${t.beginner ? 1 : 0}, ${t.entryBlocked ? 1 : 0}, ${bots});`,
     );
   }
   const file = resolve(state, '..', `seed-${Date.now()}.sql`);

@@ -7,15 +7,17 @@ import { Table } from './Console';
 
 type Metric = 'ws_retry' | 'ws_drop' | 'room_error' | 'api_error';
 type Counts = Record<Metric, number>;
-interface TypeStats { tables: number; closing: number; blocked: number; occupied: number; playing: number; seated: number; waitlist: number; spectators: number; connections: number }
+/** `seated` is members; table bots are `bots`. */
+interface TypeStats { tables: number; closing: number; blocked: number; occupied: number; playing: number; seated: number; bots?: number; waitlist: number; spectators: number; connections: number }
 interface BusyTable {
   id: string;
   name: string;
-  type: 'official' | 'member';
+  type: 'official' | 'member' | 'tournament';
   status: 'open' | 'closing';
   entryBlocked: boolean;
   maxSeats: number;
   seated: number;
+  bots?: number;
   playing: boolean;
   waitlist: number;
   spectators: number;
@@ -24,7 +26,8 @@ interface BusyTable {
   lastIssue: string | null;
 }
 interface Live {
-  tables: { official: TypeStats; member: TypeStats };
+  /** `tournament` is absent from an API older than the tournaments release. */
+  tables: { official: TypeStats; member: TypeStats; tournament?: TypeStats };
   top: BusyTable[];
   onlineUsers: number;
   ops: { slotMs: number; trend: (Counts & { at: number })[]; last5m: Counts; lastHour: Counts };
@@ -39,7 +42,7 @@ interface Live {
 }
 interface Totals {
   users: number;
-  tables: { total: number; active: number };
+  tables: { total: number; active: number; seatedBots?: number };
   handsCompleted: number;
   handsLast24h: number;
   openTableSessions: number;
@@ -164,8 +167,13 @@ export function DashboardPage() {
 function LiveFigures({ d }: { d: Live }) {
   const { t } = useT();
   const { official: o, member: m } = d.tables;
-  const occupied = o.occupied + m.occupied;
-  const seated = o.seated + m.seated;
+  // Tournament tables count toward every total; they get their own figure only when there are any.
+  const tn = d.tables.tournament;
+  const all = [o, m, ...(tn ? [tn] : [])];
+  const sum = (k: keyof TypeStats) => all.reduce((s, x) => s + (x[k] ?? 0), 0);
+  const occupied = sum('occupied');
+  const seated = sum('seated');
+  const bots = sum('bots');
   return (
     <section aria-labelledby="live-title" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -174,13 +182,14 @@ function LiveFigures({ d }: { d: Live }) {
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="dashboard">
         <Stat label={t('onlineUsers')} value={formatChips(d.onlineUsers)} sub={t('basisOnline')} />
-        <Stat label={t('wsConnections')} value={formatChips(o.connections + m.connections)} />
-        <Stat label={t('handsInPlay')} value={formatChips(o.playing + m.playing)} />
-        <Stat label={t('waitingPlayers')} value={formatChips(o.waitlist + m.waitlist)} />
+        <Stat label={t('wsConnections')} value={formatChips(sum('connections'))} />
+        <Stat label={t('handsInPlay')} value={formatChips(sum('playing'))} />
+        <Stat label={t('waitingPlayers')} value={formatChips(sum('waitlist'))} />
         <Stat label={t('officialTables')} value={formatChips(o.tables)} sub={typeSub(t, o)} />
         <Stat label={t('memberRooms')} value={formatChips(m.tables)} sub={typeSub(t, m)} />
-        <Stat label={t('avgSeated')} value={avg(seated, occupied)} sub={t('seatedOver', { n: seated, tables: occupied })} />
-        <Stat label={t('watchers')} value={formatChips(o.spectators + m.spectators)} sub={t('perTable', { v: avg(o.spectators + m.spectators, occupied) })} />
+        <Stat label={t('avgSeated')} value={avg(seated, occupied)} sub={bots ? `${t('seatedOver', { n: seated, tables: occupied })} · ${t('botsN', { n: bots })}` : t('seatedOver', { n: seated, tables: occupied })} />
+        <Stat label={t('watchers')} value={formatChips(sum('spectators'))} sub={t('perTable', { v: avg(sum('spectators'), occupied) })} />
+        {tn && tn.tables > 0 && <Stat label={t('tournamentTables')} value={formatChips(tn.tables)} sub={typeSub(t, tn)} />}
       </div>
     </section>
   );
@@ -350,12 +359,12 @@ function BusyTables({ d }: { d: Live }) {
               </td>
               <td className="px-2 py-2">
                 <div className="flex flex-wrap gap-1">
-                  <Badge tone={tb.type === 'official' ? 'gold' : 'blue'}>{t(tb.type === 'official' ? 'typeOfficial' : 'typeMember')}</Badge>
+                  <Badge tone={tb.type === 'member' ? 'blue' : 'gold'}>{t(tb.type === 'official' ? 'typeOfficial' : tb.type === 'tournament' ? 'tournamentRoom' : 'typeMember')}</Badge>
                   {tb.status === 'closing' && <Badge tone="red">{t('closing')}</Badge>}
                   {tb.entryBlocked && tb.status !== 'closing' && <Badge>{t('entryBlockedShort')}</Badge>}
                 </div>
               </td>
-              <td className="px-2 py-2 font-mono tabular-nums">{tb.seated} / {tb.maxSeats}</td>
+              <td className="px-2 py-2 font-mono tabular-nums">{tb.seated}{tb.bots ? <span className="text-info" title={t('botsN', { n: tb.bots })}> +{tb.bots}</span> : null} / {tb.maxSeats}</td>
               <td className="px-2 py-2">{tb.playing ? <Badge tone="green">{t('inHand')}</Badge> : <span className="text-ink-400">{t('betweenHands')}</span>}</td>
               <td className="px-2 py-2 font-mono tabular-nums">{tb.waitlist}</td>
               <td className="px-2 py-2 font-mono tabular-nums">{tb.spectators}</td>
@@ -394,7 +403,7 @@ function TotalsPanel({ totals }: { totals: ReturnType<typeof useData<Totals>> })
             <Stat label={t('totalUsers')} value={formatChips(d.users)} />
             <Stat label={t('activeTables')} value={`${d.tables.active} / ${d.tables.total}`} />
             <Stat label={t('handsCompleted')} value={formatChips(d.handsCompleted)} sub={t('hands24hN', { n: formatChips(d.handsLast24h) })} />
-            <Stat label={t('openSeats')} value={formatChips(d.openTableSessions)} />
+            <Stat label={t('openSeats')} value={formatChips(d.openTableSessions)} sub={d.tables.seatedBots ? t('botsSeatedApart', { n: d.tables.seatedBots }) : undefined} />
             <Stat label={t('serverStatus')} value={<span className="text-success">{t('serverOk')}</span>} sub={`${d.server.env} · D1 ${d.server.d1LatencyMs}ms`} />
           </div>
           <h3 className="mb-2 mt-5 text-xs font-bold tracking-[0.06em] text-ink-300">{t('issues')}</h3>

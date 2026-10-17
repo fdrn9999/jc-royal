@@ -4,7 +4,7 @@
  * are plain bars (no chart library), each with a text summary for screen readers and the table below as the source.
  */
 import { Badge, Button, Empty, Panel, Stat } from '@jc/ui';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
 import { useData } from '../lib';
 import { LoadError } from '../ui';
@@ -14,6 +14,9 @@ import { dur } from './Reports';
 type Unit = 'day' | 'week' | 'month';
 type RoomPlay = { hands: number; tablesAvg: number | null; seats: number; seatMs: number };
 type AcademyKey = 'ac_lesson_start' | 'ac_lesson_done' | 'ac_scenario_start' | 'ac_scenario_done' | 'ac_answer' | 'ac_correct';
+type HandNoteKey = 'hn_bookmark' | 'hn_tag' | 'hn_memo' | 'hn_fail_conflict' | 'hn_fail_invalid' | 'hn_fail_notfound' | 'hn_fail_limit' | 'hn_fail_error';
+type TimeBankKey = 'tb_use' | 'tb_sec' | 'tb_empty' | 'tb_expired' | 'tb_late' | 'tb_recover';
+type SettingsKey = 'ss_save' | 'ss_legacy' | 'ss_conflict' | 'ss_stale' | 'ss_epoch' | 'ss_fail_invalid' | 'ss_fail_limit' | 'ss_fail_busy' | 'ss_fail_error' | 'ss_load_fail' | 'ss_client_fail' | 'ss_reset' | 'ss_restore';
 interface Period {
   from: string;
   to: string;
@@ -21,9 +24,14 @@ interface Period {
   complete: boolean;
   members: { signups: number; dauAvg: number | null; returningAvg: number | null; wau: number | null; mau: number | null; partial: { dau: boolean; wau: boolean; mau: boolean }; activityDays: number };
   activation: { cohort: number; play1d: number; play7d: number; cohortDays: number };
-  play: { hands: number; handsPerDay: number | null; tablesAvg: number | null; seats: number; avgSeatMs: number | null; peak: number | null; official: RoomPlay; member: RoomPlay };
+  play: { hands: number; handsPerDay: number | null; tablesAvg: number | null; seats: number; avgSeatMs: number | null; peak: number | null; official: RoomPlay; member: RoomPlay; bots?: { hands: number; tablesAvg: number | null } };
   reports: { created: number; handled: number; avgHandleMs: number | null };
   academy: Record<AcademyKey, number>;
+  handNotes: Record<HandNoteKey, number>;
+  /** Account settings sync (absent from an older API). */
+  settings?: Record<SettingsKey, number>;
+  /** Time bank use and timer problems (absent from an older API). */
+  timeBank?: Record<TimeBankKey, number>;
 }
 interface OpsStats {
   unit: Unit;
@@ -38,6 +46,8 @@ interface OpsStats {
   total: Period;
   hourly: { avg: number | null; max: number | null }[];
   rolled: { days: number; behind: number } | { failed: true } | null;
+  /** Hand notes kept now, counted when the page loads (never whose or what). */
+  handNotesNow: { members: number; bookmarked: number; tagged: number; memos: number };
 }
 
 const UNITS: [Unit, Key][] = [
@@ -104,6 +114,11 @@ export function StatsPage() {
   const labels = d.periods.map(label);
   const faded = d.periods.map((p) => !p.complete);
   const ac = tot.academy;
+  const hn = tot.handNotes;
+  const hnFailed = hn.hn_fail_conflict + hn.hn_fail_invalid + hn.hn_fail_notfound + hn.hn_fail_limit + hn.hn_fail_error;
+  const now = d.handNotesNow;
+  const ss = tot.settings;
+  const tb = tot.timeBank;
   return (
     <div className={`flex flex-col gap-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading} data-testid="stats-page">
       {header}
@@ -120,6 +135,7 @@ export function StatsPage() {
         <Stat label={t('osHandsDay')} value={<span data-testid="stats-hands-day">{num(tot.play.handsPerDay)}</span>} sub={t('osHandsDaySub', { n: num(tot.play.hands) })} />
         <Stat label={t('osSeatLen')} value={len(tot.play.avgSeatMs)} sub={t('osSeatLenSub', { n: num(tot.play.seats) })} />
         <Stat label={t('osTables')} value={num(tot.play.tablesAvg)} sub={t('osTablesSub')} />
+        <Stat label={t('osBotHands')} value={<span data-testid="stats-bot-hands">{num(tot.play.bots?.hands ?? 0)}</span>} sub={t('osBotHandsSub', { n: num(tot.play.bots?.tablesAvg ?? null) })} />
         <Stat label={t('osPeak')} value={<span data-testid="stats-peak">{num(tot.play.peak)}</span>} sub={t('osPeakSub')} />
         <Stat
           label={t('osReports')}
@@ -199,6 +215,54 @@ export function StatsPage() {
         </Panel>
       </div>
 
+      <Panel title={t('osHandNotes')}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="stats-hand-notes">
+          <Stat
+            label={t('osHnSaved')}
+            value={<span data-testid="stats-hn-saved">{num(hn.hn_bookmark + hn.hn_tag + hn.hn_memo)}</span>}
+            sub={t('osHnSavedSub', { b: num(hn.hn_bookmark), t: num(hn.hn_tag), m: num(hn.hn_memo) })}
+          />
+          <Stat
+            label={t('osHnFailed')}
+            value={<span data-testid="stats-hn-failed">{num(hnFailed)}</span>}
+            sub={t('osHnFailedSub', { c: num(hn.hn_fail_conflict), i: num(hn.hn_fail_invalid), n: num(hn.hn_fail_notfound), l: num(hn.hn_fail_limit), e: num(hn.hn_fail_error) })}
+          />
+          <Stat
+            label={t('osHnNow')}
+            value={<span data-testid="stats-hn-now">{num(now.members)}</span>}
+            sub={t('osHnNowSub', { b: num(now.bookmarked), t: num(now.tagged), m: num(now.memos) })}
+          />
+        </div>
+        <p className="mt-3 text-xs text-ink-400">{t('osHnHint')}</p>
+      </Panel>
+      {ss && (
+        <Panel title={t('osSettings')}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="stats-settings">
+            <Stat label={t('osSsSaved')} value={<span data-testid="stats-ss-saved">{num(ss.ss_save)}</span>} sub={t('osSsSavedSub', { l: num(ss.ss_legacy) })} />
+            <Stat
+              label={t('osSsConflict')}
+              value={<span data-testid="stats-ss-conflict">{num(ss.ss_conflict)}</span>}
+              sub={t('osSsConflictSub', { s: num(ss.ss_stale), e: num(ss.ss_epoch) })}
+            />
+            <Stat
+              label={t('osSsFailed')}
+              value={<span data-testid="stats-ss-failed">{num(ss.ss_fail_invalid + ss.ss_fail_limit + ss.ss_fail_busy + ss.ss_fail_error + ss.ss_load_fail + ss.ss_client_fail)}</span>}
+              sub={t('osSsFailedSub', { i: num(ss.ss_fail_invalid), l: num(ss.ss_fail_limit), b: num(ss.ss_fail_busy), e: num(ss.ss_fail_error), r: num(ss.ss_load_fail), c: num(ss.ss_client_fail) })}
+            />
+            <Stat label={t('osSsReset')} value={<span data-testid="stats-ss-reset">{num(ss.ss_reset)}</span>} sub={t('osSsResetSub', { r: num(ss.ss_restore) })} />
+          </div>
+          <p className="mt-3 text-xs text-ink-400">{t('osSsHint')}</p>
+        </Panel>
+      )}
+      {tb && (
+        <Panel title={t('tbTitle')} actions={<Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline">{t('tbManage')} →</Link>}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="stats-time-bank">
+            <Stat label={t('tbUses')} value={<span data-testid="stats-tb-use">{num(tb.tb_use)}</span>} sub={t('osTbUseSub', { s: num(tb.tb_sec), e: num(tb.tb_empty) })} />
+            <Stat label={t('tbExpired')} value={num(tb.tb_expired)} sub={t('tbExpiredHint')} />
+            <Stat label={t('tbLate')} value={<span data-testid="stats-tb-late">{num(tb.tb_late)}</span>} sub={t('osTbLateSub', { r: num(tb.tb_recover) })} />
+          </div>
+        </Panel>
+      )}
       <Panel title={t('osHourly')}>
         <figure data-testid="stats-hourly">
           <div

@@ -152,6 +152,11 @@ export const reportRoutes = new Hono<AppEnv>()
       }
     }
     if (targetUserId === me) fail(400, 'report_self', 'you cannot report yourself');
+    // The super admin answers for the service itself and cannot be reported; admins can be, like any member.
+    const target = await c.env.DB.prepare('SELECT role, is_bot AS bot FROM users WHERE id = ?1').bind(targetUserId).first<{ role: string; bot: number }>();
+    if (target?.role === 'super_admin') fail(403, 'report_super_admin', 'the super admin cannot be reported');
+    // A table bot only plays the server's moves (it never chats); there is nothing of its own to report.
+    if (target?.bot) fail(409, 'bot_account', 'table bots cannot be reported');
     const id = crypto.randomUUID();
     try {
       await c.var.db.insert(schema.reports).values({

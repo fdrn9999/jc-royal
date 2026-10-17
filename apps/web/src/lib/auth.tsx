@@ -2,6 +2,7 @@ import type { MeDto } from '@jc/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, ApiError } from './api';
 import { useI18n } from './i18n';
+import { flushSettings } from './prefs';
 
 interface AuthCtx {
   me: MeDto | null;
@@ -62,6 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [me?.locale]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(async () => {
+    // Settings changed here and not saved yet go first, while the session is still this account's (at most 2 s).
+    await flushSettings(2_000).catch(() => {});
     await api('/api/auth/logout', { body: {} });
     setMe(null);
   }, []);

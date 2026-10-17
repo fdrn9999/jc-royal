@@ -36,6 +36,9 @@ function watch(page: Page) {
 }
 
 test('mobile: auto-muck set in the table settings keeps a losing showdown hand face down for the other player only', async ({ browser }) => {
+  // Hands take about 15 s each and A loses a given one about half the time, so the loop below may need several: the
+  // test's own limit must outlast the loop's 150 s (at the default 90 s, a sixth hand failed the test).
+  test.setTimeout(200_000);
   const a = await signUp(browser, { mobile: true });
   const b = await signUp(browser);
   const wa = watch(a.page);
@@ -58,7 +61,7 @@ test('mobile: auto-muck set in the table settings keeps a losing showdown hand f
   await a.page.getByRole('dialog').getByRole('button', { name: 'close' }).tap();
   await expect(a.page.getByRole('dialog')).toHaveCount(0);
 
-  // A reload keeps the device setting, and the room already has it: nothing is sent again.
+  // A reload keeps the setting (the account's), and the room already has it: nothing is sent again.
   await a.page.reload();
   await expect.poll(() => wa.autoMuck).toBe(true);
   await a.page.waitForTimeout(800);

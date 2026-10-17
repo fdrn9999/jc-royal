@@ -7,7 +7,9 @@
  *   a new day). Only the day is kept, never a time, page or count, and only for ACTIVE_DAYS_RETENTION days: daily,
  *   weekly and monthly active members are counted from it and kept as numbers in `daily_stats`.
  * - `daily_stats`: one number per day and metric. Most are rolled up once a day from the records the service keeps
- *   anyway (accounts, seats, hands, reports); the Academy counters are added as events arrive. Day 0 holds markers.
+ *   anyway (accounts, seats, hands, reports); the Academy, free refill, hand note, settings and time bank counters are
+ *   added as events arrive. Day 0
+ *   holds markers.
  */
 export const STATS_TZ_OFFSET_MS = 9 * 60 * 60_000;
 export const STATS_DAY = 86_400_000;
@@ -23,6 +25,66 @@ export const dayStart = (day: number) => day * STATS_DAY - STATS_TZ_OFFSET_MS;
 export const ACADEMY_METRICS = ['ac_lesson_start', 'ac_lesson_done', 'ac_scenario_start', 'ac_scenario_done', 'ac_answer', 'ac_correct'] as const;
 export type AcademyMetric = (typeof ACADEMY_METRICS)[number];
 
+/**
+ * Free refill claims that paid nothing, per day and reason (apps/api/src/lib/refill.ts): refused (off, paused, still
+ * waiting, enough chips, suspended), held (table chips could not be confirmed) or changed under it (asked again).
+ * Added as they happen, like the Academy counters, and kept by the daily rollup.
+ */
+export const REFILL_METRICS = ['rf_off', 'rf_paused', 'rf_cooldown', 'rf_above', 'rf_suspended', 'rf_held', 'rf_changed'] as const;
+export type RefillMetric = (typeof REFILL_METRICS)[number];
+
+/**
+ * Hand notes (PUT /api/me/hands/:id/note, apps/api/src/lib/handNotes.ts): saves per kind of change, and saves refused
+ * or failed per reason. Numbers only, never per member or hand, never what was written. Added as they happen and kept by
+ * the daily rollup.
+ */
+export const HAND_NOTE_METRICS = [
+  'hn_bookmark',
+  'hn_tag',
+  'hn_memo',
+  'hn_fail_conflict',
+  'hn_fail_invalid',
+  'hn_fail_notfound',
+  'hn_fail_limit',
+  'hn_fail_error',
+] as const;
+export type HandNoteMetric = (typeof HAND_NOTE_METRICS)[number];
+
+/**
+ * Account settings (GET/PUT /api/me/settings, apps/api/src/lib/settings.ts): saves that changed something, a device's
+ * settings from before sync taken in, saves made over a revision another device had changed (conflict), changes a newer
+ * one kept out (stale), saves refused after a reset (epoch), saves and loads that failed per reason, attempts a device
+ * says failed before it could reach the server, and administrators' resets and restores. Numbers only, never per
+ * member, never a value. Added as they happen and kept by the daily rollup.
+ */
+export const SETTINGS_METRICS = [
+  'ss_save',
+  'ss_legacy',
+  'ss_conflict',
+  'ss_stale',
+  'ss_epoch',
+  'ss_fail_invalid',
+  'ss_fail_limit',
+  'ss_fail_busy',
+  'ss_fail_error',
+  'ss_load_fail',
+  'ss_client_fail',
+  'ss_reset',
+  'ss_restore',
+] as const;
+export type SettingsMetric = (typeof SETTINGS_METRICS)[number];
+
+/**
+ * Time bank (apps/game-worker/src/room.ts): uses and seconds added, uses refused for an empty bank, turns that timed out
+ * although time was added, turn timeouts the room ran more than a few seconds after the deadline (late timer), and
+ * administrators' timer recoveries. Counted per hand and written with the hand record (once, also when it is written
+ * again), never per member. Kept by the daily rollup.
+ */
+export const TIME_BANK_METRICS = ['tb_use', 'tb_sec', 'tb_empty', 'tb_expired', 'tb_late', 'tb_recover'] as const;
+export type TimeBankMetric = (typeof TIME_BANK_METRICS)[number];
+
+type Metric = AcademyMetric | RefillMetric | HandNoteMetric | SettingsMetric | TimeBankMetric;
+
 /** Markers on day 0: the first day with activity markers, and the last day rolled up. */
 export const STATS_MARKER_DAY = 0;
 
@@ -32,10 +94,26 @@ export function activeDayInsert(d1: D1Database, userId: string, at: number): D1P
 }
 
 /** One statement per counter: adds `n` to the day's row. */
-export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<AcademyMetric, number>>): D1PreparedStatement[] {
+export function statsIncrements(d1: D1Database, day: number, counts: Partial<Record<Metric, number>>): D1PreparedStatement[] {
   return Object.entries(counts)
     .filter(([, n]) => (n ?? 0) > 0)
     .map(([metric, n]) =>
       d1.prepare('INSERT INTO daily_stats (day, metric, n) VALUES (?1, ?2, ?3) ON CONFLICT (day, metric) DO UPDATE SET n = n + excluded.n').bind(day, metric, n),
+    );
+}
+
+/**
+ * Like statsIncrements, for counters that come with a hand record: each adds only while hand `handId` is not recorded
+ * yet, so it must run in the batch before the hand's INSERT (a record written again adds nothing).
+ */
+export function handStatsIncrements(d1: D1Database, day: number, handId: string, counts: Partial<Record<TimeBankMetric, number>>): D1PreparedStatement[] {
+  return Object.entries(counts)
+    .filter(([, n]) => (n ?? 0) > 0)
+    .map(([metric, n]) =>
+      d1
+        .prepare(
+          'INSERT INTO daily_stats (day, metric, n) SELECT ?1, ?2, ?3 WHERE NOT EXISTS (SELECT 1 FROM hands WHERE id = ?4) ON CONFLICT (day, metric) DO UPDATE SET n = n + excluded.n',
+        )
+        .bind(day, metric, n, handId),
     );
 }

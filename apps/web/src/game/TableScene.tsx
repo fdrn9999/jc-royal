@@ -4,11 +4,13 @@
  * animate the same; it only renders the TableView it is given.
  */
 import { handLabelKey, type Card, type SeatView, type TableView } from '@jc/types';
-import { ChipStack, formatChips, Logo, PlayingCard } from '@jc/ui';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChipStack, Logo, PlayingCard } from '@jc/ui';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { amounts as chipAmounts, type Amounts, type AmountUnit } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { CueLayer } from './CueLayer';
-import { POT_POINT, seatLayout, type SeatGeometry } from './layout';
+import { DIMS, planHeight, planTable, type Density, type PlanInput, type Point, type SeatGeometry, type TablePlan } from './layout';
+import type { ReactionSender, SeatReaction } from './Reactions';
 import { Seat } from './Seat';
 import type { CueEvent } from './useTableSocket';
 
@@ -24,36 +26,110 @@ export function useBoxSize<T extends HTMLElement>() {
   return [ref, size] as const;
 }
 
-export interface TableLayout {
-  portrait: boolean;
-  compact: boolean;
-  box: { w: number; h: number };
-  geometry: SeatGeometry[];
+/**
+ * Keeps the stack at the bottom of a table screen (beginner notes, coaching, questions, the action bar or the
+ * pre-actions, the status bar) off the table: `colRef` goes on the column holding both, `stackRef` on the stack, and
+ * `style` on the table area. On a phone the stack spans the screen, so the area ends where the stack starts. Wider, the
+ * stack sits in the bottom-right corner and the area keeps clear of its height, or of its width beside it (a phone on
+ * its side), whichever leaves the table more room. Measured, since the stack depends on the state, the language and the
+ * width, and only growing within a `mode` (and width), so the table does not move turn by turn. Passing toasts and
+ * notices (data-transient) are left out.
+ */
+export function useStackRoom(mode: string) {
+  const [colRef, col] = useBoxSize<HTMLDivElement>();
+  const stackRef = useRef<HTMLDivElement>(null);
+  const key = `${mode}|${Math.round(col.w)}`;
+  const [room, setRoom] = useState({ key, w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const el = stackRef.current;
+    if (!el) return;
+    const read = () => {
+      const kids = Array.from(el.children as HTMLCollectionOf<HTMLElement>).filter((k) => k.dataset.transient === undefined && k.offsetHeight > 0);
+      const h = kids.length ? Math.ceil(el.getBoundingClientRect().bottom - Math.min(...kids.map((k) => k.getBoundingClientRect().top))) : 0;
+      const w = Math.max(0, ...kids.map((k) => k.offsetWidth));
+      setRoom((r) => (r.key !== key ? { key, w, h } : w > r.w || h > r.h ? { key, w: Math.max(w, r.w), h: Math.max(h, r.h) } : r));
+    };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [key]);
+  const { w, h } = room.key === key ? room : { w: 0, h: 0 };
+  let style: CSSProperties = { marginBottom: h };
+  if (col.w >= 640) {
+    // The box a fixed table fills (useTableLayout), in the area left by sm:mx-6, sm:mt-6 and the margin kept here.
+    const fit = (x: number, y: number) => Math.max(0, Math.min(x, 2.1 * y)) * Math.max(0, Math.min(y, 1.9 * x));
+    const below = Math.max(h, 24);
+    const beside = 24 + w + 8;
+    style = fit(col.w - 24 - beside, col.h - 48) > fit(col.w - 48, col.h - 24 - below) ? { marginBottom: 24, marginRight: beside } : { marginBottom: below };
+  }
+  return { colRef, stackRef, style };
 }
 
-/** Table box and seat geometry for the available area (portrait vs landscape, compact on small screens). */
-export function useTableLayout(area: { w: number; h: number }, maxSeats: number | undefined, anchor: number): TableLayout {
-  const portrait = area.w / Math.max(1, area.h) < 0.95;
-  // Short viewports (landscape phones, open keyboard) get the dense layout too.
-  const compact = area.w < 640 || area.h < 520;
-  const plateHalfPx = compact ? 60 : 76;
-  // Table box: keep the felt proportions inside the available area.
-  const box = useMemo(() => {
-    const ratio = portrait ? 0.68 : 1.75;
-    let w = area.w;
-    let h = w / ratio;
-    if (h > area.h) {
-      h = area.h;
-      w = h * ratio;
-    }
-    return { w, h };
-  }, [area, portrait]);
-  const geometry = useMemo(
-    () => (maxSeats ? seatLayout(maxSeats, anchor, portrait, Math.min(45, (plateHalfPx / Math.max(1, box.w)) * 100)) : []),
-    [maxSeats, anchor, portrait, plateHalfPx, box.w],
-  );
-  return { portrait, compact, box, geometry };
+export interface TableLayout {
+  portrait: boolean;
+  /** Smaller seats and shortened amounts: any density but the full one. */
+  compact: boolean;
+  density: Density;
+  box: { w: number; h: number };
+  /** Per seat index, in % of the box: the seat's centre and its bet's (the cue layer's chips fly between them). */
+  geometry: SeatGeometry[];
+  /** The pot's centre, in % of the box. */
+  pot: Point;
+  /** The status line under the board is drawn. */
+  footer: boolean;
+  /** The same in px, with the board, the pot row and the felt. */
+  plan: TablePlan;
 }
+
+export interface LayoutOptions {
+  /** The bottom seat is the viewer's own: it gets the bigger cards. */
+  me?: boolean;
+  /** Room kept above the viewer's cards (the real table's show-card buttons). */
+  meTop?: number;
+  /** A status line under the board: waiting, the next hand, the side pots. The replay lists its pots above the table instead. */
+  footer?: boolean;
+  /** Longest amounts expected, in characters (amountChars by default). */
+  chars?: PlanInput['chars'];
+  /** The height is free (the replay): `area.h` is the most it may take, and it grows no taller than this. */
+  grow?: number;
+}
+
+/** Longest amounts a table usually shows in a unit: a full-size stack ("1,234,567", "1,234.5 BB"), a bet and the pot. */
+export function amountChars(unit: AmountUnit): PlanInput['chars'] {
+  return unit === 'bb' ? { stack: 11, bet: 9, pot: 9 } : { stack: 9, bet: 6, pot: 6 };
+}
+
+const ALL: Density[] = ['full', 'compact', 'dense'];
+const SMALL: Density[] = ['compact', 'dense'];
+
+/**
+ * The table laid out in the available area (layout.ts): every seat, bet and the board in a place of its own, the
+ * seats smaller when the area is. A fixed area is kept from stretching into a band, at most 2.1 times as wide as tall
+ * and 1.9 times as tall as wide.
+ */
+export function useTableLayout(area: { w: number; h: number }, maxSeats: number | undefined, anchor: number, opts: LayoutOptions = {}): TableLayout {
+  const { me = false, meTop = 0, footer = false, grow = 0 } = opts;
+  const { stack, bet, pot } = opts.chars ?? amountChars('chips');
+  const n = maxSeats ?? 0;
+  return useMemo(() => {
+    // Narrow or short areas (phones, landscape phones, an open keyboard) start from the smaller seats. A free height
+    // (the replay) takes the largest seats that fit its budget, so only the width counts there.
+    const densities = area.w < 640 || (grow <= 0 && area.h < 520) ? SMALL : ALL;
+    const input: PlanInput = { n, anchor, me, meTop, footer, chars: { stack, bet, pot } };
+    const w = Math.max(1, area.w);
+    const h = Math.max(1, area.h);
+    const plan = grow > 0 ? planHeight(w, h, grow, input, densities) : planTable(Math.min(w, 2.1 * h), Math.min(h, 1.9 * w), input, densities);
+    const pct = (q: Point): Point => ({ x: (q.x / plan.w) * 100, y: (q.y / plan.h) * 100 });
+    const geometry = plan.seats.map((seat, i) => {
+      const b = pct(plan.bets[i] ?? seat);
+      return { seat: pct(seat), bet: b, button: b };
+    });
+    return { portrait: plan.w / plan.h < 0.95, compact: plan.density !== 'full', density: plan.density, box: { w: plan.w, h: plan.h }, geometry, pot: pct(plan.pot), footer, plan };
+  }, [area.w, area.h, n, anchor, me, meTop, footer, stack, bet, pot, grow]);
+}
+
+const CHIPS = chipAmounts('chips', 0);
 
 export function TableScene({
   s,
@@ -62,10 +138,14 @@ export function TableScene({
   canSit,
   onSit,
   onSeatClick,
+  onShow,
+  reactions,
+  react,
   nextIn,
   cues,
   consumeCues,
   reducedMotion,
+  amounts = CHIPS,
 }: {
   s: TableView;
   layout: TableLayout;
@@ -74,13 +154,22 @@ export function TableScene({
   onSit: (seatIndex: number) => void;
   /** Tapping another player's plate (the real table only). */
   onSeatClick?: (seat: SeatView) => void;
+  /** Shows one of my cards after the hand (the real table only; offered while `you.canShow`). */
+  onShow?: (card: 0 | 1) => void;
+  /** Quick reactions showing now (the real table only), each at its sender's seat while that player still sits there. */
+  reactions?: SeatReaction[];
+  /** Sending reactions from my seat (the real table only, while seated). */
+  react?: ReactionSender;
   nextIn: number | null;
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
   reducedMotion: boolean;
+  /** How amounts read (the player's unit at a real table or a replay; the Academy keeps chips, as its lessons do). */
+  amounts?: Amounts;
 }) {
   const { t } = useI18n();
-  const { portrait, compact, box, geometry } = layout;
+  const { portrait, density, box, geometry, plan } = layout;
+  const d = DIMS[density];
   const hand = s.hand;
   const winners = useMemo(() => new Map((hand?.result?.winners ?? []).map((w) => [w.seatIndex, w.amount])), [hand?.result]);
   const showdown = useMemo(() => new Map((hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x])), [hand?.result]);
@@ -88,31 +177,31 @@ export function TableScene({
   const winningFive = topWinner !== undefined ? (showdown.get(topWinner)?.bestFive ?? []) : [];
   // Chips already gathered in the middle; after settlement they have been paid out.
   const collected = hand && hand.stage !== 'settled' ? hand.potTotal - s.seats.reduce((a, x) => a + x.streetBet, 0) : 0;
-  const boardSize = compact ? '2.1rem' : 'clamp(2.4rem,4.2vw,3.6rem)';
+  const boardSize = `${plan.board}px`;
+  const status = !hand ? (nextIn !== null ? t('table.nextHand', { s: nextIn }) : t('table.waiting')) : hand.stage === 'settled' && nextIn !== null ? t('table.nextHand', { s: nextIn }) : null;
+  const sidePots =
+    hand && hand.pots.length > 1 && hand.stage !== 'settled' ? hand.pots.map((p, i) => `${i === 0 ? t('table.pot') : t('table.sidePot', { n: i })} ${amounts.fmt(p.amount, true)}`).join(' · ') : null;
 
   return (
-    <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'}>
-      {/* rail + felt */}
-      <div className="absolute rounded-[50%] p-[1.2%] shadow-[0_30px_80px_rgba(0,0,0,0.7)]" style={{ inset: portrait ? '9% 11%' : '11% 9%', background: 'var(--t-rail)' }}>
+    <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'} data-density={density}>
+      {/* rail + felt, around the seats' middles */}
+      <div className="absolute rounded-[50%] p-[1.2%] shadow-[0_30px_80px_rgba(0,0,0,0.7)]" style={{ left: plan.felt.x, top: plan.felt.y, width: plan.felt.w, height: plan.felt.h, background: 'var(--t-rail)' }}>
         <div className="relative size-full rounded-[50%] p-[0.6%]" style={{ background: 'var(--t-rail-inner)' }}>
           <div className="relative size-full overflow-hidden rounded-[50%] shadow-[inset_0_6px_30px_rgba(0,0,0,0.7)]" style={{ background: 'var(--t-felt)' }}>
             <div className="absolute inset-[9%] rounded-[50%] border" style={{ borderColor: 'var(--t-felt-line)' }} />
             <div className="absolute inset-x-0 flex justify-center" style={{ top: portrait ? '16%' : '12%', opacity: 'var(--t-watermark-opacity)' }}>
-              <Logo size={Math.min(box.w, box.h) * 0.18} />
+              <Logo size={Math.min(plan.felt.w, plan.felt.h) * 0.18} />
             </div>
           </div>
         </div>
       </div>
 
-      {/* pot + board */}
-      <div className="absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2" style={{ top: `${POT_POINT.y + 7}%` }}>
-        <div className="flex min-h-7 items-center gap-2" data-testid="pot">
-          {collected > 0 && <ChipStack amount={collected} />}
-          {hand && hand.pots.length > 1 && hand.stage !== 'settled' && (
-            <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] text-ink-200">{hand.pots.map((p, i) => `${i === 0 ? t('table.pot') : t('table.sidePot', { n: i })} ${formatChips(p.amount, true)}`).join(' · ')}</span>
-          )}
+      {/* pot, board and the status line, in the room the layout kept for them */}
+      <div className="absolute z-20 flex flex-col items-center gap-2" style={{ left: plan.block.x, top: plan.block.y, width: plan.block.w, height: plan.block.h }}>
+        <div className="flex shrink-0 items-center justify-center" style={{ height: plan.potRowH }} data-testid="pot">
+          {collected > 0 && <ChipStack amount={collected} size={`${plan.potChip}px`} text={amounts.fmt(collected, true)} />}
         </div>
-        <div className="flex gap-1 rounded-xl bg-black/35 p-1.5 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)] sm:gap-1.5 sm:p-2" data-testid="board">
+        <div className="flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
           {Array.from({ length: 5 }, (_, i) => {
             const c = hand?.board[i] as Card | undefined;
             return c ? (
@@ -122,10 +211,18 @@ export function TableScene({
             );
           })}
         </div>
-        {/* Fixed-height status slot: text changes never move the board. */}
-        <div className="flex h-5 items-center text-xs tracking-[0.06em] text-ink-200/80" data-testid="table-status" aria-live="polite">
-          {!hand ? (nextIn !== null ? t('table.nextHand', { s: nextIn }) : t('table.waiting')) : hand.stage === 'settled' && nextIn !== null ? t('table.nextHand', { s: nextIn }) : null}
-        </div>
+        {/* Fixed-height status slot: text changes never move the board. Side pots take two short lines at most. */}
+        {layout.footer && (
+          <div className="flex h-6 w-full shrink-0 items-center justify-center text-center text-ink-200/80" data-testid="table-status" aria-live="polite">
+            {status ? (
+              <span className="text-xs tracking-[0.06em]">{status}</span>
+            ) : sidePots ? (
+              <span className="line-clamp-2 rounded-md bg-black/45 px-2 text-[10px] leading-3 text-ink-200" title={sidePots} data-testid="side-pots">
+                {sidePots}
+              </span>
+            ) : null}
+          </div>
+        )}
       </div>
 
       {/* seats, bets, dealer button */}
@@ -140,7 +237,7 @@ export function TableScene({
               isMe={seat.seatIndex === mySeat}
               isActor={!!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled'}
               deadline={hand?.deadline ?? null}
-              turnMs={s.table.turnSeconds * 1000}
+              turnMs={s.table.turnSeconds * 1000 + (hand?.extraMs ?? 0)}
               isDealer={hand?.buttonSeat === seat.seatIndex}
               isHost={!!s.table.hostId && seat.userId === s.table.hostId}
               blind={hand && hand.stage === 'preflop' ? (hand.sbSeat === seat.seatIndex ? 'SB' : hand.bbSeat === seat.seatIndex ? 'BB' : null) : null}
@@ -151,19 +248,23 @@ export function TableScene({
               canSit={canSit}
               onSit={() => onSit(seat.seatIndex)}
               onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
-              compact={compact}
+              onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? onShow : undefined}
+              reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
+              react={seat.seatIndex === mySeat ? react : undefined}
+              density={density}
+              amounts={amounts}
               style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
             />
             {seat.streetBet > 0 && hand?.stage !== 'settled' && (
-              <div className="absolute z-20 -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
-                <ChipStack amount={seat.streetBet} size={compact ? '1rem' : '1.25rem'} />
+              <div className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
+                <ChipStack amount={seat.streetBet} size={`${d.chip}px`} text={amounts.fmt(seat.streetBet, true)} />
               </div>
             )}
           </div>
         );
       })}
 
-      <CueLayer cues={cues} consume={consumeCues} geometry={geometry} mySeat={mySeat} reducedMotion={reducedMotion} />
+      <CueLayer cues={cues} consume={consumeCues} geometry={geometry} pot={layout.pot} mySeat={mySeat} reducedMotion={reducedMotion} />
     </div>
   );
 }

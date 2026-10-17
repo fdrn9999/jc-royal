@@ -1,8 +1,41 @@
 import { z } from 'zod';
+import type { PublicRole } from './social';
 import type { TableCue, TableView } from './table';
 
 /** An automatic rebuy's total limit may cover at most this many rebuys of the chosen amount. */
 export const AUTO_REBUY_MAX_TIMES = 5;
+
+/** Quick reactions a seated player can send: shown for a moment over their avatar, never stored, no effect on play. */
+export const REACTIONS = ['clap', 'laugh', 'cry', 'wow', 'cool', 'fire', 'heart', 'gg'] as const;
+export type ReactionId = (typeof REACTIONS)[number];
+export const REACTION_EMOJI: Record<ReactionId, string> = { clap: '👏', laugh: '😂', cry: '😭', wow: '😮', cool: '😎', fire: '🔥', heart: '❤️', gg: '🤝' };
+/** At least this long between two reactions from one player (the default; the social policy sets it). */
+export const REACTION_COOLDOWN_MS = 2_000;
+/** And at most `max` of them in any `windowMs` (the default; the social policy sets it). */
+export const REACTION_BURST = { max: 5, windowMs: 30_000 } as const;
+/** The room forgives this much early arrival: two taps the client spaced correctly can reach it a little closer. */
+export const REACTION_SLACK_MS = 300;
+
+/** How fast one seated player may send reactions: `cooldownMs` apart, and at most `burstMax` in any `burstWindowMs`. */
+export interface ReactionRules {
+  cooldownMs: number;
+  burstMax: number;
+  burstWindowMs: number;
+}
+/** The limits before the social policy existed, and for a room or a policy that does not say. */
+export const DEFAULT_REACTION_RULES: ReactionRules = { cooldownMs: REACTION_COOLDOWN_MS, burstMax: REACTION_BURST.max, burstWindowMs: REACTION_BURST.windowMs };
+
+/**
+ * Milliseconds until a player who sent reactions at `times` (oldest first) may send another at `now` (0: now), under
+ * `rules`. The room and the client apply the same rule: the client so that a tap the room would refuse is not offered.
+ */
+export function reactionWait(times: readonly number[], now: number, rules: ReactionRules = DEFAULT_REACTION_RULES): number {
+  const recent = times.filter((at) => now - at < rules.burstWindowMs);
+  const last = recent[recent.length - 1];
+  const cooldown = last === undefined ? 0 : last + rules.cooldownMs - now;
+  const burst = recent.length >= rules.burstMax ? recent[recent.length - rules.burstMax]! + rules.burstWindowMs - now : 0;
+  return Math.max(0, cooldown, burst);
+}
 
 /**
  * Client-generated id of a command. The room answers it with `ack` (or an `error` carrying it) and applies an id
@@ -60,7 +93,22 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
   }),
   /** The seated player's auto-muck setting: a losing showdown hand stays face down where the rules allow it. */
   z.object({ t: z.literal('muck'), reqId: ReqId, on: z.boolean() }),
+  /** Shows one of the player's two cards (0 or 1) from the hand that just ended, until the next deal. Auto-muck on only. */
+  z.object({ t: z.literal('show'), reqId: ReqId, card: z.number().int().min(0).max(1) }),
+  /**
+   * Adds time from the player's time bank to their current turn. `seq` and `seen` (HandView.seq and HandView.extraMs, 0
+   * when absent) are what the player saw: a second tap sent before the first one's result was shown adds nothing.
+   */
+  z.object({
+    t: z.literal('timeBank'),
+    reqId: ReqId,
+    handId: z.string().min(1).max(128),
+    seq: z.number().int().nonnegative(),
+    seen: z.number().int().nonnegative(),
+  }),
   z.object({ t: z.literal('chat'), text: z.string().trim().min(1).max(200), reqId: ReqId.optional() }),
+  /** A quick reaction from the sender's seat (seated players only). Sent once: one that missed its moment is not retried. */
+  z.object({ t: z.literal('react'), reaction: z.enum(REACTIONS), reqId: ReqId.optional() }),
   z.object({ t: z.literal('ping') }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
@@ -69,6 +117,8 @@ export interface ChatMessage {
   id: string;
   userId: string;
   nickname: string;
+  /** Staff only (see PublicRole): the role the sender held when the line was posted. */
+  role?: PublicRole;
   text: string;
   at: number;
 }
@@ -98,6 +148,14 @@ export type ErrorCode =
   | 'suspended'
   /** An admin ended this connection (close 4004); the client does not reconnect on its own. */
   | 'disconnected'
+  /** The time bank is off at this table, or the player has none (a table bot, not dealt in). */
+  | 'time_bank_off'
+  /** Less than TIME_BANK_MIN_USE_MS left in the player's time bank. */
+  | 'time_bank_empty'
+  /** A tournament table: no sitting down, leaving, topping up, rebuying or waitlist (docs/TOURNAMENT.md). */
+  | 'tournament_table'
+  /** Quick reactions are off service-wide (the social policy). */
+  | 'reactions_off'
   | 'internal';
 
 /**
@@ -121,6 +179,8 @@ export type ServerMessage =
   | { t: 'state'; state: TableView; cues: TableCue[] }
   | { t: 'chat'; message: ChatMessage }
   | { t: 'chatHistory'; messages: ChatMessage[] }
+  /** A quick reaction, to everyone at the table; `seatIndex` and `userId` are the sender's when the room took it. */
+  | { t: 'react'; seatIndex: number; userId: string; reaction: ReactionId; at: number }
   | { t: 'ack'; reqId: string }
   | { t: 'error'; code: ErrorCode; message: string; reqId?: string }
   | { t: 'notice'; code: NoticeCode; amount?: number }

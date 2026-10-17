@@ -141,6 +141,69 @@
       "when": 1792080038471,
       "tag": "0019_daily_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792133462932,
+      "tag": "0020_refill",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792138750820,
+      "tag": "0021_bots",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792148477308,
+      "tag": "0022_referrals",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1792171028309,
+      "tag": "0023_hand_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792177631620,
+      "tag": "0024_user_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792183255558,
+      "tag": "0025_time_bank",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1792189294331,
+      "tag": "0026_tournaments",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1792202259161,
+      "tag": "0027_admin_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1792209311578,
+      "tag": "0028_social_policies",
+      "breakpoints": true
     }
   ]
 }

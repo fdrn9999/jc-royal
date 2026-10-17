@@ -6,6 +6,8 @@ type Locale = 'ko' | 'en';
 type Notice = { title: string; body: string };
 type ReportTarget = 'post' | 'comment' | 'player' | 'dm';
 type ReportReason = 'spam' | 'abuse' | 'inappropriate' | 'cheating' | 'other';
+/** Which side of a referral the member is: the one who shared the code, or the new member who signed up with it. */
+type ReferralSide = 'referrer' | 'invitee';
 
 /** What was reported, from the reporter's side ("the post you reported") and the reported member's ("your post"). */
 const KO_REPORTED = { post: '게시글을', comment: '댓글을', player: '플레이어를', dm: '1:1 메시지를' } as const;
@@ -47,6 +49,39 @@ const NOTICES = {
         `회원님의 ${KO_YOUR[target]}에 대한 신고를 검토한 결과 운영 정책 위반(${KO_REASON[reason]})으로 확인되었습니다.` +
         (hidden ? `\n해당 ${KO_YOUR[target]}은 숨김 처리되었습니다.` : ''),
     }),
+    /** A referral reward paid. `other`: the other member's nickname (null when it is not known any more). */
+    referralPaid: (side: ReferralSide, amount: number, other: string | null): Notice => ({
+      title: '추천 보상 지급 안내',
+      body:
+        (side === 'referrer'
+          ? `회원님의 추천 코드로 ${other ? `'${other}' 님이` : '새 회원이'} 가입해 추천 보상을 받았습니다.`
+          : `추천 코드${other ? `('${other}' 님)` : ''}로 가입해 추천 보상을 받았습니다.`) +
+        `\n+${n(amount)} 가상 칩이 지급되었습니다. 가입 축하 칩과 별도이며, 현금 가치가 없는 플레이 전용 가상 칩입니다.`,
+    }),
+    /** Account settings reset by staff (apps/api/src/routes/admin-settings.ts). Never carries the staff reason. */
+    settingsReset: (): Notice => ({
+      title: '계정 설정 초기화 안내',
+      body:
+        '운영팀이 계정 설정(테마·4색 덱·초보자 모드·위험 액션 확인·자동 머크·금액 단위·빠른 반응·즐겨찾기 테이블)을 기본값으로 초기화했습니다.\n' +
+        '기기마다 다음 동기화 때 반영되며, 소리 등 기기별 설정은 그대로입니다. 설정에서 언제든 다시 바꿀 수 있습니다.',
+    }),
+    settingsRestored: (): Notice => ({
+      title: '계정 설정 복구 안내',
+      body: '운영팀이 초기화했던 계정 설정을 초기화 전 상태로 복구했습니다. 기기마다 다음 동기화 때 반영됩니다.',
+    }),
+    /** Tournaments (lib/tournament.ts): free, no prize. Never carries the staff reason. */
+    tournamentStarted: (name: string): Notice => ({
+      title: '토너먼트 시작 안내',
+      body: `'${name}' 토너먼트가 시작되었습니다. 토너먼트 화면에서 테이블에 입장하세요.\n자리를 비워도 좌석은 남아 블라인드를 냅니다. 토너먼트 칩은 이 대회에서만 쓰이며 지갑 칩과 관계없습니다.`,
+    }),
+    tournamentCancelled: (name: string): Notice => ({
+      title: '토너먼트 취소 안내',
+      body: `등록하신 '${name}' 토너먼트가 시작 전에 운영팀에 의해 취소되었습니다. 참가비가 없는 무료 대회라 따로 처리할 것은 없습니다.`,
+    }),
+    tournamentAborted: (name: string): Notice => ({
+      title: '토너먼트 운영 중단 안내',
+      body: `참가하신 '${name}' 토너먼트가 진행 중에 운영팀에 의해 중단되었습니다. 이미 정해진 탈락 순위만 기록되며 우승자는 없습니다. 지갑 칩은 바뀌지 않습니다.`,
+    }),
   },
   en: {
     welcome: (grant: number): Notice => ({
@@ -74,6 +109,36 @@ const NOTICES = {
       body:
         `We reviewed a report about your ${EN_YOUR[target]} and found that it breached our operating policy (${EN_REASON[reason]}).` +
         (hidden ? `\nThe ${EN_YOUR[target]} has been hidden.` : ''),
+    }),
+    referralPaid: (side: ReferralSide, amount: number, other: string | null): Notice => ({
+      title: 'Referral reward paid',
+      body:
+        (side === 'referrer'
+          ? `${other ? `'${other}'` : 'A new member'} signed up with your referral code, so you received a referral reward.`
+          : `You signed up with a referral code${other ? ` from '${other}'` : ''}, so you received a referral reward.`) +
+        `\n+${n(amount)} virtual chips were added. They are separate from the welcome chips and are play-only virtual chips with no cash value.`,
+    }),
+    settingsReset: (): Notice => ({
+      title: 'Your account settings were reset',
+      body:
+        'Our team reset your account settings (theme, four-colour deck, beginner mode, risky action confirmation, auto-muck, amount unit, quick reactions and favourite tables) to the defaults.\n' +
+        'Each device picks this up the next time it syncs; settings kept on each device, such as sound, are unchanged. You can change them again in Settings at any time.',
+    }),
+    settingsRestored: (): Notice => ({
+      title: 'Your account settings were restored',
+      body: 'Our team restored the account settings that had been reset to what they were before. Each device picks this up the next time it syncs.',
+    }),
+    tournamentStarted: (name: string): Notice => ({
+      title: 'Your tournament has started',
+      body: `The '${name}' tournament has started. Open it from the tournaments page to take your seat.\nIf you are away, your seat stays and posts the blinds. Tournament chips are used only in this tournament and have nothing to do with your wallet.`,
+    }),
+    tournamentCancelled: (name: string): Notice => ({
+      title: 'Tournament cancelled',
+      body: `The '${name}' tournament you registered for was cancelled by our team before it started. It was a free tournament, so there is nothing else to do.`,
+    }),
+    tournamentAborted: (name: string): Notice => ({
+      title: 'Tournament stopped',
+      body: `The '${name}' tournament you played in was stopped by our team while it was running. Only the places already decided are kept, and there is no winner. Your wallet chips are unchanged.`,
     }),
   },
 } as const;

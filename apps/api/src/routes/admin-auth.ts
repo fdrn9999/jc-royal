@@ -23,7 +23,7 @@ import { requireAdmin } from '../lib/auth';
 import { DUMMY_HASH, verifyPassword } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
-import { capabilitiesOf } from '../lib/permissions';
+import { capabilitiesOf, grantsOf } from '../lib/permissions';
 import { ADMIN_REAUTH_WINDOW, createSession, destroySession } from '../lib/session';
 
 
@@ -85,6 +85,8 @@ export const adminAuthRoutes = new Hono<AppEnv>()
       sessionStartedAt: s.createdAt,
       /** What this administrator may do beyond the console's common features (the console hides the rest). */
       permissions: capabilitiesOf(u.role),
+      /** The features switched on for this administrator (every one for a super admin). The API checks them itself. */
+      grants: await grantsOf(c),
     });
   })
   /** Re-enter the password to unlock sensitive actions for a few minutes. */

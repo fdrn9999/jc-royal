@@ -21,7 +21,7 @@ export interface PolicyDoc {
 }
 
 /** Date this draft was written. The effective date is set only after legal review. */
-export const POLICY_DRAFT_DATE = '2026-10-15';
+export const POLICY_DRAFT_DATE = '2026-10-16';
 const [y, m, d] = POLICY_DRAFT_DATE.split('-').map(Number);
 
 export const LEGAL_DRAFT: Record<'ko' | 'en', string> = {
@@ -46,6 +46,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           '신고: 신고한 회원, 신고 대상, 사유와 상세 내용, 신고 시점에 서버가 복사해 둔 증거(5항)',
           '아카데미: 학습 진도와 배지',
           '남용 방지: 요청 횟수를 세기 위한 기록(IP 주소, 이메일 주소 또는 회원 번호를 키로 사용)',
+          '추천: 내 추천 코드, 추천한 회원과 가입한 회원, 보상 금액·상태·지급 일시, 가입 때 쓴 이메일 주소와 접속 네트워크를 서버의 비밀 키로 일방향 변환한 값(해시), 추천한 회원과 같은 IP 주소였는지 여부',
           '선택: 프로필 이미지 주소(URL)',
         ],
       },
@@ -53,7 +54,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         heading: '2. 처리 목적',
         items: [
           '회원 식별, 가입 의사와 이메일 주소 소유 확인, 만 14세 이상 연령 확인',
-          '게임 진행, 가상 칩 지급·정산과 기록 보존, 게임 무결성 확인과 분쟁 대응',
+          '게임 진행, 가상 칩 지급·정산과 기록 보존, 게임 무결성 확인과 분쟁 대응, 추천 보상 지급과 중복·부정 지급 방지',
           '게시판·쪽지·친구·1:1 대화 등 커뮤니티 기능 제공',
           '부정 로그인·부정 이용·괴롭힘 방지, 신고 처리와 이용 제한',
           '비밀번호 재설정 등 서비스 메일 발송(이용 언어 기준)',
@@ -72,17 +73,18 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           '테이블 채팅: 게임 서버가 테이블마다 최근 50줄만 보관하고, 테이블이 닫힌 뒤 24시간(플레이어 신고 가능 기간)이 지나면 삭제합니다.',
           '게시글·댓글: 직접 삭제하면 바로 화면에서 숨기지만, 신고와 분쟁 대응을 위해 데이터베이스에는 남습니다.',
           '가상 칩 원장, 핸드·좌석 기록: 칩 총량 검증과 분쟁 대응을 위해 탈퇴 후에도 회원 번호(무작위 값)로 보관합니다.',
+          '추천 기록: 추천 보상 지급의 근거로 탈퇴 후에도 회원 번호로 보관합니다. 가입 이메일 주소의 해시 값은 탈퇴 뒤 같은 메일함으로 다시 가입해 보상을 또 받는 것을 막기 위해 함께 남고, 접속 네트워크의 해시 값은 30일이 지나면 정리 작업에서 지웁니다. 추천 코드는 탈퇴하면 삭제합니다.',
           '신고 기록과 증거, 운영자 감사 기록은 5항과 6항을 따릅니다. 관계 법령이 보존을 요구하는 정보는 그 법령이 정한 기간 동안 보관합니다.',
         ],
         review:
-          '보관 기한을 정하지 않은 항목(1:1 대화, 직접 삭제한 게시글·댓글, 칩 원장·핸드 기록)의 기한과, 탈퇴 후 가명으로 남기는 기록의 보관 근거는 법무 검토 후 확정합니다.',
+          '보관 기한을 정하지 않은 항목(1:1 대화, 직접 삭제한 게시글·댓글, 칩 원장·핸드 기록, 추천 기록과 가입 이메일의 해시 값)의 기한과, 탈퇴 후 가명으로 남기는 기록의 보관 근거는 법무 검토 후 확정합니다.',
       },
       {
         heading: '4. 회원 탈퇴 시 처리',
         items: [
-          '바로 삭제: 로그인 세션, 친구·친구 요청·차단, 보내거나 받은 1:1 대화 전부(상대방 화면에서도 사라집니다), 운영자 쪽지함, 아카데미 진도와 배지, 쓰지 않은 비밀번호 재설정 링크',
+          '바로 삭제: 로그인 세션, 친구·친구 요청·차단, 보내거나 받은 1:1 대화 전부(상대방 화면에서도 사라집니다), 운영자 쪽지함, 아카데미 진도와 배지, 쓰지 않은 비밀번호 재설정 링크, 추천 코드',
           '복구할 수 없게 바꾸는 정보: 이메일 주소, 닉네임, 생년월일, 프로필 이미지, 비밀번호',
-          '남는 정보: 게시글·댓글(작성자를 "탈퇴한 회원"으로 표시), 가상 칩 원장, 핸드·좌석 기록, 회원이 했거나 받은 신고와 그 증거. 이 기록은 회원 번호(무작위 값)로만 남습니다. 다른 회원의 핸드 기록에는 탈퇴한 회원이 "deleted-…" 형태의 이름으로 보입니다.',
+          '남는 정보: 게시글·댓글(작성자를 "탈퇴한 회원"으로 표시), 가상 칩 원장, 핸드·좌석 기록, 회원이 했거나 받은 신고와 그 증거, 추천 기록(아직 지급하지 않은 보상은 지급하지 않고 닫음). 이 기록은 회원 번호(무작위 값)로만 남습니다. 다른 회원의 핸드 기록에는 탈퇴한 회원이 "deleted-…" 형태의 이름으로 보입니다.',
           '남은 가상 칩은 소멸하며 복구할 수 없습니다.',
         ],
         review: '탈퇴 후 게시글·댓글을 남길지(또는 일정 기간 뒤 삭제할지)와 남기는 기록의 범위는 법무 검토가 필요합니다.',
@@ -101,7 +103,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         heading: '6. 운영자 접근 권한과 감사 기록',
         items: [
           '관리자 화면은 운영자 계정만 쓸 수 있습니다. 30분 동안 쓰지 않거나 로그인한 지 8시간이 지나면 다시 로그인해야 하고, 회원 정보 내보내기·칩 조정·이용 제한 같은 민감한 작업은 5분 안에 비밀번호를 다시 확인해야 합니다.',
-          '운영자가 볼 수 있는 정보: 회원 목록과 상세(이메일 주소, 닉네임, 생년월일, 가입·인증 일시, 칩 내역, 이용 제한 상태 등), 게시글·댓글, 신고와 증거. 1:1 대화는 신고된 메시지와 5항의 증거만 볼 수 있고, 그 밖의 대화는 관리자 화면에서 볼 수 없습니다.',
+          '운영자가 볼 수 있는 정보: 회원 목록과 상세(이메일 주소, 닉네임, 생년월일, 가입·인증 일시, 칩 내역, 이용 제한 상태 등), 게시글·댓글, 신고와 증거, 추천 관계와 보상 상태(추천 화면에는 이메일 주소·IP 주소 대신 추천한 회원과 같은 IP 주소였는지 여부만 보입니다). 1:1 대화는 신고된 메시지와 5항의 증거만 볼 수 있고, 그 밖의 대화는 관리자 화면에서 볼 수 없습니다.',
           '감사 기록: 회원 목록 조회, 회원 상세 조회, 신고 조회, 파일 내보내기, 칩 조정, 이용 제한·해제, 게시물 숨김, 쪽지 발송, 신고 처리 등 운영자의 조회와 조치마다 운영자, 시각, 대상, 운영자의 IP 주소를 기록합니다.',
           '회원 정보 파일(CSV) 내보내기 항목: 회원 ID, 이메일 주소, 닉네임, 이용 언어, 회원 등급·상태, 가상 칩 잔액, 가입 일시, 생년월일, 이메일 인증 일시, 개인정보 동의 버전·일시, 이용 제한 사유. 내보낸 파일은 목적을 달성하면 지체 없이 파기합니다.',
           '서비스 인프라(Cloudflare) 계정 관리자는 기술적으로 데이터베이스에 직접 접근할 수 있고, 이 접근은 관리자 화면의 감사 기록에 남지 않습니다. 장애 대응과 법령상 의무 이행에 필요한 경우에만 접근합니다.',
@@ -133,7 +135,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         items: [
           '실명, 전화번호, 주소, 결제 정보, 위치 정보는 수집하지 않습니다.',
           '생년월일은 만 14세 이상인지 확인하고 연령대별 이용 통계를 내는 데만 씁니다.',
-          'IP 주소와 브라우저 정보는 로그인 세션 보안, 요청 횟수 제한, 운영자 조치 기록에만 씁니다.',
+          'IP 주소와 브라우저 정보는 로그인 세션 보안, 요청 횟수 제한, 운영자 조치 기록, 추천 보상의 단시간 다수 가입 확인(해시 값으로만 30일 보관)에만 씁니다. 같은 네트워크라는 이유만으로 추천 보상을 거절하지 않습니다.',
           '운영자가 1:1 대화를 볼 수 있는 범위는 신고된 메시지로 한정합니다.',
         ],
         review: '연령 확인에 생년월일 전체가 필요한지(출생 연도와 월만으로 충분한지)는 법무 검토가 필요합니다.',
@@ -182,6 +184,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           'Reports: who reported, the target, reason and details, and evidence the server copied at the time of the report (section 5)',
           'Academy: learning progress and badges',
           'Abuse prevention: request counters keyed by IP address, email address or member ID',
+          'Referrals: your referral code, who invited whom, reward amounts, status and payment times, one-way values (hashes) made with the server\'s secret key from the email address and network used at sign-up, and whether the IP address matched the inviting member\'s',
           'Optional: profile image address (URL)',
         ],
       },
@@ -189,7 +192,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         heading: '2. Why we process it',
         items: [
           'To identify members, confirm sign-up and email ownership, and confirm you are 14 or older',
-          'To run the games, grant, settle and record virtual chips, check game integrity and resolve disputes',
+          'To run the games, grant, settle and record virtual chips, check game integrity and resolve disputes, and pay referral rewards without paying twice or to abuse',
           'To provide community features: board, messages, friends and 1:1 chat',
           'To prevent unauthorized sign-ins, abuse and harassment, and to handle reports and restrictions',
           'To send service mail such as password reset links, in your preferred language',
@@ -208,17 +211,18 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           'Table chat: the game server keeps only the latest 50 lines per table and deletes them 24 hours after the table closes (the window for reporting a player).',
           'Posts and comments: when you delete one it is hidden at once, but it stays in the database for reports and disputes.',
           'Virtual chip ledger, hand and seat records: kept after account deletion under your member ID (a random value), to verify chip totals and resolve disputes.',
+          'Referral records: kept after account deletion under your member ID, as the basis of the rewards paid. The hash of the sign-up email address stays with them so that signing up again with the same inbox does not earn another reward; the hash of the network is removed by the clean-up job after 30 days. Your referral code is deleted when you delete your account.',
           'Reports, evidence and operator audit records follow sections 5 and 6. Information that a law requires us to keep is kept for the period that law sets.',
         ],
         review:
-          'Retention periods for items with no fixed period (1:1 messages, deleted posts and comments, chip ledger and hand records) and the legal basis for keeping pseudonymous records after account deletion will be settled after legal review.',
+          'Retention periods for items with no fixed period (1:1 messages, deleted posts and comments, chip ledger and hand records, referral records and the sign-up email hash) and the legal basis for keeping pseudonymous records after account deletion will be settled after legal review.',
       },
       {
         heading: '4. When you delete your account',
         items: [
-          'Deleted at once: sign-in sessions, friends, friend requests and blocks, every 1:1 message you sent or received (it also disappears for the other person), your operator inbox, Academy progress and badges, and unused password reset links',
+          'Deleted at once: sign-in sessions, friends, friend requests and blocks, every 1:1 message you sent or received (it also disappears for the other person), your operator inbox, Academy progress and badges, unused password reset links, and your referral code',
           'Replaced so it cannot be restored: email address, nickname, date of birth, profile image and password',
-          'What remains: posts and comments (the author is shown as "Withdrawn member"), the virtual chip ledger, hand and seat records, and reports you made or received with their evidence. These remain only under your member ID (a random value). In other players\' hand history you appear under a name like "deleted-…".',
+          'What remains: posts and comments (the author is shown as "Withdrawn member"), the virtual chip ledger, hand and seat records, reports you made or received with their evidence, and referral records (rewards not yet paid are closed unpaid). These remain only under your member ID (a random value). In other players\' hand history you appear under a name like "deleted-…".',
           'Remaining virtual chips are forfeited and cannot be restored.',
         ],
         review: 'Whether posts and comments should remain after account deletion (or be deleted after a period), and the scope of records kept, needs legal review.',
@@ -237,7 +241,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         heading: '6. Operator access and audit records',
         items: [
           'Only operator accounts can use the admin console. Operators must sign in again after 30 minutes of inactivity or 8 hours after sign-in, and must re-enter their password within 5 minutes before sensitive actions such as exporting member data, adjusting chips or restricting accounts.',
-          'Operators can see: the member list and details (email address, nickname, date of birth, sign-up and verification dates, chip history, restriction status and so on), posts and comments, and reports with their evidence. For 1:1 messages they can see only reported messages and the evidence in section 5; other conversations are not visible in the admin console.',
+          'Operators can see: the member list and details (email address, nickname, date of birth, sign-up and verification dates, chip history, restriction status and so on), posts and comments, reports with their evidence, and who invited whom with the reward status (the referral pages show only whether the IP address matched the inviting member\'s, never an email or IP address). For 1:1 messages they can see only reported messages and the evidence in section 5; other conversations are not visible in the admin console.',
           'Audit records: every operator view and action — member list views, member detail views, report views, file exports, chip adjustments, restrictions and their removal, hiding posts, sending messages, handling reports — is logged with the operator, time, target and the operator\'s IP address.',
           'Fields in a member file (CSV) export: member ID, email address, nickname, preferred language, role and status, virtual chip balance, sign-up date, date of birth, email verification date, privacy consent version and date, restriction reason. Exported files are destroyed without delay once their purpose is fulfilled.',
           'Administrators of the Service\'s infrastructure account (Cloudflare) can technically access the database directly, and that access is not recorded in the admin console\'s audit records. It is used only for incident response and legal obligations.',
@@ -269,7 +273,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         items: [
           'We do not collect real names, phone numbers, postal addresses, payment details or location.',
           'Date of birth is used only to confirm you are 14 or older and for usage statistics by age group.',
-          'IP addresses and browser information are used only for sign-in session security, request limits and records of operator actions.',
+          'IP addresses and browser information are used only for sign-in session security, request limits, records of operator actions and spotting many referral sign-ups in a short time (kept only as a hash, for 30 days). A shared network alone is never a reason to refuse a referral reward.',
           'Operators can see 1:1 messages only when they have been reported.',
         ],
         review: 'Whether age checks need the full date of birth (or only the year and month) needs legal review.',

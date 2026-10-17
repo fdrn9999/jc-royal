@@ -11,6 +11,17 @@ export function formatChips(n: number, compact = false): string {
   return fmt(abs / 1_000, 'K');
 }
 
+/**
+ * An amount in big blinds, for reading only: 50 at a 20 big blind → "2.5 BB". Rounded to two decimals (a nonzero
+ * amount below 0.01 BB keeps two significant digits), so anything sent stays the integer chips it came from.
+ */
+export function formatBB(n: number, bigBlind: number, compact = false): string {
+  const bb = n / bigBlind;
+  if (compact && Math.abs(bb) >= 10_000) return `${formatChips(bb, true)} BB`;
+  const tiny = bb !== 0 && Math.abs(bb) < 0.01;
+  return `${bb.toLocaleString('en-US', tiny ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: 2 })} BB`;
+}
+
 export function formatDate(ms: number, locale: string): string {
   return new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(ms);
 }

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { HandNoteDto } from './api';
+import type { PublicRole } from './social';
 
 export const PostInputSchema = z.object({
   title: z.string().trim().min(2).max(100),
@@ -25,7 +27,10 @@ export interface AuthorDto {
   id: string;
   nickname: string;
   avatarUrl: string | null;
+  /** Staff (admin or super admin). Kept for web builds older than `role`. */
   isAdmin: boolean;
+  /** Staff only (see PublicRole). */
+  role?: PublicRole;
   /** The author deleted their account: the post stays, shown as "withdrawn member" with no nickname or avatar. */
   withdrawn?: true;
 }
@@ -56,6 +61,10 @@ export interface HandPotDto {
 export interface HandReplayPlayer {
   seatIndex: number;
   nickname: string;
+  /** Staff only (see PublicRole): the member's role now, not when the hand was played. */
+  role?: PublicRole;
+  /** A table bot (the server played its moves). */
+  bot?: true;
   holeCards: string[] | null;
   stackStart: number;
   net: number;
@@ -95,6 +104,8 @@ export interface HandDetailDto extends HandReplayFields {
   handNumber: number;
   endedAt: number;
   players: (HandReplayPlayer & { userId: string; isYou: boolean })[];
+  /** The viewer's own bookmark, tags and memo on the hand (only ever sent to the viewer). */
+  note: HandNoteDto;
 }
 
 export interface CommentDto {

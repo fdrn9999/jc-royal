@@ -1,8 +1,10 @@
 import { createDb } from '@jc/db';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { AppEnv, Env } from './env';
 import { housekeeping } from './lib/housekeeping';
+import { sharePageResponse } from './lib/og';
 import { countOps } from './lib/ops';
+import { sweepReferrals } from './lib/referral';
 import { sweepRooms } from './lib/room';
 import { rollup } from './lib/stats';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
@@ -17,6 +19,7 @@ import { roomRoutes } from './routes/rooms';
 import { serviceRoutes } from './routes/service';
 import { blockRoutes, dmRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
+import { tournamentRoutes } from './routes/tournaments';
 
 const app = new Hono<AppEnv>();
 
@@ -39,10 +42,24 @@ app.route('/api/blocks', blockRoutes);
 app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
 app.route('/api/rooms', roomRoutes);
+app.route('/api/tournaments', tournamentRoutes);
 app.route('/api/academy', academyRoutes);
 app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
+
+/**
+ * Shareable pages (wrangler.jsonc run_worker_first): the app's index.html with the page's own link preview, so a
+ * crawler that runs no script sees it (lib/og.ts). Everything else is served by Workers Static Assets unchanged.
+ */
+async function sharePage(c: Context<AppEnv>) {
+  if (!c.env.ASSETS) return c.text('not found', 404);
+  return sharePageResponse(c.env.ASSETS, c.env.DB, new URL(c.req.url));
+}
+app.get('/', sharePage);
+app.get('/register', sharePage);
+app.get('/table/:id', sharePage);
+app.get('/board/:id', sharePage);
 
 app.notFound(async (c) => {
   if (c.req.path.startsWith('/api/')) return c.json({ error: { code: 'not_found', message: 'not found' } }, 404);
@@ -68,7 +85,8 @@ export default {
   /**
    * Cron trigger (wrangler.jsonc `triggers`): rolls up the day that ended into the operations statistics (before the
    * housekeeping deletes old activity markers), deletes expired short-lived rows, then wakes rooms whose close or idle
-   * close stalled. Awaited, so a failure shows as a failed run; a failed rollup does not stop the clean-up.
+   * close stalled, and settles referrals waiting for a payout (lib/referral.ts). Awaited, so a failure shows as a failed
+   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest.
    */
   async scheduled(_event, env) {
     let failed: unknown = null;
@@ -80,6 +98,12 @@ export default {
     }
     console.log('housekeeping', JSON.stringify(await housekeeping(env.DB)));
     console.log('room sweep', JSON.stringify(await sweepRooms(env)));
+    try {
+      console.log('referral sweep', JSON.stringify(await sweepReferrals(env)));
+    } catch (e) {
+      failed ??= e;
+      console.error('referral sweep failed', e instanceof Error ? e.message : String(e));
+    }
     if (failed) throw failed;
   },
 } satisfies ExportedHandler<Env>;

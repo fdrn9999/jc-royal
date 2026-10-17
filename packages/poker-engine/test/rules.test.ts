@@ -146,6 +146,11 @@ describe('blinds, positions and betting rules', () => {
     expect(v.result!.showdown).toEqual([]);
     const seen = h.seatInfo('p1');
     expect(seen.get(0)!.holeCards).toBeNull();
+    // The room can still read a folded player's own cards (to show one on request); the views never carry them.
+    expect(h.holeCardsOf('p1')).toHaveLength(2);
+    expect(h.holeCardsOf('p1')).toEqual(seen.get(1)!.holeCards);
+    expect(h.seatInfo('p0').get(1)!.holeCards).toBeNull();
+    expect(h.holeCardsOf('nobody')).toBeNull();
   });
 
   it('a player who cannot cover the big blind posts all-in and can still win', async () => {
@@ -379,5 +384,56 @@ describe('server-side guards', () => {
     expect(rec.players.map((p) => p.net)).toEqual([15, -5, -10]);
     expect(rec.actions.map((a) => a.type)).toEqual(['post-sb', 'post-bb', 'raise', 'fold', 'fold']);
     expect(rec.players.reduce((a, p) => a + p.net, 0)).toBe(0);
+  });
+});
+
+describe('time added to a turn (time bank)', () => {
+  it('moves only the current actor deadline, survives a restart and ends with the turn', async () => {
+    const h = start([1000, 1000, 1000]); // dealt at 1_000, turn 20s
+    expect(h.actorId()).toBe('p0');
+    expect(h.deadline()).toBe(21_000);
+    expect(h.handView().extraMs).toBeUndefined();
+    const seq = h.version;
+
+    expect(h.extendTurn('p0', 10_000)).toEqual({ ok: true, cues: [] });
+    expect(h.extendTurn('p0', 5_000).ok).toBe(true);
+    expect(h.deadline()).toBe(36_000);
+    expect(h.turnExtraMs).toBe(15_000);
+    expect(h.handView()).toMatchObject({ deadline: 36_000, extraMs: 15_000, seq });
+    expect(h.version).toBe(seq); // not an event: the hand's history is unchanged
+
+    const restored = HandEngine.restore(JSON.parse(JSON.stringify(h.persist())), 5_000);
+    expect(restored.deadline()).toBe(36_000);
+    expect(restored.turnExtraMs).toBe(15_000);
+
+    await must(restored, 'p0', 'call'); // at 3_000
+    expect(restored.actorId()).toBe('p1');
+    expect(restored.turnExtraMs).toBe(0);
+    expect(restored.deadline()).toBe(23_000);
+    expect(restored.handView().extraMs).toBeUndefined();
+    expect(restored.persist().turnExtraMs).toBeUndefined();
+  });
+
+  it('refuses anyone but the actor, a bad amount and a settled hand', async () => {
+    const h = start([1000, 1000, 1000]);
+    expect(h.extendTurn('p1', 10_000)).toMatchObject({ ok: false, code: 'not_your_turn' });
+    expect(h.extendTurn('nobody', 10_000)).toMatchObject({ ok: false, code: 'not_your_turn' });
+    for (const ms of [0, -1_000, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(h.extendTurn('p0', ms)).toMatchObject({ ok: false, code: 'illegal_action' });
+    }
+    expect(h.deadline()).toBe(21_000);
+    await must(h, 'p0', 'fold');
+    await must(h, 'p1', 'fold');
+    expect(h.isSettled).toBe(true);
+    expect(h.extendTurn('p2', 10_000)).toMatchObject({ ok: false, code: 'hand_over' });
+  });
+
+  it('a turn timeout after the added time still checks or folds as before', async () => {
+    const h = start([1000, 1000, 1000]);
+    h.extendTurn('p0', 10_000);
+    expect((await h.timeout('p0', 31_000)).ok).toBe(true);
+    expect(h.seatInfo(null).get(0)!.folded).toBe(true);
+    expect(h.actorId()).toBe('p1');
+    expect(h.deadline()).toBe(51_000);
   });
 });

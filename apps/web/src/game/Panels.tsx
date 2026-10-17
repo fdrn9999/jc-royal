@@ -1,12 +1,29 @@
 import { sound, type AudioSettings } from '@jc/audio';
 import { AUTO_REBUY_MAX_TIMES, type ChatMessage, type TableView } from '@jc/types';
 import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { EmojiPicker } from '../components/EmojiPicker';
+import { InstallSettingsLazy } from '../components/InstallLazy';
+import { RefillHintLazy } from '../components/RefillHintLazy';
+import { MemberName, RoleBadge } from '../components/MemberName';
+import { useAmounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { setPrefs, usePrefs } from '../lib/prefs';
+import { AMOUNT_UNITS, pullSettings, setPrefs, usePrefs, useSettingsSync } from '../lib/prefs';
 import { RequestError, rid, type TableSocketApi } from './useTableSocket';
+
+/**
+ * Whether chips ran short at any point while a dialog was open: the free refill note then stays until it closes, so
+ * a refill taken from it still shows what it paid once the dialog offers the buy-in or top-up it made possible.
+ */
+function useShortWhileOpen(open: boolean, short: boolean) {
+  const [was, setWas] = useState(false);
+  useEffect(() => {
+    setWas((w) => (open ? w || short : false));
+  }, [open, short]);
+  return open && (was || short);
+}
 
 export function BuyInModal({
   open,
@@ -29,12 +46,15 @@ export function BuyInModal({
 }) {
   const { t } = useI18n();
   const { minBuyIn, maxBuyIn, bigBlind } = state.table;
+  // The wallet reads in chips; what goes to the table reads in the player's unit, with the exact chips where it is paid.
+  const a = useAmounts(bigBlind);
   const cap = Math.min(maxBuyIn, wallet);
   const [amount, setAmount] = useState(() => Math.min(cap, Math.max(minBuyIn, bigBlind * 100)));
   useEffect(() => {
     if (open) setAmount(Math.min(cap, Math.max(minBuyIn, bigBlind * 100)));
   }, [open, cap, minBuyIn, bigBlind]);
   const affordable = cap >= minBuyIn;
+  const refill = useShortWhileOpen(open, !affordable);
   return (
     <Modal
       open={open}
@@ -46,7 +66,7 @@ export function BuyInModal({
             {t('common.cancel')}
           </Button>
           <Button disabled={!affordable} loading={busy} onClick={() => onConfirm(amount)} data-testid="buyin-confirm">
-            {t('table.buyIn')} {formatChips(amount)}
+            {t('table.buyIn')} {a.exact(amount)}
           </Button>
         </>
       }
@@ -59,18 +79,22 @@ export function BuyInModal({
         <div className="flex justify-between text-sm">
           <span className="text-ink-300">{t('lobby.buyin')}</span>
           <span className="font-mono">
-            {formatChips(minBuyIn)} – {formatChips(maxBuyIn)}
+            {a.fmt(minBuyIn)} – {a.fmt(maxBuyIn)}
           </span>
         </div>
         {affordable ? (
           <>
             <input type="range" min={minBuyIn} max={cap} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('table.buyIn')} />
-            <div className="text-center font-mono text-3xl font-semibold text-gold-300 tabular-nums">{formatChips(amount)}</div>
+            <div className="text-center font-mono text-3xl font-semibold text-gold-300 tabular-nums" data-testid="buyin-amount">
+              {a.fmt(amount)}
+              {a.unit === 'bb' && <span className="block text-xs font-normal text-ink-400">{formatChips(amount)}</span>}
+            </div>
           </>
         ) : (
           <p className="text-sm text-danger">{t('err.insufficient_balance')}</p>
         )}
-        {error && <p className="text-sm text-danger" role="alert">{error}</p>}
+        {refill && <RefillHintLazy />}
+        {error &&<p className="text-sm text-danger" role="alert">{error}</p>}
       </div>
     </Modal>
   );
@@ -110,6 +134,7 @@ export function TopUpModal({
   const lo = Math.max(1, minBuyIn - stack);
   const room = maxBuyIn - stack;
   const hi = Math.min(room, wallet);
+  const refill = useShortWhileOpen(open, room > 0 && wallet < lo);
   const [amount, setAmount] = useState(lo);
   const [busy, setBusy] = useState<'topup' | 'rebuy' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -167,21 +192,23 @@ export function TopUpModal({
     }
   }
 
+  // The wallet, and sentences that name chips, stay in chips; the stack and the amounts for it read in the player's unit.
   const fmt = (n: number) => formatChips(n);
+  const a = useAmounts(bigBlind);
   return (
     <Modal open={open} onClose={onClose} title={t('topup.title')}>
       <div className="flex flex-col gap-4" data-testid="topup-modal">
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div className="flex flex-col rounded-lg bg-ink-850/80 px-3 py-2">
             <span className="text-xs text-ink-400">{t('topup.stack')}</span>
-            <span className="font-mono font-semibold tabular-nums" data-testid="topup-stack">{fmt(stack)}</span>
+            <span className="font-mono font-semibold tabular-nums" data-testid="topup-stack">{a.fmt(stack)}</span>
           </div>
           <div className="flex flex-col rounded-lg bg-ink-850/80 px-3 py-2">
             <span className="text-xs text-ink-400">{t('table.wallet')}</span>
             <span className="font-mono font-semibold text-gold-300 tabular-nums" data-testid="topup-wallet">{fmt(wallet)}</span>
           </div>
         </div>
-        <p className="text-xs text-ink-300">{t('topup.limit', { min: fmt(minBuyIn), max: fmt(maxBuyIn) })}</p>
+        <p className="text-xs text-ink-300">{t('topup.limit', { min: a.fmt(minBuyIn), max: a.fmt(maxBuyIn) })}</p>
 
         {state.you.topUpQueued !== null && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/30 bg-gold-500/10 px-3 py-2 text-sm text-gold-300" role="status">
@@ -206,14 +233,15 @@ export function TopUpModal({
             {inHand && <p className="text-xs text-ink-300">{t('topup.afterHand')}</p>}
             {hi > lo && <input type="range" min={lo} max={hi} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('topup.open')} data-testid="topup-range" />}
             <div className="flex items-center justify-between gap-3">
-              <span className="font-mono text-2xl font-semibold text-gold-300 tabular-nums" data-testid="topup-amount">+{fmt(amount)}</span>
-              <span className="font-mono text-xs text-ink-400">→ {fmt(stack + amount)}</span>
+              <span className="font-mono text-2xl font-semibold text-gold-300 tabular-nums" data-testid="topup-amount">+{a.fmt(amount)}</span>
+              <span className="font-mono text-xs text-ink-400">→ {a.fmt(stack + amount)}</span>
             </div>
             <Button loading={busy === 'topup'} disabled={busy !== null} onClick={topUp} data-testid="topup-confirm">
-              {t('topup.confirm', { amount: fmt(amount) })}
+              {t('topup.confirm', { amount: a.exact(amount) })}
             </Button>
           </div>
         )}
+        {refill && <RefillHintLazy />}
 
         <div className="jc-divider" />
         <section className="flex flex-col gap-3" data-testid="rebuy-section">
@@ -224,7 +252,7 @@ export function TopUpModal({
           {auto ? (
             <div className="flex flex-col gap-2">
               <p className="text-sm text-gold-300" data-testid="rebuy-active">
-                {t('rebuy.active', { amount: fmt(auto.amount), spent: fmt(auto.spent), cap: fmt(auto.cap) })}
+                {t('rebuy.active', { amount: a.exact(auto.amount), spent: a.fmt(auto.spent), cap: a.fmt(auto.cap) })}
               </p>
               <Button variant="outline" loading={busy === 'rebuy'} disabled={busy !== null} onClick={() => setRebuy(false)} data-testid="rebuy-off">
                 {t('rebuy.off')}
@@ -235,7 +263,7 @@ export function TopUpModal({
               <label className="flex flex-col gap-1.5 text-xs text-ink-300">
                 <span className="flex justify-between">
                   {t('rebuy.amount')}
-                  <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="rebuy-amount">{fmt(rebuyAmount)}</span>
+                  <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="rebuy-amount">{a.exact(rebuyAmount)}</span>
                 </span>
                 <input
                   type="range"
@@ -266,7 +294,7 @@ export function TopUpModal({
                       className={cx('jc-tap rounded-lg border px-2 py-2 text-xs font-semibold', times === n ? 'border-gold-400 text-gold-300' : 'border-white/10 text-ink-200')}
                       data-testid={`rebuy-times-${n}`}
                     >
-                      {t('rebuy.times', { n, total: fmt(rebuyAmount * n) })}
+                      {t('rebuy.times', { n, total: a.fmt(rebuyAmount * n) })}
                     </button>
                   ))}
                 </div>
@@ -306,6 +334,7 @@ export function ChatPanel({
   const { t } = useI18n();
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const shown = hidden?.size ? chat.filter((m) => !hidden.has(m.userId)) : chat;
   useEffect(() => {
     // Block body on purpose: newer Chrome returns a Promise from scrollIntoView,
@@ -323,27 +352,33 @@ export function ChatPanel({
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 text-sm">
         {shown.map((m) => (
-          <div key={m.id} className="break-words" data-testid="chat-line">
+          <div key={m.id} className={cx('break-words', m.role && 'jc-role-line')} data-role={m.role} data-testid="chat-line">
             {onPick && m.userId !== myId ? (
-              <button type="button" className="font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">{m.nickname}</button>
+              <button type="button" className="max-w-full align-bottom font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">
+                <MemberName name={m.nickname} role={m.role} />
+              </button>
             ) : (
-              <span className="font-semibold text-gold-300">{m.nickname}</span>
-            )}{' '}
+              <MemberName name={m.nickname} role={m.role} className="font-semibold text-gold-300" />
+            )}
+            {m.role && <RoleBadge role={m.role} className="ml-1 align-[1px]" />}{' '}
             <span className="text-ink-100">{m.text}</span>
           </div>
         ))}
         <div ref={end} />
       </div>
       {canChat && (
-        <form onSubmit={submit} className="mt-2 flex gap-2">
+        <form onSubmit={submit} className="relative mt-2 flex gap-2">
           <input
+            ref={field}
             value={text}
             maxLength={200}
             onChange={(e) => setText(e.target.value)}
             placeholder={t('table.chatPlaceholder')}
             className="h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-ink-850 px-3 text-base sm:h-9 sm:text-sm"
             aria-label={t('table.chat')}
+            data-testid="chat-input"
           />
+          <EmojiPicker inputRef={field} value={text} onChange={setText} maxLength={200} small />
           <Button size="sm" type="submit" className="h-11! sm:h-9!" aria-label={t('table.chat')}>
             ↵
           </Button>
@@ -360,17 +395,56 @@ function useAudioSettings(): AudioSettings {
   );
 }
 
-/** Sound, table look and language; from the header it also offers logout (`onLogout`). */
-export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onClose: () => void; onLogout?: () => void }) {
+/**
+ * Where the table look and aids are kept and how saving them goes: the account's, on every device. A failed save still
+ * applies here and is retried; an administrator's reset and a newer change from another device are told once.
+ */
+function SettingsSyncLine() {
+  const { t } = useI18n();
+  const { me } = useAuth();
+  const sync = useSettingsSync();
+  if (!me || sync.state === 'off') return null;
+  const text = { loading: 'settings.sync.loading', saving: 'settings.sync.saving', saved: 'settings.sync.saved', error: 'settings.sync.error' } as const;
+  return (
+    <div className="flex flex-col gap-1 text-xs" data-testid="settings-sync" data-state={sync.state}>
+      <div className="flex items-center justify-between gap-2">
+        <span role="status" className={sync.state === 'error' ? 'text-danger' : 'text-ink-300'}>
+          {t(text[sync.state])}
+        </span>
+        {sync.state === 'error' && (
+          <Button size="sm" variant="ghost" className="shrink-0" onClick={() => pullSettings(true)} data-testid="settings-sync-retry">
+            {t('settings.sync.retry')}
+          </Button>
+        )}
+      </div>
+      {sync.reset && <span className="text-ink-300">{t('settings.sync.reset')}</span>}
+      {sync.kept > 0 && <span className="text-ink-300">{t('settings.sync.kept')}</span>}
+    </div>
+  );
+}
+
+/** Sound, table look and language; from the header it also offers logout (`onLogout`), at a table its invite link (`top`). */
+export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean; onClose: () => void; onLogout?: () => void; top?: ReactNode }) {
   const { t, locale } = useI18n();
   const { chooseLocale } = useAuth();
   const prefs = usePrefs();
   const audio = useAudioSettings();
+  // Opening the settings reads the account's again unless they were a moment ago (another device may have changed them).
+  useEffect(() => {
+    if (open) pullSettings();
+  }, [open]);
   return (
     <Modal open={open} onClose={onClose} title={t('settings.title')}>
       <div className="flex flex-col gap-5">
+        {top && (
+          <>
+            {top}
+            <div className="jc-divider" />
+          </>
+        )}
         <section className="flex flex-col gap-3">
           <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-ink-300">{t('settings.sound')}</h4>
+          <p className="-mt-1.5 text-xs text-ink-300">{t('settings.deviceOnly')}</p>
           <label className="flex items-center justify-between gap-3 text-sm">
             {t('settings.master')}
             <input type="range" min={0} max={1} step={0.05} value={audio.master} onChange={(e) => sound.update({ master: Number(e.target.value) })} className="w-40" />
@@ -387,6 +461,7 @@ export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onCl
         <div className="jc-divider" />
         <section className="flex flex-col gap-3">
           <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-ink-300">{t('settings.theme')}</h4>
+          <SettingsSyncLine />
           <div className="grid grid-cols-2 gap-2">
             {THEMES.map((th) => (
               <button
@@ -420,6 +495,34 @@ export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onCl
             </span>
             <input type="checkbox" checked={prefs.autoMuck} onChange={(e) => setPrefs({ autoMuck: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-automuck" />
           </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.reactions')}
+              <span className="text-xs text-ink-300">{t('settings.reactionsHint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.reactions} onChange={(e) => setPrefs({ reactions: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-reactions" />
+          </label>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5" id="amount-unit-label">
+              {t('settings.amountUnit')}
+              <span className="text-xs text-ink-300">{t('settings.amountUnitHint')}</span>
+            </span>
+            <div className="flex shrink-0 rounded-lg border border-white/10 p-0.5" role="radiogroup" aria-labelledby="amount-unit-label">
+              {AMOUNT_UNITS.map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  role="radio"
+                  aria-checked={prefs.amountUnit === u}
+                  onClick={() => setPrefs({ amountUnit: u })}
+                  className={cx('jc-tap min-h-9 min-w-12 rounded-md px-2.5 text-xs font-semibold', prefs.amountUnit === u ? 'bg-gold-500/20 text-gold-300' : 'text-ink-300 hover:text-ivory')}
+                  data-testid={`settings-unit-${u}`}
+                >
+                  {t(`settings.unit.${u}` as MsgKey)}
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
         <div className="jc-divider" />
         <Field label={t('settings.language')}>
@@ -430,6 +533,7 @@ export function SettingsModal({ open, onClose, onLogout }: { open: boolean; onCl
             </select>
           )}
         </Field>
+        <InstallSettingsLazy />
         {onLogout && (
           <>
             <div className="jc-divider" />

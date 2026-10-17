@@ -25,6 +25,9 @@ export const ledgerTypeLabel = labeler({
   cash_out: 'ledgerCashOut',
   admin_adjust: 'ledgerAdminAdjust',
   reconcile: 'ledgerReconcile',
+  free_refill: 'ledgerFreeRefill',
+  bot_fund: 'ledgerBotFund',
+  referral: 'ledgerReferral',
 });
 /** The memos the server writes itself (sign-up grant, buy-in seat, top-ups); a memo an admin typed is shown as it is. */
 const SYSTEM_MEMOS: Record<string, Key> = {
@@ -33,6 +36,10 @@ const SYSTEM_MEMOS: Record<string, Key> = {
   'auto rebuy': 'memoAutoRebuy',
   'recorded difference': 'memoRecorded',
   'balance corrected': 'memoCorrected',
+  'free refill': 'memoFreeRefill',
+  'bot fund': 'memoBotFund',
+  'referral reward (invited)': 'memoReferralInvited',
+  'referral reward (referrer)': 'memoReferralReferrer',
 };
 export function memoLabel(t: Tr, memo: string | null | undefined): string {
   if (!memo) return '';
@@ -60,6 +67,10 @@ export const stageLabel = labeler({ preflop: 'stagePreflop', flop: 'stageFlop', 
 const auditNames = labeler({
   'admin.access_denied': 'auditAccessDenied',
   'admin.bootstrap': 'auditAdminBootstrap',
+  'admin.grants.list': 'auditGrantsList',
+  'admin.grants.reset': 'auditGrantsReset',
+  'admin.grants.update': 'auditGrantsUpdate',
+  'admin.grants.view': 'auditGrantsView',
   'admin.login': 'auditAdminLogin',
   'admin.login.failed': 'auditAdminLoginFailed',
   'admin.reauth': 'auditAdminReauth',
@@ -67,6 +78,11 @@ const auditNames = labeler({
   'admin.session.end': 'auditSessionEnd',
   'admin.session.end_others': 'auditSessionEndOthers',
   'board.comment.status': 'auditCommentStatus',
+  'bots.events': 'auditBotsEvents',
+  'bots.integrity': 'auditBotsIntegrity',
+  'bots.policy': 'auditBotsPolicy',
+  'bots.stop': 'auditBotsStop',
+  'bots.view': 'auditBotsView',
   'board.notice.create': 'auditNoticeCreate',
   'board.notice.update': 'auditNoticeUpdate',
   'board.post.status': 'auditPostStatus',
@@ -84,6 +100,27 @@ const auditNames = labeler({
   'note.delete': 'auditNoteDelete',
   'reconcile.resolve': 'auditReconcileResolve',
   'reconcile.run': 'auditReconcileRun',
+  'referral.approve': 'auditReferralApprove',
+  'referral.list': 'auditReferralList',
+  'referral.member': 'auditReferralMember',
+  'referral.pause': 'auditReferralPause',
+  'referral.policy': 'auditReferralPolicy',
+  'referral.reject': 'auditReferralReject',
+  'referral.resume': 'auditReferralResume',
+  'referral.settle': 'auditReferralSettle',
+  'referral.view': 'auditReferralView',
+  'refill.claims': 'auditRefillClaims',
+  'refill.member': 'auditRefillMember',
+  'refill.pause': 'auditRefillPause',
+  'refill.policy': 'auditRefillPolicy',
+  'refill.resume': 'auditRefillResume',
+  'refill.stats': 'auditRefillStats',
+  'refill.view': 'auditRefillView',
+  'brand.og_image': 'auditBrandOgImage',
+  'brand.view': 'auditBrandView',
+  'settings.member': 'auditSettingsMember',
+  'settings.reset': 'auditSettingsReset',
+  'settings.restore': 'auditSettingsRestore',
   'service.notice.create': 'auditSvcNoticeCreate',
   'service.notice.delete': 'auditSvcNoticeDelete',
   'service.notice.end': 'auditSvcNoticeEnd',
@@ -96,10 +133,29 @@ const auditNames = labeler({
   'report.note': 'auditReportNote',
   'report.update': 'auditReportUpdate',
   'report.resolve': 'auditReportResolve',
+  'social.policy': 'auditSocialPolicy',
+  'social.view': 'auditSocialView',
   'table.close': 'auditTableClose',
   'table.create': 'auditTableCreate',
   'table.update': 'auditTableUpdate',
   'table.control': 'auditTableControl',
+  'table.timer_recover': 'auditTimerRecover',
+  'timebank.policy': 'auditTimeBankPolicy',
+  'timebank.view': 'auditTimeBankView',
+  'tournament.abort': 'auditTnAbort',
+  'tournament.cancel': 'auditTnCancel',
+  'tournament.create': 'auditTnCreate',
+  'tournament.list': 'auditTnList',
+  'tournament.pause': 'auditTnPause',
+  'tournament.recover': 'auditTnRecover',
+  'tournament.registration': 'auditTnRegistration',
+  'tournament.resume': 'auditTnResume',
+  'tournament.start': 'auditTnStart',
+  'tournament.view': 'auditTnView',
+  'tournament_template.create': 'auditTplCreate',
+  'tournament_template.list': 'auditTplList',
+  'tournament_template.status': 'auditTplStatus',
+  'tournament_template.update': 'auditTplUpdate',
   'user.chips': 'auditUserChips',
   'user.chips_duplicate': 'auditChipsDuplicate',
   'user.chips_refused': 'auditChipsRefused',
@@ -126,7 +182,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'timebank', 'social', 'report', 'board', 'message', 'service', 'maintenance', 'tournament', 'tournament_template'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -135,22 +191,37 @@ export const auditFamilyLabel = labeler({
   hand: 'famHand',
   ledger: 'famLedger',
   reconcile: 'famReconcile',
+  refill: 'famRefill',
+  bots: 'famBots',
+  referral: 'famReferral',
+  settings: 'famSettings',
+  timebank: 'famTimeBank',
+  social: 'famSocial',
   report: 'famReport',
   board: 'famBoard',
   message: 'famMessage',
   service: 'famService',
   maintenance: 'famMaintenance',
+  tournament: 'famTournament',
+  tournament_template: 'famTournamentTemplate',
 });
 /** Super-admin abilities (the API's lib/permissions.ts). */
 export const capabilityLabel = labeler({
   'members.export': 'capMembersExport',
   'roles.change': 'capRolesChange',
   'admins.manage': 'capAdminsManage',
+  'admins.grants': 'capAdminsGrants',
   'chips.large': 'capChipsLarge',
   'ledger.correct': 'capLedgerCorrect',
   'notes.delete_any': 'capNotesDeleteAny',
   'audit.all': 'capAuditAll',
   'sessions.all': 'capSessionsAll',
+  'refill.policy': 'capRefillPolicy',
+  'bots.policy': 'capBotsPolicy',
+  'referral.policy': 'capReferralPolicy',
+  'timebank.policy': 'capTimeBankPolicy',
+  'social.policy': 'capSocialPolicy',
+  'tournament.structure': 'capTournamentStructure',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({
@@ -159,6 +230,7 @@ export const featureLabel = labeler({
   memberExport: 'featMemberExport',
   memberNotes: 'featMemberNotes',
   sanctions: 'featSanctions',
+  disconnect: 'featDisconnect',
   chips: 'featChips',
   resetLinks: 'featResetLinks',
   roles: 'featRoles',
@@ -170,6 +242,13 @@ export const featureLabel = labeler({
   economy: 'economy',
   stats: 'featStats',
   reconcile: 'reconcile',
+  refill: 'featRefill',
+  bots: 'featBots',
+  referral: 'featReferral',
+  settings: 'featSettings',
+  social: 'featSocial',
+  brand: 'featBrand',
+  tournaments: 'tournamentsNav',
   audit: 'audit',
   reports: 'reports',
   board: 'board',
@@ -179,6 +258,8 @@ export const featureLabel = labeler({
   academy: 'academy',
   security: 'security',
 });
+/** A feature switch (the API's GRANTS): each is named after the feature it opens. */
+export const grantLabel = featureLabel;
 /** What became of a member's seat when an admin ended their connections (the room's `kick`). */
 export const seatOutcomeLabel = labeler({ left: 'seatLeft', after_hand: 'seatAfterHand', kept: 'seatKept', retrying: 'seatRetrying' });
 /** Problems the table room and the D1 comparison report on the admin table page. */
@@ -196,11 +277,32 @@ export const tableIssueLabel = labeler({
   settings_not_applied: 'issueSettingsNotApplied',
   session_without_seat: 'issueSessionWithoutSeat',
   seat_without_session: 'issueSeatWithoutSession',
+  timer_unarmed: 'issueTimerUnarmed',
 });
 /** Service notices and maintenance windows (the admin service page). */
 export const noticeKindLabel = labeler({ general: 'noticeKindGeneral', urgent: 'noticeKindUrgent', maintenance: 'noticeKindMaintenance' });
 export const noticeStateLabel = labeler({ live: 'noticeStateLive', scheduled: 'noticeStateScheduled', ended: 'noticeStateEnded', deleted: 'noticeStateDeleted' });
 export const maintStateLabel = labeler({ active: 'maintStateActive', scheduled: 'maintStateScheduled', finished: 'maintStateFinished', ended_early: 'maintStateEndedEarly', cancelled: 'maintStateCancelled' });
+/** Table bots: difficulty, the operations log's kinds and the codes the room writes with them (others are shown as they are). */
+export const botLevelLabel = labeler({ easy: 'botLevelEasy', normal: 'botLevelNormal', hard: 'botLevelHard' });
+export const botEventKindLabel = labeler({ join: 'botEvJoin', leave: 'botEvLeave', fund_exhausted: 'botEvFundExhausted', join_failed: 'botEvJoinFailed', action_failed: 'botEvActionFailed' });
+const botCodes = labeler({
+  busted: 'botCodeBusted',
+  bots_off: 'botCodeBotsOff',
+  no_members: 'botCodeNoMembers',
+  yield: 'botCodeYield',
+  limit: 'botCodeLimit',
+  policy_off: 'botCodePolicyOff',
+  busy: 'botCodeBusy',
+  max_bots: 'botCodeMaxBots',
+  fund_exhausted: 'botCodeFundExhausted',
+  error: 'botCodeError',
+  no_view: 'botCodeNoView',
+});
+export function botEventCodeLabel(t: Tr, code: string | null | undefined): string {
+  const funded = code ? /^funded (\d+)$/.exec(code) : null;
+  return funded ? t('botCodeFunded', { n: Number(funded[1]).toLocaleString() }) : botCodes(t, code);
+}
 export const seatPhaseLabel = labeler({ pending: 'phasePending', cashing: 'phaseCashing' });
 export const topUpStateLabel = labeler({ queued: 'topUpQueued', debiting: 'topUpDebiting' });
 export const targetTypeLabel = labeler({
@@ -211,11 +313,47 @@ export const targetTypeLabel = labeler({
   notice: 'targetNotice',
   post: 'targetPost',
   reconciliation: 'targetReconciliation',
+  referral: 'targetReferral',
   report: 'targetReport',
   session: 'targetSession',
   table: 'targetTable',
+  tournament: 'targetTournament',
+  tournament_template: 'targetTournamentTemplate',
   user: 'targetUser',
 });
+/** Tournaments (docs/TOURNAMENT.md): the tournament's and each entry's state, why one needs an operator, how it ended. */
+export const tnStatusLabel = labeler({ registering: 'tnStRegistering', closed: 'tnStClosed', running: 'tnStRunning', finished: 'tnStFinished', cancelled: 'tnStCancelled', aborted: 'tnStAborted' });
+export const tnEntryStatusLabel = labeler({
+  registered: 'tnEnRegistered',
+  unregistered: 'tnEnUnregistered',
+  dropped: 'tnEnDropped',
+  playing: 'tnEnPlaying',
+  eliminated: 'tnEnEliminated',
+  won: 'tnEnWon',
+  stopped: 'tnEnStopped',
+});
+export const tnRecoveryLabel = labeler({
+  room_silent: 'tnRcRoomSilent',
+  pause_stuck: 'tnRcPauseStuck',
+  resume_stuck: 'tnRcResumeStuck',
+  stalled: 'tnRcStalled',
+  table_open: 'tnRcTableOpen',
+  start_stuck: 'tnRcStartStuck',
+});
+/** `end_reason` (completed | cancelled | aborted), or the status when it has none. */
+export const tnEndReasonLabel = labeler({ completed: 'tnStFinished', finished: 'tnStFinished', cancelled: 'tnStCancelled', aborted: 'tnStAborted' });
+/** Why a template's values do not hold together (@jc/types tournamentStructureProblem). */
+export const structureProblemLabel = labeler({
+  min_players_over_capacity: 'tnPbMinPlayers',
+  small_blind_not_below_big: 'tnPbSmallBlind',
+  levels_decrease: 'tnPbLevelsDecrease',
+  start_stack_too_small: 'tnPbStartStack',
+  initial_over_max: 'tbInitialOverMax',
+  unit_over_max: 'tbUnitOverMax',
+  whole_seconds: 'tbWholeSeconds',
+});
+/** Why a registration was dropped when the tournament started. */
+export const startDroppedLabel = labeler({ suspended: 'tnDrSuspended', bot: 'tnDrBot', unverified: 'tnDrUnverified', min_hands: 'tnDrMinHands', active_elsewhere: 'tnDrElsewhere' });
 
 const HAND_NAMES: Record<string, Key> = {
   'high-card': 'handHighCard',

@@ -2,7 +2,9 @@ import { handLabelKey, type Card, type HandReviewDto } from '@jc/types';
 import { Button, formatChips, formatDate, PlayingCard } from '@jc/ui';
 import { useState } from 'react';
 import { HandReplay } from '../game/HandReplay';
+import { useAmounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { MemberName } from './MemberName';
 
 const STAGES = ['preflop', 'flop', 'turn', 'river'] as const;
 /** Board cards revealed on each street. */
@@ -12,6 +14,8 @@ const STREET_CARDS: Record<string, [number, number]> = { preflop: [0, 0], flop: 
 export function HandReview({ hand }: { hand: HandReviewDto }) {
   const { t, locale } = useI18n();
   const [replaying, setReplaying] = useState(false);
+  // The blinds stay in chips (they define the big blind); the pot and the bets read in the player's unit.
+  const amt = useAmounts(hand.bigBlind ?? 0);
   const name = (seat: number) => hand.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const act = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   return (
@@ -22,14 +26,14 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
         </h3>
         <span className="text-xs text-ink-400">
           {hand.smallBlind !== null && `${formatChips(hand.smallBlind)}/${formatChips(hand.bigBlind ?? 0)} · `}
-          {t('table.pot')} {formatChips(hand.potTotal)} · {formatDate(hand.endedAt, locale)}
+          {t('table.pot')} {amt.fmt(hand.potTotal)} · {formatDate(hand.endedAt, locale)}
         </span>
       </header>
       <Button variant={replaying ? 'ghost' : 'outline'} size="sm" className="mb-3" onClick={() => setReplaying(!replaying)} aria-expanded={replaying} data-testid="replay-toggle">
         {replaying ? t('replay.close') : `▶ ${t('replay.open')}`}
       </Button>
       {replaying && (
-        <div className="mb-3">
+        <div className="-mx-3 mb-3 sm:mx-0">
           <HandReplay hand={hand} heroSeat={hand.players.find((p) => p.isAuthor)?.seatIndex ?? null} />
         </div>
       )}
@@ -40,9 +44,11 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
         {hand.players.map((p) => (
           <li key={p.seatIndex} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${p.isAuthor ? 'bg-gold-500/10' : 'bg-white/[0.03]'}`}>
             <span className="flex gap-0.5">{(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.5rem" />)}</span>
-            <span className={`min-w-0 flex-1 truncate ${p.isAuthor ? 'font-semibold text-gold-300' : ''}`}>{p.nickname}</span>
+            <span className="flex min-w-0 flex-1">
+              <MemberName name={p.nickname} role={p.role} bot={p.bot} className={p.isAuthor ? 'font-semibold text-gold-300' : undefined} />
+            </span>
             {p.rankClass && <span className="text-[11px] text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
-            <span className={`font-mono text-xs tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{p.net > 0 ? '+' : ''}{formatChips(p.net)}</span>
+            <span className={`font-mono text-xs tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{p.net > 0 ? '+' : ''}{amt.fmt(p.net)}</span>
           </li>
         ))}
       </ul>
@@ -60,7 +66,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
                 {rows.map((a, i) => (
                   <li key={i} className="flex justify-between gap-2">
                     <span className="truncate text-ink-300">{name(a.seatIndex)}</span>
-                    <span className="shrink-0 text-ivory">{act(a.type)}{a.amount > 0 ? ` ${formatChips(a.amount)}` : ''}</span>
+                    <span className="shrink-0 text-ivory">{act(a.type)}{a.amount > 0 ? ` ${amt.fmt(a.amount)}` : ''}</span>
                   </li>
                 ))}
               </ol>

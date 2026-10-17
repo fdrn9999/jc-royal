@@ -1,29 +1,51 @@
 import { sound } from '@jc/audio';
-import type { ActionType, PublicUserDto, TableView } from '@jc/types';
+import type { ActionType, PublicUserDto, SeatView, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
-import { HandRankingChart } from '../academy/HandChart';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
 import { JoinCodeModal } from '../components/JoinCode';
+import { LinkShare } from '../components/Share';
 import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
-import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
+import type { ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
-import { TableScene, useBoxSize, useTableLayout } from '../game/TableScene';
+import { TimeBankButton } from '../game/TimeBank';
+import { useReactionSender } from '../game/Reactions';
+import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { rememberVisit } from '../lib/lobby';
-import { usePrefs } from '../lib/prefs';
+import { siteUrl } from '../lib/share';
+import { hasPendingMuck, pullSettings, usePrefs, useSettingsSync } from '../lib/prefs';
+import { useAmounts } from '../lib/amount';
 import { when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
+
+// Opened on a tap (a player's card, a report, the hand chart): loaded then, not with the table.
+const loadSocial = () => import('../components/Social');
+const PlayerCard = lazy(() => loadSocial().then((m) => ({ default: m.PlayerCard })));
+const BotCard = lazy(() => loadSocial().then((m) => ({ default: m.BotCard })));
+const ReportModal = lazy(() => loadSocial().then((m) => ({ default: m.ReportModal })));
+const HandRankingChart = lazy(() => import('../academy/HandChart').then((m) => ({ default: m.HandRankingChart })));
+// Only tournament tables show these, so they (and their text) stay out of the entry chunk; a tournament table's id
+// starts with sng- (docs/TOURNAMENT.md), which lets the page fetch them before the room's first state arrives.
+const loadTournamentHud = () => import('../game/TournamentHud');
+const TournamentBar = lazy(() => loadTournamentHud().then((m) => ({ default: m.TournamentBar })));
+const TournamentResult = lazy(() => loadTournamentHud().then((m) => ({ default: m.TournamentResult })));
+
+/** Nobody still in is dealt a hand: everyone left is away, and the level clock waits with them (not an operator's pause). */
+function tournamentStalled(s: TableView): boolean {
+  const tn = s.tournament;
+  return !!tn && tn.status === 'running' && !tn.paused && tn.levelEndsAt === null && tn.levelLeftMs !== null && !s.nextHandAt && !s.hand;
+}
 
 function useCountdown(target: number | null) {
   const [now, setNow] = useState(Date.now());
@@ -43,6 +65,9 @@ export function TableRoute() {
 
 export function TablePage() {
   const { id = '' } = useParams();
+  useEffect(() => {
+    if (id.startsWith('sng-')) void loadTournamentHud();
+  }, [id]);
   const [params, setParams] = useSearchParams();
   // Sent here by quick play: if the seat is gone on arrival, offer the next table instead of a dead end.
   const quick = useMemo(() => parseQuick(params.get('quick')), [params]);
@@ -55,6 +80,8 @@ export function TablePage() {
   const sock = useTableSocket(id);
   const { reopen } = sock;
   const s = sock.state;
+  // Table amounts in the player's unit; the wallet balance and the blinds in the header stay in chips.
+  const amt = useAmounts(s?.table.bigBlind ?? 0);
   const [codeOpen, setCodeOpen] = useState(false);
   const [buySeat, setBuySeat] = useState<number | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -64,9 +91,19 @@ export function TablePage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chart, setChart] = useState(false);
   const [picked, setPicked] = useState<PublicUserDto | null>(null);
+  const [pickedBot, setPickedBot] = useState<SeatView | null>(null);
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
+  // The player card and report dialogs mount on the first tap (their code loads then) and stay mounted.
+  const social = useRef(false);
+  if (picked || pickedBot || reporting) social.current = true;
   // Table chat from players I muted on this device or blocked; it hides their lines for me only.
   const hiddenChat = useHiddenChat(me?.id);
+  // Quick reactions: off in the settings or by the social policy (`reactions: null`), none show and none can be sent;
+  // muted or blocked players' are not shown.
+  const reactRules = s?.reactions;
+  const reactOn = prefs.reactions && reactRules !== null;
+  const reactSender = useReactionSender(sock.send, reactRules ?? undefined);
+  const reactions = useMemo(() => (reactOn ? sock.reactions.filter((r) => !hiddenChat.has(r.userId)) : []), [reactOn, sock.reactions, hiddenChat]);
   const [toast, setToast] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [topUpOpen, setTopUpOpen] = useState(false);
@@ -166,13 +203,40 @@ export function TablePage() {
     setParams(params, { replace: true });
   }, [s, params, setParams, sock]);
 
-  // Auto-muck is a device setting the room applies to my seat: tell it when the two differ. A room that predates muck
-  // reports no setting and is not asked. Re-run on reconnect, since a command sent while offline is not kept.
+  // Opening a table reads the account's settings again unless they were a moment ago (auto-muck may have changed elsewhere).
+  useEffect(() => pullSettings(), []);
+
+  // Auto-muck is the account's setting, which the room applies to my seat: tell the room this device's value when the
+  // two differ (on taking a seat, after a change here, and on reconnect, since a command sent offline is not kept), once
+  // the account's settings have been read. When the room's changed by itself while I sat (another device or an
+  // administrator changed the account's setting, and the server told my tables), this device's value is the older one:
+  // the settings are read again instead (once), unless it was changed here and is not saved yet. A room that predates
+  // muck reports no setting and is not asked.
   const roomMuck = s?.you.seatIndex != null ? s.you.autoMuck : undefined;
   const { send, status } = sock;
+  const sync = useSettingsSync();
+  const muck = useRef({ room: undefined as boolean | null | undefined, mine: prefs.autoMuck, sent: null as boolean | null, elsewhere: false, pulled: false });
   useEffect(() => {
-    if (status === 'open' && typeof roomMuck === 'boolean' && roomMuck !== prefs.autoMuck) send({ t: 'muck', on: prefs.autoMuck });
-  }, [roomMuck, prefs.autoMuck, send, status]);
+    const m = muck.current;
+    // A command sent while the connection was down is not kept: send again once it is back.
+    if (status !== 'open') m.sent = null;
+    if (typeof m.room === 'boolean' && typeof roomMuck === 'boolean' && roomMuck !== m.room && roomMuck !== m.sent) m.elsewhere = true;
+    if (roomMuck === m.sent) m.sent = null;
+    // Changed here, or read again: this device's value is the account's now.
+    if (prefs.autoMuck !== m.mine || roomMuck === prefs.autoMuck) m.elsewhere = m.pulled = false;
+    m.room = roomMuck;
+    m.mine = prefs.autoMuck;
+    if (status !== 'open' || typeof roomMuck !== 'boolean' || roomMuck === prefs.autoMuck) return;
+    if (m.elsewhere && !hasPendingMuck()) {
+      if (!m.pulled) pullSettings(true);
+      m.pulled = true;
+      return;
+    }
+    // Read first; and once sent, the room's answer is awaited rather than sending the same again.
+    if (sync.state === 'loading' || m.sent === prefs.autoMuck) return;
+    m.sent = prefs.autoMuck;
+    send({ t: 'muck', on: prefs.autoMuck });
+  }, [roomMuck, prefs.autoMuck, send, status, sync.state]);
 
   // The lobby lists tables I opened under "recent".
   const opened = !!s;
@@ -182,7 +246,8 @@ export function TablePage() {
   }, [opened, myId, id]);
 
   const anchor = s?.you.seatIndex ?? 0;
-  const layout = useTableLayout(area, s?.table.maxSeats, anchor);
+  // Seated, my seat is at the bottom with room above my cards for the show-card buttons.
+  const layout = useTableLayout(area, s?.table.maxSeats, anchor, { me: s?.you.seatIndex != null, meTop: 28, footer: true, chars: amountChars(amt.unit) });
 
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
@@ -204,9 +269,24 @@ export function TablePage() {
 
 
   const onAct = useCallback((type: ActionType, amount?: number) => sock.act(type, amount), [sock]);
+  // Time bank: a refusal shows for a moment, except a stale one (this screen was behind; the room sends the state again).
+  const addBankTime = useCallback(
+    async (handId: string, seq: number, seen: number) => {
+      try {
+        await sock.request({ t: 'timeBank', handId, seq, seen });
+      } catch (e) {
+        const code = e instanceof RequestError ? e.code : null;
+        if (code === 'stale_version') return;
+        setToast(err(code));
+        setTimeout(() => setToast(null), 3_500);
+      }
+    },
+    [sock, err],
+  );
 
   const academy = useProgress(me?.id);
   const tip = coachActive(academy, s?.you.seatIndex != null) && myTurn && s ? coachTip(s) : null;
+  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${coachActive(academy, s?.you.seatIndex != null)}`);
   // First-hands coach: count each real hand this player was dealt into while coaching is on.
   const coachedHands = useRef(new Set<string>());
   useEffect(() => {
@@ -271,12 +351,19 @@ export function TablePage() {
                     ? t('table.maintenance', { end: when(s.maintenance.endsAt, locale) })
                     : s.paused
                       ? t('table.paused')
-                      : s.maintenance && s.maintenance.startsAt - Date.now() < 3600_000
+                      : s.tournament?.status === 'running' && s.tournament.paused
+                        ? t('tn.paused')
+                        : tournamentStalled(s)
+                          ? t('tn.allAway')
+                          : s.maintenance && s.maintenance.startsAt - Date.now() < 3600_000
                         ? t('table.maintenanceSoon', { start: when(s.maintenance.startsAt, locale) })
                         : null;
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
+  // A tournament table: no wallet chips here (no buy-in, top-up, rebuy or waiting list), and its seat is not given up
+  // by leaving the screen; the way out goes to the tournament's page.
+  const tn = s?.tournament ?? null;
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 
@@ -296,6 +383,7 @@ export function TablePage() {
               </div>
               {s && (
                 <div className="truncate font-mono text-[11px] text-ink-300">
+                  {tn && <span className="font-sans">{t('tn.hud')} · </span>}
                   {s.table.roomType === 'member' && <span className="font-sans">{isHost ? `👑 ${t('room.host')}` : t('room.member')} · </span>}
                   {formatChips(s.table.smallBlind)}/{formatChips(s.table.bigBlind)}
                   {hand && ` · ${t('table.handNo', { n: hand.number })} · ${t(`stage.${hand.stage}` as MsgKey)}`}
@@ -329,12 +417,24 @@ export function TablePage() {
           <Button size="icon" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
             ⚙
           </Button>
-          <Button size="icon" variant="outline" onClick={seated ? leave : () => nav('/')} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
-            <span aria-hidden className="sm:hidden">⏏</span>
-            <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
-          </Button>
+          {tn ? (
+            <Button size="icon" variant="outline" onClick={() => nav(`/tournaments/${tn.id}`)} data-testid="leave" aria-label={t('tn.toTournament')}>
+              <span aria-hidden className="sm:hidden">🏆</span>
+              <span className="hidden sm:inline">{t('tn.toTournament')}</span>
+            </Button>
+          ) : (
+            <Button size="icon" variant="outline" onClick={seated ? leave : () => nav('/')} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
+              <span aria-hidden className="sm:hidden">⏏</span>
+              <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
+            </Button>
+          )}
         </div>
       </header>
+      {tn && (
+        <Suspense fallback={null}>
+          <TournamentBar tn={tn} />
+        </Suspense>
+      )}
       <div className="z-40">
         <ServiceBanner compact />
       </div>
@@ -372,7 +472,7 @@ export function TablePage() {
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
               <span>{t('quick.missed')}</span>
               <span className="flex gap-2">
-                <Button size="sm" loading={quickPlay.busy} onClick={() => quickPlay.run(quick.filters, [...new Set([...quick.tried, id])])} data-testid="quick-another">
+                <Button size="sm" loading={quickPlay.busy} disabled={!!s?.maintenance?.active} onClick={() => quickPlay.run(quick.filters, [...new Set([...quick.tried, id])])} data-testid="quick-another">
                   {t('quick.another')}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setQuickMissed(false)}>
@@ -386,9 +486,9 @@ export function TablePage() {
 
       <div className="flex min-h-0 flex-1">
         {/* table area */}
-        <div className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
-          {/* Beginner aids and coaching stack above the action bar: reserve room so they never cover my seat. */}
-          <div ref={areaRef} className={cx('relative mx-2 mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mb-24 sm:mt-6', seated && (prefs.beginner || tip) ? 'mb-[12rem]' : 'mb-[6.75rem]')}>
+        <div ref={room.colRef} className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
+          {/* Beginner aids and coaching stack above the action bar: the room they take is kept free so they never cover my seat. */}
+          <div ref={areaRef} className="relative mx-2 mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mt-6" style={room.style}>
             {s && (
               <TableScene
                 s={s}
@@ -396,20 +496,32 @@ export function TablePage() {
                 mySeat={mySeat}
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
-                onSeatClick={(seat) => seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null })}
+                onSeatClick={(seat) =>
+                  seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}) })
+                }
+                onShow={(card) => sock.send({ t: 'show', card })}
+                reactions={reactions}
+                react={seated && reactOn ? reactSender : undefined}
                 nextIn={nextIn}
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}
                 reducedMotion={reducedMotion}
+                amounts={amt}
               />
             )}
           </div>
 
           {/* bottom: action bar / status */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
-            {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert">{toast}</div>}
+          <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
+            {tn && (
+            <Suspense fallback={null}>
+              <TournamentResult tn={tn} />
+            </Suspense>
+          )}
+            {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert" data-transient>{toast}</div>}
             {notice && (
-              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-1 text-xs text-gold-300 sm:py-2 sm:text-sm" role="status" data-testid="table-notice">
+              // In beginner mode the notice stands in for the street note, so it counts like it.
+              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-1 text-xs text-gold-300 sm:py-2 sm:text-sm" role="status" data-testid="table-notice" data-transient={prefs.beginner && hand ? undefined : ''}>
                 {notice}
               </div>
             )}
@@ -425,7 +537,7 @@ export function TablePage() {
                 <span className="mt-0.5 shrink-0 rounded-full bg-info/25 px-1.5 text-[10px] font-bold text-[#a9c8ee]">{t('coach.title')}</span>
                 <span className="min-w-0 flex-1">
                   {tip.key === 'coach.call'
-                    ? t('coach.call', { amount: formatChips(tip.amount), pot: formatChips(tip.pot) })
+                    ? t('coach.call', { amount: amt.fmt(tip.amount), pot: amt.fmt(tip.pot) })
                     : tip.key === 'coach.strong'
                       ? t('coach.strong', { hand: t(`hand.${tip.rankClass}` as MsgKey) })
                       : t(tip.key)}
@@ -443,7 +555,8 @@ export function TablePage() {
                 ) : (
                   <div className="hidden rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:block sm:self-end">{t('table.yourTurn')}</div>
                 )}
-                <ActionBar state={s} onAct={onAct} busy={sock.acting} />
+                <TimeBankButton s={s} onUse={addBankTime} />
+                <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} />
               </>
             )}
             {s && !myTurn && seated && <PreActions s={s} onPick={sock.preAct} />}
@@ -461,7 +574,7 @@ export function TablePage() {
                   </span>
                 )}
                 {!seated && s.reservation && <span className="text-gold-300">{t('table.reserved', { name: s.reservation.nickname })}</span>}
-                {!seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && s.seats.every((x) => x.state !== 'empty') && (
+                {!tn && !seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && s.seats.every((x) => x.state !== 'empty') && (
                   <Button size="sm" variant="outline" onClick={() => sock.send({ t: 'waitlist', join: !s.you.inWaitlist })}>
                     {s.you.inWaitlist ? t('table.leaveWaitlist') : t('table.joinWaitlist')} ({s.waitlist.length})
                   </Button>
@@ -474,21 +587,22 @@ export function TablePage() {
                     </Button>
                   </>
                 )}
-                {seated && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
-                {seated && s.you.topUpQueued !== null && (
+                {seated && tn && s.you.sittingOut && <span className="max-w-xs text-xs text-gold-300" data-testid="tn-away">{t('tn.awayHint')}</span>}
+                {seated && !tn && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
+                {seated && !tn && s.you.topUpQueued !== null && (
                   <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
-                    {t('topup.queued', { amount: formatChips(s.you.topUpQueued) })}
+                    {t('topup.queued', { amount: amt.exact(s.you.topUpQueued) })}
                     <button type="button" className="jc-tap grid size-6 place-items-center rounded-full hover:bg-gold-500/20" onClick={() => sock.send({ t: 'cancelTopUp' })} aria-label={t('topup.cancel')} data-testid="topup-cancel">
                       ✕
                     </button>
                   </span>
                 )}
-                {seated && s.you.autoRebuy && (
+                {seated && !tn && s.you.autoRebuy && (
                   <span className="rounded-full border border-white/10 px-2.5 py-0.5 font-mono text-xs text-ink-200" data-testid="rebuy-badge">
-                    {t('rebuy.badge', { spent: formatChips(s.you.autoRebuy.spent), cap: formatChips(s.you.autoRebuy.cap) })}
+                    {t('rebuy.badge', { spent: amt.fmt(s.you.autoRebuy.spent), cap: amt.fmt(s.you.autoRebuy.cap) })}
                   </span>
                 )}
-                {seated && !s.you.leaving && (
+                {seated && !tn && !s.you.leaving && (
                   <Button size="sm" variant="outline" onClick={() => setTopUpOpen(true)} data-testid="topup-open">
                     {t('topup.open')}
                   </Button>
@@ -525,7 +639,12 @@ export function TablePage() {
               canChat={canChat}
               myId={me?.id}
               hidden={hiddenChat}
-              onPick={(m) => setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: s?.seats.find((x) => x.userId === m.userId)?.avatarUrl ?? null })}
+              onPick={(m) => {
+                // A seated author shows their role now; otherwise the one the line was posted with.
+                const seat = s?.seats.find((x) => x.userId === m.userId);
+                const role = seat ? seat.role : m.role;
+                setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: seat?.avatarUrl ?? null, ...(role ? { role } : {}) });
+              }}
             />
           </div>
           {s && (
@@ -552,7 +671,7 @@ export function TablePage() {
           error={buyErr}
         />
       )}
-      {s && seated && (
+      {s && seated && !tn && (
         <TopUpModal
           open={topUpOpen}
           onClose={() => setTopUpOpen(false)}
@@ -564,22 +683,42 @@ export function TablePage() {
         />
       )}
       <JoinCodeModal table={codeOpen ? { id, name: s?.table.name ?? t('lobby.private') } : null} then={codeThen} onClose={() => setCodeOpen(false)} onGranted={onCodeGranted} />
-      <SettingsModal open={settings} onClose={() => setSettings(false)} />
-      {s && isHost && <HostRoomModal open={hosting} onClose={() => setHosting(false)} table={s.table} />}
-      {/* The 1:1 chat opens in a new tab so the game connection stays. */}
-      <PlayerCard
-        user={picked}
-        onClose={() => setPicked(null)}
-        newTab
-        chatMute
-        onReport={() => {
-          if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
-          setPicked(null);
-        }}
+      <SettingsModal
+        open={settings}
+        onClose={() => setSettings(false)}
+        top={
+          s && s.status !== 'closed' ? (
+            <LinkShare
+              data={{ title: s.table.name, text: t('share.tableText', { name: s.table.name }), url: siteUrl(`/table/${encodeURIComponent(s.table.id)}${locale === 'en' ? '?lang=en' : ''}`) }}
+              label={t('share.table')}
+              hint={s.table.isPrivate ? t('room.inviteHint') : undefined}
+              testId="table-invite"
+            />
+          ) : undefined
+        }
       />
-      <ReportModal subject={reporting} onClose={() => setReporting(null)} />
+      {s && isHost && <HostRoomModal open={hosting} onClose={() => setHosting(false)} table={s.table} />}
+      {social.current && (
+        <Suspense fallback={null}>
+          {/* The 1:1 chat opens in a new tab so the game connection stays. */}
+          <PlayerCard
+            user={picked}
+            onClose={() => setPicked(null)}
+            newTab
+            chatMute
+            onReport={() => {
+              if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
+              setPicked(null);
+            }}
+          />
+          <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} />
+          <ReportModal subject={reporting} onClose={() => setReporting(null)} />
+        </Suspense>
+      )}
       <Modal open={chart} onClose={() => setChart(false)} title={t('table.handChart')}>
-        <HandRankingChart compact />
+        <Suspense fallback={<div className="h-40" />}>
+          <HandRankingChart compact />
+        </Suspense>
         <Link to="/academy/hands" className="mt-3 inline-block text-sm text-gold-300 hover:underline">
           {t('table.toAcademy')} →
         </Link>

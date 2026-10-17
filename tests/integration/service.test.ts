@@ -5,7 +5,8 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { BASE, Client, newUser, PASSWORD, signupBody, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
-import { isMyTurn, TableSocket } from '../support/ws';
+import { isMyTurn, nextState, TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 const N = '/api/admin/service/notices';
@@ -69,7 +70,7 @@ async function foldOut(socks: TableSocket[]) {
     if (!s.hand || s.hand.stage === 'settled') return;
     const me = socks.find((w) => isMyTurn(w.state!));
     if (me) await me.act(me.state!.you.legal.some((l) => l.type === 'fold') ? 'fold' : 'check');
-    else await socks[0]!.waitNext((m) => m.t === 'state', 15_000, 'next state');
+    else await nextState(socks);
   }
   throw new Error('the hand did not end');
 }
@@ -175,7 +176,7 @@ describe('maintenance', () => {
 
     // An admin session that never re-confirmed its password (a new member made admin, so the shared one's sign-ins are not spent).
     const staff = await newUser();
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${staff.me.id}'`);
+    await d1(promoteSql(`id = '${staff.me.id}'`));
     const cold = new Client(ADMIN_ORIGIN);
     expect((await cold.post('/api/admin/auth/login', { email: staff.email, password: PASSWORD })).status).toBe(200);
     const refused = await cold.post(M, plan);
@@ -227,7 +228,7 @@ describe('maintenance', () => {
   it('under way: the running hand plays out, nobody new sits or queues, members cannot sign in (staff can); the table close and pause still work; play resumes when it ends', async () => {
     // Before: a hand running at it-mt-0 with a spectator; a full heads-up table with a waitlist; a paused table; a lone player.
     const [a, b, c, e, f, g, h, p, q, v, d, staff] = await Promise.all(Array.from({ length: 12 }, () => newUser()));
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${staff!.me.id}'`);
+    await d1(promoteSql(`id = '${staff!.me.id}'`));
     const wa = await sock(a!.client, 'it-mt-0');
     const wb = await sock(b!.client, 'it-mt-0');
     const wc = await sock(c!.client, 'it-mt-0');
@@ -254,6 +255,10 @@ describe('maintenance', () => {
     expect(await wv.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
     const register = new Client();
     const fresh = await signupBody(register, { email: `${uniq('e')}@test.dev`, nickname: uniq('n').slice(0, 14) });
+    // A member's post and comment from before, to edit and delete during it.
+    const post = (await d!.client.post('/api/board/posts', { title: '점검 전 글', body: '점검 전에 쓴 글' })).body.id as string;
+    const comment = (await d!.client.post(`/api/board/posts/${post}/comments`, { body: '점검 전 댓글' })).body.id as string;
+    const staffPost = (await staff!.client.post('/api/board/posts', { title: '운영 공지 초안', body: '점검 안내' })).body.id as string;
 
     // Maintenance from now, blocking member sign-in.
     const start = await admin.post(M, { startsAt: Date.now() - 1_000, endsAt: Date.now() + 10 * 60_000, blockLogin: true, messageKo: '정기 점검', messageEn: 'Scheduled maintenance', reason: 'database upgrade' });
@@ -298,6 +303,20 @@ describe('maintenance', () => {
       expect((await new Client().post('/api/auth/login', { email: staff!.email, password: PASSWORD })).status).toBe(200);
       expect((await new Client(ADMIN_ORIGIN).post('/api/admin/auth/login', { email: staff!.email, password: PASSWORD })).status).toBe(200);
       expect((await a!.client.get('/api/auth/me')).status).toBe(200);
+
+      // Members can't post, comment or edit (the same refusal, with the end time); they can read and delete their own.
+      // Staff can post, to answer questions about it.
+      const posting = await d!.client.post('/api/board/posts', { title: '점검 중 글', body: '되나요?' });
+      expect(posting.status).toBe(503);
+      expect(posting.body.error).toMatchObject({ code: 'maintenance', details: { endsAt } });
+      expect((await d!.client.post(`/api/board/posts/${post}/comments`, { body: '점검 중 댓글' })).body.error).toMatchObject({ code: 'maintenance', details: { endsAt } });
+      expect((await d!.client.patch(`/api/board/posts/${post}`, { title: '고친 글', body: '고친 본문' })).body.error?.code).toBe('maintenance');
+      expect((await d!.client.patch(`/api/board/comments/${comment}`, { body: '고친 댓글' })).body.error?.code).toBe('maintenance');
+      expect((await d!.client.get(`/api/board/posts/${post}`)).body).toMatchObject({ title: '점검 전 글' });
+      expect((await d!.client.req('DELETE', `/api/board/comments/${comment}`)).status).toBe(200);
+      expect((await d!.client.req('DELETE', `/api/board/posts/${post}`)).status).toBe(200);
+      expect((await staff!.client.post(`/api/board/posts/${staffPost}/comments`, { body: '점검은 30분 뒤 끝납니다' })).status).toBe(201);
+      expect((await staff!.client.patch(`/api/board/posts/${staffPost}`, { title: '운영 공지', body: '점검 안내' })).status).toBe(200);
 
       // The console sees it per table, with no missing-hand warning; a table can still be closed (its player paid out).
       const detail = (await admin.get('/api/admin/tables/it-mt-0')).body;

@@ -1,11 +1,18 @@
 import { schema } from '@jc/db';
-import { HAND_RANK_CLASSES, POSITIONS, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
+import { HAND_RANK_CLASSES, HandListQuerySchema, HandNoteInputSchema, POSITIONS, SettingsSaveSchema, type SettingsSaveResult, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
-import { replayLog, replayPlayer } from '../lib/community';
-import { fail } from '../lib/http';
+import { badgesFor } from '../lib/badges';
+import { replayLog, replayPlayer, replayUser } from '../lib/community';
+import { countNote, failureMetric, isFiltered, listHands, readNote, savedMetrics, saveNote } from '../lib/handNotes';
+import { fail, parseBody } from '../lib/http';
+import { rateLimit } from '../lib/rate-limit';
+import { referralMe } from '../lib/referral';
+import { claimRefill, REFILL_RATE, refillSnapshot } from '../lib/refill';
+import { pushMuckEverywhere } from '../lib/room';
+import { clientFails, countSettings, markSynced, needsSyncMark, readRow, saveFailure, saveSettings, toDto, toState } from '../lib/settings';
 
 function pageParams(q: (k: string) => string | undefined) {
   const limit = Math.min(Math.max(Number(q('limit') ?? 20) || 20, 1), 100);
@@ -15,6 +22,28 @@ function pageParams(q: (k: string) => string | undefined) {
 
 export const meRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
+  /** The free chip refill: its terms, what the member has, and whether (or when) they may claim one (lib/refill.ts). */
+  .get('/refill', async (c) => c.json((await refillSnapshot(c.env, c.var.user!.id)).status))
+  /**
+   * Claims it. 409 refill_refused (details.status says why, and when the next one comes) or refill_changed (the wallet
+   * or a seat changed while it was decided: nothing was paid, ask again). Repeating a paid claim pays nothing more.
+   */
+  .post('/refill', async (c) => {
+    const uid = c.var.user!.id;
+    await rateLimit(c, `refill:${uid}`, REFILL_RATE.limit, REFILL_RATE.windowMs);
+    const r = await claimRefill(c.env, uid);
+    if (!r.ok) fail(409, r.code, r.code === 'refill_changed' ? 'chips changed while the refill was decided; try again' : 'no refill now', { status: r.status });
+    return c.json(r.claim);
+  })
+  /**
+   * The member's referral code, share link and rewards (lib/referral.ts). Opening it also pays what the member's
+   * referrals may pay now, so it is rate limited.
+   */
+  .get('/referral', async (c) => {
+    const uid = c.var.user!.id;
+    await rateLimit(c, `referral-me:${uid}`, 30, 60_000);
+    return c.json(await referralMe(c.env, uid, new URL(c.req.url).origin));
+  })
   .get('/ledger', async (c) => {
     const { limit, before } = pageParams((k) => c.req.query(k));
     const rows = await c.var.db
@@ -138,29 +167,19 @@ export const meRoutes = new Hono<AppEnv>()
     };
     return c.json(out);
   })
+  /**
+   * The member's hands, newest first, with their own notes (lib/handNotes.ts). Filters: date range, position, result,
+   * pot size, tag, bookmarked; the next page starts after `before` (and `beforeId`, the last hand shown). A filtered
+   * list is rate limited, since a narrow filter may read many of the member's hands.
+   */
   .get('/hands', async (c) => {
+    const uid = c.var.user!.id;
     const { limit, before } = pageParams((k) => c.req.query(k));
-    const rows = await c.var.db
-      .select({ hp: schema.handPlayers, h: schema.hands, t: { name: schema.tables.name } })
-      .from(schema.handPlayers)
-      .innerJoin(schema.hands, eq(schema.hands.id, schema.handPlayers.handId))
-      .innerJoin(schema.tables, eq(schema.tables.id, schema.hands.tableId))
-      .where(and(eq(schema.handPlayers.userId, c.var.user!.id), before ? lt(schema.handPlayers.endedAt, before) : undefined))
-      .orderBy(desc(schema.handPlayers.endedAt))
-      .limit(limit);
-    const out: HandSummaryDto[] = rows.map(({ hp, h, t }) => ({
-      id: h.id,
-      tableId: h.tableId,
-      tableName: t.name,
-      handNumber: h.handNumber,
-      endedAt: h.endedAt,
-      board: JSON.parse(h.board) as string[],
-      potTotal: h.potTotal,
-      net: hp.net,
-      won: hp.won,
-      holeCards: JSON.parse(hp.holeCards) as string[],
-      rankClass: hp.rankClass,
-    }));
+    const parsed = HandListQuerySchema.safeParse(c.req.query());
+    if (!parsed.success) fail(400, 'bad_request', 'invalid filter', parsed.error.issues.map((i) => ({ path: i.path, message: i.message })));
+    const q = parsed.data;
+    if (isFiltered(q)) await rateLimit(c, `hand-list:${uid}`, 60, 60_000);
+    const out: HandSummaryDto[] = await listHands(c.env.DB, uid, { ...q, limit, before });
     return c.json(out);
   })
   /**
@@ -180,11 +199,15 @@ export const meRoutes = new Hono<AppEnv>()
       .limit(1);
     if (!row) fail(404, 'not_found', 'hand not found');
     const { h: hand, t } = row;
-    const players = await c.var.db
-      .select({ hp: schema.handPlayers, nickname: schema.users.nickname })
-      .from(schema.handPlayers)
-      .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
-      .where(eq(schema.handPlayers.handId, handId));
+    const [players, note] = await Promise.all([
+      c.var.db
+        .select({ hp: schema.handPlayers, user: replayUser })
+        .from(schema.handPlayers)
+        .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
+        .where(eq(schema.handPlayers.handId, handId)),
+      readNote(c.env.DB, uid, handId),
+    ]);
+    const badge = await badgesFor(c, players.map((p) => p.user.role));
     const out: HandDetailDto = {
       id: hand.id,
       tableId: hand.tableId,
@@ -199,7 +222,75 @@ export const meRoutes = new Hono<AppEnv>()
       ...replayLog(hand.eventLog),
       players: players
         .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
-        .map(({ hp, nickname }) => ({ ...replayPlayer(hp, nickname, uid), userId: hp.userId, isYou: hp.userId === uid })),
+        .map(({ hp, user }) => ({ ...replayPlayer(hp, user, uid, badge), userId: hp.userId, isYou: hp.userId === uid })),
+      note,
     };
     return c.json(out);
+  })
+  /**
+   * Saves the member's bookmark, tags or memo on a hand they were dealt into (lib/handNotes.ts). 404 not_found for any
+   * other hand; 409 note_conflict, with the saved note in details, when the memo changed since revision `rev`. Saves and
+   * refusals are counted per kind for operations statistics; nothing written is counted, logged or audited.
+   */
+  .put('/hands/:id/note', async (c) => {
+    const uid = c.var.user!.id;
+    const handId = c.req.param('id');
+    try {
+      await rateLimit(c, `hand-note:${uid}`, 60, 60_000);
+      const input = await parseBody(c, HandNoteInputSchema);
+      const r = await saveNote(c.env.DB, uid, handId, input);
+      if (!r.ok) {
+        if (r.code === 'not_found') fail(404, 'not_found', 'hand not found');
+        fail(409, 'note_conflict', 'the memo changed since it was opened', { note: r.note });
+      }
+      await countNote(c.env.DB, savedMetrics(input));
+      return c.json(r.note);
+    } catch (e) {
+      await countNote(c.env.DB, [failureMetric(e)]);
+      throw e;
+    }
+  })
+  /**
+   * The member's account settings (lib/settings.ts). One read by key; the sync mark is written at most every ten
+   * minutes, after the answer. `fails`: attempts that failed on the device since its last answer (counted). `for`: the
+   * account the device expects; another one signed in meanwhile is refused (409 settings_account).
+   */
+  .get('/settings', async (c) => {
+    const uid = c.var.user!.id;
+    const now = Date.now();
+    const expect = c.req.query('for');
+    if (expect !== undefined && expect !== uid) fail(409, 'settings_account', 'another account is signed in');
+    try {
+      const row = await readRow(c.env.DB, uid);
+      if (needsSyncMark(row, now)) c.executionCtx.waitUntil(markSynced(c.env.DB, uid, now).run().catch(() => undefined));
+      const fails = clientFails(Number(c.req.query('fails')) || 0);
+      if (fails) c.executionCtx.waitUntil(countSettings(c.env.DB, { ss_client_fail: fails }, now));
+      return c.json(toDto(toState(row)));
+    } catch (e) {
+      await countSettings(c.env.DB, { ss_load_fail: 1 }, now);
+      throw e;
+    }
+  })
+  /**
+   * Saves the settings and favourite tables a device changed: the newest change wins one at a time, and `kept` names what
+   * a newer change made elsewhere kept. 409 settings_reset, with the account's settings in details, when an administrator
+   * reset them since the device's epoch; 409 settings_busy when other saves kept landing in between. When the account's
+   * auto-muck changed, the tables the member sits at take it on.
+   */
+  .put('/settings', async (c) => {
+    const uid = c.var.user!.id;
+    try {
+      await rateLimit(c, `settings:${uid}`, 60, 60_000);
+      const input = await parseBody(c, SettingsSaveSchema);
+      if (input.user !== uid) fail(409, 'settings_account', 'another account is signed in');
+      const r = await saveSettings(c.env.DB, uid, input);
+      if (r.muck !== undefined) c.executionCtx.waitUntil(pushMuckEverywhere(c.env, uid, r.muck, r.settings.rev).catch(() => undefined));
+      if (r.mark) c.executionCtx.waitUntil(markSynced(c.env.DB, uid, Date.now()).run().catch(() => undefined));
+      const fails = clientFails(input.fails);
+      await countSettings(c.env.DB, fails ? { ...r.metrics, ss_client_fail: fails } : r.metrics);
+      return c.json({ settings: r.settings, kept: r.kept } satisfies SettingsSaveResult);
+    } catch (e) {
+      await countSettings(c.env.DB, { [saveFailure(e)]: 1 });
+      throw e;
+    }
   });

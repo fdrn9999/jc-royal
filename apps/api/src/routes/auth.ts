@@ -17,7 +17,7 @@ import {
   type MeDto,
   type SignupOptionsDto,
 } from '@jc/types';
-import { and, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv, AuthUser, Env } from '../env';
 import { requireUser } from '../lib/auth';
@@ -27,6 +27,7 @@ import { fail, parseBody } from '../lib/http';
 import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { checkReferralCode, findReferrer, recordReferral, settleReferral } from '../lib/referral';
 import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
 
@@ -168,6 +169,10 @@ export const authRoutes = new Hono<AppEnv>()
     if (!emailVerifiedAt && emailVerificationOn(c.env)) fail(400, 'email_not_verified', 'verify the email address first');
     const nickTaken = await db.query.users.findFirst({ where: sql`lower(${schema.users.nickname}) = lower(${body.nickname})`, columns: { id: true } });
     if (nickTaken) fail(409, 'nickname_taken', 'nickname already in use');
+    // A code that is given must be a member's (active, not a table bot): the form says so before anything is written.
+    const referralCode = body.referralCode?.trim() ?? '';
+    const referrer = referralCode ? await findReferrer(c.env.DB, referralCode) : null;
+    if (referralCode && !referrer) fail(400, 'referral_invalid', 'the referral code is not valid');
     const id = crypto.randomUUID();
     try {
       await db.insert(schema.users).values({
@@ -194,16 +199,39 @@ export const authRoutes = new Hono<AppEnv>()
       await applyLedger(c.env.DB, { userId: id, type: 'signup_grant', amount: grant, idempotencyKey: `signup:${id}`, memo: 'welcome chips' });
     }
     await sendMessages(db, { userIds: [id], category: 'system', ...notices(body.locale).welcome(grant) });
+    // The referral is recorded under the policy in force now and paid if it may be; a failure here never fails the
+    // signup (the referral, if recorded, is paid later by the member's card, the daily cron or an operator).
+    if (referrer) {
+      try {
+        const rid = await recordReferral(c.env, {
+          referrer,
+          inviteeId: id,
+          email: body.email,
+          emailVerified: !!emailVerifiedAt,
+          verificationRequired: emailVerificationOn(c.env),
+          ip: clientIp(c),
+        });
+        await settleReferral(c.env, rid);
+      } catch (e) {
+        console.error('referral at signup', e);
+      }
+    }
     await createSession(c, id, 'user');
     return c.json(await loadMe(c, id), 201);
+  })
+  /** The signup form's check of a referral code (lib/referral.ts): whose it is and what it gives now. */
+  .get('/referral/:code', async (c) => {
+    await rateLimit(c, `referral-code:${clientIp(c)}`, 30, 60_000, { perIp: true });
+    return c.json(await checkReferralCode(c.env.DB, c.req.param('code').slice(0, 40)));
   })
   .post('/login', async (c) => {
     const body = await parseBody(c, LoginSchema);
     await rateLimit(c, `login-ip:${clientIp(c)}`, 30, 15 * 60 * 1000, { perIp: true });
     await rateLimit(c, `login-acct:${body.email}`, 10, 15 * 60 * 1000);
     const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.email, body.email) });
-    const ok = await verifyPassword(body.password, u?.passwordHash ?? DUMMY_HASH);
-    if (!u || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
+    // A table bot's account has no password: it is refused like an unknown address.
+    const ok = await verifyPassword(body.password, u && !u.isBot ? u.passwordHash : DUMMY_HASH);
+    if (!u || u.isBot || !ok || u.status === 'deleted') fail(401, 'invalid_credentials', 'email or password is incorrect');
     if (u.status === 'suspended') fail(403, 'suspended', u.suspendedReason ?? 'account suspended');
     // After the password check, so the refusal tells nothing to someone who does not know it.
     await refuseSignInInMaintenance(c, u.role);
@@ -219,7 +247,7 @@ export const authRoutes = new Hono<AppEnv>()
     await rateLimit(c, `reset:${clientIp(c)}`, 5, 60 * 60 * 1000, { perIp: true });
     // Per-address cap, applied whether or not the account exists, so nobody can flood an inbox.
     await rateLimit(c, `reset-email:${body.email}`, 3, 60 * 60 * 1000);
-    const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.email, body.email), eq(schema.users.status, 'active')) });
+    const u = await c.var.db.query.users.findFirst({ where: and(eq(schema.users.email, body.email), eq(schema.users.status, 'active'), eq(schema.users.isBot, false)) });
     let devToken: string | undefined;
     if (u) {
       const token = randomToken();
@@ -346,6 +374,27 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.adminNotes).where(eq(schema.adminNotes.userId, me.id)),
       // Days the member was active (operations statistics; the day totals already counted stay).
       db.delete(schema.activeDays).where(eq(schema.activeDays.userId, me.id)),
+      // The member's referral code stops working. Their referrals stay (ledger rows name them) but close: as the new
+      // member, sides not paid yet are not paid; as the referrer, their side is skipped (the new member is still paid).
+      db.delete(schema.referralCodes).where(eq(schema.referralCodes.userId, me.id)),
+      // The member's own bookmarks, tags and memos on hands (the hands themselves stay, below).
+      db.delete(schema.handNotes).where(eq(schema.handNotes.userId, me.id)),
+      // Account settings and favourite tables, with what a reset kept to undo it.
+      db.delete(schema.userSettings).where(eq(schema.userSettings.userId, me.id)),
+      db
+        .update(schema.referrals)
+        .set({
+          inviteeStatus: sql`CASE invitee_status WHEN 'pending' THEN 'unpaid' ELSE invitee_status END`,
+          referrerStatus: sql`CASE referrer_status WHEN 'pending' THEN 'unpaid' ELSE referrer_status END`,
+          status: sql`CASE WHEN invitee_status = 'paid' OR referrer_status = 'paid' THEN 'settled' ELSE 'unpaid' END`,
+          failureCode: 'invitee_deleted',
+          updatedAt: Date.now(),
+        })
+        .where(and(eq(schema.referrals.inviteeId, me.id), inArray(schema.referrals.status, ['pending', 'review']))),
+      db
+        .update(schema.referrals)
+        .set({ referrerStatus: 'skipped', failureCode: 'referrer_deleted', updatedAt: Date.now() })
+        .where(and(eq(schema.referrals.referrerId, me.id), eq(schema.referrals.referrerStatus, 'pending'), inArray(schema.referrals.status, ['pending', 'review']))),
       // Kept, under the pseudonymous id only: chip ledger, hands and seats (integrity), posts and comments (shown as
       // a withdrawn member), and reports. See docs/PRIVACY_OPERATIONS.md.
     ]);

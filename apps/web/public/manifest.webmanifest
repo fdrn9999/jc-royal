@@ -1,12 +1,18 @@
 {
+  "id": "/",
   "name": "JC ROYAL",
   "short_name": "JC ROYAL",
+  "description": "친구와 즐기는 프리미엄 텍사스 홀덤, 혼자 즐기는 봇 플레이, 포커 아카데미. 모든 칩은 현금 가치가 없는 플레이 전용 가상 칩입니다.",
+  "lang": "ko",
+  "dir": "ltr",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0a0b0d",
   "theme_color": "#0a0b0d",
+  "categories": ["games"],
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

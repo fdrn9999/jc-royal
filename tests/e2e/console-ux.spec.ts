@@ -1,10 +1,11 @@
 import { expect, type Page } from '@playwright/test';
 import { ADMIN, adminLogin, sql } from './analytics-helpers';
 import { signUp, test, uid } from './helpers';
+import { promoteSql } from '../support/grants';
 
 test('a slow answer for an earlier filter does not replace the list for the filter now chosen', async ({ browser }) => {
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const page = await adminLogin(browser, op.email);
   const post = (title: string) =>
     page.evaluate(async (t) => ((await (await fetch('/api/admin/board/notices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t, body: 'E2E' }) })).json()) as { id: string }).id, title);
@@ -38,7 +39,7 @@ const auditOf = (page: Page, action: string) =>
 test('ledger, hands and tables: filters in the URL, page by page, and each ledger look in the audit log', async ({ browser }) => {
   const op = await signUp(browser);
   const member = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   // 60 entries that cancel out (top-up −100, cash-out +100), so the wallet still matches the ledger; with the sign-up grant, 61.
   sql(
     `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 60) INSERT INTO chip_ledger (id, user_id, type, amount, balance_after, idempotency_key, created_at) ` +
@@ -124,7 +125,7 @@ test('ledger, hands and tables: filters in the URL, page by page, and each ledge
 test('a post is deleted and a message sent only after a confirmation that says what will happen', async ({ browser }) => {
   const op = await signUp(browser);
   const member = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const page = await adminLogin(browser, op.email);
   const title = `E2E 삭제 확인 ${uid('p')}`;
   await page.evaluate(async (t) => fetch('/api/admin/board/notices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t, body: 'E2E' }) }), title);
@@ -160,7 +161,7 @@ test('a post is deleted and a message sent only after a confirmation that says w
 
 test('a list that cannot load says so with a retry, and the console says when the network or the server is away', async ({ browser }) => {
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const page = await adminLogin(browser, op.email);
   const ledger = (u: URL) => u.pathname === '/api/admin/ledger';
   await page.route(ledger, (r) => r.abort('internetdisconnected'));

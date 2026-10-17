@@ -1,11 +1,12 @@
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat } from '@jc/ui';
-import { academyItemName, ageOn, isoDate, type AcademyItemKind } from '@jc/types';
+import { academyItemName, ageOn, BOT_LEVELS, botSettingsIssues, isoDate, type AcademyItemKind, type BotLevel } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
 import {
   academyKindLabel,
   actionLabel,
+  botLevelLabel,
   capabilityLabel,
   handRankLabel,
   ledgerTypeLabel,
@@ -15,12 +16,16 @@ import {
   seatPhaseLabel,
   stageLabel,
   tableIssueLabel,
+  tnStatusLabel,
   topUpStateLabel,
   userStatusLabel,
 } from '../labels';
-import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { ApiError, canDo, errText, hasGrant, useAdmin, useData } from '../lib';
 import { dayStart, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
+import { MemberSettingsPanel } from './MemberSettings';
+import { MemberReferralPanel } from './Referrals';
+import { MemberRefillPanel, RefillRefLine, type RefillRef } from './Refill';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 const newKey = () => crypto.randomUUID().replace(/-/g, '').slice(0, 24);
@@ -269,6 +274,8 @@ interface UserDetail {
   /** Latest seatings with their tables, and reports by and about the member. Absent from older APIs. */
   recentTables?: RecentTable[];
   reports?: MemberReports;
+  /** What the server left out because the feature is off for this administrator (ledger, reports). Absent from older APIs. */
+  hidden?: ('ledger' | 'reports')[];
 }
 
 type Role = 'user' | 'admin' | 'super_admin';
@@ -282,7 +289,7 @@ type Pending =
   | { kind: 'disconnect' }
   | { kind: 'unsuspend' }
   | { kind: 'role'; role: Role }
-  | { kind: 'chips'; amount: number; memo: string; key: string };
+  | { kind: 'chips'; amount: number; memo: string; key: string; ref: RefillRef | null };
 
 /** The API's answer to `preview: true`: what the change would do, computed now; nothing is written. */
 interface SanctionPreview {
@@ -294,7 +301,7 @@ interface SanctionPreview {
 }
 interface UnsuspendPreview { from: string; to: string; suspendedReason: string | null }
 interface RolePreview { from: string; to: string; console: { from: boolean; to: boolean }; adminSessions: number; capabilities: { gained: string[]; lost: string[] } }
-interface ChipPreview { amount: number; balanceBefore: number; balanceAfter: number; large: boolean; duplicate: boolean }
+interface ChipPreview { amount: number; balanceBefore: number; balanceAfter: number; large: boolean; duplicate: boolean; ref: { id: string; type: string; amount: number; createdAt: number } | null }
 
 function ChangePreview({ p, data }: { p: Exclude<Pending, null>; data: unknown }) {
   const { t } = useT();
@@ -350,6 +357,7 @@ function ChangePreview({ p, data }: { p: Exclude<Pending, null>; data: unknown }
           {t('amount')}: <span className="font-mono">{d.amount > 0 ? '+' : ''}{formatChips(d.amount)}</span> {d.large && <Badge tone="gold">{t('pvLarge')}</Badge>}
         </p>
         <p className="break-all text-ink-300">{t('memo')}: {p.memo}</p>
+        {d.ref && <RefillRefLine r={{ ...d.ref, seq: p.ref?.id === d.ref.id ? p.ref.seq : undefined }} />}
         {d.duplicate && <p className="text-danger" role="alert">{t('pvDuplicate')}</p>}
       </div>
     );
@@ -407,7 +415,10 @@ export function UserDetailPage() {
   const [pv, setPv] = useState<{ data: unknown } | { error: unknown } | null>(null);
   const previewSeq = useRef(0);
   // Kept while the same amount and memo are tried again, so a retry after a lost answer cannot pay twice.
-  const [chipKey, setChipKey] = useState<{ key: string; amount: number; memo: string } | null>(null);
+  const [chipKey, setChipKey] = useState<{ key: string; amount: number; memo: string; ref: string | null } | null>(null);
+  // A free refill the adjustment takes back (the member's refill panel), named in the ledger row it writes.
+  const [chipRef, setChipRef] = useState<RefillRef | null>(null);
+  const chipForm = useRef<HTMLDivElement>(null);
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
   // Another administrator suspended the member after this page loaded: show the member as they are now.
@@ -445,7 +456,7 @@ export function UserDetailPage() {
           : p.kind === 'role'
             ? { preview: true, role: p.role }
             : p.kind === 'chips'
-              ? { preview: true, amount: p.amount, memo: p.memo, idempotencyKey: p.key }
+              ? { preview: true, amount: p.amount, memo: p.memo, idempotencyKey: p.key, ...(p.ref ? { refLedgerId: p.ref.id } : {}) }
               : { preview: true };
     api<unknown>(`/api/admin/users/${id}/${p.kind}`, { body }).then(
       (data) => seq === previewSeq.current && setPv({ data }),
@@ -463,14 +474,24 @@ export function UserDetailPage() {
   };
   const askChips = () => {
     const n = Number(amount);
-    const key = chipKey && chipKey.amount === n && chipKey.memo === memo ? chipKey.key : newKey();
-    setChipKey({ key, amount: n, memo });
-    ask({ kind: 'chips', amount: n, memo, key });
+    const ref = chipRef?.id ?? null;
+    const key = chipKey && chipKey.amount === n && chipKey.memo === memo && chipKey.ref === ref ? chipKey.key : newKey();
+    setChipKey({ key, amount: n, memo, ref });
+    ask({ kind: 'chips', amount: n, memo, key, ref: chipRef });
   };
   const clearChips = () => {
     setChipKey(null);
+    setChipRef(null);
     setAmount('');
     setMemo('');
+  };
+  // Taking back a refill: what is left of it, as a negative adjustment linked to it, checked in the dialog like any other.
+  const correctRefill = (r: RefillRef) => {
+    setChipRef(r);
+    setAmount(String(-r.amount));
+    setMemo(t('refillCorrectMemo', { n: r.seq }));
+    chipForm.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    chipForm.current?.querySelector('input')?.focus({ preventScroll: true });
   };
   const issueReset = async () => {
     setNote(null);
@@ -503,7 +524,7 @@ export function UserDetailPage() {
     if (p.kind === 'chips') {
       // The previewed request itself: same amount, memo and key.
       void run(async () => {
-        await api(`/api/admin/users/${id}/chips`, { body: { amount: p.amount, memo: p.memo, idempotencyKey: p.key } });
+        await api(`/api/admin/users/${id}/chips`, { body: { amount: p.amount, memo: p.memo, idempotencyKey: p.key, ...(p.ref ? { refLedgerId: p.ref.id } : {}) } });
         clearChips();
       });
       return;
@@ -518,6 +539,10 @@ export function UserDetailPage() {
   if (!data) return <PageState error={error} onRetry={reload} />;
   const u = data.user;
   const canModerate = me?.user.id !== u.id && (u.role === 'user' || canDo(me, 'admins.manage'));
+  // Switched-off features are left out here; the server refuses them anyway.
+  const on = (g: string) => hasGrant(me, g);
+  const hidden = data.hidden ?? [];
+  const statusActions = on('sanctions') || on('resetLinks') || canDo(me, 'roles.change');
   const pvData = pv && 'data' in pv ? pv.data : null;
   const pvError = pv && 'error' in pv && !(pv.error instanceof ApiError && pv.error.code === 'reauth_cancelled') ? errText(pv.error, t) : null;
   // Before → after, shown in the confirmation so the admin sees exactly what changes (the server's values once previewed).
@@ -551,7 +576,7 @@ export function UserDetailPage() {
         {!data.ledgerConsistent && <Badge tone="red">{t('ledgerMismatch')}</Badge>}
         <span className="ml-auto flex flex-wrap gap-3">
           <Link to={`/audit?targetType=user&targetId=${encodeURIComponent(u.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="user-audit">{t('audit')} →</Link>
-          <Link to={`/reports?status=all&userId=${u.id}`} className="text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
+          {on('reports') && <Link to={`/reports?status=all&userId=${u.id}`} className="text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>}
         </span>
       </div>
       <Feedback note={note} />
@@ -585,8 +610,11 @@ export function UserDetailPage() {
           </div>
         </dl>
       </Panel>
+      {(on('chips') || statusActions) && (
       <div className="grid gap-6 lg:grid-cols-2">
+        {on('chips') && (
         <Panel title={t('adjustChips')}>
+          <div ref={chipForm}>
           <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); askChips(); }}>
             <Field
               label={t('amount')}
@@ -595,14 +623,18 @@ export function UserDetailPage() {
             >
               {(fid) => <Input id={fid} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d-]/g, ''))} data-testid="chip-amount" />}
             </Field>
-            <Field label={t('memo')}>{(fid) => <Input id={fid} value={memo} onChange={(e) => setMemo(e.target.value)} />}</Field>
+            <Field label={t('memo')}>{(fid) => <Input id={fid} value={memo} onChange={(e) => setMemo(e.target.value)} data-testid="chip-memo" />}</Field>
+            {chipRef && <RefillRefLine r={{ type: 'free_refill', amount: chipRef.amount, createdAt: chipRef.at, seq: chipRef.seq }} onClear={() => setChipRef(null)} />}
             <p className="text-xs text-ink-400">{t('chipPreviewHint')}</p>
             <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2} data-testid="chip-submit">{t('confirm')}</Button>
           </form>
+          </div>
         </Panel>
+        )}
+        {statusActions && (
         <Panel title={t('status')}>
           <div className="flex flex-col gap-3">
-            {u.status === 'active' && me?.user.id !== u.id ? (
+            {!on('sanctions') ? null : u.status === 'active' && me?.user.id !== u.id ? (
               <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'suspend' }); }}>
                 <Input placeholder={t('reason')} aria-label={t('reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
                 <Button type="submit" variant="danger" disabled={reason.trim().length < 2} data-testid="suspend">{t('suspend')}</Button>
@@ -610,7 +642,7 @@ export function UserDetailPage() {
             ) : u.status === 'suspended' ? (
               <Button variant="outline" onClick={() => ask({ kind: 'unsuspend' })} data-testid="unsuspend">{t('unsuspend')} ({u.suspendedReason})</Button>
             ) : null}
-            <Button variant="subtle" onClick={issueReset} data-testid="reset-link">{t('resetLink')}</Button>
+            {on('resetLinks') && <Button variant="subtle" onClick={issueReset} data-testid="reset-link">{t('resetLink')}</Button>}
             {canDo(me, 'roles.change') && me?.user.id !== u.id && (
               <div className="flex flex-wrap gap-2">
                 <span className="self-center text-sm text-ink-300">{t('setRole')}:</span>
@@ -621,7 +653,9 @@ export function UserDetailPage() {
             )}
           </div>
         </Panel>
+        )}
       </div>
+      )}
       <Panel title={t('connectionsTitle')}>
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-2 text-sm" data-testid="user-sessions">
@@ -649,7 +683,7 @@ export function UserDetailPage() {
             )}
             <p className="text-xs text-ink-400">{t('onlineBasis')}</p>
           </div>
-          {canModerate && (
+          {canModerate && on('disconnect') && (
             <form className="flex min-w-0 flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'disconnect' }); }} data-testid="disconnect-form">
               <p className="text-xs text-ink-300">{t('disconnectHint')}</p>
               <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={dReason} onChange={(e) => setDReason(e.target.value)} />}</Field>
@@ -726,9 +760,13 @@ export function UserDetailPage() {
       </Modal>
       <MemberActivityPanel userId={u.id} />
       {data.recentTables && <RecentTablesPanel rows={data.recentTables} />}
-      {data.reports && <MemberReportsPanel userId={u.id} reports={data.reports} />}
+      {data.reports && <MemberReportsPanel userId={u.id} reports={data.reports} hidden={hidden.includes('reports')} />}
       <MemberHistoryPanel key={rev} userId={u.id} />
+      {on('refill') && <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />}
+      {on('referral') && <MemberReferralPanel key={`referral${rev}`} userId={u.id} />}
+      {on('settings') && <MemberSettingsPanel key={`settings${rev}`} userId={u.id} />}
       <Panel title={t('ledger')}>
+        {hidden.includes('ledger') && <p className="mb-2 text-xs text-ink-400" data-testid="ledger-hidden">{t('hiddenLedger')}</p>}
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (
             <tr key={l.id}>
@@ -775,7 +813,60 @@ function ResetLinkResult({ reset }: { reset: ResetLink }) {
 interface TableRow {
   id: string; name: string; maxSeats: number; smallBlind: number; bigBlind: number; minBuyIn: number; maxBuyIn: number; turnSeconds: number;
   isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; handsPaused?: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
-  roomType: 'official' | 'member'; hostNickname: string | null;
+  roomType: 'official' | 'member' | 'tournament'; hostNickname: string | null;
+  /** When its settings last changed; sent back with a change so one made meanwhile by another administrator is a conflict. */
+  updatedAt: number;
+  /** Table bots (official tables only); `liveBots` is how many of `liveSeated` are bots. */
+  botsEnabled?: boolean; botLevel?: string; botMinHumans?: number; botMax?: number; botFillTo?: number; botYield?: boolean; liveBots?: number;
+}
+type BotForm = { botsEnabled: boolean; botLevel: BotLevel; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
+const BOT_DEFAULTS: BotForm = { botsEnabled: false, botLevel: 'normal', botMinHumans: 1, botMax: 1, botFillTo: 2, botYield: true };
+/** Bot counts that still fit a table of maxSeats (the create form's size can change under them). */
+const fitBots = (b: BotForm, maxSeats: number): Pick<BotForm, 'botMinHumans' | 'botMax' | 'botFillTo'> => {
+  const botFillTo = Math.min(b.botFillTo, maxSeats);
+  return { botFillTo, botMax: Math.min(b.botMax, maxSeats - 1), botMinHumans: Math.min(b.botMinHumans, botFillTo - 1) };
+};
+const BOT_ISSUE = { botFillTo: 'errBotFillTo', botMax: 'errBotMax', botMinHumans: 'errBotMinHumans' } as const;
+
+/** The table bot settings: the same inputs when a table is created and on its page. */
+function BotFields({ v, set, maxSeats, disabled }: { v: BotForm; set: (v: BotForm) => void; maxSeats: number; disabled?: boolean }) {
+  const { t } = useT();
+  const issues = botSettingsIssues(v, maxSeats);
+  const num = (k: 'botMinHumans' | 'botMax' | 'botFillTo') => (e: React.ChangeEvent<HTMLSelectElement>) => set({ ...v, [k]: Number(e.target.value) });
+  const counts = (from: number, to: number) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
+  const pick = (k: 'botMinHumans' | 'botMax' | 'botFillTo', from: number, to: number, testid: string) => (
+    <Field label={t(k)}>{(id) => (
+      <select id={id} className={selectCls} value={v[k]} disabled={disabled || !v.botsEnabled} onChange={num(k)} data-testid={testid}>
+        {counts(from, to).map((n) => <option key={n} value={n}>{n}</option>)}
+      </select>
+    )}</Field>
+  );
+  return (
+    <div className="col-span-2 grid grid-cols-2 gap-3" data-testid="bot-fields">
+      <label className="col-span-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" className={checkbox} checked={v.botsEnabled} disabled={disabled} onChange={(e) => set({ ...v, botsEnabled: e.target.checked })} data-testid="bot-enabled" />
+        {t('botsAllow')}
+      </label>
+      <Field label={t('botsLevel')}>{(id) => (
+        <select id={id} className={selectCls} value={v.botLevel} disabled={disabled || !v.botsEnabled} onChange={(e) => set({ ...v, botLevel: e.target.value as BotLevel })} data-testid="bot-level">
+          {BOT_LEVELS.map((l) => <option key={l} value={l}>{botLevelLabel(t, l)}</option>)}
+        </select>
+      )}</Field>
+      {pick('botMinHumans', 1, Math.min(8, maxSeats - 1), 'bot-min-humans')}
+      {pick('botMax', 1, Math.min(8, maxSeats - 1), 'bot-max')}
+      {pick('botFillTo', 2, maxSeats, 'bot-fill-to')}
+      <label className="col-span-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" className={checkbox} checked={v.botYield} disabled={disabled || !v.botsEnabled} onChange={(e) => set({ ...v, botYield: e.target.checked })} data-testid="bot-yield" />
+        {t('botYield')}
+      </label>
+      {issues.length > 0 && (
+        <ul className="col-span-2 flex flex-col gap-0.5 text-xs text-danger" role="alert" data-testid="bot-issues">
+          {issues.map((x) => <li key={x.message}>{t(BOT_ISSUE[x.path[0] as keyof typeof BOT_ISSUE] ?? 'errBotMax')}</li>)}
+        </ul>
+      )}
+      <p className="col-span-2 text-xs text-ink-400">{t('botsFieldsHint')}</p>
+    </div>
+  );
 }
 
 /** One colour per table state wherever a table's state is shown: open green, closing gold, closed grey. */
@@ -813,7 +904,7 @@ export function TablesPage() {
     setOffset(0);
   };
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false });
+  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false, ...BOT_DEFAULTS });
   const [note, setNote] = useState<Note>(null);
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -833,7 +924,11 @@ export function TablesPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-extrabold">{t('tables')}</h1>
-        <Button onClick={() => setOpen(true)} data-testid="create-table">{t('createTable')}</Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline" data-testid="time-bank-link">{t('tbManage')} →</Link>
+          <Link to="/tables/social" className="text-sm text-gold-300 hover:underline" data-testid="social-link">{t('soManage')} →</Link>
+          <Button onClick={() => setOpen(true)} data-testid="create-table">{t('createTable')}</Button>
+        </div>
       </div>
       <Feedback note={note} />
       <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); filter(setQ)(text.trim()); }}>
@@ -846,6 +941,7 @@ export function TablesPage() {
           <option value="">{t('roomTypeLabel')}: {t('statusAll')}</option>
           <option value="official">{t('roomTypeLabel')}: {t('officialRoom')}</option>
           <option value="member">{t('roomTypeLabel')}: {t('memberRoom')}</option>
+          <option value="tournament">{t('roomTypeLabel')}: {t('tournamentRoom')}</option>
         </select>
         <label className="flex h-11 items-center gap-2 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm">
           <input type="checkbox" className={checkbox} checked={issueOnly} onChange={(e) => filter(setIssueOnly)(e.target.checked)} data-testid="table-issue" />
@@ -862,6 +958,7 @@ export function TablesPage() {
               <td className="px-2 py-2 font-semibold">
                 {tb.name} {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}
                 {tb.roomType === 'member' && <Badge tone="blue" className="ml-1">{t('memberRoom')} · {tb.hostNickname ?? '—'}</Badge>}
+                {tb.roomType === 'tournament' && <Badge tone="gold" className="ml-1">{t('tournamentRoom')}</Badge>}
               </td>
               <td className="px-2 py-2">
                 <span className="flex flex-wrap gap-1">
@@ -873,8 +970,8 @@ export function TablesPage() {
               </td>
               <td className="px-2 py-2">{tb.maxSeats}</td>
               <td className="px-2 py-2 font-mono">{tb.smallBlind}/{tb.bigBlind}</td>
-              <td className="whitespace-nowrap px-2 py-2 font-mono">{formatChips(tb.minBuyIn, true)}–{formatChips(tb.maxBuyIn, true)}</td>
-              <td className="px-2 py-2 text-xs">{t('seatedWs', { seated: tb.liveSeated, ws: tb.liveConnections })} {tb.livePlaying && <Badge tone="green">{t('inHand')}</Badge>}</td>
+              <td className="whitespace-nowrap px-2 py-2 font-mono">{tb.roomType === 'tournament' ? '—' : `${formatChips(tb.minBuyIn, true)}–${formatChips(tb.maxBuyIn, true)}`}</td>
+              <td className="px-2 py-2 text-xs">{t('seatedWs', { seated: tb.liveSeated - (tb.liveBots ?? 0), ws: tb.liveConnections })} {!!tb.liveBots && <Badge tone="blue">{t('botsN', { n: tb.liveBots })}</Badge>} {tb.botsEnabled && !tb.liveBots && <Badge>{t('botsAllowedShort')}</Badge>} {tb.livePlaying && <Badge tone="green">{t('inHand')}</Badge>}</td>
               <td className="px-2 py-2">{tb.handsPlayed}</td>
               <td className="px-2 py-2"><Link to={`/tables/${tb.id}`} className="text-gold-300">{t('detail')}</Link></td>
             </tr>
@@ -896,7 +993,7 @@ export function TablesPage() {
         <form className="grid grid-cols-2 gap-3" onSubmit={create}>
           <div className="col-span-2"><Field label={t('name')}>{(id) => <Input id={id} required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field></div>
           <Field label={t('maxSeats')}>{(id) => (
-            <select id={id} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3" value={f.maxSeats} onChange={(e) => setF({ ...f, maxSeats: Number(e.target.value) })}>
+            <select id={id} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3" value={f.maxSeats} onChange={(e) => setF({ ...f, ...fitBots(f, Number(e.target.value)), maxSeats: Number(e.target.value) })}>
               {[2, 6, 9].map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           )}</Field>
@@ -909,6 +1006,7 @@ export function TablesPage() {
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.beginner} onChange={(e) => setF({ ...f, beginner: e.target.checked })} data-testid="table-beginner" /> {t('beginnerTable')}</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.isPrivate} onChange={(e) => setF({ ...f, isPrivate: e.target.checked })} /> {t('private')}</label>
           {f.isPrivate && <div className="col-span-2"><Field label={t('joinCode')}>{(id) => <Input id={id} value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value })} />}</Field></div>}
+          <BotFields v={f} set={(b) => setF({ ...f, ...b })} maxSeats={f.maxSeats} />
           <div className="col-span-2 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Button><Button type="submit">{t('save')}</Button></div>
         </form>
       </Modal>
@@ -926,6 +1024,10 @@ interface LiveSeat {
   leaveAfterHand?: boolean;
   timeouts?: number;
   topUp?: { state: string; amount: number; auto: boolean } | null;
+  /** A table bot's level (the room plays it). */
+  bot?: string | null;
+  /** The member's time bank here: ms left, hands since the last refill (read only: no one sets it). */
+  timeBank?: { ms: number; hands: number } | null;
 }
 /** The room's admin status (never cards). Fields after `chipsOnTable` are absent from rooms older than B2. */
 interface LiveStatus {
@@ -944,7 +1046,16 @@ interface LiveStatus {
   at?: number;
   /** The service maintenance window the room knows of (active by its clock). */
   maintenance?: { startsAt: number; endsAt: number; active: boolean } | null;
+  /** Table bots as the room sees them: allowed now (table setting and service policy), and when it tries a bot again after a failure. */
+  bots?: { allowed: boolean; policyOn: boolean; retryAt: number | null; failures: number } | null;
+  /** The running turn's clock (time bank time added included). Absent from rooms older than the time bank. */
+  timer?: { turnStartedAt: number; baseMs: number; extraMs: number; deadline: number; alarmAt: number | null; lateMs: number } | null;
+  /** The time bank rules of the hand being played and those the next hand gets, with banks kept for members who left. */
+  timeBank?: { hand: TimeBankRulesView | null; next: TimeBankRulesView | null; policyVersion: number | null; kept: number; handUses: number } | null;
+  /** The social policy version the room last read (null: none yet, the defaults) and whether it takes quick reactions. */
+  social?: { policyVersion: number | null; reactions: boolean } | null;
 }
+interface TimeBankRulesView { version: number; initialMs: number; maxMs: number; unitMs: number; refillHands: number; refillMs: number }
 interface Diagnosis {
   issues: string[];
   sessionsOnlyInD1: { id: string; userId: string; seatIndex: number; buyIn: number; nickname: string | null }[];
@@ -963,11 +1074,168 @@ interface ClosePreview {
   roomAnswered: boolean;
 }
 
+/**
+ * An official table's table bots, saved as one change (the API checks them against the table's size). They take effect
+ * between hands; the service-wide policy and the bots' log are on the bots page.
+ */
+function TableBotsPanel({ tb, live, act }: { tb: TableRow; live: LiveStatus | null; act: (fn: () => Promise<unknown>) => Promise<void> }) {
+  const { t, locale } = useT();
+  const { api } = useAdmin();
+  const saved: BotForm = {
+    botsEnabled: !!tb.botsEnabled,
+    botLevel: (BOT_LEVELS as readonly string[]).includes(tb.botLevel ?? '') ? (tb.botLevel as BotLevel) : 'normal',
+    botMinHumans: tb.botMinHumans ?? 1,
+    botMax: tb.botMax ?? 1,
+    botFillTo: tb.botFillTo ?? 2,
+    botYield: tb.botYield ?? true,
+  };
+  const [v, setV] = useState(saved);
+  const dirty = (Object.keys(saved) as (keyof BotForm)[]).some((k) => saved[k] !== v[k]);
+  const bad = botSettingsIssues(v, tb.maxSeats).length > 0;
+  const closed = tb.status === 'closed';
+  const b = live?.bots;
+  const link = <Link to={`/bots?table=${encodeURIComponent(tb.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="table-bots-link">{t('botsNav')} →</Link>;
+  if (tb.roomType !== 'official') {
+    return (
+      <Panel title={t('botsPanel')}>
+        <p className="text-sm text-ink-400">{t('botsMemberRoomNote')}</p>
+      </Panel>
+    );
+  }
+  return (
+    <Panel title={t('botsPanel')} actions={link}>
+      <form
+        className="grid grid-cols-2 gap-3"
+        data-testid="table-bots"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          void act(() => api(`/api/admin/tables/${tb.id}`, { method: 'PATCH', body: { ...v, ifUpdatedAt: tb.updatedAt } }));
+        }}
+      >
+        {b && (
+          <p className="col-span-2 flex flex-wrap items-center gap-1 text-xs" data-testid="table-bots-live">
+            <Badge tone={b.allowed ? 'green' : 'neutral'}>{b.allowed ? t('botsLiveAllowed') : t('botsLiveNotAllowed')}</Badge>
+            {!b.policyOn && <Badge tone="gold">{t('botsPolicyOffShort')}</Badge>}
+            {b.failures > 0 && <Badge tone="red">{t('botsLiveFailures', { n: b.failures, at: b.retryAt ? formatDate(b.retryAt, locale) : '—' })}</Badge>}
+          </p>
+        )}
+        <BotFields v={v} set={setV} maxSeats={tb.maxSeats} disabled={closed} />
+        <div className="col-span-2 flex flex-wrap gap-2">
+          <Button type="submit" disabled={closed || !dirty || bad} data-testid="table-bots-save">{t('save')}</Button>
+          {dirty && <Button type="button" variant="ghost" onClick={() => setV(saved)}>{t('cancel')}</Button>}
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+type RecoverResult = 'bot_moved' | 'timed_out' | 'rearmed' | 'none';
+const RECOVER_TEXT: Record<RecoverResult, 'tbRecoverBotMoved' | 'tbRecoverTimedOut' | 'tbRecoverRearmed' | 'tbRecoverNone'> = {
+  bot_moved: 'tbRecoverBotMoved',
+  timed_out: 'tbRecoverTimedOut',
+  rearmed: 'tbRecoverRearmed',
+  none: 'tbRecoverNone',
+};
+
+/**
+ * The running turn's timer and the table's time bank, read only: when the turn began, its turn time and the time bank
+ * time added, the deadline, the room's alarm and how late it is; the rules of this hand and of the next (a policy change
+ * shows here as a different next version). "Timer recovery" asks the room to apply its own rules now (a turn past its
+ * deadline times out or its bot moves; otherwise the alarm is set again). No one's time is set here.
+ */
+function TimerPanel({ id, live, issues, open, onDone }: { id: string; live: LiveStatus; issues: string[]; open: boolean; onDone: (n: Note) => Promise<void> }) {
+  const { t, locale } = useT();
+  const { api } = useAdmin();
+  const [ask, setAsk] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const tm = live.timer;
+  const tb = live.timeBank;
+  const unarmed = issues.includes('timer_unarmed');
+  const late = !!tm && tm.lateMs > 0;
+  // A turn's clock is read to the second.
+  const time = (ms: number | null | undefined) => (ms ? new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', { timeStyle: 'medium' }).format(ms) : t('none'));
+  const s = (ms: number) => t('tbSeconds', { n: Math.round(ms / 1000) });
+  const recover = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ result: RecoverResult; lateMs: number }>(`/api/admin/tables/${id}/timer-recover`, { body: { reason: reason.trim() } });
+      setAsk(false);
+      setReason('');
+      await onDone({ ok: true, text: t(RECOVER_TEXT[r.result] ?? 'tbRecoverNone') });
+    } catch (e) {
+      setAsk(false);
+      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) await onDone({ ok: false, text: errText(e, t) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel title={t('tbTimerTitle')} actions={<Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline">{t('tbManage')} →</Link>}>
+      <div className="flex flex-col gap-3 text-sm" data-testid="table-timer" data-state={!tm ? 'idle' : unarmed ? 'unarmed' : late ? 'late' : 'ok'}>
+        {!tm ? (
+          <p className="text-ink-400">{t('tbNoTurn')}</p>
+        ) : (
+          <>
+            <p className="flex flex-wrap items-center gap-1">
+              {unarmed ? <Badge tone="red">{t('tbTimerUnarmed')}</Badge> : late ? <Badge tone="gold">{t('tbTimerLate', { n: s(tm.lateMs) })}</Badge> : <Badge tone="green">{t('tbTimerOk')}</Badge>}
+              {tm.extraMs > 0 && <Badge tone="blue">{t('tbExtraAdded', { n: s(tm.extraMs) })}</Badge>}
+            </p>
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div><dt className="text-xs text-ink-400">{t('tbTurnStarted')}</dt><dd>{time(tm.turnStartedAt)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('tbTurnTime')}</dt><dd className="font-mono">{s(tm.baseMs)} + {s(tm.extraMs)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('tbDeadline')}</dt><dd data-testid="timer-deadline">{time(tm.deadline)}</dd></div>
+              <div><dt className="text-xs text-ink-400">{t('diagAlarm')}</dt><dd>{time(tm.alarmAt)}</dd></div>
+            </dl>
+          </>
+        )}
+        {tb && (
+          <div className="flex flex-col gap-1 rounded-lg border border-white/10 px-3 py-2 text-xs" data-testid="table-time-bank">
+            <p>
+              {tb.hand ? t('tbHandRules', { v: tb.hand.version, unit: s(tb.hand.unitMs), max: s(tb.hand.maxMs) }) : t('tbHandRulesOff')}
+              {' · '}
+              {tb.next ? t('tbNextRules', { v: tb.next.version }) : t('tbNextRulesOff')}
+            </p>
+            {(tb.hand?.version ?? null) !== (tb.next?.version ?? null) && <p className="text-gold-200">{t('tbPendingVersion')}</p>}
+            <p className="text-ink-400">{t('tbHandUses', { n: tb.handUses, kept: tb.kept })}</p>
+          </div>
+        )}
+        {live.social && (
+          <p className="flex flex-wrap items-center gap-2 text-xs" data-testid="table-social" data-reactions={live.social.reactions}>
+            <Badge tone={live.social.reactions ? 'green' : 'neutral'}>{t(live.social.reactions ? 'soTableRules' : 'soTableRulesOff', { v: live.social.policyVersion ?? 0 })}</Badge>
+            <Link to="/tables/social" className="text-gold-300 hover:underline">{t('soManage')} →</Link>
+          </p>
+        )}
+        <div className="flex flex-col gap-1">
+          <Button variant={unarmed || late ? 'gold' : 'outline'} disabled={!open} onClick={() => setAsk(true)} data-testid="timer-recover">{t('tbRecover')}</Button>
+          <p className="text-xs text-ink-400">{t('tbRecoverHint')}</p>
+        </div>
+      </div>
+      <Modal
+        open={ask}
+        onClose={() => setAsk(false)}
+        title={t('tbRecover')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAsk(false)}>{t('cancel')}</Button>
+            <Button variant="gold" disabled={reason.trim().length < 2} loading={busy} onClick={recover} data-testid="timer-recover-confirm">{t('confirm')}</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2 text-sm">
+          <p>{t('tbRecoverConfirm')}</p>
+          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="timer-recover-reason" />}</Field>
+        </div>
+      </Modal>
+    </Panel>
+  );
+}
+
 export function TableDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useT();
   const { api } = useAdmin();
-  const { data, error, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null }>(`/api/admin/tables/${id}`);
+  const { data, error, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null; tournament?: { id: string; name: string; status: string } | null }>(`/api/admin/tables/${id}`);
   const [note, setNote] = useState<Note>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [closePv, setClosePv] = useState<{ data: ClosePreview } | { error: unknown } | null>(null);
@@ -975,6 +1243,8 @@ export function TableDetailPage() {
   const [control, setControl] = useState<TableControl | null>(null);
   const [cReason, setCReason] = useState('');
   const [edit, setEdit] = useState<{ smallBlind?: number; bigBlind?: number; minBuyIn?: number; maxBuyIn?: number }>({});
+  // Bumped after a conflict so the blinds form starts again from the reloaded values (its inputs are uncontrolled).
+  const [blindsForm, setBlindsForm] = useState(0);
   const act = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
@@ -982,6 +1252,13 @@ export function TableDetailPage() {
       await reload();
     } catch (e) {
       if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setNote({ ok: false, text: errText(e, t) });
+      // Another administrator changed the table: show what it is now, to check before saving again. The typed blinds
+      // go with it, so what the form shows is what a second save sends.
+      if (e instanceof ApiError && e.code === 'table_conflict') {
+        await reload();
+        setEdit({});
+        setBlindsForm((n) => n + 1);
+      }
     }
   };
   const runControl = async (action: TableControl) => {
@@ -1018,6 +1295,9 @@ export function TableDetailPage() {
   const diag = data.diagnosis;
   const time = (ms: number | null | undefined) => (ms ? formatDate(ms, locale) : t('none'));
   const controllable = tb.status === 'open';
+  // A tournament's table is paused, closed and set up from its tournament (the API refuses these here: tournament_table).
+  const tn = tb.roomType === 'tournament' ? (data.tournament ?? null) : null;
+  const tnTable = tb.roomType === 'tournament';
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -1027,6 +1307,7 @@ export function TableDetailPage() {
         {tb.entryBlocked && <Badge tone="red">{t('entryBlockedShort')}</Badge>}
         {live?.maintenance?.active && <Badge tone="gold">{t('maintStateActive')}</Badge>}
         {tb.lastIssue && <Badge tone="red">{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></Badge>}
+        {tnTable && <Badge tone="gold">{t('tournamentRoom')}</Badge>}
       </div>
       <Feedback note={note} />
       {error && <LoadError error={error} onRetry={reload} />}
@@ -1040,12 +1321,14 @@ export function TableDetailPage() {
                   <li key={i} className="flex justify-between gap-2 py-1.5">
                     <span className="flex min-w-0 flex-wrap items-center gap-1">
                       #{s.seatIndex + 1} {s.nickname}
+                      {s.bot && <Badge tone="blue">{t('botBadge')} · {botLevelLabel(t, s.bot)}</Badge>}
                       {!s.connected && <Badge>{t('offline')}</Badge>}
                       {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}
                       {s.phase && s.phase !== 'seated' && <Badge tone="gold">{seatPhaseLabel(t, s.phase)}</Badge>}
                       {s.leaveAfterHand && <Badge>{t('leaveAfterHand')}</Badge>}
                       {!!s.timeouts && <Badge>{t('timeoutsN', { n: s.timeouts })}</Badge>}
                       {s.topUp && <Badge tone="blue">{t('topUpN', { amount: formatChips(s.topUp.amount), state: topUpStateLabel(t, s.topUp.state) })}</Badge>}
+                      {s.timeBank && <Badge>{t('tbSeatBank', { n: Math.floor(s.timeBank.ms / 1000) })}</Badge>}
                     </span>
                     <span className="shrink-0 font-mono">{formatChips(s.stack)}</span>
                   </li>
@@ -1055,6 +1338,20 @@ export function TableDetailPage() {
             </div>
           )}
         </Panel>
+        {tnTable ? (
+          <Panel title={t('tnTableTitle')}>
+            <div className="flex flex-col gap-3 text-sm" data-testid="tn-table-panel">
+              {tn && (
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">{tn.name}</span>
+                  <Badge tone={tn.status === 'running' ? 'green' : tn.status === 'aborted' ? 'red' : 'neutral'}>{tnStatusLabel(t, tn.status)}</Badge>
+                </p>
+              )}
+              <p className="text-ink-300">{t('tnTableBody')}</p>
+              {tn && <Link to={`/tournaments/${tn.id}`} className="self-start text-gold-300 hover:underline" data-testid="tn-table-tournament">{t('tnTableLink')} →</Link>}
+            </div>
+          </Panel>
+        ) : (
         <Panel title={t('emergencyTitle')}>
           <div className="flex flex-col gap-3" data-testid="emergency">
             <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={cReason} onChange={(e) => setCReason(e.target.value)} disabled={!controllable} data-testid="control-reason" />}</Field>
@@ -1074,6 +1371,7 @@ export function TableDetailPage() {
             <Button variant="danger" disabled={tb.status !== 'open'} onClick={askClose} data-testid="close-table">{t('closeTable')}</Button>
           </div>
         </Panel>
+        )}
       </div>
       {live && (
         <Panel title={t('diagnosisTitle')}>
@@ -1121,21 +1419,36 @@ export function TableDetailPage() {
           </div>
         </Panel>
       )}
+      {live && (
+        <TimerPanel
+          id={id}
+          live={live}
+          issues={diag?.issues ?? []}
+          open={controllable}
+          onDone={async (n) => {
+            setNote(n);
+            await reload();
+          }}
+        />
+      )}
+      {!tnTable && (
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('blinds')}>
-          <form className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: edit })); }}>
+          <form key={blindsForm} data-testid="table-blinds" className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { ...edit, ifUpdatedAt: tb.updatedAt } })); }}>
             {(['smallBlind', 'bigBlind', 'minBuyIn', 'maxBuyIn'] as const).map((k) => (
               <Field key={k} label={t(k)}>{(fid) => <Input id={fid} inputMode="numeric" defaultValue={tb[k]} onChange={(e) => setEdit({ ...edit, [k]: Number(e.target.value) || undefined })} />}</Field>
             ))}
             <p className="col-span-2 text-xs text-ink-400">{t('appliesNextHand')}</p>
             <div className="col-span-2 flex flex-wrap gap-2">
               <Button type="submit" disabled={tb.status === 'closed'}>{t('save')}</Button>
-              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { allowSpectators: !tb.allowSpectators } }))}>{t('spectators')}: {tb.allowSpectators ? t('yes') : t('no')}</Button>
-              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { beginner: !tb.beginner } }))}>{t('beginnerTable')}: {tb.beginner ? t('yes') : t('no')}</Button>
+              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { allowSpectators: !tb.allowSpectators, ifUpdatedAt: tb.updatedAt } }))}>{t('spectators')}: {tb.allowSpectators ? t('yes') : t('no')}</Button>
+              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { beginner: !tb.beginner, ifUpdatedAt: tb.updatedAt } }))}>{t('beginnerTable')}: {tb.beginner ? t('yes') : t('no')}</Button>
             </div>
           </form>
         </Panel>
+        <TableBotsPanel key={[tb.botsEnabled, tb.botLevel, tb.botMinHumans, tb.botMax, tb.botFillTo, tb.botYield].join(':')} tb={tb} live={live} act={act} />
       </div>
+      )}
       <div className="flex flex-wrap gap-4">
         <Link to={`/hands?tableId=${id}`} className="text-sm text-gold-300">{t('hands')} →</Link>
         <Link to={`/audit?targetType=table&targetId=${encodeURIComponent(id)}`} className="text-sm text-gold-300" data-testid="table-audit">{t('audit')} →</Link>
@@ -1359,7 +1672,7 @@ export function HandDetailPage() {
 
 // ------------------------------------------------------------------ ledger, reconcile, audit
 const LEDGER_KEYS = ['member', 'type', 'from', 'to'] as const;
-const LEDGER_TYPES = ['signup_grant', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile'] as const;
+const LEDGER_TYPES = ['signup_grant', 'free_refill', 'buy_in', 'top_up', 'cash_out', 'admin_adjust', 'reconcile', 'bot_fund', 'referral'] as const;
 
 /**
  * The chip ledger, newest first, page by page. Every look (with its filters and page) is recorded in the audit log by
