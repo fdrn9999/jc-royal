@@ -283,7 +283,9 @@ describe('member page', () => {
     open.push(wa, wb);
     expect(await wa.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
     expect(await wb.request({ t: 'sit', seatIndex: 1, buyIn: 300 })).toMatchObject({ t: 'ack' });
-    await wa.waitState((s) => s.hand?.stage === 'preflop', 20_000, 'first hand');
+    const first = await wa.waitState((s) => s.hand?.stage === 'preflop', 20_000, 'first hand');
+    // B's copy of the hand can be read after A's: until it is, B's playOut sees no hand and returns, and nobody plays B.
+    await wb.waitState((s) => s.hand?.id === first.hand!.id, 20_000, 'first hand on B');
     await Promise.all([playOut(wa), playOut(wb)]);
     // A next hand may already be dealt: leaving then folds it and stands up when it settles.
     expect(await wa.request({ t: 'leave' })).toMatchObject({ t: 'ack' });

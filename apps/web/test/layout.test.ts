@@ -138,6 +138,27 @@ describe('table layout: every seat, bet and the board in a place of its own', ()
     expect(problems(six, input(6, { chars: short }))).toEqual([]);
   });
 
+  it('passes the cap by as little as it can: a smaller cap never makes a taller table', () => {
+    // A heads-up replay on a 390px phone (Pixel 7), the cap a few px under what the smallest seats need: the table
+    // took the larger seats' least height (359px), 91px over the cap, and pushed the controls under the bottom bar.
+    const p = input(2, { chars: { stack: 9, bet: 5, pot: 5 } });
+    const under = planHeight(336, 440, 260, p, SMALL);
+    expect(under.h).toBeGreaterThan(260);
+    expect(under.h).toBeLessThanOrEqual(272);
+    expect(under.density).toBe('dense');
+    expect(under.overlap).toBe(0);
+    expect(problems(under, p)).toEqual([]);
+    for (const [w, n, chars] of [[336, 2, CHIPS], [336, 6, CHIPS], [358, 9, BB], [1206, 2, CHIPS], [1206, 9, BB]] as const) {
+      const q = input(n, { chars });
+      let last = 0;
+      for (let cap = 120; cap <= 520; cap += 8) {
+        const h = planHeight(w, 540, cap, q, w < 640 ? SMALL : ALL).h;
+        expect(h, `${w}px · ${n} seats · cap ${cap}`).toBeGreaterThanOrEqual(last);
+        last = h;
+      }
+    }
+  });
+
   it('falls back to the least overlap, not a crash, when nothing fits', () => {
     const plan = planTable(120, 90, input(9), SMALL);
     expect(plan.overlap).toBeGreaterThan(0);
