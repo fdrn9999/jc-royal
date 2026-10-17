@@ -1,4 +1,4 @@
-import { AMBIENT, GAP_MS, LENGTH_MS, MAX_VOICES, Mixer } from '@jc/audio';
+import { AMBIENT, GAP_MS, LENGTH_MS, MAX_VOICES, Mixer, type SoundId } from '@jc/audio';
 import { describe, expect, it } from 'vitest';
 
 describe('mixer', () => {
@@ -29,6 +29,36 @@ describe('mixer', () => {
     const later = 1 + Math.max(...Object.values(LENGTH_MS));
     expect(m.voices(later)).toBe(0);
     expect(m.admit('chip', later)).toBe(true);
+  });
+
+  it('never more than MAX_VOICES at once, whatever comes: a sound that tells the hand takes the place of one playing', () => {
+    const m = new Mixer();
+    const ids = Object.keys(GAP_MS) as SoundId[];
+    let seed = 3;
+    let admitted = 0;
+    for (let i = 0; i < 3000; i++) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      const id = ids[seed % ids.length]!;
+      // A burst: a sound every 7 ms, now and then a quiet moment.
+      const now = i * 7 + Math.floor(i / 200) * 1000;
+      if (m.admit(id, now)) admitted++;
+      expect(m.voices(now), `${id} at ${now}`).toBeLessThanOrEqual(MAX_VOICES);
+    }
+    expect(admitted).toBeGreaterThan(500);
+  });
+
+  it('the background sound nearest its end is stopped for it, then the one that tells the hand nearest its end', () => {
+    const m = new Mixer();
+    const stopped: SoundId[] = [];
+    for (const id of ['deal', 'flip', 'chip', 'select', 'check', 'call'] as const) expect(m.admit(id, 0, undefined, () => stopped.push(id))).toBe(true);
+    expect(m.admit('raise', 1, undefined, () => stopped.push('raise'))).toBe(true);
+    expect(stopped).toEqual(['select']);
+    expect(m.voices(1)).toBe(MAX_VOICES);
+    for (const id of ['allin', 'timer', 'win'] as const) m.admit(id, 2, undefined, () => stopped.push(id));
+    expect(stopped).toEqual(['select', 'flip', 'chip', 'deal']);
+    m.admit('showdown', 3);
+    expect(stopped).toEqual(['select', 'flip', 'chip', 'deal', 'check']);
+    expect(m.voices(3)).toBe(MAX_VOICES);
   });
 
   it('every sound has a gap and a length', () => {

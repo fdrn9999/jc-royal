@@ -180,7 +180,8 @@ export function TableScene({
   const { staged, flights, start, arrival } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion);
   const result = !staged || staged.result;
   const reveal = !staged || staged.reveal;
-  useEffect(() => onResultShown?.(result), [result, onResultShown]);
+  // Before the frame is painted, so a page holding its word never shows it a frame early.
+  useLayoutEffect(() => onResultShown?.(result), [result, onResultShown]);
   const winners = useMemo(() => new Map(result ? (hand?.result?.winners ?? []).map((w) => [w.seatIndex, w.amount]) : []), [hand?.result, result]);
   const showdown = useMemo(() => new Map(result ? (hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x]) : []), [hand?.result, result]);
   const topWinner = result ? hand?.result?.winners?.[0]?.seatIndex : undefined;

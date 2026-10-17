@@ -8,6 +8,8 @@ interface SeatIn {
   stack?: number;
   cards?: boolean;
   hole?: Card[];
+  /** Who sits there (by default the same player per seat). */
+  user?: string;
 }
 
 /** Six seats (unlisted ones empty); `seats` by seat index. */
@@ -17,7 +19,7 @@ function view(o: { id?: string; seq?: number; stage?: HandStage; board?: Card[];
     seats: Array.from({ length: 6 }, (_, i) => {
       const x = o.seats[i];
       return x
-        ? { seatIndex: i, state: 'active', stack: x.stack ?? 1000, streetBet: x.bet ?? 0, hasCards: x.cards ?? true, holeCards: x.hole ?? null, connected: true }
+        ? { seatIndex: i, state: 'active', userId: x.user ?? `u-${i}`, stack: x.stack ?? 1000, streetBet: x.bet ?? 0, hasCards: x.cards ?? true, holeCards: x.hole ?? null, connected: true }
         : { seatIndex: i, state: 'empty', stack: 0, streetBet: 0, hasCards: false, connected: false };
     }),
     hand: {
@@ -37,6 +39,19 @@ let cueId = 0;
 const batch = (...cues: TableCue[]): StageCue[] => cues.map((cue) => ({ id: ++cueId, cue }));
 const act = (seatIndex: number, type: ActionType, amount = 0): TableCue => ({ kind: 'action', seatIndex, type, amount });
 const FLOP: Card[] = ['Ah', 'Kd', '7c'];
+
+/** The chips the table shows at `t` of `p` over `v`, as TableScene draws them: stacks, bets, the pot and chips in the air. */
+function shown(p: Plan | null, t: number, v: TableView): number {
+  const st = stagedAt(p, t, v);
+  const settled = v.hand?.stage === 'settled';
+  let sum = st?.pot ?? collected(v);
+  for (const x of v.seats) sum += (st?.stacks[x.seatIndex] ?? x.stack) + (st?.bets[x.seatIndex] ?? (settled ? 0 : x.streetBet));
+  if (st) for (const f of p!.flights) if (f.at <= t && t < f.at + f.dur) sum += f.amount;
+  return sum;
+}
+const chips = (v: TableView) => shown(null, 0, v);
+/** Every moment a plan's scene can change, and either side of it. */
+const moments = (p: Plan) => [...new Set([0, ...boundaries(p), ...p.flights.flatMap((f) => [f.at, f.at + f.dur])].flatMap((a) => [a - 1, a, a + 1]))].filter((a) => a >= 0 && a < p.end);
 
 describe('staging: chips', () => {
   it('slides each street bet into the pot with its own amount (never a fixed chip), after the call lands', () => {
@@ -153,6 +168,84 @@ describe('staging: chips', () => {
     const toppedUp = view({ seq: 6, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995 }, 1: { stack: 2000 } } });
     expect(stagedAt(p, p.result, toppedUp)!.stacks).toEqual({});
   });
+
+  it('never shows a chip twice: a settled batch whose payouts are held back (an Academy question) is not staged beside stacks that already hold them', () => {
+    const prev = view({ seq: 4, stage: 'preflop', potTotal: 15, seats: { 0: { bet: 5, stack: 995 }, 1: { bet: 10, stack: 990 } } });
+    const next = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false }, 1: { stack: 1005 } }, winners: [{ seatIndex: 1, amount: 15, potIds: ['pot-main-0'] }] });
+    const p = plan(prev, batch(act(0, 'fold'), { kind: 'handEnd' }), next, 1);
+    // The stacks already hold the pot: the scene shows the state at once, with the pot gone.
+    expect(p).toBeNull();
+    expect(shown(p, 0, next)).toBe(chips(next));
+  });
+
+  it('ends what it stages at a seat its winner left or someone else took, but not for a seat taken elsewhere', () => {
+    const prev = view({ seq: 4, stage: 'preflop', potTotal: 15, seats: { 0: { bet: 5, stack: 995 }, 1: { bet: 10, stack: 990 } } });
+    const winners = [{ seatIndex: 1, amount: 15, potIds: ['pot-main-0'] }];
+    const next = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false }, 1: { stack: 1005 } }, winners });
+    const p = plan(prev, batch(act(0, 'fold'), { kind: 'payout', seatIndex: 1, amount: 15 }, { kind: 'handEnd' }), next, 0)!;
+    const t = p.flights.find((f) => f.kind === 'payout')!.at + 1;
+    expect(stagedAt(p, t, next)).not.toBeNull();
+    // The same hand, the same step (no cue explains it): the winner stood up while the chips were on their way...
+    const left = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false } }, winners });
+    expect(stagedAt(p, t, left)).toBeNull();
+    // ...or someone else sat down there, with as many chips.
+    const taken = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false }, 1: { stack: 1005, user: 'u-new' } }, winners });
+    expect(stagedAt(p, t, taken)).toBeNull();
+    const elsewhere = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false }, 1: { stack: 1005 }, 4: { stack: 500, cards: false } }, winners });
+    expect(stagedAt(p, t, elsewhere)).not.toBeNull();
+  });
+
+  it('stages nothing at a seat whose player changed within the batch itself: the chips are not for whoever sits there now', () => {
+    // The winner stood up and someone else sat down there before the batch reached the table.
+    const prev = view({ seq: 4, stage: 'preflop', potTotal: 15, seats: { 0: { bet: 5, stack: 995 }, 1: { bet: 10, stack: 990 } } });
+    const winners = [{ seatIndex: 1, amount: 15, potIds: ['pot-main-0'] }];
+    const cues = batch(act(0, 'fold'), { kind: 'payout', seatIndex: 1, amount: 15 }, { kind: 'handEnd' });
+    const taken = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false }, 1: { stack: 1005, user: 'u-new' } }, winners });
+    expect(plan(prev, cues, taken, 0)).toBeNull();
+    expect(shown(plan(prev, cues, taken, 0), 0, taken)).toBe(chips(taken));
+    // A seat taken elsewhere still lets it play out.
+    const elsewhere = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false }, 1: { stack: 1005 }, 4: { stack: 500, cards: false } }, winners });
+    expect(plan(prev, cues, elsewhere, 0)).not.toBeNull();
+  });
+
+  it('a run-out squeezed into its budget still lands every chip exactly when it counts: never in two places, never missing', () => {
+    // Preflop all in and two calls, the board run out, a three-way split: longer than the budget, so the plan is scaled.
+    const prev = view({ seq: 3, stage: 'preflop', potTotal: 15, seats: { 1: { bet: 5, stack: 995 }, 2: { bet: 10, stack: 990 }, 3: {} } });
+    const winners = [1, 2, 3].map((seatIndex) => ({ seatIndex, amount: 1000, potIds: ['pot-main-0'] }));
+    const next = view({ seq: 12, stage: 'settled', board: [...FLOP, '2s', '9d'], potTotal: 3000, seats: { 1: {}, 2: {}, 3: {} }, winners });
+    const cues = batch(
+      act(3, 'allin', 1000),
+      act(1, 'call', 995),
+      act(2, 'call', 990),
+      { kind: 'street', stage: 'flop', cards: FLOP },
+      { kind: 'street', stage: 'turn', cards: ['2s'] },
+      { kind: 'street', stage: 'river', cards: ['9d'] },
+      { kind: 'showdown' },
+      ...winners.map((w): TableCue => ({ kind: 'payout', seatIndex: w.seatIndex, amount: w.amount })),
+      { kind: 'handEnd' },
+    );
+    const p = plan(prev, cues, next, 1)!;
+    expect(p.end).toBe(BUDGET);
+    // Until the last bet lands a stack may already show it gone; from then on every chip is somewhere, once.
+    const lastBet = Math.max(...p.flights.filter((f) => f.kind === 'bet').map((f) => f.at + f.dur));
+    for (const t of moments(p)) {
+      if (t >= lastBet) expect(shown(p, t, next), `t=${t}`).toBe(chips(next));
+      else expect(shown(p, t, next), `t=${t}`).toBeLessThanOrEqual(chips(next));
+    }
+  });
+
+  it('a winner of two pots gets one payout with both, and the stack waits for all of it', () => {
+    // As in the side-pot hand above, but seat 1 wins both pots (were the engine to pay them one by one).
+    const prev = view({ seq: 9, stage: 'river', board: [...FLOP, '2s', '9d'], potTotal: 900, seats: { 1: { bet: 300, stack: 700 }, 2: {}, 3: { stack: 0 } } });
+    const winners = [{ seatIndex: 1, amount: 1200, potIds: ['pot-main-0', 'pot-side-1'] }];
+    const next = view({ seq: 11, stage: 'settled', board: prev.hand!.board, potTotal: 1200, seats: { 1: { stack: 1900 }, 2: { stack: 700 }, 3: { stack: 0 } }, winners });
+    const cues = batch(act(2, 'call', 300), { kind: 'showdown' }, { kind: 'payout', seatIndex: 1, amount: 300 }, { kind: 'payout', seatIndex: 1, amount: 900 }, { kind: 'handEnd' });
+    const p = plan(prev, cues, next, 1)!;
+    expect(p.flights.filter((f) => f.kind === 'payout').map((f) => [f.seat, f.amount])).toEqual([[1, 1200]]);
+    expect(stagedAt(p, p.result, next)!.stacks).toEqual({ 1: 700 });
+    expect(p.sounds.filter((x) => x.id === 'win')).toHaveLength(1);
+    for (const t of moments(p)) if (t >= p.result) expect(shown(p, t, next), `t=${t}`).toBe(chips(next));
+  });
 });
 
 describe('staging: cards', () => {
@@ -246,9 +339,19 @@ describe('staging: real hands', () => {
       expect(end.pot ?? collected(after)).toBe(collected(after));
       expect(end.stacks).toEqual({});
       const pays = cues.filter((c) => c.cue.kind === 'payout').map((c) => c.cue as { seatIndex: number; amount: number });
+      // Each winner's payout flies once, with all of it.
       const flown = p!.flights.filter((f) => f.kind === 'payout');
-      expect(flown.map((f) => f.amount).sort()).toEqual(pays.map((x) => x.amount).sort());
+      const perSeat = (xs: [number, number][]) => xs.reduce<Record<number, number>>((a, [seat, v]) => ((a[seat] = (a[seat] ?? 0) + v), a), {});
+      expect(flown.map((f) => f.seat)).toEqual([...new Set(flown.map((f) => f.seat))]);
+      expect(perSeat(flown.map((f) => [f.seat, f.amount]))).toEqual(perSeat(pays.map((x) => [x.seatIndex, x.amount])));
       for (const f of p!.flights) expect(f.amount).toBeGreaterThan(0);
+      // Never more chips on the table than there are (a bet leaves its stack before it lands, so fewer while bets fly);
+      // from the result on, every chip is in a stack, the pot or the air.
+      const total = chips(after);
+      for (const t of moments(p!)) {
+        expect(shown(p!, t, after), `t=${t} of ${JSON.stringify(cues.map((c) => c.cue))}`).toBeLessThanOrEqual(total);
+        if (settled && t >= p!.result) expect(shown(p!, t, after), `t=${t} of ${JSON.stringify(cues.map((c) => c.cue))}`).toBe(total);
+      }
       for (const c of cues) kinds.add(c.cue.kind === 'action' ? `action:${c.cue.type}` : c.cue.kind);
       if (pays.length > 1) kinds.add('multi-payout');
       if (after.seats.some((x) => x.state === 'allin')) kinds.add('allin');

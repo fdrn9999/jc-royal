@@ -30,7 +30,10 @@ test('a page that cannot load says so and offers a retry, instead of a spinner t
   await restore();
   await failed.getByTestId('load-failed-retry').click();
   await expect(failed).toHaveCount(0);
-  await expect(page.getByTestId('write-post')).toBeVisible();
+  // The list itself came back (the write button sits in the header whatever the list does). One of the union, as a
+  // board with both notices and posts matches more than one.
+  await expect(page.getByTestId('post-row').or(page.getByTestId('notice-row')).or(page.getByText(/아직 글이 없습니다|No posts yet/)).first()).toBeVisible();
+  await expect(page.getByRole('progressbar')).toHaveCount(0);
 
   // A post that is gone is "not found", not a retry.
   await page.goto('/board/no-such-post');

@@ -99,7 +99,11 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
   const room = useStackRoom('');
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
   // The table turns the hands over before it shows who won: the bar and the net wait for it (the next hand does not).
-  const [resultShown, setResultShown] = useState(true);
+  // Told per hand and stage, so a settled hand never starts out with the word the table gave on the one before.
+  const shownKey = view.hand ? `${view.hand.id}:${s.settled}` : '';
+  const [shownFor, setShownFor] = useState<string | null>(null);
+  const resultShown = shownFor === shownKey;
+  const onResultShown = useCallback((shown: boolean) => setShownFor(shown ? shownKey : null), [shownKey]);
   const [net, setNet] = useState(s.net);
 
   useEffect(() => sound.installAutoUnlock(), []);
@@ -163,7 +167,7 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
       </header>
       <div ref={room.colRef} className="jc-game-surface relative flex min-h-0 flex-1 flex-col">
         <div ref={areaRef} className="relative mx-2 mt-2 flex min-h-0 flex-1 items-center justify-center sm:mx-6" style={room.style}>
-          <TableScene s={view} layout={layout} mySeat={0} canSit={false} onSit={() => {}} nextIn={null} cues={cues} consumeCues={(up) => (s.consumeCues(up), setCues([...s.cues]))} reducedMotion={reducedMotion} onResultShown={setResultShown} />
+          <TableScene s={view} layout={layout} mySeat={0} canSit={false} onSit={() => {}} nextIn={null} cues={cues} consumeCues={(up) => (s.consumeCues(up), setCues([...s.cues]))} reducedMotion={reducedMotion} onResultShown={onResultShown} />
         </div>
         <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
           {fault && (

@@ -87,6 +87,8 @@ class SoundEngine {
   private buffers = new Map<SoundId, AudioBuffer>();
   private decoding = false;
   private mixer = new Mixer();
+  /** While a sound is being started: how to silence each of its parts, should the mixer need its place. */
+  private hush: (() => void)[] | null = null;
   private gesture: (() => void) | null = null;
   private listeners = new Set<(s: AudioSettings) => void>();
   settings: AudioSettings = typeof window === 'undefined' ? { ...DEFAULTS } : readSettings();
@@ -220,6 +222,7 @@ class SoundEngine {
     gain.connect(this.fx);
     osc.start(t0);
     osc.stop(t0 + dur + 0.05);
+    this.hush?.push(silence(ctx, gain, osc, t0));
   }
 
   private noise(o: { duration?: number; volume?: number; filterFreq?: number; start?: number }) {
@@ -245,6 +248,7 @@ class SoundEngine {
     gain.connect(this.fx);
     src.start(t0);
     src.stop(t0 + dur);
+    this.hush?.push(silence(ctx, gain, src, t0));
   }
 
   private sample(buffer: AudioBuffer, volume: number) {
@@ -257,13 +261,20 @@ class SoundEngine {
     src.connect(gain);
     gain.connect(this.fx);
     src.start();
+    this.hush?.push(silence(ctx, gain, src, ctx.currentTime));
   }
 
   play(id: SoundId) {
     if (typeof document !== 'undefined' && document.hidden) return;
     const recorded = this.buffers.get(id);
-    if (!this.ready() || !this.mixer.admit(id, performance.now(), recorded && recorded.duration * 1000)) return;
-    this.voice(id);
+    const parts: (() => void)[] = [];
+    if (!this.ready() || !this.mixer.admit(id, performance.now(), recorded && recorded.duration * 1000, () => parts.forEach((f) => f()))) return;
+    this.hush = parts;
+    try {
+      this.voice(id);
+    } finally {
+      this.hush = null;
+    }
   }
 
   private voice(id: SoundId) {
@@ -336,6 +347,29 @@ class SoundEngine {
       }
     }
   }
+}
+
+/** Fades a playing part (started at `t0`) out within a few ms, without a click; one not started yet never starts. */
+function silence(ctx: AudioContext, gain: GainNode, src: AudioScheduledSourceNode, t0: number) {
+  return () => {
+    try {
+      const t = ctx.currentTime;
+      // Its envelope has not begun (the gain stands at 1 until then): stopped before it starts, it never sounds.
+      if (t < t0) return src.stop(t);
+      const g = gain.gain;
+      // Held where it is, so a fade under way never jumps back up to where its ramp began.
+      if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(t);
+      else {
+        const v = g.value;
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(v, t);
+      }
+      g.setTargetAtTime(0, t, 0.006);
+      src.stop(t + 0.04);
+    } catch {
+      /* already over */
+    }
+  };
 }
 
 function clamp01(n: number) {

@@ -89,8 +89,10 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
       consumeRef.current(last.current);
     }
     if (!batch.some((e) => STAGED_KINDS.has(e.cue.kind))) {
-      // A seat taken or left, a reconnect: the plan goes on unless the hand moved on without it.
-      if (run.current && sig(s) !== run.current.plan.final) stop();
+      // A seat taken or left, a reconnect: the plan goes on unless the hand moved on without it, or the plan no longer
+      // applies (chips on their way to a seat left or taken), so its timers and sounds end with it.
+      const r = run.current;
+      if (r && (sig(s) !== r.plan.final || !stagedAt(r.plan, performance.now() - r.start, s))) stop();
       return;
     }
     // Anything new catches up: the old plan gives way, the new one starts from the state it left.

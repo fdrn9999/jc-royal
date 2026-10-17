@@ -2,9 +2,10 @@
  * How one batch of server cues plays out on the table. A batch arrives with the state it ends in, already final; this
  * plans the few seconds the scene takes to get there: a bet lands in front of its seat before it counts, street bets
  * slide into the pot with their real amounts, board cards turn one after another (an all-in run-out street by street,
- * the hands face up first), the showdown comes before the result, and each winner gets one payout of what they won,
- * side pots first. Pure: no clock, no DOM. The amounts shown are only ever ones the state passed through, and a batch
- * whose amounts do not add up to its final state is not staged at all (the scene shows the server state at once).
+ * the hands face up first), the showdown comes before the result, and each winner gets one payout of all they won
+ * (their payout cues added up), side pots first. Pure: no clock, no DOM. The amounts shown are only ever ones the state
+ * passed through, no chip is ever shown in two places at once, and a batch whose amounts do not add up to its final
+ * state is not staged at all (the scene shows the server state at once).
  */
 import type { SoundId } from '@jc/audio';
 import type { TableCue, TableView } from '@jc/types';
@@ -48,6 +49,8 @@ export interface Plan {
   result: number;
   /** Per winner seat, the stack before its payout lands; `stack` is the final one it must still match. */
   stacks: Record<number, { before: number; until: number; stack: number }>;
+  /** Per seat index the plan moves chips at, who sits there (occupant): a seat left or taken since ends the plan. */
+  who: Record<number, string>;
 }
 
 /** What the scene shows at a moment of a plan (absent fields: the server state's). */
@@ -75,7 +78,7 @@ export const BUDGET = 3300;
 /** More cues than that at once (a reconnect, a tab that slept): the scene jumps to the state. */
 export const MAX_CUES = 30;
 
-/** The cues that move chips or cards; seats taken or left never stop a plan. */
+/** The cues that move chips or cards. A seat taken or left is not one of them: it ends a plan only at a seat the plan moves chips at. */
 export const STAGED_KINDS: ReadonlySet<TableCue['kind']> = new Set(['handStart', 'deal', 'action', 'street', 'showdown', 'payout', 'handEnd']);
 
 export const ACTION_SOUND: Record<string, SoundId> = { fold: 'fold', check: 'check', call: 'call', bet: 'raise', raise: 'raise', allin: 'allin' };
@@ -84,6 +87,11 @@ export const ACTION_SOUND: Record<string, SoundId> = { fold: 'fold', check: 'che
 export function sig(v: TableView): string {
   const h = v.hand;
   return h ? `${h.id}:${h.seq}:${h.stage}:${h.board.length}` : '-';
+}
+
+/** Who sits at a seat: '' when empty, the same key for the same player. */
+function occupant(x: TableView['seats'][number] | undefined): string {
+  return !x || x.state === 'empty' ? '' : (x.userId ?? x.nickname ?? '*');
 }
 
 /** The chips in the middle that are not in front of a seat (none once settled: they have been paid). */
@@ -158,7 +166,12 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
     } else if (c.kind === 'showdown') {
       sweep();
       showHands();
-    } else if (c.kind === 'payout') payouts.push({ seat: c.seatIndex, amount: c.amount });
+    } else if (c.kind === 'payout') {
+      // One payout per winner: a winner of several pots gets all of it at once, and its stack waits for all of it.
+      const same = payouts.find((x) => x.seat === c.seatIndex);
+      if (same) same.amount += c.amount;
+      else payouts.push({ seat: c.seatIndex, amount: c.amount });
+    }
   }
 
   let result = 0;
@@ -184,14 +197,21 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
   }
 
   // Only what adds up is staged: the bets and the pot must end where the state is, the board must grow into its cards.
-  // A settled hand always pays someone; without its payouts (the Academy holding the result back for a question) the
-  // pot stays in the middle until the plan ends.
-  if (settled ? (payouts.length > 0 && pot !== 0) || Object.values(stacks).some((s) => s.before < 0) : pot !== collected(next)) return null;
+  // A settled hand always pays someone, and its stacks already hold the pot: without its payouts (the Academy holding
+  // the result back for a question) a pot left in the middle would show those chips twice, so the state shows at once.
+  if (settled ? !payouts.length || pot !== 0 || Object.values(stacks).some((s) => s.before < 0) : pot !== collected(next)) return null;
   if (!settled && next.seats.some((x) => (running.get(x.seatIndex) ?? 0) !== x.streetBet)) return null;
   const board = boardAt.length && ph.board.length + boardAt.length === h.board.length ? { from: ph.board.length, at: boardAt } : null;
   if (boardAt.length && !board) return null;
 
-  const p: Plan = { hand: h.id, final: sig(next), end: t + 60, flights, sounds, bets, pot: potT.length > 1 ? potT : null, board, reveal, result, stacks };
+  // Chips move only between the same players: a seat its player left, or someone else took, within the batch itself
+  // would send them to whoever sits there now, so the state shows at once.
+  const who: Plan['who'] = {};
+  for (const seat of [...flights.map((f) => f.seat), ...Object.keys(bets).map(Number), ...Object.keys(stacks).map(Number)]) {
+    who[seat] = occupant(next.seats.find((x) => x.seatIndex === seat));
+    if (who[seat] !== occupant(prev.seats.find((x) => x.seatIndex === seat))) return null;
+  }
+  const p: Plan = { hand: h.id, final: sig(next), end: t + 60, flights, sounds, bets, pot: potT.length > 1 ? potT : null, board, reveal, result, stacks, who };
   return p.end > BUDGET ? scale(p, BUDGET / p.end) : p;
 }
 
@@ -202,7 +222,7 @@ function dealPlan(next: TableView, cues: StageCue[]): Plan {
   const step = dealStep(order.length);
   const sounds: Plan['sounds'] = [];
   if (cues.some((c) => c.cue.kind === 'deal') && order.length) sounds.push({ at: 0, id: 'deal' }, { at: order.length * step, id: 'deal' });
-  return { hand: h.id, final: sig(next), end: order.length * 2 * step, flights: [], sounds, bets: {}, pot: null, board: null, reveal: 0, result: 0, stacks: {} };
+  return { hand: h.id, final: sig(next), end: order.length * 2 * step, flights: [], sounds, bets: {}, pot: null, board: null, reveal: 0, result: 0, stacks: {}, who: {} };
 }
 
 function dealOrder(v: TableView): number[] {
@@ -233,7 +253,8 @@ function scale(p: Plan, f: number): Plan {
   return {
     ...p,
     end: s(p.end),
-    flights: p.flights.map((x) => ({ ...x, at: s(x.at), dur: s(x.dur) })),
+    // A flight lands exactly when what it carries counts (a bet, the pot, a stack), never a millisecond apart.
+    flights: p.flights.map((x) => ({ ...x, at: s(x.at), dur: s(x.at + x.dur) - s(x.at) })),
     sounds: p.sounds.map((x) => ({ ...x, at: s(x.at) })),
     bets: Object.fromEntries(Object.entries(p.bets).map(([k, tr]) => [k, track(tr)])),
     pot: p.pot && track(p.pot),
@@ -253,6 +274,8 @@ function at(tr: Track, t: number): number {
 /** The scene at `t` ms into `p`, over the server state `v` (null once the plan is over or no longer applies). */
 export function stagedAt(p: Plan | null, t: number, v: TableView): Staged | null {
   if (!p || t >= p.end || v.hand?.id !== p.hand) return null;
+  // Chips on their way to a seat its player left, or someone else took: the scene shows the state at once.
+  for (const [k, w] of Object.entries(p.who)) if (occupant(v.seats.find((x) => x.seatIndex === +k)) !== w) return null;
   const bets: Record<number, number> = {};
   for (const [k, tr] of Object.entries(p.bets)) bets[+k] = at(tr, t);
   const stacks: Record<number, number> = {};
