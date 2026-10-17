@@ -182,6 +182,10 @@ export async function findReferrer(db: D1Database, raw: string): Promise<Referre
 /**
  * Records a signup made with `referrer`'s code, right after the new member's row is written, and returns its id.
  * Decides only what is known at signup (policy on, same inbox, a burst from one network); paying is settleReferral's.
+ *
+ * Whether the inbox was referred before and how many signups for this referrer came from the network are decided by
+ * the INSERT itself, against the rows there when it is written: signups arriving together each read before the others
+ * wrote, so a separate read would let every one of them through (D1 runs one statement at a time).
  */
 export async function recordReferral(
   env: Env,
@@ -191,28 +195,36 @@ export async function recordReferral(
   const now = p.now ?? Date.now();
   const email = normalizeEmail(p.email);
   const [emailHash, ipHash] = await Promise.all([keyed(env, 'email', email), keyed(env, 'ip', networkOf(p.ip))]);
-  const [pol, repeat, burst, same] = await db.batch([
+  const [pol, same] = await db.batch([
     db.prepare(currentPolicySql),
-    db.prepare(`SELECT 1 AS x FROM referrals WHERE email_hash = ?1 LIMIT 1`).bind(emailHash),
-    db.prepare(`SELECT COUNT(*) AS n FROM referrals WHERE referrer_id = ?1 AND created_at > ?2 AND ip_hash = ?3`).bind(p.referrer.id, now - DAY, ipHash),
     db.prepare(`SELECT 1 AS x FROM sessions WHERE user_id = ?1 AND kind = 'user' AND ip = ?2 LIMIT 1`).bind(p.referrer.id, p.ip),
   ]);
   const policy = policyRow(pol!.results[0] as Record<string, unknown> | undefined);
-  let status: ReferralStatus = 'pending';
-  let failure: ReferralFailure | null = null;
-  if (!policy?.enabled) [status, failure] = ['unpaid', 'off'];
-  else if (p.verificationRequired && !p.emailVerified) [status, failure] = ['unpaid', 'email'];
-  else if (repeat!.results.length || email === normalizeEmail(p.referrer.email)) [status, failure] = ['unpaid', 'repeat_email'];
-  else if (Number((burst!.results[0] as { n: number }).n) + 1 >= policy.burstLimit) [status, failure] = ['review', 'burst'];
+  // What is known without the table, in the order of reasons: off, an unverified e-mail, the referrer's own inbox.
+  let known: ReferralFailure | null = null;
+  if (!policy?.enabled) known = 'off';
+  else if (p.verificationRequired && !p.emailVerified) known = 'email';
+  else if (email === normalizeEmail(p.referrer.email)) known = 'repeat_email';
   const referrerAmount = policy?.enabled ? policy.referrerAmount : 0;
   const inviteeAmount = policy?.enabled ? policy.inviteeAmount : 0;
-  const side = (amount: number): ReferralSideStatus => (status === 'unpaid' ? 'unpaid' : amount > 0 ? 'pending' : 'skipped');
+  // A side's status unless the referral is unpaid (then both sides are).
+  const side = (amount: number): ReferralSideStatus => (amount > 0 ? 'pending' : 'skipped');
   const id = crypto.randomUUID();
   await db
     .prepare(
       `INSERT INTO referrals (id, code, referrer_id, invitee_id, status, referrer_status, invitee_status, policy_version, referrer_amount, invitee_amount,
                               min_hands, email_hash, ip_hash, same_ip, email_verified, failure_code, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
+       SELECT ?1, ?2, ?3, ?4,
+              CASE WHEN f.failure IS NULL THEN 'pending' WHEN f.failure = 'burst' THEN 'review' ELSE 'unpaid' END,
+              CASE WHEN f.failure IS NULL OR f.failure = 'burst' THEN ?5 ELSE 'unpaid' END,
+              CASE WHEN f.failure IS NULL OR f.failure = 'burst' THEN ?6 ELSE 'unpaid' END,
+              ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, f.failure, ?15, ?15
+         FROM (SELECT CASE
+                        WHEN ?16 IS NOT NULL THEN ?16
+                        WHEN EXISTS (SELECT 1 FROM referrals WHERE email_hash = ?11) THEN 'repeat_email'
+                        WHEN (SELECT COUNT(*) FROM referrals WHERE referrer_id = ?3 AND created_at > ?17 AND ip_hash = ?12) + 1 >= ?18 THEN 'burst'
+                      END AS failure) f
+        WHERE true
        ON CONFLICT (invitee_id) DO NOTHING`,
     )
     .bind(
@@ -220,7 +232,6 @@ export async function recordReferral(
       p.referrer.code,
       p.referrer.id,
       p.inviteeId,
-      status,
       side(referrerAmount),
       side(inviteeAmount),
       policy?.version ?? 0,
@@ -231,8 +242,10 @@ export async function recordReferral(
       ipHash,
       same!.results.length ? 1 : 0,
       p.emailVerified ? 1 : 0,
-      failure,
       now,
+      known,
+      now - DAY,
+      policy?.burstLimit ?? 0,
     )
     .run();
   return id;

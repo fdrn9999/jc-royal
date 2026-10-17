@@ -156,3 +156,162 @@ real beforeinstallprompt events: 0
   ✓  41 [mobile] › tests\e2e\tournament-mobile.spec.ts:30:1 › mobile: a heads-up Sit & Go from the template to the stop, for the operator and both players at phone width (20.6s)
 
   41 passed (7.9m)
+
+== G014 (Codex review fixes) full E2E, 2026-10-17. Desktop and mobile projects in one run (one worker, so one test at a time), retries 0, real Chrome 155.
+
+> playwright test -c tests/playwright.config.ts "--retries=0"
+
+[WebServer] (node:44856) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:29068) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:5040) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:7016) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] [plugin builtin:vite-reporter] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[WebServer] ▲ [WARNING] Scheduled Workers are not automatically triggered during local development.
+[WebServer] 
+[WebServer]   To manually trigger a scheduled event, run:
+[WebServer]     curl "http://127.0.0.1:8798/cdn-cgi/local/scheduled"
+[WebServer]   For more details, see https://developers.cloudflare.com/workers/configuration/cron-triggers/#test-cron-triggers-locally
+[WebServer] 
+[WebServer] 
+[WebServer] (node:12684) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 108 tests using 1 worker
+
+(node:28392) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓    1 [desktop] › tests\e2e\academy-followups.spec.ts:16:1 › academy sync: progress and badges follow the account to another device (10.6s)
+  ✓    2 [desktop] › tests\e2e\academy-followups.spec.ts:32:1 › academy badges: progress edited in the browser is kept but earns nothing; real study after a restart does (8.8s)
+  ✓    3 [desktop] › tests\e2e\academy-followups.spec.ts:70:1 › compare quiz explains a wrong pick with the deciding cards; review page targets the weak topic (3.9s)
+  ✓    4 [desktop] › tests\e2e\academy-followups.spec.ts:87:1 › free practice: rule-based bots, any legal action, several hands, still offline (24.2s)
+  ✓    5 [desktop] › tests\e2e\academy-followups.spec.ts:120:1 › real game links: beginner table tag + filter, first-hands coaching after a lesson (10.9s)
+  ✓    6 [desktop] › tests\e2e\academy.spec.ts:8:1 › academy: onboarding, card lesson with wrong-then-right answers, progress restored per account (9.9s)
+  ✓    7 [desktop] › tests\e2e\academy.spec.ts:49:1 › academy: hand comparison (engine-judged), drag sorting, hold’em streets, action demo (7.1s)
+  ✓    8 [desktop] › tests\e2e\academy.spec.ts:87:1 › academy practice: real table UI offline — no socket, wallet unchanged, scenario completes (17.5s)
+  ✓    9 [desktop] › tests\e2e\academy.spec.ts:125:1 › real table: hand chart opens without dropping the game; beginner mode shows the current hand (10.1s)
+  ✓   10 [desktop] › tests\e2e\action-keys.spec.ts:39:1 › keyboard shortcuts: same two-press confirmation as a tap, no repeats, nothing from chat or dialogs, one action per turn (14.7s)
+  ✓   11 [desktop] › tests\e2e\admin-table-conflict.spec.ts:44:1 › two administrators on one table: a save from the page opened before the other’s change is refused, the page shows the table as it is now, and saving again from there keeps both changes (9.1s)
+  ✓   12 [desktop] › tests\e2e\admin.spec.ts:7:1 › admin console: bootstrap, login, create table, adjust chips with password re-confirmation, member is notified (9.9s)
+  ✓   13 [desktop] › tests\e2e\analytics.spec.ts:6:1 › operations stats: empty until a day is rolled up, then totals, trends and a table by day, week and month in Korean and English (8.7s)
+  ✓   14 [desktop] › tests\e2e\board.spec.ts:4:1 › board: write, comment, edit own content; others cannot edit (10.5s)
+  ✓   15 [desktop] › tests\e2e\bots-admin.spec.ts:36:1 › bot administration: the seated bot and its fund, a policy change with before → after and a reason, an emergency stop the table follows, the event log and the fund check (20.8s)
+  ✓   16 [desktop] › tests\e2e\console-ux.spec.ts:6:1 › a slow answer for an earlier filter does not replace the list for the filter now chosen (7.3s)
+  ✓   17 [desktop] › tests\e2e\console-ux.spec.ts:39:1 › ledger, hands and tables: filters in the URL, page by page, and each ledger look in the audit log (12.8s)
+  ✓   18 [desktop] › tests\e2e\console-ux.spec.ts:125:1 › a post is deleted and a message sent only after a confirmation that says what will happen (8.5s)
+  ✓   19 [desktop] › tests\e2e\console-ux.spec.ts:162:1 › a list that cannot load says so with a retry, and the console says when the network or the server is away (4.3s)
+  ✓   20 [desktop] › tests\e2e\economy.spec.ts:29:1 › chip economy: the page shows where chips are, and a wallet mismatch is reverted only after its evidence and a confirmed before → after (9.6s)
+  ✓   21 [desktop] › tests\e2e\emergency.spec.ts:21:1 › emergency controls: an admin ends a seated member’s connections, the page stops reconnecting, and pausing new hands shows at the table (18.6s)
+  ✓   22 [desktop] › tests\e2e\game.spec.ts:4:1 › two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund (20.4s)
+  ✓   23 [desktop] › tests\e2e\hand-review.spec.ts:14:1 › hand review: filter my hands on the server, bookmark and tag them, keep a private memo that a save from another tab cannot silently overwrite, and see pot odds where the record settles them (22.0s)
+  ✓   24 [desktop] › tests\e2e\header-widths.spec.ts:54:1 › header between the phone layout and a wide window: no wrapped label, nothing outside the window, every link reachable (4.0s)
+real beforeinstallprompt events: 0
+  ✓   25 [desktop] › tests\e2e\install.spec.ts:7:1 › desktop: no lobby offer until the browser can install; the steps and the status live in settings, in Korean and English (3.7s)
+  ✓   26 [desktop] › tests\e2e\legal.spec.ts:4:1 › privacy policy and terms are public drafts in Korean and English, linked from the footers and sign-up (3.9s)
+  ✓   27 [desktop] › tests\e2e\legal.spec.ts:45:1 › account deletion explains what is removed, and the board shows the author as a withdrawn member (6.9s)
+  ✓   28 [desktop] › tests\e2e\lobby.spec.ts:13:1 › lobby: a full table without spectating offers the waitlist, and the table says where you stand (7.4s)
+  ✓   29 [desktop] › tests\e2e\lobby.spec.ts:48:1 › lobby: favourites stay after a reload and come first; recent lists the tables opened, newest first (3.1s)
+  ✓   30 [desktop] › tests\e2e\lobby.spec.ts:89:1 › lobby: the size and blind filters narrow the list as well as quick play (2.0s)
+  ✓   31 [desktop] › tests\e2e\lobby.spec.ts:114:1 › lobby: polls only while visible, never overlaps, and refreshes on coming back (3.5s)
+  ✓   32 [desktop] › tests\e2e\lobby.spec.ts:159:1 › lobby: slows to every 30 seconds after a minute without input, and the next input refreshes at once (7.1s)
+  ✓   33 [desktop] › tests\e2e\locale.spec.ts:7:1 › Korean visitors never download English; someone who saved English opens in English (737ms)
+  ✓   34 [desktop] › tests\e2e\locale.spec.ts:25:1 › choosing English in the settings switches the page at once, and back (2.1s)
+  ✓   35 [desktop] › tests\e2e\locale.spec.ts:39:1 › a link that asks for English (?lang=en, as its preview was) opens in English for someone with no saved language (751ms)
+  ✓   36 [desktop] › tests\e2e\members.spec.ts:29:1 › member management: list filters, sign-in time, activity, notes without personal data, and sanctions with before → after and a reason (15.5s)
+  ✓   37 [desktop] › tests\e2e\private-access.spec.ts:15:1 › private table: the join code is traded for a ticket and never appears in a page or socket address (8.3s)
+  ✓   38 [desktop] › tests\e2e\quickplay.spec.ts:7:1 › quick play: filters find a free seat, nothing is paid before the buy-in, and a lost seat offers the next table (8.0s)
+  ✓   39 [desktop] › tests\e2e\reconnect.spec.ts:50:1 › game reconnect: after the network drops, the seat, stack and own cards come back and the hand plays on (19.9s)
+  ✓   40 [desktop] › tests\e2e\referral-admin.spec.ts:40:1 › referral administration: the overview against the ledger, a pause that holds payouts, a policy change with before → after, a burst approved, and the member page (27.9s)
+  ✓   41 [desktop] › tests\e2e\refill-admin.spec.ts:66:1 › free refill administration: the policy changed with before → after and a reason, an emergency pause and resume, and a refill taken back from the member page (28.9s)
+[WebServer] ▲ [WARNING] ProxyWorker: GET http://127.0.0.1:8798/assets/i18n-BeNVzNlK.js recovered on attempt 2 after a dropped connection to the UserWorker
+[WebServer] 
+[WebServer] 
+[WebServer] ▲ [WARNING] ProxyWorker: GET http://127.0.0.1:8798/assets/react-DB-4Zxce.js recovered on attempt 2 after a dropped connection to the UserWorker
+[WebServer] 
+[WebServer] 
+  ✓   42 [desktop] › tests\e2e\register-view.spec.ts:3:1 › register: email = local part + domain picker with direct input (910ms)
+  ✓   43 [desktop] › tests\e2e\replay-layout.spec.ts:34:1 › replay: at 2, 6 and 9 seats on phones, a tablet and desktops, every seat, card, bet, pot and control has a place of its own (1.3m)
+  ✓   44 [desktop] › tests\e2e\replay-timeline.spec.ts:45:1 › replay timeline: each street a tap away, a slider to click or drag, and every step read out in words (5.9s)
+  ✓   45 [desktop] › tests\e2e\replay-timeline.spec.ts:118:1 › replay timeline: a hand over before the flop has nothing past it; English and big blinds; playback stops at the end (5.2s)
+  ✓   46 [desktop] › tests\e2e\reports.spec.ts:33:1 › report workflow: severity, assignment, internal notes, a suspension given from the report, outcome messages, and reference statistics (13.0s)
+  ✓   47 [desktop] › tests\e2e\resend.spec.ts:4:1 › a buy-in whose answer was lost with the connection is sent again and applied once (3.3s)
+  ✓   48 [desktop] › tests\e2e\rooms.spec.ts:6:1 › rooms: a member opens a private room from the lobby, is marked as host, renames and shares it, then closes it and gets the chips back (7.1s)
+  ✓   49 [desktop] › tests\e2e\security.spec.ts:53:1 › permissions and audit: a plain admin is refused super-admin work and sees only their own log; a super admin searches, filters and pages every entry, refusals included (12.9s)
+  ✓   50 [desktop] › tests\e2e\security.spec.ts:156:1 › previews and sessions: suspending and closing a table show what will happen first; ending a session or changing a role signs that console out on its next request (18.2s)
+  ✓   51 [desktop] › tests\e2e\service.spec.ts:29:1 › service notices and maintenance: an admin posts a bilingual notice and plans maintenance; members and visitors see them in their language; maintenance under way pauses seating and sign-in until it ends (24.6s)
+  ✓   52 [desktop] › tests\e2e\service.spec.ts:254:1 › a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent (6.7s)
+  ✓   53 [desktop] › tests\e2e\settings-sync.spec.ts:49:1 › account settings: a second device keeps the account values over its own, fills only what the account lacks, keeps a change it could not save, and switching accounts never mixes them (13.9s)
+  ✓   54 [desktop] › tests\e2e\settings-sync.spec.ts:125:1 › admin settings reset: counts only, a preview with its scope, reason and re-authentication; a device holding an unsaved change does not upload it again; undo restores; one message each (15.1s)
+  ✓   55 [desktop] › tests\e2e\share.spec.ts:26:1 › the lobby shares the site, or copies its address where there is no share sheet (4.9s)
+  ✓   56 [desktop] › tests\e2e\share.spec.ts:45:1 › a table invite in the table settings is the table address only, never a code (2.7s)
+  ✓   57 [desktop] › tests\e2e\signup-form.spec.ts:6:1 › sign-up form: email code, live password rules, eye toggle, birth date, consents (2.6s)
+  ✓   58 [desktop] › tests\e2e\social-play.spec.ts:21:1 › play together: invite from the friends list; the card opens the table, says when it filled up, and asks for a private code (14.7s)
+  ✓   59 [desktop] › tests\e2e\social-safety.spec.ts:16:1 › 1:1 chat: report one message, block with a confirmation, the other side sees only that messaging is off; unblock in settings (6.9s)
+  ✓   60 [desktop] › tests\e2e\social-safety.spec.ts:75:1 › table: mute hides one player’s chat for me only; after the hand, report them from the hand record (20.0s)
+  ✓   61 [desktop] › tests\e2e\social.spec.ts:15:1 › friends: request by nickname, accept, 1:1 chat with read receipt, unfriend (21.9s)
+  ✓   62 [desktop] › tests\e2e\social.spec.ts:82:1 › reports: a post, a comment and a player at the table; the author card offers a friend request (10.0s)
+  ✓   63 [desktop] › tests\e2e\social.spec.ts:152:1 › 1:1 chat sync: no polling while the tab is hidden; coming back or reconnecting catches up at once (5.8s)
+  ✓   64 [desktop] › tests\e2e\stats.spec.ts:4:1 › my statistics: VPIP, PFR, showdowns, positions and the daily trend from a hand played, nothing for a spectator (28.1s)
+  ✓   65 [desktop] › tests\e2e\topup.spec.ts:4:1 › top-up: between hands it applies at once; during a hand it waits, can be cancelled, and arrives after the hand (14.7s)
+  ✓   66 [desktop] › tests\e2e\topup.spec.ts:62:1 › top-up: the dialog opens with its suggested amount already in place, so an amount picked at once is the one sent (2.9s)
+  ✓   67 [desktop] › tests\e2e\topup.spec.ts:84:1 › auto rebuy: off by default, needs explicit consent with an amount and a limit, and can be turned off (3.9s)
+(node:33800) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   68 [mobile] › tests\e2e\academy-mobile.spec.ts:7:1 › mobile academy: bottom nav, touch quiz (tap select + tap-to-swap sort), no overflow, no page scroll on card taps (12.3s)
+  ✓   69 [mobile] › tests\e2e\academy-mobile.spec.ts:40:1 › mobile practice: raise with presets by touch, hand chart as a bottom sheet, actions stay on screen (10.4s)
+  ✓   70 [mobile] › tests\e2e\academy-mobile.spec.ts:60:1 › mobile: review, free practice and progress pages fit the phone; free-play action bar stays on screen (4.9s)
+  ✓   71 [mobile] › tests\e2e\account-mobile.spec.ts:13:1 › mobile: my page fits the phone, the header gear opens settings with logout, and 자동 로그인 decides how long the sign-in lasts (7.8s)
+  ✓   72 [mobile] › tests\e2e\action-mobile.spec.ts:14:1 › mobile: a big call needs a second tap, and moving the bet amount cancels an armed all-in (14.6s)
+  ✓   73 [mobile] › tests\e2e\admin-grants-mobile.spec.ts:28:1 › on a phone: a super admin turns features on for one administrator, who sees only those in the console from their next request (10.3s)
+  ✓   74 [mobile] › tests\e2e\analytics-mobile.spec.ts:6:1 › operations stats on a phone: the page fits the screen, the wide table scrolls inside its panel, and the period buttons work by touch (6.6s)
+  ✓   75 [mobile] › tests\e2e\bb-mobile.spec.ts:42:1 › mobile: with big blinds chosen, the table, the buy-in and the replay read in BB while a typed 2.5 BB raise sends 50 chips (18.0s)
+  ✓   76 [mobile] › tests\e2e\bots-mobile.spec.ts:27:1 › mobile: a member alone at a bot table gets bots with a BOT pill and level, a bot card with no social actions, and the lobby counts members and bots, in Korean and English (5.0s)
+  ✓   77 [mobile] › tests\e2e\console-ux-mobile.spec.ts:16:1 › on a phone: a member’s ledger, a report decided through its confirmation, and a post deleted after one, without sideways scrolling (9.7s)
+  ✓   78 [mobile] › tests\e2e\hand-review-mobile.spec.ts:19:1 › mobile: hand list filters fold away, bookmarks and tags are thumb-sized, the memo saves, and the pot odds fit the screen (14.8s)
+real beforeinstallprompt events: 0
+  ✓   79 [mobile] › tests\e2e\install-mobile.spec.ts:7:1 › mobile: Android Chrome lobby offers the install steps; Later and the 30-day snooze stay hidden across a reload and settings bring the offer back (5.0s)
+  ✓   80 [mobile] › tests\e2e\install-mobile.spec.ts:94:1 › mobile: the browser install prompt — dismissed keeps the offer, installed hides it until the browser offers again; never in the app or at a table (4.7s)
+  ✓   81 [mobile] › tests\e2e\install-mobile.spec.ts:148:1 › mobile: iPhone Safari gets the Share → Add to Home Screen steps, an in-app browser the way out, the home screen app nothing; in English too (4.7s)
+  ✓   82 [mobile] › tests\e2e\legal-mobile.spec.ts:4:1 › mobile: privacy policy, terms and the sign-up agreements fit the phone (5.2s)
+  ✓   83 [mobile] › tests\e2e\lobby-mobile.spec.ts:4:1 › mobile lobby: one create button, a full table card that fits, and the waitlist from a tap (7.8s)
+  ✓   84 [mobile] › tests\e2e\mobile.spec.ts:4:1 › mobile: lobby → seat → playable action bar, no horizontal overflow (8.3s)
+  ✓   85 [mobile] › tests\e2e\mobile.spec.ts:30:1 › mobile: touch guards — no-zoom game surface, 16px inputs, two-tap risky fold, BB stepper (15.5s)
+  ✓   86 [mobile] › tests\e2e\muck-mobile.spec.ts:38:1 › mobile: auto-muck set in the table settings keeps a losing showdown hand face down for the other player only (1.6m)
+  ✓   87 [mobile] › tests\e2e\pre-action-mobile.spec.ts:30:1 › mobile: a check chosen while the other player acts is made on the turn, and a bet cancels it with a notice (13.5s)
+  ✓   88 [mobile] › tests\e2e\quickplay-mobile.spec.ts:4:1 › mobile: quick play seats players at the table, then explains a full table and what to do instead (9.1s)
+  ✓   89 [mobile] › tests\e2e\reaction-mobile.spec.ts:26:1 › mobile: a seated player sends a quick reaction from their seat, everyone sees it over the avatar, and the setting turns it off (13.8s)
+  ✓   90 [mobile] › tests\e2e\reaction-mobile.spec.ts:103:1 › mobile: the emoji button puts an emoji at the caret in table chat and in a direct message (5.9s)
+  ✓   91 [mobile] › tests\e2e\referral-mobile.spec.ts:7:1 › referrals on a phone: the code and link on the Me page, a friend signing up through the link, and both paid once (10.5s)
+  ✓   92 [mobile] › tests\e2e\refill-mobile.spec.ts:20:1 › free refill on a phone: the terms on the Me page, a refill taken from the buy-in notice, then the wait (6.4s)
+  ✓   93 [mobile] › tests\e2e\replay-mobile.spec.ts:44:1 › mobile: a finished hand replays action by action on the table, hiding the other hand until the showdown (34.9s)
+  ✓   94 [mobile] › tests\e2e\replay-timeline-mobile.spec.ts:18:1 › mobile: replay timeline by touch — each street a tap away, the slider dragged by a finger without moving the page (4.5s)
+  ✓   95 [mobile] › tests\e2e\replay-timeline-mobile.spec.ts:74:1 › mobile: a heads-up replay opens with the table, the timeline and play all above the bottom navigation (3.3s)
+  ✓   96 [mobile] › tests\e2e\role-mobile.spec.ts:72:1 › mobile: staff names at 360px keep the crown or shield, the color and the badge without covering the table or the chat (12.5s)
+  ✓   97 [mobile] › tests\e2e\rooms-mobile.spec.ts:4:1 › mobile: open a room by touch; the create dialog, the table header with the host button and the host dialog fit a 360px phone (4.8s)
+  ✓   98 [mobile] › tests\e2e\settings-sync-mobile.spec.ts:5:1 › settings sync on a phone: the sync line and its retry in settings, and the member settings panel with its reset preview, fit 390px (8.6s)
+  ✓   99 [mobile] › tests\e2e\share-mobile.spec.ts:4:1 › mobile: the share button and the table invite fit a 360px phone and open the share sheet (2.9s)
+  ✓  100 [mobile] › tests\e2e\show-mobile.spec.ts:62:1 › mobile: after folding, a player with auto-muck on taps Show on one card and the other player sees that card only (13.4s)
+  ✓  101 [mobile] › tests\e2e\social-brand-admin-mobile.spec.ts:35:1 › mobile: social operations and brand status in the console at phone width (policy, preview, save; previews, image, install checks) (10.6s)
+  ✓  102 [mobile] › tests\e2e\social-mobile.spec.ts:4:1 › mobile: play together from the friends list; the table picker fits and every row is a full-width tap target (6.1s)
+  ✓  103 [mobile] › tests\e2e\social-mobile.spec.ts:49:1 › mobile: report a 1:1 message and block by touch; dialogs fit the screen (6.0s)
+  ✓  104 [mobile] › tests\e2e\staff-safety-mobile.spec.ts:37:1 › on a phone, a member is offered no block for staff and no report for the super admin, and is told why (15.2s)
+  ✓  105 [mobile] › tests\e2e\stats-mobile.spec.ts:4:1 › mobile: my statistics, positions and the daily trend fit the phone in Korean and English (26.8s)
+  ✓  106 [mobile] › tests\e2e\time-bank-mobile.spec.ts:49:1 › mobile: the time bank on my turn (time left, one tap adds it, the clock grows), and its administration at phone width (17.0s)
+  ✓  107 [mobile] › tests\e2e\topup-mobile.spec.ts:4:1 › mobile: top-up and auto rebuy fit the phone, and an empty wallet is explained instead of offered (5.1s)
+  ✓  108 [mobile] › tests\e2e\tournament-mobile.spec.ts:30:1 › mobile: a heads-up Sit & Go from the template to the stop, for the operator and both players at phone width (19.8s)
+
+  108 passed (22.3m)
+
+== G014 new spec alone, run first:
+
+> playwright test -c tests/playwright.config.ts "--project=desktop" "--retries=0" "admin-table-conflict"
+Running 1 test using 1 worker
+  ✓  1 [desktop] › tests\e2e\admin-table-conflict.spec.ts:44:1 › two administrators on one table: a save from the page opened before the other’s change is refused, the page shows the table as it is now, and saving again from there keeps both changes (9.3s)
+  1 passed (44.4s)

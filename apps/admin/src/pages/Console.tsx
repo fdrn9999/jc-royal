@@ -814,6 +814,8 @@ interface TableRow {
   id: string; name: string; maxSeats: number; smallBlind: number; bigBlind: number; minBuyIn: number; maxBuyIn: number; turnSeconds: number;
   isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; handsPaused?: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
   roomType: 'official' | 'member' | 'tournament'; hostNickname: string | null;
+  /** When its settings last changed; sent back with a change so one made meanwhile by another administrator is a conflict. */
+  updatedAt: number;
   /** Table bots (official tables only); `liveBots` is how many of `liveSeated` are bots. */
   botsEnabled?: boolean; botLevel?: string; botMinHumans?: number; botMax?: number; botFillTo?: number; botYield?: boolean; liveBots?: number;
 }
@@ -1107,7 +1109,7 @@ function TableBotsPanel({ tb, live, act }: { tb: TableRow; live: LiveStatus | nu
         data-testid="table-bots"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
-          void act(() => api(`/api/admin/tables/${tb.id}`, { method: 'PATCH', body: v }));
+          void act(() => api(`/api/admin/tables/${tb.id}`, { method: 'PATCH', body: { ...v, ifUpdatedAt: tb.updatedAt } }));
         }}
       >
         {b && (
@@ -1241,6 +1243,8 @@ export function TableDetailPage() {
   const [control, setControl] = useState<TableControl | null>(null);
   const [cReason, setCReason] = useState('');
   const [edit, setEdit] = useState<{ smallBlind?: number; bigBlind?: number; minBuyIn?: number; maxBuyIn?: number }>({});
+  // Bumped after a conflict so the blinds form starts again from the reloaded values (its inputs are uncontrolled).
+  const [blindsForm, setBlindsForm] = useState(0);
   const act = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
@@ -1248,6 +1252,13 @@ export function TableDetailPage() {
       await reload();
     } catch (e) {
       if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setNote({ ok: false, text: errText(e, t) });
+      // Another administrator changed the table: show what it is now, to check before saving again. The typed blinds
+      // go with it, so what the form shows is what a second save sends.
+      if (e instanceof ApiError && e.code === 'table_conflict') {
+        await reload();
+        setEdit({});
+        setBlindsForm((n) => n + 1);
+      }
     }
   };
   const runControl = async (action: TableControl) => {
@@ -1423,15 +1434,15 @@ export function TableDetailPage() {
       {!tnTable && (
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('blinds')}>
-          <form className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: edit })); }}>
+          <form key={blindsForm} data-testid="table-blinds" className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { ...edit, ifUpdatedAt: tb.updatedAt } })); }}>
             {(['smallBlind', 'bigBlind', 'minBuyIn', 'maxBuyIn'] as const).map((k) => (
               <Field key={k} label={t(k)}>{(fid) => <Input id={fid} inputMode="numeric" defaultValue={tb[k]} onChange={(e) => setEdit({ ...edit, [k]: Number(e.target.value) || undefined })} />}</Field>
             ))}
             <p className="col-span-2 text-xs text-ink-400">{t('appliesNextHand')}</p>
             <div className="col-span-2 flex flex-wrap gap-2">
               <Button type="submit" disabled={tb.status === 'closed'}>{t('save')}</Button>
-              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { allowSpectators: !tb.allowSpectators } }))}>{t('spectators')}: {tb.allowSpectators ? t('yes') : t('no')}</Button>
-              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { beginner: !tb.beginner } }))}>{t('beginnerTable')}: {tb.beginner ? t('yes') : t('no')}</Button>
+              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { allowSpectators: !tb.allowSpectators, ifUpdatedAt: tb.updatedAt } }))}>{t('spectators')}: {tb.allowSpectators ? t('yes') : t('no')}</Button>
+              <Button type="button" variant="outline" disabled={tb.status === 'closed'} onClick={() => act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { beginner: !tb.beginner, ifUpdatedAt: tb.updatedAt } }))}>{t('beginnerTable')}: {tb.beginner ? t('yes') : t('no')}</Button>
             </div>
           </form>
         </Panel>

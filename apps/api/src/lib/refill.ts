@@ -75,8 +75,39 @@ interface Snapshot {
   seq: number;
 }
 
-/** What the member has, and whether a refill would pay now. Asks the tables only when the answer depends on them. */
-export async function refillSnapshot(env: Env, userId: string, now = Date.now()): Promise<Snapshot> {
+/** A table's answer to `holdings` (the room's holdings()), null when it did not answer. */
+type Holding = Record<string, unknown> | null;
+
+/**
+ * The chips on the member's tables from the rooms' answers (one per open seat, in `sessions` order), or why they cannot
+ * be counted. Each room answers for its own moment, and with more than one table those moments differ: a sum of them can
+ * be a total the member never held (one table read before its hand settled up, another after its hand settled down).
+ * So a claim asks every table `again` once all have answered. A table whose second answer is the first one (same seat,
+ * stack and last settled hand) held that stack from one answer to the other, and the moment between the two rounds lies
+ * inside every table's span: the sum is what the member held at that one moment. Any change is held as `busy`.
+ */
+export function tableChips(sessions: string[], first: Holding[], again?: Holding[]): { tables: number } | { hold: RefillHold } {
+  let tables = 0;
+  for (const [i, a] of first.entries()) {
+    if (!a) return { hold: 'unreachable' };
+    if (!a.seated || a.tableSessionId !== sessions[i]) return { hold: 'mismatch' };
+    if (!a.stable) return { hold: 'busy' };
+    tables += Number(a.stack) || 0;
+  }
+  for (const [i, b] of (again ?? []).entries()) {
+    const a = first[i]!;
+    if (!b) return { hold: 'unreachable' };
+    // A room from before `settled` answers without it both times; its stack is still compared.
+    if (!b.seated || b.tableSessionId !== a.tableSessionId || b.stack !== a.stack || !b.stable || (b.settled ?? null) !== (a.settled ?? null)) return { hold: 'busy' };
+  }
+  return { tables };
+}
+
+/**
+ * What the member has, and whether a refill would pay now. Asks the tables only when the answer depends on them; with
+ * `confirm` (a claim) and more than one table, asks them twice (tableChips).
+ */
+export async function refillSnapshot(env: Env, userId: string, now = Date.now(), confirm = false): Promise<Snapshot> {
   const db = env.DB;
   const [pol, usr, sess, last] = await db.batch([
     db.prepare(currentPolicySql),
@@ -113,14 +144,14 @@ export async function refillSnapshot(env: Env, userId: string, now = Date.now())
   if (l && l.nextAt > now) return refuse('cooldown');
   // Table chips only add to the wallet: a wallet at the line already is enough.
   if (wallet >= policy.below) return refuse('above');
-  let tables = 0;
-  const answers = await Promise.all(seats.map((s) => roomCallEnv(env, s.tableId, 'holdings', { user: userId })));
-  for (const [i, a] of answers.entries()) {
-    if (!a) return refuse('held', 'unreachable');
-    if (!a.seated || a.tableSessionId !== seats[i]!.id) return refuse('held', 'mismatch');
-    if (!a.stable) return refuse('held', 'busy');
-    tables += Number(a.stack) || 0;
-  }
+  const ask = () => Promise.all(seats.map((s) => roomCallEnv(env, s.tableId, 'holdings', { user: userId })));
+  const sessions = seats.map((s) => s.id);
+  const first = await ask();
+  let counted = tableChips(sessions, first);
+  // Only a claim that would pay asks again: a total at the line already pays nothing, however the tables move.
+  if ('tables' in counted && confirm && seats.length > 1 && wallet + counted.tables < policy.below) counted = tableChips(sessions, first, await ask());
+  if ('hold' in counted) return refuse('held', counted.hold);
+  const tables = counted.tables;
   status.tables = tables;
   if (wallet + tables >= policy.below) return refuse('above');
   status.eligible = true;
@@ -149,7 +180,7 @@ export type ClaimOutcome =
 /** Pays the member's refill if they may have one now: once, whatever the number of tabs, retries or concurrent claims. */
 export async function claimRefill(env: Env, userId: string, now = Date.now()): Promise<ClaimOutcome> {
   const db = env.DB;
-  const snap = await refillSnapshot(env, userId, now);
+  const snap = await refillSnapshot(env, userId, now, true);
   const { status, policy } = snap;
   if (!status.eligible || !policy) {
     await count(db, METRIC[status.reason ?? 'off'], now);

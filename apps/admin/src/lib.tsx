@@ -123,6 +123,7 @@ const BY_CODE: Record<string, Key> = {
   tournament_name_mismatch: 'errTnNameMismatch',
   tournament_structure_invalid: 'errTnStructure',
   tournament_table: 'errTnTable',
+  table_conflict: 'errTableConflict',
   tournament_template_not_found: 'errTplNotFound',
   tournament_template_archived: 'errTplArchived',
   tournament_template_conflict: 'errTplConflict',

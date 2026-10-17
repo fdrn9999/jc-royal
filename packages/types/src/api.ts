@@ -188,6 +188,8 @@ export const TablePatchSchema = z.object({
   botMax: BotSettingsShape.botMax.removeDefault().optional(),
   botFillTo: BotSettingsShape.botFillTo.removeDefault().optional(),
   botYield: z.boolean().optional(),
+  /** The table's updatedAt the change was made from (what the console's table page showed); a table changed since is a table_conflict. */
+  ifUpdatedAt: z.number().int().nonnegative().optional(),
 });
 
 /** Hands played below which quick play counts a player as a newcomer and prefers beginner tables. */

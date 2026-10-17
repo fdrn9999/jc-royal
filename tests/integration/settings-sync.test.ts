@@ -201,6 +201,26 @@ describe('member settings', () => {
     expect(back.muck).toEqual({ tables: 1, reached: 1 });
     await ws.waitState((s) => s.you.autoMuck === true, 10_000, 'auto-muck restored');
   });
+
+  it('keeps the newest auto-muck at the table when saves follow each other faster than they reach it', async () => {
+    const u = await newUser();
+    const ws = await TableSocket.open(u.client, 'it-set-1');
+    open.push(ws);
+    expect(await ws.request({ t: 'sit', seatIndex: 0, buyIn: 1000 })).toMatchObject({ t: 'ack' });
+    // Each save answers before its push reaches the room (the push runs after the answer), so these pushes overlap and
+    // may land in any order; the room keeps the value of the highest revision (on).
+    let rev = 0;
+    for (const v of [true, false, true, false, true, false, true]) {
+      const r = await saved(u, { epoch: 0, base: rev, prefs: { autoMuck: { v, ago: 0 } } });
+      expect(r.kept).toEqual([]);
+      rev = r.settings.rev;
+    }
+    expect(rev).toBe(7);
+    await ws.waitState((s) => s.you.autoMuck === true, 10_000, 'auto-muck on');
+    // No late push turns it back.
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(ws.state!.you.autoMuck).toBe(true);
+  });
 });
 
 describe('administrator reset and restore', () => {

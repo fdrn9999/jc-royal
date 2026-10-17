@@ -74,8 +74,9 @@ export const TABLES: TestTable[] = [
   // Service maintenance: tables that stop dealing and seating while it runs, and one with a waitlist.
   ...Array.from({ length: 5 }, (_, i) => ({ id: `it-mt-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-mt-wl', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
-  // Two administrators doing the same thing at once (a suspension, a close) while a hand runs.
-  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-conc-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Two administrators doing the same thing at once (a suspension, a close) while a hand runs; one edits a table's
+  // settings while the other blocks its entry.
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `it-conc-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Leaving mid-hand: three players, long turns so only the players (and the room's fold for a leaver) act.
   { id: 'it-leave-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Administrator permissions: a table whose settings a plain administrator changes.
@@ -88,8 +89,9 @@ export const TABLES: TestTable[] = [
   { id: 'it-og-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
   // Quick reactions: seated players and a spectator; long turns keep the clock out of it.
   ...Array.from({ length: 3 }, (_, i) => ({ id: `it-react-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
-  // Free refill: chips on a table (a hand's bets included), and a table whose room holds no seat D1 has open.
-  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-refill-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  // Free refill: chips on a table (a hand's bets included), a table whose room holds no seat D1 has open, and one member
+  // seated at two tables.
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-refill-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Table bots (off until bots.test.ts turns the policy on): heads-up, a six-seat table three bots fill, short stacks
   // all in for side pots (a three-big-blind minimum no admin could set, so an easy bot calls), a seat given up to a member waiting,
   // the emergency stop, and a buy-in larger than the fund has left.
@@ -101,8 +103,9 @@ export const TABLES: TestTable[] = [
   { id: 'it-bot-fund', maxSeats: 2, sb: 50, bb: 100, min: 10000, max: 10000, turnSeconds: 60, bots: {} },
   // Referral rewards: a new member plays the hand the policy asks for, heads-up so one fold ends it.
   { id: 'it-ref-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
-  // Account settings: auto-muck saved from a device, and an administrator's reset, reach the table the member sits at.
-  { id: 'it-set-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Account settings: auto-muck saved from a device, and an administrator's reset, reach the table the member sits at;
+  // quick saves whose pushes overlap.
+  ...Array.from({ length: 2 }, (_, i) => ({ id: `it-set-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Time bank: heads-up with long turns, so only the bank moves a deadline; and a short turn that still runs out.
   ...Array.from({ length: 5 }, (_, i) => ({ id: `it-tb-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-tb-fast', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 3 },

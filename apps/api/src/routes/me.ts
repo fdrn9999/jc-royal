@@ -284,7 +284,7 @@ export const meRoutes = new Hono<AppEnv>()
       const input = await parseBody(c, SettingsSaveSchema);
       if (input.user !== uid) fail(409, 'settings_account', 'another account is signed in');
       const r = await saveSettings(c.env.DB, uid, input);
-      if (r.muck !== undefined) c.executionCtx.waitUntil(pushMuckEverywhere(c.env, uid, r.muck).catch(() => undefined));
+      if (r.muck !== undefined) c.executionCtx.waitUntil(pushMuckEverywhere(c.env, uid, r.muck, r.settings.rev).catch(() => undefined));
       if (r.mark) c.executionCtx.waitUntil(markSynced(c.env.DB, uid, Date.now()).run().catch(() => undefined));
       const fails = clientFails(input.fails);
       await countSettings(c.env.DB, fails ? { ...r.metrics, ss_client_fail: fails } : r.metrics);

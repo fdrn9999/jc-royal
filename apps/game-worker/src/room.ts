@@ -61,6 +61,7 @@ import {
   type TableRow,
 } from './settlement';
 import { botBuyIn, botEvent, pickBot, type BotEventKind } from './bots';
+import { muckRevParam, takePushedMuck } from './muck';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
@@ -121,6 +122,8 @@ interface SeatState {
   preReqs?: string[];
   /** The player's setting: a losing showdown hand stays face down when the rules allow it (see HandEngine.handView). */
   autoMuck?: boolean;
+  /** The settings revision of the last account auto-muck the api pushed to this seat (muck.ts takePushedMuck). */
+  muckRev?: number;
   /**
    * A table bot of this level (bots.ts), not a member. It acts on its turn from what its seat sees (`playBotTurn`), never
    * times out or sits out, and leaves through `leaveAfterHand` like a member — but plays the hand out first.
@@ -653,7 +656,10 @@ export class TableRoom extends DurableObject<Env> {
             return Response.json({ ok: true, seated: await this.refreshRole(url.searchParams.get('user') ?? '', url.searchParams.get('role') ?? 'user') });
           case 'muck':
             // The member's account auto-muck changed (their save on another device, or an admin's settings reset).
-            return Response.json({ ok: true, seated: await this.setAutoMuck(url.searchParams.get('user') ?? '', url.searchParams.get('on') === '1') });
+            return Response.json({
+              ok: true,
+              seated: await this.setAutoMuck(url.searchParams.get('user') ?? '', url.searchParams.get('on') === '1', muckRevParam(url.searchParams.get('rev'))),
+            });
           default:
             return new Response('not found', { status: 404 });
         }
@@ -984,13 +990,23 @@ export class TableRoom extends DurableObject<Env> {
    * The free chip refill (api lib/refill.ts) asks what a member has on this table. During a hand that is the stack the
    * hand started with, bets included (it changes only when the hand settles). `stable` is false while chips are on
    * their way between the wallet and the seat (a buy-in, a top-up being taken, a cash-out): the api then holds the claim.
+   * `settled` (the last hand settled here) lets it tell that two answers came from the same stretch between hands.
    */
-  private holdings(userId: string): { seated: false } | { seated: true; tableSessionId: string; stack: number; stable: boolean; inHand: boolean } {
+  private holdings(
+    userId: string,
+  ): { seated: false } | { seated: true; tableSessionId: string; stack: number; stable: boolean; inHand: boolean; settled: string | null } {
     const i = this.seatIndexOf(userId);
     const s = i === null ? null : this.room.seats[i]!;
     // Tournament chips are not the member's chips.
     if (!s || this.table?.roomType === 'tournament') return { seated: false };
-    return { seated: true, tableSessionId: s.tableSessionId, stack: s.stack, stable: s.phase === 'seated' && s.topUp?.state !== 'debiting', inHand: this.handHasPlayer(userId) };
+    return {
+      seated: true,
+      tableSessionId: s.tableSessionId,
+      stack: s.stack,
+      stable: s.phase === 'seated' && s.topUp?.state !== 'debiting',
+      inHand: this.handHasPlayer(userId),
+      settled: this.room.settledHandId,
+    };
   }
 
   private async sit(a: Attachment, seatIndex: number, amount: number, reqId: string) {
@@ -2774,17 +2790,14 @@ export class TableRoom extends DurableObject<Env> {
   /**
    * The member's account auto-muck, pushed by the api when it changed: their seat takes it on for the next showdown, the
    * same as their own 'muck' command (a hand already settled keeps what it was settled with). Only their view shows it.
-   * Returns whether the member holds a seat here.
+   * A push older than the last one the seat took (`rev`) changes nothing. Returns whether the member holds a seat here.
    */
-  private async setAutoMuck(userId: string, on: boolean): Promise<boolean> {
+  private async setAutoMuck(userId: string, on: boolean, rev: number | null): Promise<boolean> {
     const i = userId ? this.seatIndexOf(userId) : null;
     if (i === null) return false;
-    const seat = this.room.seats[i]!;
-    if (!!seat.autoMuck !== on) {
-      seat.autoMuck = on;
-      await this.save();
-      this.sendView(userId);
-    }
+    const next = takePushedMuck(this.room.seats[i]!, on, rev);
+    if (next !== 'none') await this.save();
+    if (next === 'show') this.sendView(userId);
     return true;
   }
 

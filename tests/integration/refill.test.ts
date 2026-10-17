@@ -161,6 +161,24 @@ describe('free chip refill', () => {
     expect(await status(h)).toMatchObject({ eligible: true, tables: 0 });
   });
 
+  it('counts the chips on two tables together; a claim asks both twice and pays on what they held at one moment', async () => {
+    const m = await newUser();
+    await sit(m, 'it-refill-2', 0, 100);
+    await sit(m, 'it-refill-3', 0, 150);
+    const { below } = (await status(m)).policy!;
+    // Wallet and both tables together at the line: nothing to pay.
+    await setWallet(m, below - 250);
+    expect(await status(m)).toMatchObject({ eligible: false, reason: 'above', tables: 250 });
+    expect((await claim(m)).body.error.details.status).toMatchObject({ reason: 'above', tables: 250 });
+    // Below it: the tables answer the same twice (no hand runs at either), so the claim pays once on that total.
+    await setWallet(m, below - 300);
+    expect(await status(m)).toMatchObject({ eligible: true, wallet: below - 300, tables: 250 });
+    const r = await claim(m);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await claims(m.me.id)).toEqual([expect.objectContaining({ seq: 1, wallet: below - 300, table_chips: 250 })]);
+    expect(await balance(m.me.id)).toBe(below - 300 + r.body.amount);
+  });
+
   it('applies a policy change to the next claim only: a running wait keeps its time and each refill names its version', async () => {
     const [a, b] = await Promise.all([newUser(), newUser()]);
     await setWallet(a, 500);

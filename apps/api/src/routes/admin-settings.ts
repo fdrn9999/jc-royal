@@ -131,7 +131,7 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     if (!done) fail(409, 'settings_changed', 'the settings changed while resetting', { settings: (await load(c, id)).diag });
     await countSettings(db, { ss_reset: 1 }, now);
     // The tables the member sits at take on the default auto-muck (off) when theirs was on.
-    const muck = muckOf(row) ? await pushMuckEverywhere(c.env, id, false) : null;
+    const muck = muckOf(row) ? await pushMuckEverywhere(c.env, id, false, done.rev) : null;
     await audit(c, 'settings.reset', { type: 'user', id }, {
       reason,
       before: { rev: s.rev, epoch: s.epoch, fields: diag.fields, favourites: diag.favourites },
@@ -177,7 +177,7 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     if (!done) fail(409, 'settings_changed', 'the settings changed while restoring', { settings: (await load(c, id)).diag });
     await countSettings(db, { ss_restore: 1 }, now);
     const on = prefs.autoMuck?.[0] === true;
-    const muck = on !== muckOf(row) ? await pushMuckEverywhere(c.env, id, on) : null;
+    const muck = on !== muckOf(row) ? await pushMuckEverywhere(c.env, id, on, done.rev) : null;
     await audit(c, 'settings.restore', { type: 'user', id }, {
       reason,
       resetAt: info.at,

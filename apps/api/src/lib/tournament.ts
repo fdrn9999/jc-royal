@@ -305,15 +305,22 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     const seats = shuffledSeats();
     const started = `tn.status = 'running' AND tn.table_id = '${tableId}' AND tn.started_at = ${now}`;
     const mine = `EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND ${started})`;
+    // The players qualify when the batch commits, not only when they were read above: a suspension (or a seat taken in
+    // another tournament, a verification taken back) in between changes neither the version nor the roster, so the
+    // start is conditional on it too and looks again (dropping that player) when it no longer holds. Hands played only
+    // grow, so they are not read again.
     const res = await db.batch([
       db
         .prepare(
           `UPDATE tournaments SET status = 'running', version = version + 1, table_id = ?2, started_at = ?3, level = 0, level_ends_at = NULL,
                   level_left_ms = CASE WHEN json_array_length(levels) > 1 THEN level_ms ELSE NULL END, paused_at = ?3, pause_requested = 0,
                   pause_changed_at = NULL, players_left = ?4, hands = 0, room_seen_at = NULL, updated_at = ?3
-            WHERE id = ?1 AND status IN ('registering', 'closed') AND roster = ?5 AND version = ?6`,
+            WHERE id = ?1 AND status IN ('registering', 'closed') AND roster = ?5 AND version = ?6
+              AND NOT EXISTS (SELECT 1 FROM json_each(?7) p LEFT JOIN users u ON u.id = p.value
+                               WHERE u.id IS NULL OR u.status != 'active' OR u.is_bot != 0 OR (?8 = 1 AND u.email_verified_at IS NULL)
+                                  OR ${ELSEWHERE_SQL('u.id')})`,
         )
-        .bind(id, tableId, now, players.length, t.roster, t.version),
+        .bind(id, tableId, now, players.length, t.roster, t.version, JSON.stringify(players.map((p) => p.userId)), t.requireVerified),
       db
         .prepare(
           `INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, allow_spectators,

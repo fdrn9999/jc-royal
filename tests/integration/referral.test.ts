@@ -238,6 +238,35 @@ describe('referral rewards', () => {
     expect(await paidRows(other.me.id)).toHaveLength(1);
   });
 
+  it('rewards one inbox once even when its addresses sign up at the same moment', async () => {
+    const ref = await newUser();
+    const code = await codeOf(ref.client);
+    // Accepted as different addresses at signup, the same inbox once normalized (a tag, upper case).
+    const local = uniq('same');
+    const all = await Promise.all([`${local}+one@test.dev`, `${local}+two@test.dev`, `${local.toUpperCase()}+three@test.dev`, `${local}@test.dev`].map((email) => joined(code, { email })));
+    const rows = await Promise.all(all.map((j) => referralOf(j.id)));
+    const paid = rows.filter((r) => r!.status === 'settled');
+    expect(paid, JSON.stringify(rows)).toHaveLength(1);
+    expect(paid[0]).toMatchObject({ referrerStatus: 'paid', inviteeStatus: 'paid', failure: null });
+    for (const r of rows.filter((x) => x !== paid[0])) expect(r).toMatchObject({ status: 'unpaid', referrerStatus: 'unpaid', inviteeStatus: 'unpaid', failure: 'repeat_email' });
+    expect(await paidRows(ref.me.id)).toHaveLength(1);
+    expect((await Promise.all(all.map((j) => paidRows(j.id)))).flat()).toHaveLength(1);
+    await ledgerMatches([ref.me.id, ...all.map((j) => j.id)]);
+  });
+
+  it('holds every signup of a burst from one network for review even when they arrive at once', async () => {
+    await setPolicy({ burstLimit: 2 });
+    const ref = await newUser();
+    const code = await codeOf(ref.client);
+    const all = await Promise.all([joined(code), joined(code), joined(code), joined(code)]);
+    const rows = await Promise.all(all.map((j) => referralOf(j.id)));
+    // The first is paid; from the second on (the limit), each is held, whatever order they were recorded in.
+    expect(rows.map((r) => r!.status).sort(), JSON.stringify(rows)).toEqual(['review', 'review', 'review', 'settled']);
+    for (const r of rows.filter((x) => x!.status === 'review')) expect(r).toMatchObject({ failure: 'burst', referrerStatus: 'pending', inviteeStatus: 'pending' });
+    expect(await paidRows(ref.me.id)).toHaveLength(1);
+    await ledgerMatches([ref.me.id, ...all.map((j) => j.id)]);
+  });
+
   it("caps the referrer per day and in total even when signups arrive at once; the new members are paid all the same", async () => {
     await setPolicy({ dailyCap: 1, totalCap: 2 });
     const ref = await newUser();

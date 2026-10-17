@@ -114,12 +114,15 @@ export async function refreshRoleEverywhere(env: Env, userId: string, role: stri
  * After a member's account auto-muck changed (their own save on any device, or an administrator's reset or restore):
  * the seats they hold take it on for the next showdown. A room that does not answer keeps the seat's value until the
  * member's table screen sends theirs (it compares the two when it connects), so this never fails the change.
+ *
+ * `rev` is the settings revision the change was saved as (it only grows). A member's save pushes in the background, so
+ * two quick saves can arrive in the other order; the room keeps the value of the highest revision it was sent.
  */
-export async function pushMuckEverywhere(env: Env, userId: string, on: boolean): Promise<{ tables: number; reached: number }> {
+export async function pushMuckEverywhere(env: Env, userId: string, on: boolean, rev: number): Promise<{ tables: number; reached: number }> {
   const { results } = await env.DB.prepare(`SELECT DISTINCT table_id AS id FROM table_sessions WHERE user_id = ?1 AND status = 'seated'`)
     .bind(userId)
     .all<{ id: string }>();
-  const answers = await Promise.all(results.map(({ id }) => roomCallEnv(env, id, 'muck', { user: userId, on: on ? '1' : '0' })));
+  const answers = await Promise.all(results.map(({ id }) => roomCallEnv(env, id, 'muck', { user: userId, on: on ? '1' : '0', rev: String(rev) })));
   return { tables: results.length, reached: answers.filter(Boolean).length };
 }
 

@@ -6,8 +6,8 @@
  RUN  v4.1.11 <repo>/apps/game-worker
 
 
- Test Files  1 passed (1)
-      Tests  13 passed (13)
-   Start at  15:51:35
-   Duration  905ms (transform 175ms, setup 0ms, import 687ms, tests 10ms, environment 0ms)
+ Test Files  2 passed (2)
+      Tests  18 passed (18)
+   Start at  16:57:42
+   Duration  1.00s (transform 218ms, setup 0ms, import 812ms, tests 15ms, environment 0ms)
 

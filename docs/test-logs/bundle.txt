@@ -4,3 +4,11 @@ entry index-dI0S6ZEH.js + react-DB-4Zxce.js + i18n-BeNVzNlK.js + api-RqXQen_0.js
 ✓ bundle guard passed
 
 admin console (no limit): dist/assets/index-C7wXiAi1.js 1,036.03 kB | gzip: 290.92 kB
+
+== G014 (Codex review fixes), 2026-10-17
+> node tests/bundle-check.mjs  (after pnpm build)
+
+entry index-dbwIA0UG.js + react-DB-4Zxce.js + i18n-BeNVzNlK.js + api-RqXQen_0.js + src-B-Ov6Il7.js + prefs-DHiplHu4.js + auth-CrPPNaHA.js: 644 KB; engine in: routes-Df206TCD.js
+✓ bundle guard passed
+
+admin console (no limit): dist/assets/index-DRWFJGIp.js 1,036.63 kB | gzip: 291.07 kB

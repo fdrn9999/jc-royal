@@ -82,3 +82,64 @@ Error: d1 execute failed (attempt 1): {
    Start at  14:36:25
    Duration  1603.48s (transform 749ms, setup 0ms, import 3.27s, tests 1572.70s, environment 4ms)
 
+== G014 (Codex review fixes) full integration, 2026-10-17 (same environment as P12). 312 tests after the new ones.
+   311 passed; the one failure stopped in test setup, before any assertion, and passed when the file ran again
+   (see docs/TEST_REPORT.md, Codex 브랜치 리뷰(G014) > 통합 실패 조사).
+
+> vitest run --config tests/vitest.config.ts
+
+ ❯ tests/integration/tournaments.test.ts (11 tests | 1 failed) 96989ms
+     × an operator starts with the minimum, re-reading each registration, and never twice 111ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/tournaments.test.ts > registration > an operator starts with the minimum, re-reading each registration, and never twice
+Error: verification request failed 500 "Error: Network connection lost.\n    at async Object.fetch (file:///<repo>/node_modules/.pnpm/miniflare@5.20261006.2-beta_@types+node@26.6.5/node_modules/miniflare/dist/src/workers/core/entry.worker.js:5347:22)"
+ ❯ verifyEmail tests/support/client.ts:75:50
+     73| export async function verifyEmail(c: Client, email: string): Promise<s…
+     74|   const r = await c.post('/api/auth/email-verification/request', { ema…
+     75|   if (r.status !== 200 || !r.body.devCode) throw new Error(`verificati…
+       |                                                  ^
+     76|   const v = await c.post('/api/auth/email-verification/confirm', { ema…
+     77|   if (v.status !== 200) throw new Error(`verification confirm failed $…
+ ❯ signupBody tests/support/client.ts:83:123
+ ❯ newUser tests/support/client.ts:89:48
+ ❯ tests/integration/tournaments.test.ts:302:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 42 passed (43)
+      Tests  1 failed | 311 passed (312)
+   Start at  16:46:58
+   Duration  1697.58s (transform 767ms, setup 0ms, import 3.30s, tests 1665.70s, environment 4ms)
+
+> vitest run --config tests/vitest.config.ts tests/integration/tournaments.test.ts        (the failed file again)
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Duration  122.09s (transform 63ms, setup 0ms, import 96ms, tests 102.28s, environment 0ms)
+
+== Investigation runs of tournaments.test.ts (wrangler dev output kept, not part of the suite):
+   whole file, plain:  iso1 1 failed | 10 passed    iso2 1 failed | 10 passed
+                       iso4 2 failed | 9 passed (debug log on; also the restart test: migration "bad port", then
+                            afterAll "read ECONNRESET")
+                       (iso3 left out: the debug log leaked into the d1 helper's output, a setup mistake)
+   chosen tests (-t), registration tests only:
+     an operator starts                                                          1 passed
+     closes and reopens | an operator starts                                     2 passed
+     registers once | an operator starts                                         2 passed
+     are checked | registers once | many arrive at once | closes and reopens |
+       an operator starts                                                        5 passed
+     registers once | many arrive at once | closes and reopens | an operator starts  4 passed
+     are checked | registers once | closes and reopens | an operator starts      4 passed
+     are checked | many arrive at once | closes and reopens | an operator starts  1 failed | 3 passed  (same error)
+   idle-time probes (own test files against the same dev server, never part of the suite):
+     probe1  idle 1/3/5/7/10/15 s, then concurrent POSTs                         192 requests, 0 dropped
+     probe5  idle 4.95-5.30 s in 10 ms steps, twice, then concurrent POSTs        576 requests, 0 dropped
+     probe6  six real sign-ups at once, idle 4.96-5.30 s in 10 ms steps, then two  288 sign-ups, 0 dropped
+   whole file, warm (8 x GET /api/health at once every second from global setup) vs plain, alternating:
+     warm1 11 passed   warm2 11 passed   base1 11 passed   warm3 11 passed   warm4 11 passed
+     base2 2 failed | 9 passed (same error at :302; the restart test's migration "bad port", then
+           afterAll "read ECONNRESET")
+     warm runs: 3,152 health requests, 0 failed, 0 dropped connections in the dev log

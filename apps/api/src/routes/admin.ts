@@ -957,46 +957,84 @@ const admin = new Hono<AppEnv>()
       if (!(await hasGrant(c, 'tableControl'))) fail(403, 'permission_off', 'this feature is turned off for your account');
       assertRecentReauth(c);
     }
-    const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
-    if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
-    // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
-    if (t.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
-    const merged = { sb: body.smallBlind ?? t.smallBlind, bb: body.bigBlind ?? t.bigBlind, min: body.minBuyIn ?? t.minBuyIn, max: body.maxBuyIn ?? t.maxBuyIn };
-    if (merged.bb < merged.sb || merged.min < merged.bb * 10 || merged.max < merged.min) fail(400, 'bad_request', 'invalid blind / buy-in combination');
-    const isPrivate = body.isPrivate ?? t.isPrivate;
-    let joinCodeHash = t.joinCodeHash;
-    if (body.joinCode !== undefined) joinCodeHash = body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null;
-    if (isPrivate && !joinCodeHash) fail(400, 'bad_request', 'private tables need a join code');
-    const bots = {
-      botsEnabled: body.botsEnabled ?? t.botsEnabled,
-      botLevel: body.botLevel ?? t.botLevel,
-      botMinHumans: body.botMinHumans ?? t.botMinHumans,
-      botMax: body.botMax ?? t.botMax,
-      botFillTo: body.botFillTo ?? t.botFillTo,
-      botYield: body.botYield ?? t.botYield,
-    };
+    const T = schema.tables;
     const botFields = (['botsEnabled', 'botLevel', 'botMinHumans', 'botMax', 'botFillTo', 'botYield'] as const).filter((k) => body[k] !== undefined);
-    // Table bots sit only at official tables; a member's room is theirs and other members'.
-    if (botFields.length && t.roomType !== 'official') fail(400, 'bad_request', 'member rooms have no table bots');
-    const botIssue = botFields.length ? botSettingsIssues(bots, t.maxSeats)[0] : undefined;
-    if (botIssue) fail(400, 'bad_request', botIssue.message);
-    await c.var.db
-      .update(schema.tables)
-      .set({
-        name: body.name ?? t.name,
-        smallBlind: merged.sb,
-        bigBlind: merged.bb,
-        minBuyIn: merged.min,
-        maxBuyIn: merged.max,
-        isPrivate,
-        joinCodeHash: isPrivate ? joinCodeHash : null,
-        allowSpectators: body.allowSpectators ?? t.allowSpectators,
-        beginner: body.beginner ?? t.beginner,
-        entryBlocked: body.entryBlocked ?? t.entryBlocked,
-        ...bots,
-        updatedAt: Date.now(),
-      })
-      .where(eq(schema.tables.id, id));
+    const joinCodeHash = body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null;
+    const conflict = (now: { updatedAt: number } | undefined): never => fail(409, 'table_conflict', 'the table changed meanwhile', { updatedAt: now?.updatedAt ?? null });
+    // The row is written only if every column this sets still holds what was read, and the status too: a change another
+    // administrator made in between (a block from /control, another edit, a close) is never overwritten with what this
+    // request read. The body names only what it changes, so it is merged onto a fresh read and tried again. With
+    // `ifUpdatedAt` (the console sends what it was showing) any change since then is a conflict instead.
+    const save = async () => {
+      for (let attempt = 0; ; attempt++) {
+        if (attempt === 3) conflict(await c.var.db.query.tables.findFirst({ where: eq(T.id, id) }));
+        const r = await c.var.db.query.tables.findFirst({ where: eq(T.id, id) });
+        if (!r || r.status === 'closed') fail(404, 'not_found', 'table not found');
+        // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
+        if (r.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
+        if (body.ifUpdatedAt !== undefined && body.ifUpdatedAt !== r.updatedAt) conflict(r);
+        const merged = { sb: body.smallBlind ?? r.smallBlind, bb: body.bigBlind ?? r.bigBlind, min: body.minBuyIn ?? r.minBuyIn, max: body.maxBuyIn ?? r.maxBuyIn };
+        if (merged.bb < merged.sb || merged.min < merged.bb * 10 || merged.max < merged.min) fail(400, 'bad_request', 'invalid blind / buy-in combination');
+        const isPrivate = body.isPrivate ?? r.isPrivate;
+        const code = body.joinCode !== undefined ? joinCodeHash : r.joinCodeHash;
+        if (isPrivate && !code) fail(400, 'bad_request', 'private tables need a join code');
+        const bots = {
+          botsEnabled: body.botsEnabled ?? r.botsEnabled,
+          botLevel: body.botLevel ?? r.botLevel,
+          botMinHumans: body.botMinHumans ?? r.botMinHumans,
+          botMax: body.botMax ?? r.botMax,
+          botFillTo: body.botFillTo ?? r.botFillTo,
+          botYield: body.botYield ?? r.botYield,
+        };
+        // Table bots sit only at official tables; a member's room is theirs and other members'.
+        if (botFields.length && r.roomType !== 'official') fail(400, 'bad_request', 'member rooms have no table bots');
+        const botIssue = botFields.length ? botSettingsIssues(bots, r.maxSeats)[0] : undefined;
+        if (botIssue) fail(400, 'bad_request', botIssue.message);
+        const saved = await c.var.db
+          .update(T)
+          .set({
+            name: body.name ?? r.name,
+            smallBlind: merged.sb,
+            bigBlind: merged.bb,
+            minBuyIn: merged.min,
+            maxBuyIn: merged.max,
+            isPrivate,
+            joinCodeHash: isPrivate ? code : null,
+            allowSpectators: body.allowSpectators ?? r.allowSpectators,
+            beginner: body.beginner ?? r.beginner,
+            entryBlocked: body.entryBlocked ?? r.entryBlocked,
+            ...bots,
+            // Always later than what was read, so a form loaded before this change sees it as one.
+            updatedAt: Math.max(Date.now(), r.updatedAt + 1),
+          })
+          .where(
+            and(
+              eq(T.id, id),
+              eq(T.status, r.status),
+              eq(T.updatedAt, r.updatedAt),
+              eq(T.name, r.name),
+              eq(T.smallBlind, r.smallBlind),
+              eq(T.bigBlind, r.bigBlind),
+              eq(T.minBuyIn, r.minBuyIn),
+              eq(T.maxBuyIn, r.maxBuyIn),
+              eq(T.isPrivate, r.isPrivate),
+              r.joinCodeHash === null ? isNull(T.joinCodeHash) : eq(T.joinCodeHash, r.joinCodeHash),
+              eq(T.allowSpectators, r.allowSpectators),
+              eq(T.beginner, r.beginner),
+              eq(T.entryBlocked, r.entryBlocked),
+              eq(T.botsEnabled, r.botsEnabled),
+              eq(T.botLevel, r.botLevel),
+              eq(T.botMinHumans, r.botMinHumans),
+              eq(T.botMax, r.botMax),
+              eq(T.botFillTo, r.botFillTo),
+              eq(T.botYield, r.botYield),
+            ),
+          )
+          .returning({ id: T.id });
+        if (saved.length) return r;
+      }
+    };
+    const t = await save();
     // Blind changes apply from the next hand; the running hand keeps its config. Bot settings apply at once without
     // touching the running hand: a bot over the new limits stands up after it, and a bot that sits down meanwhile is dealt
     // in from the next one. A room that does not confirm keeps its old settings (entry blocking included) until it
