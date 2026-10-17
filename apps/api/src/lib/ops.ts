@@ -35,7 +35,7 @@ const zero = (): Counts => Object.fromEntries(OPS_METRICS.map((m) => [m, 0])) as
 const isMetric = (m: string): m is OpsMetric => (OPS_METRICS as readonly string[]).includes(m);
 
 interface TypeRow {
-  type: 'official' | 'member';
+  type: 'official' | 'member' | 'tournament';
   tables: number;
   closing: number;
   blocked: number;
@@ -94,7 +94,7 @@ export async function liveOps(db: D1Database, now = Date.now()) {
   const [types, top, online, ops, reports, recon, stuck, orphaned] = results;
   const rows = <T>(r: D1Result | undefined) => (r?.results ?? []) as T[];
 
-  const byType = { official: emptyType('official'), member: emptyType('member') };
+  const byType = { official: emptyType('official'), member: emptyType('member'), tournament: emptyType('tournament') };
   for (const r of rows<TypeRow>(types)) byType[r.type] = { ...emptyType(r.type), ...nonNull(r) };
 
   const trend = Array.from({ length: SLOTS }, (_, i) => ({ at: from + i * SLOT_MS, ...zero() }));

@@ -5,7 +5,7 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { BASE, Client, newUser, PASSWORD, signupBody, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
-import { isMyTurn, TableSocket } from '../support/ws';
+import { isMyTurn, nextState, TableSocket } from '../support/ws';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 const N = '/api/admin/service/notices';
@@ -69,7 +69,7 @@ async function foldOut(socks: TableSocket[]) {
     if (!s.hand || s.hand.stage === 'settled') return;
     const me = socks.find((w) => isMyTurn(w.state!));
     if (me) await me.act(me.state!.you.legal.some((l) => l.type === 'fold') ? 'fold' : 'check');
-    else await socks[0]!.waitNext((m) => m.t === 'state', 15_000, 'next state');
+    else await nextState(socks);
   }
   throw new Error('the hand did not end');
 }

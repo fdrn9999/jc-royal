@@ -291,3 +291,7 @@
 `rooms`(점검 예약·변경·종료 응답): `{tables, reached, unreached[], truncated}`. 접속자나 착석자가 있는 열린·종료 중 테이블(연결 많은 순, 최대 60곳)의 룸에 테이블 설정을 다시 읽게 해(한 번 더 시도) 점검 표시와 핸드 중단·재개를 바로 반영한다. 답하지 않았거나 60곳 밖의 룸은 다음 점유 기록 때나 핸드를 기록할 때(같은 batch에서 점검을 읽음) 알게 되고, 알고 난 뒤에는 점검 시작·종료 시각의 알람에서 D1을 다시 읽는다. 사람이 그대로인 채 핸드를 이어 가던 룸도 그 핸드를 기록하면서 점검을 알아 다음 핸드를 시작하지 않는다. 설정·좌석·칩은 바꾸지 않는다.
 
 아카데미 지표(관리자): `GET /api/admin/academy/stats` → `[{kind, itemId, starts, completes, correct, wrong}]`(익명 집계). 테이블 생성·수정 본문에 `beginner`(입문 테이블) 추가.
+
+## 토너먼트(6인 SNG)
+
+회원 `GET /api/tournaments`, `GET /api/tournaments/:id`, `POST /api/tournaments/:id/register`, `POST /api/tournaments/:id/unregister`와 관리자 `/api/admin/tournaments*`, `/api/admin/tournament-templates*`. 요청·응답·오류 코드·권한은 `docs/TOURNAMENT.md` "API"에 있다. 대회 테이블(`roomType: 'tournament'`)은 로비 목록과 빠른 참가에 나오지 않고, 착석·충전·리바이는 룸이 `tournament_table`로 거절하며, 관리자 테이블 종료·긴급 제어·설정 변경은 409 `tournament_table`이다. 관리자 테이블 상세(`GET /api/admin/tables/:id`)는 대회 테이블이면 `tournament: {id, name, status}`를 더한다.

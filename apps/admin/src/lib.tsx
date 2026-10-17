@@ -111,6 +111,20 @@ const BY_CODE: Record<string, Key> = {
   time_bank_policy_conflict: 'errTimeBankConflict',
   time_bank_no_change: 'errTimeBankNoChange',
   time_bank_invalid: 'errTimeBankInvalid',
+  tournament_not_found: 'errTnNotFound',
+  tournament_conflict: 'errTnConflict',
+  tournament_state: 'errTnState',
+  tournament_started: 'errTnStarted',
+  tournament_not_ready: 'errTnNotReady',
+  tournament_limit: 'errTnLimit',
+  tournament_name_mismatch: 'errTnNameMismatch',
+  tournament_structure_invalid: 'errTnStructure',
+  tournament_table: 'errTnTable',
+  tournament_template_not_found: 'errTplNotFound',
+  tournament_template_archived: 'errTplArchived',
+  tournament_template_conflict: 'errTplConflict',
+  tournament_template_no_change: 'errTplNoChange',
+  tournament_template_state: 'errTplState',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

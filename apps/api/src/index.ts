@@ -19,6 +19,7 @@ import { roomRoutes } from './routes/rooms';
 import { serviceRoutes } from './routes/service';
 import { blockRoutes, dmRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
+import { tournamentRoutes } from './routes/tournaments';
 
 const app = new Hono<AppEnv>();
 
@@ -41,6 +42,7 @@ app.route('/api/blocks', blockRoutes);
 app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
 app.route('/api/rooms', roomRoutes);
+app.route('/api/tournaments', tournamentRoutes);
 app.route('/api/academy', academyRoutes);
 app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);

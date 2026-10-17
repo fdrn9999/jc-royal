@@ -18,6 +18,7 @@ import { EconomyPage, ReconcilePage } from './pages/Economy';
 import { RefillPage } from './pages/Refill';
 import { BotsPage } from './pages/Bots';
 import { TimeBankPage } from './pages/TimeBank';
+import { TournamentDetailPage, TournamentsPage, TournamentTemplatesPage } from './pages/Tournaments';
 import { ReferralsPage } from './pages/Referrals';
 import { AuditPage } from './pages/Audit';
 import { AcademyStatsPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
@@ -28,6 +29,7 @@ const NAV: [string, Key][] = [
   ['/users', 'users'],
   ['/tables', 'tables'],
   ['/bots', 'botsNav'],
+  ['/tournaments', 'tournamentsNav'],
   ['/referrals', 'referralNav'],
   ['/academy', 'academy'],
   ['/hands', 'hands'],
@@ -128,6 +130,9 @@ const router = createBrowserRouter([
       { path: '/tables/time-bank', element: <TimeBankPage /> },
       { path: '/tables/:id', element: <TableDetailPage /> },
       { path: '/bots', element: <BotsPage /> },
+      { path: '/tournaments', element: <TournamentsPage /> },
+      { path: '/tournaments/templates', element: <TournamentTemplatesPage /> },
+      { path: '/tournaments/:id', element: <TournamentDetailPage /> },
       { path: '/referrals', element: <ReferralsPage /> },
       { path: '/hands', element: <HandsPage /> },
       { path: '/hands/:id', element: <HandDetailPage /> },

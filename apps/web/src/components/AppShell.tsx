@@ -82,6 +82,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink to="/" end className={link}>
               {t('nav.lobby')}
             </NavLink>
+            <NavLink to="/tournaments" className={link} data-testid="nav-tournaments">
+              {t('nav.tournaments')}
+            </NavLink>
             <NavLink to="/academy" className={link}>
               {t('nav.academy')}
             </NavLink>

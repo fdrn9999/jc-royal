@@ -149,9 +149,10 @@ export const tables = sqliteTable(
     createdBy: text('created_by').references(() => users.id),
     /**
      * 'official' tables are opened by admins. A 'member' room is opened by a member (createdBy, the host), who can
-     * rename it, change spectating and the join code, and close it; never touch chips, cards or results.
+     * rename it, change spectating and the join code, and close it; never touch chips, cards or results. A 'tournament'
+     * table is opened by a tournament's start (tournaments.table_id) and plays tournament chips only (docs/TOURNAMENT.md).
      */
-    roomType: text('room_type', { enum: ['official', 'member'] }).notNull().default('official'),
+    roomType: text('room_type', { enum: ['official', 'member', 'tournament'] }).notNull().default('official'),
     /**
      * Table bots (official tables only, and only while the bot policy is on): once ot_min_humans members sit, bots
      * of ot_level join one at a time until ot_fill_to players sit, never more than ot_max bots. With
@@ -869,4 +870,125 @@ export const referrals = sqliteTable(
     index('referrals_status_idx').on(t.status, t.createdAt),
     index('referrals_email_idx').on(t.emailHash),
   ],
+);
+
+/**
+ * A tournament template (docs/TOURNAMENT.md): the structure a super admin sets, from which operators open tournaments.
+ * A tournament copies it when it is opened, so a template edited or archived later changes no tournament already open.
+ * `levels` is a JSON array of {sb, bb}; times in ms. `version` counts edits (two editors: the second is told).
+ */
+export const tournamentTemplates = sqliteTable(
+  'tournament_templates',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    capacity: integer('capacity').notNull(),
+    /** The fewest eligible players an operator's start needs (2 to capacity). */
+    minPlayers: integer('min_players').notNull(),
+    startStack: integer('start_stack').notNull(),
+    levels: text('levels').notNull(),
+    levelMs: integer('level_ms').notNull(),
+    turnSeconds: integer('turn_seconds').notNull(),
+    tbEnabled: integer('tb_enabled', { mode: 'boolean' }).notNull(),
+    tbInitialMs: integer('tb_initial_ms').notNull(),
+    tbMaxMs: integer('tb_max_ms').notNull(),
+    tbUnitMs: integer('tb_unit_ms').notNull(),
+    tbRefillHands: integer('tb_refill_hands').notNull(),
+    tbRefillMs: integer('tb_refill_ms').notNull(),
+    /** Registration conditions: hands played (any table) and a verified email. */
+    minHands: integer('min_hands').notNull().default(0),
+    requireVerified: integer('require_verified', { mode: 'boolean' }).notNull().default(false),
+    /** Starts by itself when the last seat is taken. */
+    autoStart: integer('auto_start', { mode: 'boolean' }).notNull().default(true),
+    status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+    version: integer('version').notNull().default(1),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('tournament_templates_status_idx').on(t.status, t.updatedAt)],
+);
+
+/**
+ * One tournament (docs/TOURNAMENT.md "대회 상태"): the template's structure as copied when it was opened, its state, and
+ * the progress its table's room writes back after each hand (level, clock, hands, players left: a mirror for the lists
+ * and the admin; the room's own storage is the authority while it runs). `version` rises with every change an admin
+ * sees (status, pause request); `roster` with every registration change. Never deleted.
+ */
+export const tournaments = sqliteTable(
+  'tournaments',
+  {
+    id: text('id').primaryKey(),
+    templateId: text('template_id'),
+    name: text('name').notNull(),
+    status: text('status', { enum: ['registering', 'closed', 'running', 'finished', 'cancelled', 'aborted'] }).notNull(),
+    capacity: integer('capacity').notNull(),
+    minPlayers: integer('min_players').notNull(),
+    startStack: integer('start_stack').notNull(),
+    levels: text('levels').notNull(),
+    levelMs: integer('level_ms').notNull(),
+    turnSeconds: integer('turn_seconds').notNull(),
+    tbEnabled: integer('tb_enabled', { mode: 'boolean' }).notNull(),
+    tbInitialMs: integer('tb_initial_ms').notNull(),
+    tbMaxMs: integer('tb_max_ms').notNull(),
+    tbUnitMs: integer('tb_unit_ms').notNull(),
+    tbRefillHands: integer('tb_refill_hands').notNull(),
+    tbRefillMs: integer('tb_refill_ms').notNull(),
+    minHands: integer('min_hands').notNull(),
+    requireVerified: integer('require_verified', { mode: 'boolean' }).notNull(),
+    autoStart: integer('auto_start', { mode: 'boolean' }).notNull(),
+    version: integer('version').notNull().default(1),
+    roster: integer('roster').notNull().default(0),
+    /** The table opened at the start (tables.room_type 'tournament'). */
+    tableId: text('table_id'),
+    /** Progress as the room last wrote it: level index, when it ends (running clock) or what was left (stopped clock). */
+    level: integer('level').notNull().default(0),
+    levelEndsAt: integer('level_ends_at'),
+    levelLeftMs: integer('level_left_ms'),
+    /** An admin asked for a pause from the next hand (and when that request last changed); `paused_at`: the clock stopped. */
+    pauseRequested: integer('pause_requested', { mode: 'boolean' }).notNull().default(false),
+    pauseChangedAt: integer('pause_changed_at'),
+    pausedAt: integer('paused_at'),
+    playersLeft: integer('players_left'),
+    hands: integer('hands').notNull().default(0),
+    /** When the room last wrote its progress (a silent room is shown as needing recovery). */
+    roomSeenAt: integer('room_seen_at'),
+    startedAt: integer('started_at'),
+    finishedAt: integer('finished_at'),
+    cancelledAt: integer('cancelled_at'),
+    abortedAt: integer('aborted_at'),
+    winnerId: text('winner_id'),
+    /** completed (one player left), cancelled, aborted. */
+    endReason: text('end_reason', { enum: ['completed', 'cancelled', 'aborted'] }),
+    /** The operator's reason for a cancel or an abort (staff only). */
+    endNote: text('end_note'),
+    endedBy: text('ended_by'),
+    createdBy: text('created_by'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [index('tournaments_status_idx').on(t.status, t.createdAt), uniqueIndex('tournaments_table_idx').on(t.tableId)],
+);
+
+/**
+ * A member's entry in a tournament (docs/TOURNAMENT.md "참가자 상태"). `stack` mirrors the room's after each hand
+ * (tournament chips, never wallet chips); `place` is final once set.
+ */
+export const tournamentEntries = sqliteTable(
+  'tournament_entries',
+  {
+    tournamentId: text('tournament_id').notNull(),
+    userId: text('user_id').notNull(),
+    status: text('status', { enum: ['registered', 'unregistered', 'dropped', 'playing', 'eliminated', 'won', 'stopped'] }).notNull(),
+    seatIndex: integer('seat_index'),
+    stack: integer('stack'),
+    place: integer('place'),
+    registeredAt: integer('registered_at').notNull(),
+    eliminatedAt: integer('eliminated_at'),
+    /** The room's hand number in which the player busted. */
+    eliminatedHand: integer('eliminated_hand'),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.tournamentId, t.userId] }), index('tournament_entries_user_idx').on(t.userId, t.status)],
 );

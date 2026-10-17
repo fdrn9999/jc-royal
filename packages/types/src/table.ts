@@ -1,6 +1,7 @@
 import type { Card, HandRankClass } from './cards';
 import type { PublicRole } from './social';
 import type { TimeBankRules } from './timebank';
+import type { TournamentTableView } from './tournament';
 
 /** Seat counts poker-engine-ts supports (SessionConfig.maxSeats). */
 export const SUPPORTED_MAX_SEATS = [2, 6, 9] as const;
@@ -109,7 +110,8 @@ export interface TableConfigView {
   turnSeconds: number;
   allowSpectators: boolean;
   isPrivate: boolean;
-  roomType: 'official' | 'member';
+  /** 'tournament': a Sit & Go's table, played with tournament chips (TableView.tournament). */
+  roomType: 'official' | 'member' | 'tournament';
   /** The member who opened a member room; null for official tables. */
   hostId: string | null;
 }
@@ -140,6 +142,8 @@ export interface TableView {
    * knows them). Null when the time bank is off here; absent from older rooms.
    */
   timeBank?: Omit<TimeBankRules, 'version'> | null;
+  /** A tournament table's tournament: levels, players left, places and the viewer's standing. Absent elsewhere. */
+  tournament?: TournamentTableView | null;
   you: {
     userId: string;
     seatIndex: number | null;

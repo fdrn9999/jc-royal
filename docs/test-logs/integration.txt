@@ -1,31 +1,20 @@
 
-> jc-royal@ test:integration <repo>
-> vitest run --config tests/vitest.config.ts
+> vitest run --config tests/vitest.config.ts tests/integration/service.test.ts -t "a table the start was never sent"
+  (before the fix, at the tournament work's tree: 1 passed of 8 runs, and it failed in its group run; failing at
+   the second foldOut with "timeout waiting for next state; last hand: {number 2, preflop, actorSeat 1, seq 0}")
+  (at 3ebc2b6, before the tournament work: passed 8 of 8 runs that reached the test; one more stopped in
+   wrangler's migration step before it)
 
+> after tests/support/ws.ts nextState (wait on every socket, not the first)
+
+ Test Files  1 passed (1)   x4 runs
+      Tests  1 passed | 5 skipped (6)
+
+> vitest run --config tests/vitest.config.ts
 
  RUN  v4.1.11 <repo>
 
- ❯ tests/integration/admin-permissions.test.ts (11 tests | 1 failed) 40169ms
-     × every admin route refuses the wrong caller: no session, a member session, the player site, a plain admin on super-admin routes, and no fresh password 6ms
- ❯ tests/integration/privacy.test.ts (4 tests | 1 failed) 6996ms
-     × deletes 1:1 messages both ways, inbox, Academy records, hand notes and reset links; keeps ledger and reports 1878ms
-
- FAIL  tests/integration/admin-permissions.test.ts — the expected super-admin route list had no 'PUT /time-bank/policy' (list updated)
- FAIL  tests/integration/privacy.test.ts — Error: d1 execute failed (attempt 1): "fetch failed" (the test's own setup INSERT, before the deletion request)
-
- Test Files  2 failed | 39 passed (41)
-      Tests  2 failed | 280 passed (282)
-   Start at  06:14:05
-   Duration  1498.93s (transform 755ms, setup 0ms, import 3.44s, tests 1468.86s, environment 4ms)
-
-> vitest run --config tests/vitest.config.ts tests/integration/privacy.test.ts tests/integration/admin-permissions.test.ts
-
- Test Files  2 passed (2)
-      Tests  15 passed (15)
-   Duration  74.93s (transform 63ms, setup 0ms, import 116ms, tests 57.27s, environment 0ms)
-
-> vitest run --config tests/vitest.config.ts tests/integration/time-bank.test.ts
-
- Test Files  1 passed (1)
-      Tests  6 passed (6)
-   Duration  83.28s (transform 51ms, setup 0ms, import 82ms, tests 65.87s, environment 0ms)
+ Test Files  42 passed (42)
+      Tests  293 passed (293)
+   Start at  10:23:09
+   Duration  1567.35s (transform 817ms, setup 0ms, import 4.75s, tests 1533.62s, environment 4ms)

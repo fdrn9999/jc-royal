@@ -143,6 +143,8 @@ export type ErrorCode =
   | 'time_bank_off'
   /** Less than TIME_BANK_MIN_USE_MS left in the player's time bank. */
   | 'time_bank_empty'
+  /** A tournament table: no sitting down, leaving, topping up, rebuying or waitlist (docs/TOURNAMENT.md). */
+  | 'tournament_table'
   | 'internal';
 
 /**

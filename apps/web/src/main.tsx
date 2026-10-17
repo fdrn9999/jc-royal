@@ -70,6 +70,7 @@ const loadBoard = () => import('./pages/Board');
 const loadMaintenance = () => import('./pages/Maintenance');
 const loadFriends = () => import('./pages/Friends');
 const loadMessages = () => import('./pages/Messages');
+const loadTournaments = () => import('./pages/Tournaments');
 
 /** Keeps Academy progress in sync with the server while someone is signed in. */
 function AcademySync() {
@@ -154,6 +155,8 @@ const router = createBrowserRouter([
       { path: '/me', element: onDemand(loadMe, 'MePage') },
       { path: '/me/hands', element: onDemand(loadHands, 'HandsPage') },
       { path: '/me/hands/:id', element: onDemand(loadMe, 'HandDetailPage') },
+      { path: '/tournaments', element: onDemand(loadTournaments, 'TournamentsPage') },
+      { path: '/tournaments/:id', element: onDemand(loadTournaments, 'TournamentPage') },
       { path: '/board', element: onDemand(loadBoard, 'BoardPage') },
       { path: '/board/write', element: onDemand(loadBoard, 'PostEditorPage') },
       { path: '/board/:id', element: onDemand(loadBoard, 'PostPage') },

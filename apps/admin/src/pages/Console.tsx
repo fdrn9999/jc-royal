@@ -16,6 +16,7 @@ import {
   seatPhaseLabel,
   stageLabel,
   tableIssueLabel,
+  tnStatusLabel,
   topUpStateLabel,
   userStatusLabel,
 } from '../labels';
@@ -799,7 +800,7 @@ function ResetLinkResult({ reset }: { reset: ResetLink }) {
 interface TableRow {
   id: string; name: string; maxSeats: number; smallBlind: number; bigBlind: number; minBuyIn: number; maxBuyIn: number; turnSeconds: number;
   isPrivate: boolean; allowSpectators: boolean; beginner: boolean; entryBlocked: boolean; handsPaused?: boolean; status: string; liveSeated: number; livePlaying: boolean; liveConnections: number; handsPlayed: number; lastIssue: string | null;
-  roomType: 'official' | 'member'; hostNickname: string | null;
+  roomType: 'official' | 'member' | 'tournament'; hostNickname: string | null;
   /** Table bots (official tables only); `liveBots` is how many of `liveSeated` are bots. */
   botsEnabled?: boolean; botLevel?: string; botMinHumans?: number; botMax?: number; botFillTo?: number; botYield?: boolean; liveBots?: number;
 }
@@ -924,6 +925,7 @@ export function TablesPage() {
           <option value="">{t('roomTypeLabel')}: {t('statusAll')}</option>
           <option value="official">{t('roomTypeLabel')}: {t('officialRoom')}</option>
           <option value="member">{t('roomTypeLabel')}: {t('memberRoom')}</option>
+          <option value="tournament">{t('roomTypeLabel')}: {t('tournamentRoom')}</option>
         </select>
         <label className="flex h-11 items-center gap-2 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm">
           <input type="checkbox" className={checkbox} checked={issueOnly} onChange={(e) => filter(setIssueOnly)(e.target.checked)} data-testid="table-issue" />
@@ -940,6 +942,7 @@ export function TablesPage() {
               <td className="px-2 py-2 font-semibold">
                 {tb.name} {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}
                 {tb.roomType === 'member' && <Badge tone="blue" className="ml-1">{t('memberRoom')} · {tb.hostNickname ?? '—'}</Badge>}
+                {tb.roomType === 'tournament' && <Badge tone="gold" className="ml-1">{t('tournamentRoom')}</Badge>}
               </td>
               <td className="px-2 py-2">
                 <span className="flex flex-wrap gap-1">
@@ -951,7 +954,7 @@ export function TablesPage() {
               </td>
               <td className="px-2 py-2">{tb.maxSeats}</td>
               <td className="px-2 py-2 font-mono">{tb.smallBlind}/{tb.bigBlind}</td>
-              <td className="whitespace-nowrap px-2 py-2 font-mono">{formatChips(tb.minBuyIn, true)}–{formatChips(tb.maxBuyIn, true)}</td>
+              <td className="whitespace-nowrap px-2 py-2 font-mono">{tb.roomType === 'tournament' ? '—' : `${formatChips(tb.minBuyIn, true)}–${formatChips(tb.maxBuyIn, true)}`}</td>
               <td className="px-2 py-2 text-xs">{t('seatedWs', { seated: tb.liveSeated - (tb.liveBots ?? 0), ws: tb.liveConnections })} {!!tb.liveBots && <Badge tone="blue">{t('botsN', { n: tb.liveBots })}</Badge>} {tb.botsEnabled && !tb.liveBots && <Badge>{t('botsAllowedShort')}</Badge>} {tb.livePlaying && <Badge tone="green">{t('inHand')}</Badge>}</td>
               <td className="px-2 py-2">{tb.handsPlayed}</td>
               <td className="px-2 py-2"><Link to={`/tables/${tb.id}`} className="text-gold-300">{t('detail')}</Link></td>
@@ -1208,7 +1211,7 @@ export function TableDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useT();
   const { api } = useAdmin();
-  const { data, error, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null }>(`/api/admin/tables/${id}`);
+  const { data, error, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null; tournament?: { id: string; name: string; status: string } | null }>(`/api/admin/tables/${id}`);
   const [note, setNote] = useState<Note>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [closePv, setClosePv] = useState<{ data: ClosePreview } | { error: unknown } | null>(null);
@@ -1259,6 +1262,9 @@ export function TableDetailPage() {
   const diag = data.diagnosis;
   const time = (ms: number | null | undefined) => (ms ? formatDate(ms, locale) : t('none'));
   const controllable = tb.status === 'open';
+  // A tournament's table is paused, closed and set up from its tournament (the API refuses these here: tournament_table).
+  const tn = tb.roomType === 'tournament' ? (data.tournament ?? null) : null;
+  const tnTable = tb.roomType === 'tournament';
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -1268,6 +1274,7 @@ export function TableDetailPage() {
         {tb.entryBlocked && <Badge tone="red">{t('entryBlockedShort')}</Badge>}
         {live?.maintenance?.active && <Badge tone="gold">{t('maintStateActive')}</Badge>}
         {tb.lastIssue && <Badge tone="red">{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></Badge>}
+        {tnTable && <Badge tone="gold">{t('tournamentRoom')}</Badge>}
       </div>
       <Feedback note={note} />
       {error && <LoadError error={error} onRetry={reload} />}
@@ -1298,6 +1305,20 @@ export function TableDetailPage() {
             </div>
           )}
         </Panel>
+        {tnTable ? (
+          <Panel title={t('tnTableTitle')}>
+            <div className="flex flex-col gap-3 text-sm" data-testid="tn-table-panel">
+              {tn && (
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">{tn.name}</span>
+                  <Badge tone={tn.status === 'running' ? 'green' : tn.status === 'aborted' ? 'red' : 'neutral'}>{tnStatusLabel(t, tn.status)}</Badge>
+                </p>
+              )}
+              <p className="text-ink-300">{t('tnTableBody')}</p>
+              {tn && <Link to={`/tournaments/${tn.id}`} className="self-start text-gold-300 hover:underline" data-testid="tn-table-tournament">{t('tnTableLink')} →</Link>}
+            </div>
+          </Panel>
+        ) : (
         <Panel title={t('emergencyTitle')}>
           <div className="flex flex-col gap-3" data-testid="emergency">
             <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={cReason} onChange={(e) => setCReason(e.target.value)} disabled={!controllable} data-testid="control-reason" />}</Field>
@@ -1317,6 +1338,7 @@ export function TableDetailPage() {
             <Button variant="danger" disabled={tb.status !== 'open'} onClick={askClose} data-testid="close-table">{t('closeTable')}</Button>
           </div>
         </Panel>
+        )}
       </div>
       {live && (
         <Panel title={t('diagnosisTitle')}>
@@ -1376,6 +1398,7 @@ export function TableDetailPage() {
           }}
         />
       )}
+      {!tnTable && (
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('blinds')}>
           <form className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: edit })); }}>
@@ -1392,6 +1415,7 @@ export function TableDetailPage() {
         </Panel>
         <TableBotsPanel key={[tb.botsEnabled, tb.botLevel, tb.botMinHumans, tb.botMax, tb.botFillTo, tb.botYield].join(':')} tb={tb} live={live} act={act} />
       </div>
+      )}
       <div className="flex flex-wrap gap-4">
         <Link to={`/hands?tableId=${id}`} className="text-sm text-gold-300">{t('hands')} →</Link>
         <Link to={`/audit?targetType=table&targetId=${encodeURIComponent(id)}`} className="text-sm text-gold-300" data-testid="table-audit">{t('audit')} →</Link>

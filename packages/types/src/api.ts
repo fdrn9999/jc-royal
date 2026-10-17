@@ -223,7 +223,7 @@ export interface MeDto {
   createdAt: number;
 }
 
-export type RoomType = 'official' | 'member';
+export type RoomType = 'official' | 'member' | 'tournament';
 
 export interface LobbyTableDto {
   id: string;

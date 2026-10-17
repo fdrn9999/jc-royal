@@ -69,6 +69,19 @@ const NOTICES = {
       title: '계정 설정 복구 안내',
       body: '운영팀이 초기화했던 계정 설정을 초기화 전 상태로 복구했습니다. 기기마다 다음 동기화 때 반영됩니다.',
     }),
+    /** Tournaments (lib/tournament.ts): free, no prize. Never carries the staff reason. */
+    tournamentStarted: (name: string): Notice => ({
+      title: '토너먼트 시작 안내',
+      body: `'${name}' 토너먼트가 시작되었습니다. 토너먼트 화면에서 테이블에 입장하세요.\n자리를 비워도 좌석은 남아 블라인드를 냅니다. 토너먼트 칩은 이 대회에서만 쓰이며 지갑 칩과 관계없습니다.`,
+    }),
+    tournamentCancelled: (name: string): Notice => ({
+      title: '토너먼트 취소 안내',
+      body: `등록하신 '${name}' 토너먼트가 시작 전에 운영팀에 의해 취소되었습니다. 참가비가 없는 무료 대회라 따로 처리할 것은 없습니다.`,
+    }),
+    tournamentAborted: (name: string): Notice => ({
+      title: '토너먼트 운영 중단 안내',
+      body: `참가하신 '${name}' 토너먼트가 진행 중에 운영팀에 의해 중단되었습니다. 이미 정해진 탈락 순위만 기록되며 우승자는 없습니다. 지갑 칩은 바뀌지 않습니다.`,
+    }),
   },
   en: {
     welcome: (grant: number): Notice => ({
@@ -114,6 +127,18 @@ const NOTICES = {
     settingsRestored: (): Notice => ({
       title: 'Your account settings were restored',
       body: 'Our team restored the account settings that had been reset to what they were before. Each device picks this up the next time it syncs.',
+    }),
+    tournamentStarted: (name: string): Notice => ({
+      title: 'Your tournament has started',
+      body: `The '${name}' tournament has started. Open it from the tournaments page to take your seat.\nIf you are away, your seat stays and posts the blinds. Tournament chips are used only in this tournament and have nothing to do with your wallet.`,
+    }),
+    tournamentCancelled: (name: string): Notice => ({
+      title: 'Tournament cancelled',
+      body: `The '${name}' tournament you registered for was cancelled by our team before it started. It was a free tournament, so there is nothing else to do.`,
+    }),
+    tournamentAborted: (name: string): Notice => ({
+      title: 'Tournament stopped',
+      body: `The '${name}' tournament you played in was stopped by our team while it was running. Only the places already decided are kept, and there is no winner. Your wallet chips are unchanged.`,
     }),
   },
 } as const;

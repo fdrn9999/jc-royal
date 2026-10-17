@@ -15,6 +15,7 @@ import { OpsCounter, type TimeBankMetric } from '@jc/db';
 import { botView, decideBot, HandEngine, nextButtonSeat, type ActResult, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
   AUTO_REBUY_MAX_TIMES,
+  blindsAt,
   type BotLevel,
   ClientMessageSchema,
   MEMBER_IDLE_CLOSE_MS,
@@ -25,6 +26,7 @@ import {
   reactionWait,
   TIME_BANK_MIN_USE_MS,
   timeBankRulesFor,
+  tournamentTimeBankRules,
   type ChatMessage,
   type ClientMessage,
   type ErrorCode,
@@ -39,6 +41,7 @@ import {
   type TableCue,
   type TableView,
   type TimeBankRules,
+  type TournamentTableView,
 } from '@jc/types';
 import {
   buyIn,
@@ -56,6 +59,7 @@ import {
   type TableRow,
 } from './settlement';
 import { botBuyIn, botEvent, pickBot, type BotEventKind } from './bots';
+import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
   DB: D1Database;
@@ -185,6 +189,11 @@ interface RoomState {
   banks?: Record<string, { ms: number; hands: number; at: number }>;
   /** The current hand's time bank counters, moved into its record when it settles (statistics only). */
   tbCount?: { handId: string; n: Partial<Record<TimeBankMetric, number>> } | null;
+  /**
+   * The Sit & Go this table plays (tournament tables only: tournament.ts, docs/TOURNAMENT.md). Seeded from D1 once; from
+   * then on the room's own state leads, and D1 only brings an operator's pause request and an abort.
+   */
+  tourney?: TourneyState | null;
 }
 
 const BETWEEN_HANDS_MS = 4_000;
@@ -329,6 +338,9 @@ export class TableRoom extends DurableObject<Env> {
         this.room.reservation = null;
         await this.save();
       }
+      // A tournament table meets its tournament (players sit down with their tournament chips), or takes on what an
+      // operator changed meanwhile.
+      const tourneyChanged = await this.takeTourney(t.tournament);
       this.loaded = true;
       // A code change this room was not told about (or slept through) still takes effect.
       await this.enforceAccess();
@@ -343,6 +355,11 @@ export class TableRoom extends DurableObject<Env> {
       if (this.unfinishedWork()) {
         await this.finishWorkSafely();
         await this.schedule();
+      }
+      // A tournament woken by its first visitor (the api's `reload` did not reach it) deals without waiting for one.
+      if (tourneyChanged) {
+        if (!this.dealsNow()) await this.stopTourneyClock();
+        await this.afterChange();
       }
     }
   }
@@ -586,6 +603,9 @@ export class TableRoom extends DurableObject<Env> {
               this.table = t;
               // Maintenance an admin planned, moved or ended (this broadcast and afterChange show it and deal again).
               this.takeMaint(maintenance, read);
+              // A tournament's pause or resume (from the next hand), or its abort (which comes with the close below).
+              await this.takeTourney(t.tournament);
+              if (!this.dealsNow()) await this.stopTourneyClock();
               if (t.status === 'closing' && !this.room.closed) await this.beginClose();
               // A room an older build closed before telling D1.
               else if (this.room.closed && t.status !== 'closed') await markTableClosed(this.env.DB, tableId);
@@ -757,6 +777,10 @@ export class TableRoom extends DurableObject<Env> {
 
   private async handle(ws: WebSocket, a: Attachment, msg: Exclude<ClientMessage, { t: 'ping' }>) {
     const t = this.table!;
+    // A tournament seat is neither taken nor given up by hand, and its chips come from the tournament only.
+    if (t.roomType === 'tournament' && (msg.t === 'sit' || msg.t === 'leave' || msg.t === 'topUp' || msg.t === 'cancelTopUp' || msg.t === 'autoRebuy' || (msg.t === 'waitlist' && msg.join))) {
+      throw new CommandError('tournament_table', 'not at a tournament table');
+    }
     switch (msg.t) {
       case 'sync':
         this.send(ws, { t: 'state', state: this.view(a, this.connectedUsers()), cues: [] });
@@ -912,6 +936,7 @@ export class TableRoom extends DurableObject<Env> {
   /** Seat checks shared by `sit` and quick play's `seatCheck`: the table takes entries and this seat is free. */
   private assertSeatFree(userId: string, codeOk: boolean, seatIndex: number) {
     const t = this.table!;
+    if (t.roomType === 'tournament') throw new CommandError('tournament_table', 'not at a tournament table');
     if (this.room.closing || this.room.closed || t.status !== 'open') throw new CommandError('table_closed', 'table is closed');
     if (t.entryBlocked) throw new CommandError('entry_blocked', 'new entries are blocked');
     if (this.inMaintenance()) throw new CommandError('maintenance', 'service maintenance: no new entries');
@@ -955,7 +980,8 @@ export class TableRoom extends DurableObject<Env> {
   private holdings(userId: string): { seated: false } | { seated: true; tableSessionId: string; stack: number; stable: boolean; inHand: boolean } {
     const i = this.seatIndexOf(userId);
     const s = i === null ? null : this.room.seats[i]!;
-    if (!s) return { seated: false };
+    // Tournament chips are not the member's chips.
+    if (!s || this.table?.roomType === 'tournament') return { seated: false };
     return { seated: true, tableSessionId: s.tableSessionId, stack: s.stack, stable: s.phase === 'seated' && s.topUp?.state !== 'debiting', inHand: this.handHasPlayer(userId) };
   }
 
@@ -1043,6 +1069,8 @@ export class TableRoom extends DurableObject<Env> {
 
   /** Pays the seat's stack back to the wallet. A failure is counted for the chip economy page and passed on to the caller's retry. */
   private async cashOutSeat(seat: SeatState) {
+    // Tournament chips never reach a wallet (standUp frees a tournament seat without coming here).
+    if (this.table?.roomType === 'tournament') return;
     try {
       await cashOut(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: seat.stack });
     } catch (e) {
@@ -1094,6 +1122,12 @@ export class TableRoom extends DurableObject<Env> {
   private async standUp(i: number) {
     const seat = this.room.seats[i];
     if (!seat) return;
+    if (this.table?.roomType === 'tournament') {
+      // Tournament chips stay in the tournament: the seat is freed and nothing moves (docs/TOURNAMENT.md).
+      this.room.seats[i] = null;
+      await this.save();
+      return;
+    }
     // A seat whose buy-in D1 never confirmed (the call failed) may have brought nothing: only the ledger says whether
     // it did, and paying out a buy-in never taken would create chips. If that read fails too the seat stays pending
     // for `recoverPendingSeats`.
@@ -1229,7 +1263,7 @@ export class TableRoom extends DurableObject<Env> {
   private async applyTopUps(handId: string | null): Promise<Notice[]> {
     const t = this.table!;
     const notices: Notice[] = [];
-    if (this.room.closing || t.status !== 'open') return notices;
+    if (this.room.closing || t.status !== 'open' || t.roomType === 'tournament') return notices;
     for (const s of this.room.seats) {
       if (!s || s.phase !== 'seated' || this.handHasPlayer(s.userId)) continue;
       try {
@@ -1377,6 +1411,14 @@ export class TableRoom extends DurableObject<Env> {
         else break;
         continue;
       }
+      // At a tournament table a player who is away stays dealt in (blinds and all) and checks or folds at once.
+      if (actor && seat && seat.sittingOut && this.table?.roomType === 'tournament') {
+        const type = h.legalOptions(actor).some((o) => o.type === 'check') ? 'check' : 'fold';
+        const r = await h.act(actor, { type }, `away-${h.version}`, now);
+        if (r.ok) cues.push(...r.cues);
+        else break;
+        continue;
+      }
       // A pre-action chosen while waiting: carried out if the engine still allows it, else the player decides.
       const pre = seat?.preAction;
       if (actor && seat && pre && pre.handId === h.handId && pre.stage === h.stage) {
@@ -1414,7 +1456,21 @@ export class TableRoom extends DurableObject<Env> {
     const h = this.hand!;
     const now = Date.now();
     const firstTime = this.room.settledHandId !== h.handId;
-    if (firstTime) {
+    const tn = this.table?.roomType === 'tournament' ? (this.room.tourney ?? null) : null;
+    if (firstTime && tn) {
+      const stacks = h.finalStacks();
+      for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
+      this.room.settledHandId = h.handId;
+      this.room.nextHandAt = now + BETWEEN_HANDS_MS;
+      this.room.muck = { handId: h.handId, ids: this.room.seats.filter((s) => s?.autoMuck && stacks.has(s.userId)).map((s) => s!.userId) };
+      // A tournament hand is not recorded (no hand history, statistics or replay): its result is the tournament's —
+      // places for those who lost their last chip, the winner once one player is left — written to D1 below.
+      this.refillTimeBanks(h);
+      this.room.tbCount = null;
+      bustOut(tn, h.startingSeats, stacks, now);
+      if (tn.status !== 'aborted') tn.dirty = true;
+      await this.save();
+    } else if (firstTime) {
       const stacks = h.finalStacks();
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
@@ -1439,7 +1495,8 @@ export class TableRoom extends DurableObject<Env> {
     // Results stay visible until the next hand starts. They go out before the D1 write: the result is already saved
     // here, nothing shown depends on D1 having it, and commands sent on seeing it wait in `run` until settle is done.
     this.broadcast(cues);
-    await this.retryUnrecorded();
+    if (tn) await this.syncTourney();
+    else await this.retryUnrecorded();
     // Top-ups that waited for this hand and automatic rebuys happen before busted players stand up.
     const notices = await this.applyTopUps(h.handId);
     const left: TableCue[] = [];
@@ -1468,8 +1525,10 @@ export class TableRoom extends DurableObject<Env> {
 
   private eligibleSeats(): number[] {
     const out: number[] = [];
+    // A tournament player who is away is dealt in all the same (see `progress`).
+    const tourney = this.table?.roomType === 'tournament';
     this.room.seats.forEach((s, i) => {
-      if (s && s.phase === 'seated' && !s.sittingOut && !s.leaveAfterHand && s.stack > 0) out.push(i);
+      if (s && s.phase === 'seated' && s.stack > 0 && (tourney || (!s.sittingOut && !s.leaveAfterHand))) out.push(i);
     });
     return out;
   }
@@ -1512,7 +1571,7 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   private async afterChange() {
-    if (!this.hand && this.eligibleSeats().length >= 2 && !this.room.nextHandAt && !this.room.closing && !this.table?.handsPaused && !this.inMaintenance()) {
+    if (!this.hand && this.eligibleSeats().length >= 2 && !this.room.nextHandAt && !this.room.closing && this.dealsNow()) {
       this.room.nextHandAt = Date.now() + FIRST_HAND_DELAY_MS;
       await this.save();
     }
@@ -1529,27 +1588,177 @@ export class TableRoom extends DurableObject<Env> {
     // A paused table deals nothing until an admin resumes it (`reload` then schedules the next hand), nor does any table
     // during maintenance (the alarm at its end does). Table bots never play a hand among themselves.
     const members = dealt.filter((i) => !this.room.seats[i]!.bot).length;
-    if (dealt.length < 2 || members === 0 || this.room.closing || t.status !== 'open' || t.handsPaused || this.inMaintenance()) {
+    if (dealt.length < 2 || members === 0 || this.room.closing || t.status !== 'open' || !this.dealsNow()) {
       this.room.nextHandAt = null;
       this.hand = null;
+      // A tournament's level clock waits for the next deal (stopped before the view goes out, which shows the time kept).
+      await this.stopTourneyClock();
       await this.save();
       this.broadcast();
       return;
     }
+    // (A tournament's button moves to the next player still in: busted seats are free, so there is no dead button.)
     const button = nextButtonSeat(this.room.buttonSeat, dealt, t.maxSeats);
     this.room.buttonSeat = button;
     this.room.handNumber += 1;
     this.room.nextHandAt = null;
     const now = Date.now();
+    const tn = t.roomType === 'tournament' ? (this.room.tourney ?? null) : null;
+    let blinds = { sb: t.smallBlind, bb: t.bigBlind };
+    if (tn) {
+      // The level is fixed here for the whole hand: one whose time runs out during it applies from the next deal.
+      runClock(tn, now);
+      tn.hands += 1;
+      tn.dirty = true;
+      blinds = blindsAt(tn.levels, tn.level);
+    }
     this.hand = HandEngine.start({
       handId: `${t.id}:${this.room.handNumber}:${crypto.randomUUID().slice(0, 8)}`,
-      rules: { maxSeats: t.maxSeats as MaxSeats, smallBlind: t.smallBlind, bigBlind: t.bigBlind, turnMs: t.turnSeconds * 1000 },
+      rules: { maxSeats: t.maxSeats as MaxSeats, smallBlind: blinds.sb, bigBlind: blinds.bb, turnMs: t.turnSeconds * 1000 },
       seats: dealt.map((i) => ({ playerId: this.room.seats[i]!.userId, seatIndex: i, stack: this.room.seats[i]!.stack, displayName: this.room.seats[i]!.nickname })),
       buttonSeat: button,
       now,
     });
     this.dealTimeBanks(dealt);
     await this.progress([{ kind: 'handStart', handNumber: this.room.handNumber }, { kind: 'deal' }]);
+    // The level and hand count dealt reach D1 now, not only when the hand ends (the operators' page shows them).
+    if (tn?.dirty) await this.syncTourney();
+  }
+
+  /**
+   * Whether the table may deal now: not paused by an admin, no maintenance under way and, at a tournament table, the
+   * tournament running without an operator's pause and someone still in who is not away. Players who are all away
+   * would only post and fold the blinds to each other for ever (the last level stays), so the table waits — its level
+   * clock stopped — until one of them is back (`sitIn`).
+   */
+  private dealsNow(): boolean {
+    const t = this.table!;
+    if (t.handsPaused || this.inMaintenance()) return false;
+    if (t.roomType !== 'tournament') return true;
+    const tn = this.room.tourney;
+    return !!tn && tn.status === 'running' && !tn.pauseRequested && this.room.seats.some((s) => !!s && s.phase === 'seated' && s.stack > 0 && !s.sittingOut);
+  }
+
+  // ------------------------------------------------------------------ tournament
+
+  /**
+   * The tournament as D1 has it (table load and `reload`). The first time — or after this room lost its storage — the
+   * players sit down with their tournament chips as D1 last had them; after that the room's own state leads, and D1 only
+   * brings an operator's pause request and an abort. Returns whether anything changed.
+   */
+  private async takeTourney(row: TournamentRow | null): Promise<boolean> {
+    if (this.table?.roomType !== 'tournament' || !row) return false;
+    const now = Date.now();
+    const tn = this.room.tourney;
+    if (!tn) {
+      if (row.status !== 'running' && row.status !== 'finished' && row.status !== 'aborted') return false;
+      const seeded = seedTourney(row, now);
+      this.room.tourney = seeded;
+      if (seeded.status === 'running') {
+        for (const e of row.entries) {
+          const stack = e.stack ?? row.startStack;
+          if (e.status !== 'playing' || stack <= 0 || this.seatIndexOf(e.userId) !== null) continue;
+          const free = e.seat !== null && e.seat >= 0 && e.seat < this.room.seats.length && !this.room.seats[e.seat] ? e.seat : this.room.seats.findIndex((x) => !x);
+          if (free < 0) continue;
+          const role = publicRole(e.role);
+          this.room.seats[free] = {
+            userId: e.userId,
+            nickname: e.nickname,
+            avatarUrl: e.avatarUrl,
+            ...(role ? { role } : {}),
+            stack,
+            // Not a table session: nothing of this seat is in the ledger.
+            tableSessionId: `tny:${row.id}:${e.userId}`,
+            phase: 'seated',
+            buyIn: row.startStack,
+            sittingOut: false,
+            sitOutSince: null,
+            leaveAfterHand: false,
+            timeouts: 0,
+            joinedAt: now,
+          };
+        }
+      }
+      await this.save();
+      return true;
+    }
+    let changed = false;
+    if (tn.status === 'running' && tn.pauseRequested !== row.pauseRequested) {
+      tn.pauseRequested = row.pauseRequested;
+      changed = true;
+    }
+    if (row.status === 'aborted' && tn.status !== 'aborted') {
+      markAborted(tn, now);
+      changed = true;
+    }
+    if (changed) await this.save();
+    return changed;
+  }
+
+  /** A running tournament whose table deals no hand now (paused, maintenance): its level clock stops until the next deal. */
+  private async stopTourneyClock() {
+    const tn = this.room.tourney;
+    if (this.table?.roomType !== 'tournament' || tn?.status !== 'running' || (this.hand && !this.hand.isSettled)) return;
+    if (!stopClock(tn, Date.now())) return;
+    tn.dirty = true;
+    await this.save();
+    await this.syncTourney();
+  }
+
+  /**
+   * Writes the tournament's progress to D1 (`syncTournament`); a failure leaves it to the retry alarm, and the table does
+   * not close before D1 has the result. D1 answers with the operator's pause request and an abort, taken on here.
+   */
+  private async syncTourney(): Promise<boolean> {
+    const tn = this.room.tourney;
+    if (!tn?.dirty || !this.tableId) return true;
+    const now = Date.now();
+    const stacks = this.room.seats.filter((x): x is SeatState => !!x && Object.hasOwn(tn.players, x.userId)).map((x) => ({ userId: x.userId, stack: x.stack }));
+    const read = ++this.maintReads;
+    let r: Awaited<ReturnType<typeof syncTournament>>;
+    try {
+      r = await syncTournament(this.env.DB, tn, stacks, now);
+    } catch (e) {
+      this.fault('tournament sync failed; will retry', e);
+      return false;
+    }
+    tn.dirty = false;
+    tn.confirmed = tn.places.length;
+    if (this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
+    if (tn.status === 'running') tn.pauseRequested = r.pauseRequested;
+    const aborted = r.status === 'aborted' && tn.status !== 'aborted';
+    if (aborted) markAborted(tn, now);
+    await this.save();
+    if (aborted && !this.room.closing) await this.beginClose();
+    return true;
+  }
+
+  /** The tournament as the table shows it to `userId`. */
+  private tourneyView(userId: string): TournamentTableView | null {
+    const tn = this.room.tourney;
+    if (this.table?.roomType !== 'tournament' || !tn) return null;
+    const b = blindsAt(tn.levels, tn.level);
+    const mine = tn.places.find((p) => p.userId === userId);
+    const status: TournamentTableView['you']['status'] =
+      tn.winnerId === userId ? 'won' : mine ? 'eliminated' : !Object.hasOwn(tn.players, userId) ? 'watching' : tn.status === 'aborted' ? 'stopped' : 'playing';
+    return {
+      id: tn.id,
+      name: tn.name,
+      status: tn.status,
+      level: tn.level,
+      levelCount: tn.levels.length,
+      smallBlind: b.sb,
+      bigBlind: b.bb,
+      next: tn.level < tn.levels.length - 1 ? blindsAt(tn.levels, tn.level + 1) : null,
+      levelEndsAt: tn.levelEndsAt,
+      levelLeftMs: tn.levelLeftMs,
+      paused: tn.pauseRequested,
+      playersLeft: playersLeft(tn),
+      entrants: Object.keys(tn.players).length,
+      startStack: tn.startStack,
+      places: [...tn.places].sort((x, y) => x.place - y.place).map((p) => ({ nickname: p.nickname, place: p.place })),
+      you: { status, place: mine?.place ?? null },
+    };
   }
 
   // ------------------------------------------------------------------ time bank
@@ -1561,8 +1770,7 @@ export class TableRoom extends DurableObject<Env> {
    * over a lowered maximum is cut to it. Table bots have none.
    */
   private dealTimeBanks(dealt: number[]) {
-    const t = this.table!;
-    const rules = timeBankRulesFor(t.timeBank, t.roomType);
+    const rules = this.nextBankRules();
     this.room.bankRules = rules;
     this.room.tbCount = null;
     if (!rules) return;
@@ -1572,6 +1780,13 @@ export class TableRoom extends DurableObject<Env> {
       const bank = s.bank ?? this.takeBank(s.userId) ?? { ms: rules.initialMs, hands: 0 };
       s.bank = { ms: Math.min(bank.ms, rules.maxMs), hands: Math.min(bank.hands, rules.refillHands - 1) };
     }
+  }
+
+  /** The time bank rules a hand dealt now gets: a tournament's own (from its template), otherwise the service policy's. */
+  private nextBankRules(): TimeBankRules | null {
+    const t = this.table!;
+    if (t.roomType === 'tournament') return tournamentTimeBankRules(this.room.tourney?.tb ?? null);
+    return timeBankRulesFor(t.timeBank, t.roomType);
   }
 
   /** After a hand, for each member dealt in who still has their seat: one more hand, and the refill when it is due. */
@@ -1692,7 +1907,9 @@ export class TableRoom extends DurableObject<Env> {
     }
     if (this.room.nextHandAt) times.push(this.room.nextHandAt);
     if (this.room.reservation) times.push(this.room.reservation.until);
-    for (const s of this.room.seats) if (s?.sittingOut && s.sitOutSince) times.push(s.sitOutSince + SIT_OUT_STAND_UP_MS);
+    // (A tournament player who is away keeps the seat.)
+    if (this.table?.roomType !== 'tournament') for (const s of this.room.seats) if (s?.sittingOut && s.sitOutSince) times.push(s.sitOutSince + SIT_OUT_STAND_UP_MS);
+    if (this.room.tourney?.closeAt && !this.room.closing) times.push(this.room.tourney.closeAt);
     // Maintenance: its start is shown on the table, its end deals again.
     const m = this.maint;
     if (m && !this.room.closed) {
@@ -1737,8 +1954,8 @@ export class TableRoom extends DurableObject<Env> {
         await this.save();
         this.broadcast();
       }
-      // Long sit-outs stand up.
-      for (let i = 0; i < this.room.seats.length; i++) {
+      // Long sit-outs stand up (not at a tournament table).
+      for (let i = 0; i < this.room.seats.length && this.table?.roomType !== 'tournament'; i++) {
         const s = this.room.seats[i];
         if (s?.sittingOut && s.sitOutSince && s.sitOutSince + SIT_OUT_STAND_UP_MS <= now && s.phase === 'seated' && !this.handHasPlayer(s.userId)) {
           try {
@@ -1776,6 +1993,9 @@ export class TableRoom extends DurableObject<Env> {
         const plan = this.botPlan();
         if (plan.leave.length || (plan.join && (this.room.botRetryAt ?? 0) <= now)) await this.balanceBots(plan);
       }
+      // A finished tournament's table closes once its result has been on screen for a while.
+      const tn = this.room.tourney;
+      if (tn?.closeAt && tn.closeAt <= now && !this.room.closing) await this.beginClose();
       // Next hand.
       if (this.room.nextHandAt && this.room.nextHandAt <= now && (!this.hand || this.hand.isSettled)) {
         this.hand = null;
@@ -2107,7 +2327,7 @@ export class TableRoom extends DurableObject<Env> {
    * Work a failed D1 call left behind: a buy-in, leave or cash-out cut short, a close, a finished hand not yet recorded.
    */
   private unfinishedWork(): boolean {
-    if (this.unrecorded.size > 0) return true;
+    if (this.unrecorded.size > 0 || this.room.tourney?.dirty) return true;
     if (this.room.closing && !this.room.closed && !(this.hand && !this.hand.isSettled)) return true;
     return this.room.seats.some(
       (s) => s && (s.phase === 'pending' || ((s.phase === 'cashing' || (s.phase === 'seated' && s.leaveAfterHand)) && !this.handHasPlayer(s.userId))),
@@ -2118,6 +2338,7 @@ export class TableRoom extends DurableObject<Env> {
     try {
       await this.recoverPendingSeats();
       await this.retryUnrecorded();
+      await this.syncTourney();
       if (this.room.closing && !this.room.closed) await this.continueClose();
       this.broadcast();
     } catch (e) {
@@ -2152,7 +2373,8 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   private async finishCloseIfIdle() {
-    if (this.room.seats.some((s) => s)) return;
+    // (A tournament's table waits until D1 has its result.)
+    if (this.room.seats.some((s) => s) || this.room.tourney?.dirty) return;
     // D1 first: a room that counts itself closed retries nothing, so D1 must not be left saying 'closing'.
     await markTableClosed(this.env.DB, this.tableId!);
     this.room.closed = true;
@@ -2223,7 +2445,8 @@ export class TableRoom extends DurableObject<Env> {
     const i = this.seatIndexOf(userId);
     let seat: 'none' | 'kept' | 'left' | 'after_hand' | 'retrying' = i === null ? 'none' : 'kept';
     await this.save();
-    if (leave) {
+    // A tournament seat stays: its player is dealt in and checks or folds once they time out (docs/TOURNAMENT.md).
+    if (leave && this.table?.roomType !== 'tournament') {
       if (waiting || this.room.reservation?.userId === userId) {
         this.room.waitlist = this.room.waitlist.filter((w) => w.userId !== userId);
         if (this.room.reservation?.userId === userId) this.room.reservation = null;
@@ -2264,7 +2487,7 @@ export class TableRoom extends DurableObject<Env> {
     if (live && h!.isStalled()) issues.push('stalled_hand');
     if (deadline && deadline + OVERDUE_MS < now) issues.push('turn_overdue');
     // (No hand is due while the table is paused or the service is in maintenance.)
-    const dealing = !t.handsPaused && !this.inMaintenance(now);
+    const dealing = this.dealsNow();
     if (!live && dealing && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
     if (!live && dealing && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
     if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
@@ -2275,7 +2498,9 @@ export class TableRoom extends DurableObject<Env> {
     if (this.unfinishedWork() && !alarmAt) issues.push('no_retry_alarm');
     // A running turn whose alarm is missing or set past its deadline: nothing would time it out.
     if (live && deadline && !h!.isStalled() && (!alarmAt || alarmAt > Math.max(deadline, now) + 1_000)) issues.push('timer_unarmed');
-    const nextRules = timeBankRulesFor(t.timeBank, t.roomType);
+    const tn = this.room.tourney;
+    if (tn?.dirty) issues.push('tournament_unsynced');
+    const nextRules = this.nextBankRules();
     return {
       tableId: this.tableId,
       handNumber: this.room.handNumber,
@@ -2340,6 +2565,25 @@ export class TableRoom extends DurableObject<Env> {
       alarmAt,
       version: this.room.version,
       known: { status: t.status, entryBlocked: t.entryBlocked, handsPaused: t.handsPaused },
+      // The tournament as this room plays it (read only: no stack, card, winner or place is set from here).
+      tournament: tn
+        ? {
+            id: tn.id,
+            status: tn.status,
+            level: tn.level,
+            levelCount: tn.levels.length,
+            levelEndsAt: tn.levelEndsAt,
+            levelLeftMs: tn.levelLeftMs,
+            clockStoppedAt: tn.stoppedAt,
+            pauseRequested: tn.pauseRequested,
+            hands: tn.hands,
+            playersLeft: playersLeft(tn),
+            entrants: Object.keys(tn.players).length,
+            places: tn.places.map((p) => ({ userId: p.userId, nickname: p.nickname, place: p.place, hand: p.hand })),
+            unsynced: tn.dirty,
+            closeAt: tn.closeAt,
+          }
+        : null,
       issues,
       at: now,
     };
@@ -2390,8 +2634,10 @@ export class TableRoom extends DurableObject<Env> {
     const res = this.room.reservation;
     const reservationLive = res && res.until > Date.now() ? res : null;
     const access = this.hasAccess(a);
+    const tv = this.tourneyView(a.userId);
     const canSit =
       !isSeated &&
+      !tv &&
       access &&
       t.status === 'open' &&
       !t.entryBlocked &&
@@ -2406,8 +2652,9 @@ export class TableRoom extends DurableObject<Env> {
         id: t.id,
         name: t.name,
         maxSeats: t.maxSeats as MaxSeats,
-        smallBlind: t.smallBlind,
-        bigBlind: t.bigBlind,
+        // (A tournament's blinds are its level's.)
+        smallBlind: tv ? tv.smallBlind : t.smallBlind,
+        bigBlind: tv ? tv.bigBlind : t.bigBlind,
         minBuyIn: t.minBuyIn,
         maxBuyIn: t.maxBuyIn,
         turnSeconds: t.turnSeconds,
@@ -2423,10 +2670,11 @@ export class TableRoom extends DurableObject<Env> {
       waitlist: this.room.waitlist.map((w) => w.nickname),
       reservation: reservationLive ? { nickname: reservationLive.nickname, until: reservationLive.until } : null,
       // No countdown to a hand a pause or maintenance will not deal.
-      nextHandAt: t.handsPaused || (this.room.nextHandAt && this.inMaintenance(this.room.nextHandAt)) ? null : this.room.nextHandAt,
+      nextHandAt: t.handsPaused || (tv && tv.paused) || (this.room.nextHandAt && this.inMaintenance(this.room.nextHandAt)) ? null : this.room.nextHandAt,
       paused: t.handsPaused,
       maintenance: this.maint ? { ...this.maint, active: this.inMaintenance() } : null,
-      timeBank: publicRules(h && !h.isSettled ? (this.room.bankRules ?? null) : timeBankRulesFor(t.timeBank, t.roomType)),
+      timeBank: publicRules(h && !h.isSettled ? (this.room.bankRules ?? null) : this.nextBankRules()),
+      tournament: tv,
       you: {
         userId: a.userId,
         seatIndex: mySeat,

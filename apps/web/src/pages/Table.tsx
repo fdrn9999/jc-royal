@@ -35,6 +35,17 @@ const PlayerCard = lazy(() => loadSocial().then((m) => ({ default: m.PlayerCard 
 const BotCard = lazy(() => loadSocial().then((m) => ({ default: m.BotCard })));
 const ReportModal = lazy(() => loadSocial().then((m) => ({ default: m.ReportModal })));
 const HandRankingChart = lazy(() => import('../academy/HandChart').then((m) => ({ default: m.HandRankingChart })));
+// Only tournament tables show these, so they (and their text) stay out of the entry chunk; a tournament table's id
+// starts with sng- (docs/TOURNAMENT.md), which lets the page fetch them before the room's first state arrives.
+const loadTournamentHud = () => import('../game/TournamentHud');
+const TournamentBar = lazy(() => loadTournamentHud().then((m) => ({ default: m.TournamentBar })));
+const TournamentResult = lazy(() => loadTournamentHud().then((m) => ({ default: m.TournamentResult })));
+
+/** Nobody still in is dealt a hand: everyone left is away, and the level clock waits with them (not an operator's pause). */
+function tournamentStalled(s: TableView): boolean {
+  const tn = s.tournament;
+  return !!tn && tn.status === 'running' && !tn.paused && tn.levelEndsAt === null && tn.levelLeftMs !== null && !s.nextHandAt && !s.hand;
+}
 
 function useCountdown(target: number | null) {
   const [now, setNow] = useState(Date.now());
@@ -54,6 +65,9 @@ export function TableRoute() {
 
 export function TablePage() {
   const { id = '' } = useParams();
+  useEffect(() => {
+    if (id.startsWith('sng-')) void loadTournamentHud();
+  }, [id]);
   const [params, setParams] = useSearchParams();
   // Sent here by quick play: if the seat is gone on arrival, offer the next table instead of a dead end.
   const quick = useMemo(() => parseQuick(params.get('quick')), [params]);
@@ -334,12 +348,19 @@ export function TablePage() {
                     ? t('table.maintenance', { end: when(s.maintenance.endsAt, locale) })
                     : s.paused
                       ? t('table.paused')
-                      : s.maintenance && s.maintenance.startsAt - Date.now() < 3600_000
+                      : s.tournament?.status === 'running' && s.tournament.paused
+                        ? t('tn.paused')
+                        : tournamentStalled(s)
+                          ? t('tn.allAway')
+                          : s.maintenance && s.maintenance.startsAt - Date.now() < 3600_000
                         ? t('table.maintenanceSoon', { start: when(s.maintenance.startsAt, locale) })
                         : null;
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
+  // A tournament table: no wallet chips here (no buy-in, top-up, rebuy or waiting list), and its seat is not given up
+  // by leaving the screen; the way out goes to the tournament's page.
+  const tn = s?.tournament ?? null;
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 
@@ -359,6 +380,7 @@ export function TablePage() {
               </div>
               {s && (
                 <div className="truncate font-mono text-[11px] text-ink-300">
+                  {tn && <span className="font-sans">{t('tn.hud')} · </span>}
                   {s.table.roomType === 'member' && <span className="font-sans">{isHost ? `👑 ${t('room.host')}` : t('room.member')} · </span>}
                   {formatChips(s.table.smallBlind)}/{formatChips(s.table.bigBlind)}
                   {hand && ` · ${t('table.handNo', { n: hand.number })} · ${t(`stage.${hand.stage}` as MsgKey)}`}
@@ -392,12 +414,24 @@ export function TablePage() {
           <Button size="icon" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
             ⚙
           </Button>
-          <Button size="icon" variant="outline" onClick={seated ? leave : () => nav('/')} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
-            <span aria-hidden className="sm:hidden">⏏</span>
-            <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
-          </Button>
+          {tn ? (
+            <Button size="icon" variant="outline" onClick={() => nav(`/tournaments/${tn.id}`)} data-testid="leave" aria-label={t('tn.toTournament')}>
+              <span aria-hidden className="sm:hidden">🏆</span>
+              <span className="hidden sm:inline">{t('tn.toTournament')}</span>
+            </Button>
+          ) : (
+            <Button size="icon" variant="outline" onClick={seated ? leave : () => nav('/')} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
+              <span aria-hidden className="sm:hidden">⏏</span>
+              <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
+            </Button>
+          )}
         </div>
       </header>
+      {tn && (
+        <Suspense fallback={null}>
+          <TournamentBar tn={tn} />
+        </Suspense>
+      )}
       <div className="z-40">
         <ServiceBanner compact />
       </div>
@@ -476,6 +510,11 @@ export function TablePage() {
 
           {/* bottom: action bar / status */}
           <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
+            {tn && (
+            <Suspense fallback={null}>
+              <TournamentResult tn={tn} />
+            </Suspense>
+          )}
             {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert" data-transient>{toast}</div>}
             {notice && (
               // In beginner mode the notice stands in for the street note, so it counts like it.
@@ -532,7 +571,7 @@ export function TablePage() {
                   </span>
                 )}
                 {!seated && s.reservation && <span className="text-gold-300">{t('table.reserved', { name: s.reservation.nickname })}</span>}
-                {!seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && s.seats.every((x) => x.state !== 'empty') && (
+                {!tn && !seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && s.seats.every((x) => x.state !== 'empty') && (
                   <Button size="sm" variant="outline" onClick={() => sock.send({ t: 'waitlist', join: !s.you.inWaitlist })}>
                     {s.you.inWaitlist ? t('table.leaveWaitlist') : t('table.joinWaitlist')} ({s.waitlist.length})
                   </Button>
@@ -545,8 +584,9 @@ export function TablePage() {
                     </Button>
                   </>
                 )}
-                {seated && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
-                {seated && s.you.topUpQueued !== null && (
+                {seated && tn && s.you.sittingOut && <span className="max-w-xs text-xs text-gold-300" data-testid="tn-away">{t('tn.awayHint')}</span>}
+                {seated && !tn && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
+                {seated && !tn && s.you.topUpQueued !== null && (
                   <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
                     {t('topup.queued', { amount: amt.exact(s.you.topUpQueued) })}
                     <button type="button" className="jc-tap grid size-6 place-items-center rounded-full hover:bg-gold-500/20" onClick={() => sock.send({ t: 'cancelTopUp' })} aria-label={t('topup.cancel')} data-testid="topup-cancel">
@@ -554,12 +594,12 @@ export function TablePage() {
                     </button>
                   </span>
                 )}
-                {seated && s.you.autoRebuy && (
+                {seated && !tn && s.you.autoRebuy && (
                   <span className="rounded-full border border-white/10 px-2.5 py-0.5 font-mono text-xs text-ink-200" data-testid="rebuy-badge">
                     {t('rebuy.badge', { spent: amt.fmt(s.you.autoRebuy.spent), cap: amt.fmt(s.you.autoRebuy.cap) })}
                   </span>
                 )}
-                {seated && !s.you.leaving && (
+                {seated && !tn && !s.you.leaving && (
                   <Button size="sm" variant="outline" onClick={() => setTopUpOpen(true)} data-testid="topup-open">
                     {t('topup.open')}
                   </Button>
@@ -628,7 +668,7 @@ export function TablePage() {
           error={buyErr}
         />
       )}
-      {s && seated && (
+      {s && seated && !tn && (
         <TopUpModal
           open={topUpOpen}
           onClose={() => setTopUpOpen(false)}

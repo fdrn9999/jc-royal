@@ -9,3 +9,4 @@ export * from './social';
 export * from './service';
 export * from './settings';
 export * from './timebank';
+export * from './tournament';

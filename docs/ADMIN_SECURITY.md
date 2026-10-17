@@ -50,6 +50,7 @@
 - **회원 안내**: 초기화·복구가 실제로 쓰인 경우에만 같은 D1 batch에서 쪽지 한 통(카테고리 `admin`, 계정 언어 ko·en)을 쓴다. 쪽지에 관리자의 사유는 넣지 않는다.
 - **감사 기록**: `settings.reset` `{reason, before{rev, epoch, fields, favourites}, after{…}, restorable, muck}`, `settings.restore` `{reason, resetAt, before, after, muck}`. 개수만 담고 설정 값·즐겨찾기 테이블은 담지 않는다. 거절은 `settings.reset.failed`·`settings.restore.failed`.
 - **운영 통계**: 날짜별 저장·병합 충돌·밀린 변경·초기화 뒤 거절·실패 이유별(입력·요청 제한·경합·오류·불러오기·기기에서 실패)·초기화·복구 횟수(`ss_*`, 운영 통계의 "계정 설정 동기화" 카드). 회원별 수치는 없다.
+- 토너먼트(6인 SNG): 조회·대회 만들기·등록 마감·시작·일시정지·재개·복구는 기능 `tournaments`(위임 가능), 시작 전 취소와 운영 중단은 여기에 비밀번호 재확인·사유를 더하고 운영 중단은 대회 이름 입력까지 받는다. 템플릿(대회 구조) 관리는 능력 `tournament.structure`(최고 관리자만). 시작 뒤 스택·카드·승자·순위를 바꾸는 경로는 없다. 대회 테이블에는 테이블 종료·긴급 제어·설정 변경이 409 `tournament_table`로 막힌다(턴 타이머 복구는 그대로). 자세한 규칙은 `docs/TOURNAMENT.md`
 
 ## 시간 은행 관리
 
@@ -173,7 +174,7 @@ service.notice.create, service.notice.update, service.notice.end, service.notice
 maintenance.schedule, maintenance.update, maintenance.end, maintenance.cancel,
 board.post.status, board.comment.status, message.send,
 report.view, report.resolved, report.dismissed, report.severity, report.assign, report.note,
-settings.reset, settings.restore, timebank.policy, table.timer_recover
+settings.reset, settings.restore, timebank.policy, table.timer_recover, tournament.create, tournament.registration, tournament.start, tournament.cancel, tournament.pause, tournament.resume, tournament.abort, tournament.recover, tournament_template.create, tournament_template.update, tournament_template.status
 ```
 
 조회도 남긴다. `user.list`(회원 목록·검색: 검색어, 필터, 정렬, 건수), `user.view`(회원 상세: 생년월일·동의 기록 포함), `report.view`(신고 목록: 1:1 메시지 신고 ID 포함)는 화면을 열 때마다 1행씩 쌓인다. 1:1 대화를 읽는 관리자 API는 없고, 관리자가 보는 1:1 메시지는 신고 증거뿐이다. 보관 기간은 정하지 않았다(`docs/PRIVACY_OPERATIONS.md` 5·9절). 회원 상세의 "관리 이력·메모"는 이 감사 로그(그 회원 대상의 제재·권한·칩·재설정 링크·메모 삭제와 그 회원에 대한 신고 결정)와 메모를 시간순으로 보여 준다. 최근 참여 테이블과 신고 건수는 상세 조회(`user.view`)에 함께 담기고, 기간별 활동(`/activity`)과 이력(`/timeline`) 조회는 따로 기록하지 않는다(콘솔은 상세를 연 뒤에만 부른다).

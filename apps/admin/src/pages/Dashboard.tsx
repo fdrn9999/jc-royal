@@ -12,7 +12,7 @@ interface TypeStats { tables: number; closing: number; blocked: number; occupied
 interface BusyTable {
   id: string;
   name: string;
-  type: 'official' | 'member';
+  type: 'official' | 'member' | 'tournament';
   status: 'open' | 'closing';
   entryBlocked: boolean;
   maxSeats: number;
@@ -26,7 +26,8 @@ interface BusyTable {
   lastIssue: string | null;
 }
 interface Live {
-  tables: { official: TypeStats; member: TypeStats };
+  /** `tournament` is absent from an API older than the tournaments release. */
+  tables: { official: TypeStats; member: TypeStats; tournament?: TypeStats };
   top: BusyTable[];
   onlineUsers: number;
   ops: { slotMs: number; trend: (Counts & { at: number })[]; last5m: Counts; lastHour: Counts };
@@ -166,9 +167,13 @@ export function DashboardPage() {
 function LiveFigures({ d }: { d: Live }) {
   const { t } = useT();
   const { official: o, member: m } = d.tables;
-  const occupied = o.occupied + m.occupied;
-  const seated = o.seated + m.seated;
-  const bots = (o.bots ?? 0) + (m.bots ?? 0);
+  // Tournament tables count toward every total; they get their own figure only when there are any.
+  const tn = d.tables.tournament;
+  const all = [o, m, ...(tn ? [tn] : [])];
+  const sum = (k: keyof TypeStats) => all.reduce((s, x) => s + (x[k] ?? 0), 0);
+  const occupied = sum('occupied');
+  const seated = sum('seated');
+  const bots = sum('bots');
   return (
     <section aria-labelledby="live-title" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -177,13 +182,14 @@ function LiveFigures({ d }: { d: Live }) {
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="dashboard">
         <Stat label={t('onlineUsers')} value={formatChips(d.onlineUsers)} sub={t('basisOnline')} />
-        <Stat label={t('wsConnections')} value={formatChips(o.connections + m.connections)} />
-        <Stat label={t('handsInPlay')} value={formatChips(o.playing + m.playing)} />
-        <Stat label={t('waitingPlayers')} value={formatChips(o.waitlist + m.waitlist)} />
+        <Stat label={t('wsConnections')} value={formatChips(sum('connections'))} />
+        <Stat label={t('handsInPlay')} value={formatChips(sum('playing'))} />
+        <Stat label={t('waitingPlayers')} value={formatChips(sum('waitlist'))} />
         <Stat label={t('officialTables')} value={formatChips(o.tables)} sub={typeSub(t, o)} />
         <Stat label={t('memberRooms')} value={formatChips(m.tables)} sub={typeSub(t, m)} />
         <Stat label={t('avgSeated')} value={avg(seated, occupied)} sub={bots ? `${t('seatedOver', { n: seated, tables: occupied })} · ${t('botsN', { n: bots })}` : t('seatedOver', { n: seated, tables: occupied })} />
-        <Stat label={t('watchers')} value={formatChips(o.spectators + m.spectators)} sub={t('perTable', { v: avg(o.spectators + m.spectators, occupied) })} />
+        <Stat label={t('watchers')} value={formatChips(sum('spectators'))} sub={t('perTable', { v: avg(sum('spectators'), occupied) })} />
+        {tn && tn.tables > 0 && <Stat label={t('tournamentTables')} value={formatChips(tn.tables)} sub={typeSub(t, tn)} />}
       </div>
     </section>
   );
@@ -353,7 +359,7 @@ function BusyTables({ d }: { d: Live }) {
               </td>
               <td className="px-2 py-2">
                 <div className="flex flex-wrap gap-1">
-                  <Badge tone={tb.type === 'official' ? 'gold' : 'blue'}>{t(tb.type === 'official' ? 'typeOfficial' : 'typeMember')}</Badge>
+                  <Badge tone={tb.type === 'member' ? 'blue' : 'gold'}>{t(tb.type === 'official' ? 'typeOfficial' : tb.type === 'tournament' ? 'tournamentRoom' : 'typeMember')}</Badge>
                   {tb.status === 'closing' && <Badge tone="red">{t('closing')}</Badge>}
                   {tb.entryBlocked && tb.status !== 'closing' && <Badge>{t('entryBlockedShort')}</Badge>}
                 </div>

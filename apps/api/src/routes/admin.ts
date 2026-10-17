@@ -24,6 +24,7 @@ import { adminReferralRoutes } from './admin-referral';
 import { adminSettingsRoutes } from './admin-settings';
 import { adminRefillRoutes } from './admin-refill';
 import { adminTimeBankRoutes } from './admin-timebank';
+import { adminTournamentRoutes } from './admin-tournaments';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
 import { adminReportRoutes } from './reports';
@@ -58,12 +59,14 @@ type LiveSeat = { userId: string; nickname: string; phase: string; tableSessionI
  * What the room reports, held against D1: settings the room has not taken on, and seats the two disagree about. A seat
  * whose buy-in is still being confirmed has no session row yet, so it is left out. The two reads are not one snapshot:
  * a player sitting down or leaving in between can show here once; a mismatch that stays is worth a look. Nothing is
- * changed here, in the wallet or anywhere else.
+ * changed here, in the wallet or anywhere else. A tournament table has no session rows (its seats hold tournament chips,
+ * not wallet chips), so its seats are not compared.
  */
 async function diagnose(d1: D1Database, t: typeof schema.tables.$inferSelect, live: Record<string, unknown>) {
   const issues = Array.isArray(live.issues) ? live.issues.filter((x): x is string => typeof x === 'string') : [];
   const known = live.known as { status?: string; entryBlocked?: boolean; handsPaused?: boolean } | undefined;
   if (known && (known.status !== t.status || known.entryBlocked !== t.entryBlocked || known.handsPaused !== t.handsPaused)) issues.push('settings_not_applied');
+  if (t.roomType === 'tournament') return { issues, sessionsOnlyInD1: [], seatsOnlyInRoom: [] };
   const { results: open } = await d1
     .prepare(`SELECT s.id, s.user_id AS userId, s.seat_index AS seatIndex, s.buy_in AS buyIn, s.created_at AS createdAt, u.nickname FROM table_sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.table_id = ?1 AND s.status = 'seated'`)
     .bind(t.id)
@@ -833,7 +836,7 @@ const admin = new Hono<AppEnv>()
   // ---------------------------------------------------------------- tables
   /**
    * Tables, newest first. Without `paged=1` every table as a plain array, as before. With it: `q` (part of the name, or
-   * the exact id), `status` (open | closing | closed, or active = not closed), `roomType` (official | member), `issue=1`
+   * the exact id), `status` (open | closing | closed, or active = not closed), `roomType` (official | member | tournament), `issue=1`
    * (a last issue recorded), `limit` / `offset`, and the number of matching tables.
    */
   .get('/tables', async (c) => {
@@ -846,7 +849,7 @@ const admin = new Hono<AppEnv>()
       ? and(
           q ? or(like(T.name, `%${q}%`), eq(T.id, q)) : undefined,
           status === 'open' || status === 'closing' || status === 'closed' ? eq(T.status, status) : status === 'active' ? ne(T.status, 'closed') : undefined,
-          roomType === 'official' || roomType === 'member' ? eq(T.roomType, roomType) : undefined,
+          roomType === 'official' || roomType === 'member' || roomType === 'tournament' ? eq(T.roomType, roomType) : undefined,
           c.req.query('issue') === '1' ? isNotNull(T.lastIssue) : undefined,
         )
       : undefined;
@@ -896,8 +899,10 @@ const admin = new Hono<AppEnv>()
     if (!t) fail(404, 'not_found', 'table not found');
     const live = t.status === 'closed' ? null : await roomCall(c, id, 'status');
     const { joinCodeHash, ...rest } = t;
+    const tournament =
+      t.roomType === 'tournament' ? await c.env.DB.prepare('SELECT id, name, status FROM tournaments WHERE table_id = ?1').bind(id).first<{ id: string; name: string; status: string }>() : null;
     // The live status never includes hole cards or deck information.
-    return c.json({ table: { ...rest, hasJoinCode: !!joinCodeHash }, live, diagnosis: live ? await diagnose(c.env.DB, t, live) : null });
+    return c.json({ table: { ...rest, hasJoinCode: !!joinCodeHash }, live, diagnosis: live ? await diagnose(c.env.DB, t, live) : null, tournament });
   })
   /**
    * Emergency controls, each confirmed by the room before the admin is told it took effect: `pause` deals no new hand
@@ -909,6 +914,8 @@ const admin = new Hono<AppEnv>()
     const body = await parseBody(c, TableControlSchema);
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
+    // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
+    if (t.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
     const set =
       body.action === 'pause' || body.action === 'resume' ? { handsPaused: body.action === 'pause' } : { entryBlocked: body.action === 'block' };
     await c.var.db.update(schema.tables).set({ ...set, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
@@ -926,6 +933,8 @@ const admin = new Hono<AppEnv>()
     if (body.entryBlocked !== undefined) assertRecentReauth(c);
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
+    // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
+    if (t.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
     const merged = { sb: body.smallBlind ?? t.smallBlind, bb: body.bigBlind ?? t.bigBlind, min: body.minBuyIn ?? t.minBuyIn, max: body.maxBuyIn ?? t.maxBuyIn };
     if (merged.bb < merged.sb || merged.min < merged.bb * 10 || merged.max < merged.min) fail(400, 'bad_request', 'invalid blind / buy-in combination');
     const isPrivate = body.isPrivate ?? t.isPrivate;
@@ -986,6 +995,8 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
+    // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.
+    if (t.roomType === 'tournament') fail(409, 'tournament_table', 'a tournament table is controlled from its tournament');
     if (await isPreview(c)) {
       const live = await roomCall(c, id, 'status');
       const { results: open } = await c.env.DB.prepare(
@@ -1301,4 +1312,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes));

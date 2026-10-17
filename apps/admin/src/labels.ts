@@ -134,6 +134,20 @@ const auditNames = labeler({
   'table.timer_recover': 'auditTimerRecover',
   'timebank.policy': 'auditTimeBankPolicy',
   'timebank.view': 'auditTimeBankView',
+  'tournament.abort': 'auditTnAbort',
+  'tournament.cancel': 'auditTnCancel',
+  'tournament.create': 'auditTnCreate',
+  'tournament.list': 'auditTnList',
+  'tournament.pause': 'auditTnPause',
+  'tournament.recover': 'auditTnRecover',
+  'tournament.registration': 'auditTnRegistration',
+  'tournament.resume': 'auditTnResume',
+  'tournament.start': 'auditTnStart',
+  'tournament.view': 'auditTnView',
+  'tournament_template.create': 'auditTplCreate',
+  'tournament_template.list': 'auditTplList',
+  'tournament_template.status': 'auditTplStatus',
+  'tournament_template.update': 'auditTplUpdate',
   'user.chips': 'auditUserChips',
   'user.chips_duplicate': 'auditChipsDuplicate',
   'user.chips_refused': 'auditChipsRefused',
@@ -160,7 +174,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'timebank', 'report', 'board', 'message', 'service', 'maintenance'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'timebank', 'report', 'board', 'message', 'service', 'maintenance', 'tournament', 'tournament_template'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -179,6 +193,8 @@ export const auditFamilyLabel = labeler({
   message: 'famMessage',
   service: 'famService',
   maintenance: 'famMaintenance',
+  tournament: 'famTournament',
+  tournament_template: 'famTournamentTemplate',
 });
 /** Super-admin abilities (the API's lib/permissions.ts). */
 export const capabilityLabel = labeler({
@@ -194,6 +210,7 @@ export const capabilityLabel = labeler({
   'bots.policy': 'capBotsPolicy',
   'referral.policy': 'capReferralPolicy',
   'timebank.policy': 'capTimeBankPolicy',
+  'tournament.structure': 'capTournamentStructure',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({
@@ -217,6 +234,7 @@ export const featureLabel = labeler({
   bots: 'featBots',
   referral: 'featReferral',
   settings: 'featSettings',
+  tournaments: 'tournamentsNav',
   audit: 'audit',
   reports: 'reports',
   board: 'board',
@@ -283,8 +301,43 @@ export const targetTypeLabel = labeler({
   report: 'targetReport',
   session: 'targetSession',
   table: 'targetTable',
+  tournament: 'targetTournament',
+  tournament_template: 'targetTournamentTemplate',
   user: 'targetUser',
 });
+/** Tournaments (docs/TOURNAMENT.md): the tournament's and each entry's state, why one needs an operator, how it ended. */
+export const tnStatusLabel = labeler({ registering: 'tnStRegistering', closed: 'tnStClosed', running: 'tnStRunning', finished: 'tnStFinished', cancelled: 'tnStCancelled', aborted: 'tnStAborted' });
+export const tnEntryStatusLabel = labeler({
+  registered: 'tnEnRegistered',
+  unregistered: 'tnEnUnregistered',
+  dropped: 'tnEnDropped',
+  playing: 'tnEnPlaying',
+  eliminated: 'tnEnEliminated',
+  won: 'tnEnWon',
+  stopped: 'tnEnStopped',
+});
+export const tnRecoveryLabel = labeler({
+  room_silent: 'tnRcRoomSilent',
+  pause_stuck: 'tnRcPauseStuck',
+  resume_stuck: 'tnRcResumeStuck',
+  stalled: 'tnRcStalled',
+  table_open: 'tnRcTableOpen',
+  start_stuck: 'tnRcStartStuck',
+});
+/** `end_reason` (completed | cancelled | aborted), or the status when it has none. */
+export const tnEndReasonLabel = labeler({ completed: 'tnStFinished', finished: 'tnStFinished', cancelled: 'tnStCancelled', aborted: 'tnStAborted' });
+/** Why a template's values do not hold together (@jc/types tournamentStructureProblem). */
+export const structureProblemLabel = labeler({
+  min_players_over_capacity: 'tnPbMinPlayers',
+  small_blind_not_below_big: 'tnPbSmallBlind',
+  levels_decrease: 'tnPbLevelsDecrease',
+  start_stack_too_small: 'tnPbStartStack',
+  initial_over_max: 'tbInitialOverMax',
+  unit_over_max: 'tbUnitOverMax',
+  whole_seconds: 'tbWholeSeconds',
+});
+/** Why a registration was dropped when the tournament started. */
+export const startDroppedLabel = labeler({ suspended: 'tnDrSuspended', bot: 'tnDrBot', unverified: 'tnDrUnverified', min_hands: 'tnDrMinHands', active_elsewhere: 'tnDrElsewhere' });
 
 const HAND_NAMES: Record<string, Key> = {
   'high-card': 'handHighCard',

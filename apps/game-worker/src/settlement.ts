@@ -8,6 +8,7 @@
 import { applyLedger, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
 import { BOT_LEVELS, type BotLevel, type TimeBankPolicy } from '@jc/types';
+import { TOURNAMENT_JSON, toTournamentRow, type TournamentRow } from './tournament';
 
 export interface TableRow {
   id: string;
@@ -24,7 +25,7 @@ export interface TableRow {
   /** Emergency control: no new hand starts until an admin resumes the table. */
   handsPaused: boolean;
   status: 'open' | 'closing' | 'closed';
-  roomType: 'official' | 'member';
+  roomType: 'official' | 'member' | 'tournament';
   /** The member who opened a member room (or the admin who opened an official table). */
   createdBy: string | null;
   /** Hash of a private table's current join code. Never sent to clients. */
@@ -39,6 +40,8 @@ export interface TableRow {
   botPolicyOn: boolean;
   /** The time bank policy (time_bank_policies, newest version) as D1 last showed it; read again with each hand record. */
   timeBank: TimeBankPolicy | null;
+  /** The tournament this table plays (tournament tables only; see tournament.ts). */
+  tournament: TournamentRow | null;
 }
 
 /** The next maintenance window that has not finished (the current one while it runs): see maintenance_windows. */
@@ -47,7 +50,7 @@ export interface Maintenance {
   endsAt: number;
 }
 
-function maintenanceQuery(d1: D1Database, now: number) {
+export function maintenanceQuery(d1: D1Database, now: number) {
   return d1
     .prepare(
       `SELECT starts_at AS startsAt, ends_at AS endsAt FROM maintenance_windows
@@ -56,7 +59,7 @@ function maintenanceQuery(d1: D1Database, now: number) {
     .bind(now);
 }
 
-function toMaintenance(r: { startsAt: unknown; endsAt: unknown } | undefined): Maintenance | null {
+export function toMaintenance(r: { startsAt: unknown; endsAt: unknown } | undefined): Maintenance | null {
   return r ? { startsAt: Number(r.startsAt), endsAt: Number(r.endsAt) } : null;
 }
 
@@ -74,7 +77,8 @@ export async function loadTable(d1: D1Database, tableId: string, now = Date.now(
                 is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
                 room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash,
                 bots_enabled AS botsEnabled, bot_level AS botLevel, bot_min_humans AS botMinHumans, bot_max AS botMax,
-                bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn, (${TIME_BANK_POLICY}) AS timeBank
+                bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn, (${TIME_BANK_POLICY}) AS timeBank,
+                (${TOURNAMENT_JSON}) AS tournament
          FROM tables WHERE id = ?1`,
       )
       .bind(tableId),
@@ -99,7 +103,7 @@ function toTableRow(r: Record<string, unknown>): TableRow {
     entryBlocked: !!r.entryBlocked,
     handsPaused: !!r.handsPaused,
     status: r.status as TableRow['status'],
-    roomType: r.roomType === 'member' ? 'member' : 'official',
+    roomType: r.roomType === 'member' ? 'member' : r.roomType === 'tournament' ? 'tournament' : 'official',
     createdBy: r.createdBy == null ? null : String(r.createdBy),
     joinCodeHash: r.joinCodeHash == null ? null : String(r.joinCodeHash),
     bots: {
@@ -112,6 +116,7 @@ function toTableRow(r: Record<string, unknown>): TableRow {
     },
     botPolicyOn: Number(r.botPolicyOn) === 1,
     timeBank: toTimeBankPolicy(r.timeBank),
+    tournament: r.roomType === 'tournament' ? toTournamentRow(r.tournament) : null,
   };
 }
 

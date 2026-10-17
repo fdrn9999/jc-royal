@@ -183,6 +183,13 @@
       "when": 1792183255558,
       "tag": "0025_time_bank",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1792189294331,
+      "tag": "0026_tournaments",
+      "breakpoints": true
     }
   ]
 }

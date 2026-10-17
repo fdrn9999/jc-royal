@@ -1,4 +1,4 @@
-import type { LobbyTableDto } from '@jc/types';
+import type { LobbyTableDto, TournamentSummaryDto } from '@jc/types';
 import { Badge, Button, cx, Empty, formatChips, Input, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -65,6 +65,42 @@ function useLobbyTables() {
   // The refresh button replaces a request already out rather than waiting for it.
   const refresh = useCallback(() => void feed.current?.run(true), []);
   return { tables, error, refresh };
+}
+
+/**
+ * The way into tournaments (the bottom navigation has no room for it on a phone). Asked once per visit, not polled:
+ * the viewer's own tournament, if any, names itself; otherwise the card just describes them.
+ */
+function TournamentCard() {
+  const { t } = useI18n();
+  const [mine, setMine] = useState<TournamentSummaryDto | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    api<{ current: TournamentSummaryDto | null }>('/api/tournaments?limit=1', { signal: ac.signal }).then(
+      (r) => setMine(r.current),
+      () => {
+        /* the card still links to the list */
+      },
+    );
+    return () => ac.abort();
+  }, []);
+  const live = mine?.status === 'running' && mine.me?.status === 'playing' && mine.tableId;
+  return (
+    <Link
+      to={live ? `/table/${mine.tableId}` : mine ? `/tournaments/${mine.id}` : '/tournaments'}
+      className="jc-panel jc-tap flex items-center gap-3 p-4 transition hover:border-gold-400/60"
+      data-testid="lobby-tournaments"
+    >
+      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-xl text-gold-300">🏆</span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-bold text-ivory">{t('tn.lobbyTitle')}</span>
+        <span className="block truncate text-xs text-ink-300">
+          {mine ? t('tn.lobbyMine', { name: mine.name, status: t(`tn.status.${mine.status}` as MsgKey) }) : t('tn.lobbyBody')}
+        </span>
+      </span>
+      <span className="shrink-0 text-sm font-semibold text-gold-300">{live ? t('tn.toTable') : t('tn.details')} →</span>
+    </Link>
+  );
 }
 
 export function LobbyPage() {
@@ -145,6 +181,7 @@ export function LobbyPage() {
           <span className="hidden shrink-0 text-sm font-semibold text-gold-300 sm:inline">{t('lobby.academyCta')} →</span>
         </Link>
       )}
+      <TournamentCard />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

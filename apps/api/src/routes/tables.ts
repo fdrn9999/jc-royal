@@ -75,8 +75,9 @@ export const tableRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
   .get('/', async (c) => {
     // `IN` (not `<> 'closed'`) so SQLite searches tables_status_idx instead of scanning every closed room ever made.
+    // A tournament's table is reached from its tournament (routes/tournaments.ts), never from the lobby.
     const rows = await withHost(c)
-      .where(inArray(schema.tables.status, ['open', 'closing']))
+      .where(and(inArray(schema.tables.status, ['open', 'closing']), ne(schema.tables.roomType, 'tournament')))
       // Official tables first, then members' rooms.
       .orderBy(desc(schema.tables.roomType), asc(schema.tables.bigBlind), asc(schema.tables.name));
     return c.json(rows.map((r) => toLobbyDto(r.t, r.host)));
@@ -98,6 +99,7 @@ export const tableRoutes = new Hono<AppEnv>()
         eq(T.status, 'open'),
         eq(T.isPrivate, false),
         eq(T.entryBlocked, false),
+        ne(T.roomType, 'tournament'),
         body.maxSeats ? eq(T.maxSeats, body.maxSeats) : undefined,
         body.bigBlind ? eq(T.bigBlind, body.bigBlind) : undefined,
       ),

@@ -83,7 +83,7 @@ describe('permission table', () => {
     }));
     expect(routes.length).toBe(source.match(/^\s+'(GET|POST|PUT|PATCH|DELETE) /gm)!.length);
     expect(routes.length).toBeGreaterThan(55);
-    expect(routes.filter((r) => r.superOnly).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['POST /referrals/resume', 'POST /refill/resume', 'POST /users/:id/role', 'POST /users/export', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'PUT /time-bank/policy']);
+    expect(routes.filter((r) => r.superOnly).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['POST /referrals/resume', 'POST /refill/resume', 'POST /tournament-templates', 'POST /tournament-templates/:id/status', 'POST /users/:id/role', 'POST /users/export', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'PUT /time-bank/policy', 'PUT /tournament-templates/:id']);
 
     const member = await newUser();
     const staff = await plainAdmin();
@@ -115,7 +115,7 @@ describe('permission table', () => {
     // None of it changed the member, and the plain administrator's only records are the refused super-admin calls.
     expect(await d1(`SELECT status, role, balance, suspended_reason AS reason FROM users WHERE id = '${member.me.id}'`)).toEqual([{ status: 'active', role: 'user', balance: member.me.balance, reason: null }]);
     expect((await member.client.get('/api/auth/me')).status).toBe(200);
-    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['bots.policy.failed failed', 'referral.policy.failed failed', 'referral.resume.failed failed', 'refill.policy.failed failed', 'refill.resume.failed failed', 'timebank.policy.failed failed', 'user.export.failed failed', 'user.role.failed failed']);
+    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['bots.policy.failed failed', 'referral.policy.failed failed', 'referral.resume.failed failed', 'refill.policy.failed failed', 'refill.resume.failed failed', 'timebank.policy.failed failed', 'tournament_template.create.failed failed', 'tournament_template.status.failed failed', 'tournament_template.update.failed failed', 'user.export.failed failed', 'user.role.failed failed']);
   });
 
   it('records failed changes and refusals, but not a missing password confirmation or a read that found nothing', async () => {

@@ -46,6 +46,8 @@ export const CAPABILITIES = {
   'referral.policy': 'super_admin',
   /** Change the time bank policy (on, member rooms, first grant, maximum, one use, refill). */
   'timebank.policy': 'super_admin',
+  /** Create, change and archive tournament templates (the structure every tournament opened from them copies). */
+  'tournament.structure': 'super_admin',
 } as const satisfies Record<string, AdminRole>;
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -79,6 +81,7 @@ export const FEATURES = [
   'refill',
   'bots',
   'referral',
+  'tournaments',
   'settings',
   'audit',
   'reports',
@@ -227,6 +230,24 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'DELETE /security/sessions/:id': r('security', 'admin.session.end', { target: 'session' }),
   'POST /security/sessions/end-others': r('security', 'admin.session.end_others'),
   'GET /security/permissions': r('security', 'admin.permission.view'),
+
+  // Sit & Go tournaments (routes/admin-tournaments.ts): anyone on duty opens one from a template, runs it (registration,
+  // start, pause, resume, recovery) and cancels or stops it (password and reason). Templates — the structure — are a
+  // super admin's. Nothing here sets a stack, a card, a winner or a place.
+  'GET /tournaments': r('tournaments', 'tournament.list'),
+  'POST /tournaments': r('tournaments', 'tournament.create', { preview }),
+  'GET /tournaments/:id': r('tournaments', 'tournament.view', { target: 'tournament' }),
+  'POST /tournaments/:id/registration': r('tournaments', 'tournament.registration', { target: 'tournament' }),
+  'POST /tournaments/:id/start': r('tournaments', 'tournament.start', { target: 'tournament' }),
+  'POST /tournaments/:id/pause': r('tournaments', 'tournament.pause', { target: 'tournament' }),
+  'POST /tournaments/:id/resume': r('tournaments', 'tournament.resume', { target: 'tournament' }),
+  'POST /tournaments/:id/recover': r('tournaments', 'tournament.recover', { target: 'tournament' }),
+  'POST /tournaments/:id/cancel': r('tournaments', 'tournament.cancel', { reauth, target: 'tournament' }),
+  'POST /tournaments/:id/abort': r('tournaments', 'tournament.abort', { reauth, target: 'tournament' }),
+  'GET /tournament-templates': r('tournaments', 'tournament_template.list'),
+  'POST /tournament-templates': r('tournaments', 'tournament_template.create', { role: CAPABILITIES['tournament.structure'], reauth, preview }),
+  'PUT /tournament-templates/:id': r('tournaments', 'tournament_template.update', { role: CAPABILITIES['tournament.structure'], reauth, preview, target: 'tournament_template' }),
+  'POST /tournament-templates/:id/status': r('tournaments', 'tournament_template.status', { role: CAPABILITIES['tournament.structure'], reauth, target: 'tournament_template' }),
 };
 
 const ADMIN_BASE = '/api/admin';

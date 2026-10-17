@@ -6,7 +6,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { BASE, Client, newUser, PASSWORD, sharedAdmin, signupBody, uniq } from '../support/client';
 import { d1 } from '../support/d1';
-import { isMyTurn, TableSocket } from '../support/ws';
+import { isMyTurn, nextState, TableSocket } from '../support/ws';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 const admin = sharedAdmin();
@@ -287,7 +287,7 @@ describe('referral rewards', () => {
       if (!s.hand || s.hand.stage === 'settled') break;
       const me = [wa, wb].find((w) => isMyTurn(w.state!));
       if (me) await me.act(me.state!.you.legal.some((l) => l.type === 'fold') ? 'fold' : 'check');
-      else await wa.waitNext((m) => m.t === 'state', 15_000, 'next state');
+      else await nextState([wa, wb]);
     }
     for (const w of [wa, wb]) expect(await w.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
 

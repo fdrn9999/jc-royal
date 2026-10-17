@@ -47,6 +47,11 @@ describe('admin permission table', () => {
         'POST /tables/:id/control',
         'POST /tables/:id/timer-recover',
         'PUT /time-bank/policy',
+        'POST /tournaments/:id/abort',
+        'POST /tournaments/:id/cancel',
+        'POST /tournament-templates',
+        'PUT /tournament-templates/:id',
+        'POST /tournament-templates/:id/status',
         'POST /users/:id/chips',
         'POST /users/:id/disconnect',
         'POST /users/:id/reset-link',
@@ -59,14 +64,15 @@ describe('admin permission table', () => {
       ].sort(),
     );
     const superOnly = Object.entries(ROUTE_RULES).filter(([, r]) => r.role === 'super_admin').map(([k]) => k);
-    expect(superOnly.sort()).toEqual(['PUT /bots/policy', 'POST /referrals/resume', 'PUT /referrals/policy', 'POST /refill/resume', 'POST /users/:id/role', 'POST /users/export', 'PUT /refill/policy', 'PUT /time-bank/policy'].sort());
+    expect(superOnly.sort()).toEqual(['PUT /bots/policy', 'POST /referrals/resume', 'PUT /referrals/policy', 'POST /refill/resume', 'POST /users/:id/role', 'POST /users/export', 'PUT /refill/policy', 'PUT /time-bank/policy', 'POST /tournament-templates', 'PUT /tournament-templates/:id', 'POST /tournament-templates/:id/status'].sort());
     // A preview skips only the password, so only routes that answer a preview and write nothing are marked.
     const previews = Object.entries(ROUTE_RULES).filter(([, r]) => r.preview).map(([k]) => k);
     expect(previews.sort()).toEqual(
-      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/settings/reset', 'POST /users/:id/settings/restore', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend', 'PUT /time-bank/policy'].sort(),
+      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/settings/reset', 'POST /users/:id/settings/restore', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend', 'PUT /time-bank/policy', 'POST /tournaments', 'POST /tournament-templates', 'PUT /tournament-templates/:id'].sort(),
     );
-    // Deciding a report asks for no password, so its preview skips nothing; every other preview stands before one.
-    expect(previews.filter((k) => !ROUTE_RULES[k]!.reauth)).toEqual(['POST /reports/:id']);
+    // Deciding a report and opening a tournament ask for no password, so their previews skip nothing; every other preview
+    // stands before one.
+    expect(previews.filter((k) => !ROUTE_RULES[k]!.reauth).sort()).toEqual(['POST /reports/:id', 'POST /tournaments']);
   });
 
   it('gives super admins every capability and plain administrators none of the super-admin ones', () => {

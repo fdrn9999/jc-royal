@@ -156,6 +156,10 @@
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, tournament_table, internal`
 
 `suspended`·`disconnected`가 `reqId` 없이 오면 관리자가 연결을 끝낸 것이고 4004 종료가 뒤따릅니다. `reqId`가 붙은 `suspended`는 정지된 계정의 착석·충전을 지갑이 거절한 것입니다.
+
+## 토너먼트 테이블 (`roomType: 'tournament'`)
+
+대회 테이블의 `state`는 최상위 `tournament`(레벨·블라인드·다음 레벨·시계·일시정지·생존 인원·정해진 순위·보는 사람의 처지)를 더한다. 필드는 `docs/TOURNAMENT.md` "테이블 상태(WebSocket)". 좌석은 대회가 시작할 때 룸이 D1 등록으로 만들고, 스택은 대회 칩이다. 착석·일어서기·충전·리바이·대기열 요청은 `tournament_table`로 거절된다. 블라인드는 핸드를 시작할 때의 레벨로 끝까지 가고, 운영자의 일시정지는 다음 핸드부터 적용된다. 접속이 끊긴 참가자도 좌석에 남아 블라인드를 내고 차례에는 체크 또는 폴드된다. 배포 순서는 `0026_tournaments` → game-worker → api → web·admin.
