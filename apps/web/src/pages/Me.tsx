@@ -1,7 +1,7 @@
 import { handLabelKey, NICKNAME_RE, passwordOk, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { BadgeShelf } from '../academy/Badges';
 import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
@@ -19,23 +19,35 @@ import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAmounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { isGone, LoadFailed } from '../components/Loading';
+import { useBack } from '../lib/back';
+import { useKeptScroll } from '../lib/scroll';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 
 function useLoad<T>(path: string) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState(false);
+  // Refused for good (not found, not mine), as opposed to a load that may work if tried again.
+  const [gone, setGone] = useState(false);
   const reload = useCallback(async () => {
+    setError(false);
     try {
       setData(await api<T>(path));
-    } catch {
+    } catch (e) {
+      setGone(isGone(e));
       setError(true);
     }
   }, [path]);
   useEffect(() => {
     void reload();
   }, [reload]);
-  return { data, error, reload, set: setData };
+  return { data, error, gone, reload, set: setData };
+}
+
+/** Under a section whose list could not load (and none is shown): says so, with a retry. */
+function Failed({ x }: { x: { data: unknown; error: boolean; reload: () => Promise<void> } }) {
+  return x.error && x.data === null ? <LoadFailed className="py-6" onRetry={() => void x.reload()} /> : null;
 }
 
 function signed(n: number) {
@@ -61,6 +73,8 @@ export function MePage() {
   const [deleting, setDeleting] = useState(false);
   const [delPw, setDelPw] = useState('');
   const [delErr, setDelErr] = useState<string | null>(null);
+  // Back from a hand opened here: the same place, once what sits above it has loaded.
+  useKeptScroll([stats, hands, ledger, myPosts, myComments, sessions].every((x) => x.data !== null || x.error));
 
   if (!me) return null;
 
@@ -165,6 +179,8 @@ export function MePage() {
               <StatDefinitions />
             </div>
           </div>
+        ) : stats.error ? (
+          <Failed x={stats} />
         ) : (
           <Empty>{t('common.loading')}</Empty>
         )}
@@ -177,6 +193,7 @@ export function MePage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('me.recent')} actions={<Link to="/me/hands" className="jc-tap py-1 text-xs text-gold-300 hover:underline" data-testid="me-all-hands">{t('me.allHands')} →</Link>}>
           {hands.data && hands.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+          <Failed x={hands} />
           <ul className="divide-y divide-white/5">
             {hands.data?.map((h) => (
               <HandRow key={h.id} hand={h} onChange={(n) => hands.set(hands.data!.map((x) => (x.id === n.id ? n : x)))} />
@@ -186,6 +203,7 @@ export function MePage() {
 
         <Panel title={t('me.ledger')}>
           {ledger.data && ledger.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+          <Failed x={ledger} />
           <ul className="divide-y divide-white/5" data-testid="ledger">
             {ledger.data?.map((l) => (
               <li key={l.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
@@ -206,6 +224,7 @@ export function MePage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className="text-xs text-gold-300 hover:underline">{t('board.write')}</Link>}>
           {myPosts.data && myPosts.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+          <Failed x={myPosts} />
           <ul className="divide-y divide-white/5" data-testid="my-posts">
             {myPosts.data?.map((p) => (
               <li key={p.id} className="flex items-center gap-3 py-2.5 text-sm">
@@ -219,6 +238,7 @@ export function MePage() {
         </Panel>
         <Panel title={t('me.myComments')}>
           {myComments.data && myComments.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+          <Failed x={myComments} />
           <ul className="divide-y divide-white/5" data-testid="my-comments">
             {myComments.data?.map((c) => (
               <li key={c.id} className="py-2.5 text-sm">
@@ -259,6 +279,7 @@ export function MePage() {
           </form>
           <div className="jc-divider my-5" />
           <h3 className="mb-2 text-sm font-semibold">{t('me.sessions')}</h3>
+          <Failed x={sessions} />
           <ul className="flex flex-col gap-2">
             {sessions.data?.map((ss) => (
               <li key={ss.id} className="flex items-center justify-between gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs">
@@ -316,13 +337,16 @@ export function MePage() {
 export function HandDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useI18n();
-  const { data, error } = useLoad<HandDetailDto>(`/api/me/hands/${encodeURIComponent(id)}`);
+  // Back to the list it was opened from (with its filters), or My Page; a lesson opened from here comes back here.
+  const back = useBack(/^\/me(\/hands)?(\?|$)/, '/me');
+  const here = useLocation().pathname;
+  const { data, error, gone, reload } = useLoad<HandDetailDto>(`/api/me/hands/${encodeURIComponent(id)}`);
   const tr = useTr();
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
   // This hand's amounts in the player's unit, at its own big blind; the wallet and the stats above stay in chips.
   const amt = useAmounts(data?.bigBlind ?? 0);
-  if (error) return <Empty>{t('notFound')}</Empty>;
-  if (!data) return <Empty>{t('common.loading')}</Empty>;
+  if (gone) return <Empty>{t('notFound')}</Empty>;
+  if (!data) return error ? <LoadFailed onRetry={() => void reload()} /> : <Empty>{t('common.loading')}</Empty>;
   const name = (seat: number) => data.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const links = lessonLinksFor(data);
   const odds = potOddsFor(data);
@@ -331,7 +355,9 @@ export function HandDetailPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-extrabold tracking-[0.04em] jc-gold-text">{t('replay.title', { n: data.handNumber })}</h1>
-        <Link to="/me" className="text-sm text-gold-300 hover:underline">← {t('nav.me')}</Link>
+        <Link to={back.to} onClick={back.onClick} className="jc-tap shrink-0 py-2 text-sm text-gold-300 hover:underline" data-testid="hand-back">
+          ← {back.from?.startsWith('/me/hands') ? t('hands.title') : t('nav.me')}
+        </Link>
       </div>
       <Panel
         title={t('replay.player')}
@@ -352,7 +378,7 @@ export function HandDetailPage() {
           <ul className="flex flex-col gap-2" data-testid="hand-lessons">
             {links.map((x) => (
               <li key={x.id}>
-                <Link to={x.to} className="jc-tap flex items-center gap-3 rounded-xl border border-gold-500/20 bg-gold-500/5 p-3 hover:border-gold-400/50" data-link={x.id}>
+                <Link to={x.to} state={{ from: here }} className="jc-tap flex items-center gap-3 rounded-xl border border-gold-500/20 bg-gold-500/5 p-3 hover:border-gold-400/50" data-link={x.id}>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-bold text-gold-300">{tr(x.title)}</span>
                     <span className="block text-xs text-ink-300">{tr(x.why)}</span>

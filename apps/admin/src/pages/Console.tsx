@@ -127,7 +127,7 @@ export function UsersPage() {
   if (onlineOnly) params.set('online', '1');
   if (status) params.set('status', status);
   if (role) params.set('role', role);
-  const { data, error, loading } = useData<{ items: UserRow[]; total: number }>(`/api/admin/users?${params}`);
+  const { data, error, loading, reload } = useData<{ items: UserRow[]; total: number }>(`/api/admin/users?${params}`);
   // Any change to what is searched starts again from the first page (the selection for export stays).
   const filter = <T,>(set: (v: T) => void) => (v: T) => {
     set(v);
@@ -202,7 +202,7 @@ export function UsersPage() {
         <p className="w-full text-xs text-ink-400">{mayExport ? t('exportHint') : t('exportSuperOnly')}</p>
       </div>
       <Feedback note={note} />
-      {error && <LoadError error={error} />}
+      {error && <LoadError error={error} onRetry={reload} />}
       <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <Table
           head={[

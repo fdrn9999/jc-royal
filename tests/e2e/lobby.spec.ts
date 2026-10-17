@@ -97,6 +97,30 @@ test('lobby: the size and blind filters narrow the list as well as quick play', 
   await expect(cards.filter({ hasText: 'E2E Six' })).toHaveCount(0);
   for (const text of await cards.allTextContents()) expect(text).toMatch(/\/6\D.*3 \/ 6/);
   await expect(page.getByTestId('lobby-filtered')).toContainText(/6인 · 3\/6|6 seats · 3\/6/);
+  // A table and back (its leave button, the logo, the browser) finds the lobby as it was: the tab, the search, both filters.
+  await page.getByTestId('lobby-filter-open').click();
+  await page.getByRole('textbox', { name: /테이블 검색|Search tables/ }).fill('Fav');
+  await expect(page).toHaveURL('/?seats=6&bb=6&tab=open&q=Fav');
+  const kept = async () => {
+    await expect(page).toHaveURL('/?seats=6&bb=6&tab=open&q=Fav');
+    await expect(page.getByTestId('lobby-filter-open')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('textbox', { name: /테이블 검색|Search tables/ })).toHaveValue('Fav');
+    await expect(panel.getByTestId('quick-seats-6')).toHaveAttribute('aria-checked', 'true');
+    await expect(panel.getByTestId('quick-blind')).toHaveValue('6');
+    await expect(cards).toHaveCount(1);
+  };
+  for (const back of ['leave', 'logo', 'browser'] as const) {
+    await cards.getByTestId('lobby-watch').click();
+    await expect(page).toHaveURL('/table/e2e-lobby-fav');
+    await expect(page.getByTestId('viewer-status')).toBeVisible();
+    if (back === 'leave') await page.getByTestId('leave').click();
+    else if (back === 'logo') await page.getByRole('link', { name: /^(로비|Lobby)$/ }).first().click();
+    else await page.goBack();
+    await kept();
+  }
+  await page.getByTestId('lobby-filter-all').click();
+  await page.getByRole('textbox', { name: /테이블 검색|Search tables/ }).fill('');
+  await expect(page).toHaveURL('/?seats=6&bb=6');
   // At the narrowest desktop width the panel's controls still sit inside it, next to the description.
   await page.setViewportSize({ width: 1024, height: 800 });
   const outer = (await panel.boundingBox())!;

@@ -5,7 +5,7 @@
 import { HAND_MEMO_MAX, HAND_TAGS, handLabelKey, type HandNoteDto, type HandSummaryDto, type HandTag } from '@jc/types';
 import { Button, cx, formatChips, formatDate, Panel, PlayingCard } from '@jc/ui';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { api, ApiError } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
@@ -56,6 +56,7 @@ const signed = (n: number) => `${n > 0 ? '+' : ''}${formatChips(n)}`;
 /** One of the member's hands: cards, table, result, their tags and memo mark, and a bookmark that saves on the spot. */
 export function HandRow({ hand, onChange }: { hand: HandSummaryDto; onChange: (h: HandSummaryDto) => void }) {
   const { t, locale } = useI18n();
+  const { pathname, search } = useLocation();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   async function toggle() {
@@ -107,7 +108,8 @@ export function HandRow({ hand, onChange }: { hand: HandSummaryDto; onChange: (h
       </div>
       <span className={`shrink-0 font-mono text-sm font-semibold tabular-nums ${hand.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{signed(hand.net)}</span>
       <BookmarkToggle on={hand.bookmarked} busy={busy} onToggle={() => void toggle()} />
-      <Link to={`/me/hands/${encodeURIComponent(hand.id)}`} className="jc-tap shrink-0 py-2 text-xs text-gold-300 hover:underline">
+      {/* The hand's page goes back here: the list with its filters, where it was. */}
+      <Link to={`/me/hands/${encodeURIComponent(hand.id)}`} state={{ from: pathname + search }} className="jc-tap shrink-0 py-2 text-xs text-gold-300 hover:underline">
         {t('me.viewHand')}
       </Link>
     </li>

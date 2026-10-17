@@ -1,0 +1,160 @@
+{
+  "what": "packages/audio silence(): real Chrome OfflineAudioContext, 1 kHz sine with the tone() envelope, silence() called at calledAt (s). Peaks of |sample| per window. native = cancelAndHoldAtTime, fallback = the same Chrome with cancelAndHoldAtTime removed (as on browsers without it).",
+  "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+  "before_fix": [
+    {
+      "case": "playing, mid-decay (win note)",
+      "native": {
+        "calledAt": 0.10133,
+        "before": 0.01907,
+        "after5ms": 0.01598,
+        "after5to40": 0.00694,
+        "after40": 0,
+        "intendedPeak": 0.14
+      },
+      "fallback": {
+        "calledAt": 0.10133,
+        "before": 0.01907,
+        "after5ms": 0.13061,
+        "after5to40": 0.05676,
+        "after40": 0,
+        "intendedPeak": 0.14
+      }
+    },
+    {
+      "case": "playing, early decay (chip)",
+      "native": {
+        "calledAt": 0.032,
+        "before": 0.01626,
+        "after5ms": 0.00886,
+        "after5to40": 0.00385,
+        "after40": 0,
+        "intendedPeak": 0.1
+      },
+      "fallback": {
+        "calledAt": 0.032,
+        "before": 0.01626,
+        "after5ms": 0.09592,
+        "after5to40": 0.04169,
+        "after40": 0,
+        "intendedPeak": 0.1
+      }
+    },
+    {
+      "case": "scheduled 5ms later (allin part)",
+      "native": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0.49456,
+        "after5to40": 0.42994,
+        "after40": 0,
+        "intendedPeak": 0.08
+      },
+      "fallback": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0.49456,
+        "after5to40": 0.42994,
+        "after40": 0,
+        "intendedPeak": 0.08
+      }
+    },
+    {
+      "case": "scheduled 20ms later (win note)",
+      "native": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0,
+        "after5to40": 0.04273,
+        "after40": 0,
+        "intendedPeak": 0.14
+      },
+      "fallback": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0,
+        "after5to40": 0.04273,
+        "after40": 0,
+        "intendedPeak": 0.14
+      }
+    }
+  ],
+  "after_fix": [
+    {
+      "case": "playing, mid-decay (win note)",
+      "native": {
+        "calledAt": 0.10133,
+        "before": 0.01907,
+        "after5ms": 0.01598,
+        "after5to40": 0.00694,
+        "after40": 0,
+        "intendedPeak": 0.14
+      },
+      "fallback": {
+        "calledAt": 0.10133,
+        "before": 0.01907,
+        "after5ms": 0.01598,
+        "after5to40": 0.00695,
+        "after40": 0,
+        "intendedPeak": 0.14
+      }
+    },
+    {
+      "case": "playing, early decay (chip)",
+      "native": {
+        "calledAt": 0.032,
+        "before": 0.01626,
+        "after5ms": 0.00886,
+        "after5to40": 0.00385,
+        "after40": 0,
+        "intendedPeak": 0.1
+      },
+      "fallback": {
+        "calledAt": 0.032,
+        "before": 0.01626,
+        "after5ms": 0.00888,
+        "after5to40": 0.00386,
+        "after40": 0,
+        "intendedPeak": 0.1
+      }
+    },
+    {
+      "case": "scheduled 5ms later (allin part)",
+      "native": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0,
+        "after5to40": 0,
+        "after40": 0,
+        "intendedPeak": 0.08
+      },
+      "fallback": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0,
+        "after5to40": 0,
+        "after40": 0,
+        "intendedPeak": 0.08
+      }
+    },
+    {
+      "case": "scheduled 20ms later (win note)",
+      "native": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0,
+        "after5to40": 0,
+        "after40": 0,
+        "intendedPeak": 0.14
+      },
+      "fallback": {
+        "calledAt": 0.10133,
+        "before": 0,
+        "after5ms": 0,
+        "after5to40": 0,
+        "after40": 0,
+        "intendedPeak": 0.14
+      }
+    }
+  ]
+}

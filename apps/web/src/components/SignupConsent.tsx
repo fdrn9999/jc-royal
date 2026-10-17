@@ -1,7 +1,11 @@
 import { cx } from '@jc/ui';
-import { useId, useState } from 'react';
-import { PRIVACY_NOTICE } from '../legal/privacyNotice';
+import { useEffect, useId, useState } from 'react';
+import type { PrivacyNotice } from '../legal/privacyNotice';
 import { useI18n } from '../lib/i18n';
+
+// The notice text is long and only read when opened, so it stays out of the first bundle.
+let notices: Promise<Record<'ko' | 'en', PrivacyNotice>> | null = null;
+const loadNotices = () => (notices ??= import('../legal/privacyNotice').then((m) => m.PRIVACY_NOTICE).catch((e: unknown) => ((notices = null), Promise.reject(e))));
 
 export interface Agreements {
   age14: boolean;
@@ -21,7 +25,19 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
   const [open, setOpen] = useState(false);
   const noticeId = useId();
   const all = value.age14 && value.privacy;
-  const notice = PRIVACY_NOTICE[locale];
+  const [notice, setNotice] = useState<Record<'ko' | 'en', PrivacyNotice> | 'error' | null>(null);
+  useEffect(() => {
+    if (!open || (notice && notice !== 'error')) return;
+    let gone = false;
+    loadNotices().then(
+      (n) => !gone && setNotice(n),
+      () => !gone && setNotice('error'),
+    );
+    return () => {
+      gone = true;
+    };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const text = notice && notice !== 'error' ? notice[locale] : null;
   return (
     <fieldset className="break-keep rounded-xl border border-white/10 bg-ink-900/60">
       <legend className="sr-only">{t('consent.title')}</legend>
@@ -60,19 +76,26 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
         </div>
         {open && (
           <div id={noticeId} tabIndex={0} className="mt-1 max-h-56 overflow-y-auto rounded-lg border border-white/10 bg-ink-950/70 px-3.5 py-3 text-xs leading-relaxed text-ink-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500/30">
-            <p className="font-semibold text-ivory">{notice.title}</p>
-            <p className="mt-2">{notice.intro}</p>
-            {notice.sections.map((s) => (
-              <section key={s.heading} className="mt-3">
-                <h4 className="font-semibold text-ink-100">{s.heading}</h4>
-                <ul className="mt-1 list-disc space-y-1 pl-4">
-                  {s.items.map((i) => (
-                    <li key={i}>{i}</li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-            <p className="mt-3 text-ink-400">{notice.effective}</p>
+            {text ? (
+              <>
+                <p className="font-semibold text-ivory">{text.title}</p>
+                <p className="mt-2">{text.intro}</p>
+                {text.sections.map((s) => (
+                  <section key={s.heading} className="mt-3">
+                    <h4 className="font-semibold text-ink-100">{s.heading}</h4>
+                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                      {s.items.map((i) => (
+                        <li key={i}>{i}</li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+                <p className="mt-3 text-ink-400">{text.effective}</p>
+              </>
+            ) : (
+              // Loading, or it failed (offline): the full policy page below still has it.
+              <p role="status">{t(notice === 'error' ? 'common.error' : 'common.loading')}</p>
+            )}
             <a href="/privacy" target="_blank" rel="noopener" className="mt-1 inline-block font-semibold text-gold-300 underline-offset-2 hover:underline" data-testid="consent-policy-link">
               {t('consent.fullPolicy')}
             </a>

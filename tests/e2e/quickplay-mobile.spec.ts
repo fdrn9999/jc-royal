@@ -31,7 +31,8 @@ test('mobile: quick play seats players at the table, then explains a full table 
   await quick.getByTestId('quick-go').tap();
   const miss = quick.getByTestId('quick-miss');
   await expect(miss).toHaveAttribute('data-code', 'tables_full');
-  await expect(third.page).toHaveURL(/\/$/);
+  // Still the lobby (no table opened), its filters in the address.
+  await expect(third.page).toHaveURL('/?seats=2&bb=18');
   expect(await widerThanDevice(third.page)).toBe(false);
   await third.page.screenshot({ path: 'test-results/quick-full-mobile.png' });
   await miss.getByRole('button', { name: /방 만들기|Create room/ }).tap();

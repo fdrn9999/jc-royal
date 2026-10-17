@@ -63,8 +63,13 @@ export function Button({
   );
 }
 
-export function Spinner({ className }: { className?: string }) {
-  return <span aria-hidden className={cx('inline-block animate-spin rounded-full border-2 border-current border-r-transparent size-5', className)} />;
+/**
+ * With a `label`, it stands for something loading: an indeterminate progress bar that screen readers name (not a live
+ * status, which the notes beside it use). Without one it only decorates, as in a busy button.
+ */
+export function Spinner({ className, label }: { className?: string; label?: string }) {
+  const spin = cx('inline-block animate-spin rounded-full border-2 border-current border-r-transparent size-5', className);
+  return label ? <span role="progressbar" aria-label={label} className={spin} /> : <span aria-hidden className={spin} />;
 }
 
 export function Field({ label, hint, error, children }: { label: string; hint?: ReactNode; error?: string | null; children: (id: string) => ReactNode }) {

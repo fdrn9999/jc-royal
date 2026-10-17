@@ -9,7 +9,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
 import { AUDIT_FAMILIES, auditActionLabel, auditFamilyLabel, roleLabel, targetTypeLabel } from '../labels';
 import { useData } from '../lib';
-import { dayStart } from '../ui';
+import { dayStart, LoadError } from '../ui';
 import { Table } from './Console';
 
 interface AuditItem {
@@ -69,7 +69,7 @@ export function AuditPage() {
     q.set('before', String(cur.at));
     q.set('beforeId', cur.id);
   }
-  const { data, error, loading } = useData<AuditPageDto>(`/api/admin/audit?${q}`);
+  const { data, error, loading, reload } = useData<AuditPageDto>(`/api/admin/audit?${q}`);
   const all = data?.scope === 'all';
   const { data: staff } = useData<{ items: { id: string; nickname: string; role: string }[] }>(all ? '/api/admin/reports/assignees' : null);
 
@@ -179,7 +179,7 @@ export function AuditPage() {
           </div>
         ) : null}
       </div>
-      {error && <Empty>{error}</Empty>}
+      {error && <LoadError error={error} onRetry={reload} />}
       <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         {data && shown === 0 ? (
           <Empty>{t('auditEmpty')}</Empty>

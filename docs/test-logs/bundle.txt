@@ -12,3 +12,11 @@ entry index-dbwIA0UG.js + react-DB-4Zxce.js + i18n-BeNVzNlK.js + api-RqXQen_0.js
 ✓ bundle guard passed
 
 admin console (no limit): dist/assets/index-DRWFJGIp.js 1,036.63 kB | gzip: 291.07 kB
+
+== feat/polish, 2026-10-18
+> node tests/bundle-check.mjs  (after pnpm build)
+
+entry index-B9-v0OGF.js + react-DB-4Zxce.js + i18n-av-w2ZQ0.js + api-RqXQen_0.js + src-B-Ov6Il7.js + prefs-DHiplHu4.js + auth-DtwH21Bw.js: 646 KB; engine in: routes-C4IHwoyW.js
+✓ bundle guard passed
+
+admin console (no limit): dist/assets/index-BNnw7voy.js 1,036.76 kB | gzip: 291.11 kB

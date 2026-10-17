@@ -40,6 +40,8 @@ test('mobile: top-up and auto rebuy fit the phone, and an empty wallet is explai
   await expect(modal.getByTestId('topup-short')).toBeVisible();
   await expect(modal.getByTestId('topup-confirm')).toHaveCount(0);
   await expect(modal.getByTestId('topup-short').getByRole('link')).toHaveAttribute('href', '/me');
+  // In a new tab: leaving the table for the wallet would leave the seat's connection behind.
+  await expect(modal.getByTestId('topup-wallet-link')).toHaveAttribute('target', '_blank');
   expect(await widerThanDevice(m.page)).toBe(false);
   await m.page.screenshot({ path: 'test-results/topup-short-mobile.png', animations: 'disabled' });
 });
