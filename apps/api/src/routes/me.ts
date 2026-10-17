@@ -4,6 +4,7 @@ import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
+import { badgesFor } from '../lib/badges';
 import { replayLog, replayPlayer, replayUser } from '../lib/community';
 import { countNote, failureMetric, isFiltered, listHands, readNote, savedMetrics, saveNote } from '../lib/handNotes';
 import { fail, parseBody } from '../lib/http';
@@ -206,6 +207,7 @@ export const meRoutes = new Hono<AppEnv>()
         .where(eq(schema.handPlayers.handId, handId)),
       readNote(c.env.DB, uid, handId),
     ]);
+    const badge = await badgesFor(c, players.map((p) => p.user.role));
     const out: HandDetailDto = {
       id: hand.id,
       tableId: hand.tableId,
@@ -220,7 +222,7 @@ export const meRoutes = new Hono<AppEnv>()
       ...replayLog(hand.eventLog),
       players: players
         .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
-        .map(({ hp, user }) => ({ ...replayPlayer(hp, user, uid), userId: hp.userId, isYou: hp.userId === uid })),
+        .map(({ hp, user }) => ({ ...replayPlayer(hp, user, uid, badge), userId: hp.userId, isYou: hp.userId === uid })),
       note,
     };
     return c.json(out);

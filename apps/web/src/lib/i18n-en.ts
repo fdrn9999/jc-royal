@@ -145,6 +145,7 @@ export const en: Dict = {
   'err.illegal_action': 'That action is not allowed now.',
   'err.stale_version': 'The table changed. Please choose again.',
   'err.time_bank_off': 'The time bank cannot be used at this table right now.',
+  'err.reactions_off': 'Quick reactions cannot be sent right now.',
   'err.time_bank_empty': 'Your time bank is empty.',
   'err.duplicate': 'Already processed.',
   'err.forbidden': 'Not allowed.',

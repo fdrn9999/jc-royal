@@ -924,6 +924,7 @@ export function TablesPage() {
         <h1 className="text-xl font-extrabold">{t('tables')}</h1>
         <div className="flex flex-wrap items-center gap-3">
           <Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline" data-testid="time-bank-link">{t('tbManage')} →</Link>
+          <Link to="/tables/social" className="text-sm text-gold-300 hover:underline" data-testid="social-link">{t('soManage')} →</Link>
           <Button onClick={() => setOpen(true)} data-testid="create-table">{t('createTable')}</Button>
         </div>
       </div>
@@ -1049,6 +1050,8 @@ interface LiveStatus {
   timer?: { turnStartedAt: number; baseMs: number; extraMs: number; deadline: number; alarmAt: number | null; lateMs: number } | null;
   /** The time bank rules of the hand being played and those the next hand gets, with banks kept for members who left. */
   timeBank?: { hand: TimeBankRulesView | null; next: TimeBankRulesView | null; policyVersion: number | null; kept: number; handUses: number } | null;
+  /** The social policy version the room last read (null: none yet, the defaults) and whether it takes quick reactions. */
+  social?: { policyVersion: number | null; reactions: boolean } | null;
 }
 interface TimeBankRulesView { version: number; initialMs: number; maxMs: number; unitMs: number; refillHands: number; refillMs: number }
 interface Diagnosis {
@@ -1194,6 +1197,12 @@ function TimerPanel({ id, live, issues, open, onDone }: { id: string; live: Live
             {(tb.hand?.version ?? null) !== (tb.next?.version ?? null) && <p className="text-gold-200">{t('tbPendingVersion')}</p>}
             <p className="text-ink-400">{t('tbHandUses', { n: tb.handUses, kept: tb.kept })}</p>
           </div>
+        )}
+        {live.social && (
+          <p className="flex flex-wrap items-center gap-2 text-xs" data-testid="table-social" data-reactions={live.social.reactions}>
+            <Badge tone={live.social.reactions ? 'green' : 'neutral'}>{t(live.social.reactions ? 'soTableRules' : 'soTableRulesOff', { v: live.social.policyVersion ?? 0 })}</Badge>
+            <Link to="/tables/social" className="text-gold-300 hover:underline">{t('soManage')} →</Link>
+          </p>
         )}
         <div className="flex flex-col gap-1">
           <Button variant={unarmed || late ? 'gold' : 'outline'} disabled={!open} onClick={() => setAsk(true)} data-testid="timer-recover">{t('tbRecover')}</Button>

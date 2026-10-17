@@ -132,16 +132,18 @@
 ## 빠른 반응 (`react`)
 
 - **보낼 수 있는 사람**: 착석한 플레이어(자리 비움 포함). 관전자·대기 중인 연결은 `forbidden`. 목록에 없는 반응은 스키마 검사에서 `bad_request`(`reqId` 없음).
-- **속도**: 회원당 앞 반응에서 2초 뒤, 그리고 30초 동안 5회까지(`packages/types` `reactionWait`, 웹도 같은 함수로 버튼을 미리 끔). 네트워크 지연으로 일찍 도착하는 것은 300ms까지 봐줍니다. 넘으면 `rate_limited`. 기록은 회원 ID 기준이라 다시 연결해도 줄지 않고, 룸 메모리에만 있어 룸이 다시 시작되면 지워집니다.
+- **켜기·속도(소셜 정책)**: 관리자 콘솔의 소셜 정책(`social_policies`, 최신 버전)이 정한다. 마이그레이션 0028의 버전 1은 이전과 같은 값(켜짐, 회원당 앞 반응에서 2초 뒤, 30초 동안 5회까지)이고, 정책은 간격 0.5–30초·횟수 1–20회·구간 5–300초 안에서 바꾼다. 룸은 테이블을 읽을 때와 핸드를 기록할 때(같은 D1 batch) 정책을 읽고, 관리자가 바꾸면 연결이 있는 테이블(최대 100곳)이 바로 다시 읽는다. 정책이 끄면 `reactions_off`(착석 검사보다 먼저). 판정은 `packages/types` `reactionWait`(웹도 같은 함수와 룸이 보낸 값으로 버튼을 미리 끔). 네트워크 지연으로 일찍 도착하는 것은 300ms까지 봐줍니다. 넘으면 `rate_limited`. 기록은 회원 ID 기준이라 다시 연결해도 줄지 않고, 룸 메모리에만 있어 룸이 다시 시작되면 지워집니다.
+- **상태의 `reactions`**: `TableView.reactions`는 룸이 지키는 값 `{cooldownMs, burstMax, burstWindowMs}`, 정책이 끄면 `null`(웹은 버튼과 받은 반응을 모두 그리지 않음). 이전 룸은 필드가 없고 웹은 기본값을 씁니다.
 - **전달**: 룸은 보낸 좌석 번호와 회원 ID를 붙여 그 순간 열린 모든 연결에 `react`를 보내고 `reqId`가 있으면 `ack`. 저장하지 않으므로 상태 `version`이 바뀌지 않고, 새로 연결하거나 다시 연결한 사람은 지난 반응을 받지 않습니다. 핸드·칩·카드와 무관합니다.
 - **웹 클라이언트**: `reqId` 없이 한 번만 보내고 다시 시도하지 않습니다. 받은 반응은 좌석마다 마지막 것만 2.6초 보여 주고, 숨긴 탭에서는 무시합니다. 설정에서 끄면 받지도 보내지도 않고, 뮤트·차단한 회원의 반응은 그리지 않습니다.
-- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `react`를 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보냅니다. 이전 웹은 모르는 `react` 메시지를 무시합니다.
+- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `react`를 모르는 메시지로 보고 `bad_request`(`reqId` 없음)를 보냅니다. 이전 웹은 모르는 `react` 메시지를 무시합니다. 소셜 정책(0028)은 마이그레이션 → game-worker → api → web·admin. 이전 룸은 정책을 읽지 않고 고정값(2초·30초 5회, 켜짐)을 지키며 `reactions`를 보내지 않는다. 정책이 끈 동안 이전 웹은 버튼을 보이고, 누르면 `reactions_off`가 일반 오류 문장으로 보인다.
 
 ## 운영진 표시 (`role`)
 
 - **값**: `'super_admin'` 또는 `'admin'`. 일반 회원의 좌석·채팅 줄에는 필드가 없습니다. 출처는 api가 세션을 확인하며 D1 `users.role`에서 읽어 핸드셰이크 신원에 넣은 값뿐이고, 클라이언트가 보낸 `role`(`sit`·`chat` 등)은 스키마가 버립니다.
 - **좌석**: 앉을 때 그 연결의 역할을 좌석에 붙이고, 이후 핸드셰이크마다 다시 맞춥니다(역할이 바뀐 뒤 처음 연결할 때 반영).
 - **채팅**: 게시할 때 그 연결의 역할을 줄에 붙입니다. 이미 게시된 줄은 바뀌지 않습니다.
+- **소셜 정책의 표시 숨김**: 정책이 최고 관리자·관리자 표시를 끄면 룸은 그 역할의 `role`을 좌석과 채팅 줄(새 줄과 접속 때의 `chatHistory`)에서 빼고 보낸다. 저장된 좌석·채팅 줄은 역할을 그대로 가지므로 다시 켜면 돌아온다. 정책을 다시 읽어 표시가 바뀌면 화면의 채팅을 `chatHistory`로 다시 보내고, 좌석은 다음 `state`부터 바뀐다. 운영진 신고·차단 규칙(`block_staff`·`report_super_admin`)은 표시와 상관없이 실제 역할로 정한다.
 - **역할 변경 즉시 반영**: 관리자 콘솔에서 역할을 바꾸면 api가 그 회원이 앉아 있는 테이블의 룸에 내부 요청 `role`(`?user=&role=`, 값은 D1에 저장된 역할)을 보냅니다. 룸은 그 회원의 열린 연결 신원을 고치고(다음 채팅부터 새 역할), 좌석 표시가 바뀌면 저장한 뒤 모두에게 `state`를 보냅니다(`version` 증가). 응답 `{ok, seated}`. 앉아 있지 않은 테이블의 관전 연결은 다시 연결할 때 맞춰집니다.
 - **배포 순서**: api와 game-worker를 먼저, 웹을 나중에. 이전 룸은 `role`을 보내지 않으므로 새 웹은 표시 없이 그대로 그립니다. 이전 룸이 내부 `role` 요청을 모르면 api는 `reached`에서 빼고 역할 변경은 그대로 저장합니다.
 
@@ -156,7 +158,7 @@
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, tournament_table, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, tournament_table, reactions_off, internal`
 
 `suspended`·`disconnected`가 `reqId` 없이 오면 관리자가 연결을 끝낸 것이고 4004 종료가 뒤따릅니다. `reqId`가 붙은 `suspended`는 정지된 계정의 착석·충전을 지갑이 거절한 것입니다.
 

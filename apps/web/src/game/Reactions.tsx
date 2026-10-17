@@ -1,8 +1,9 @@
 /**
  * Quick reactions: an emoji a seated player sends that shows for a moment over their avatar for everyone at the table.
- * Nothing about them touches the game; the room only checks the sender is seated and keeps to its rate.
+ * Nothing about them touches the game; the room only checks the sender is seated and keeps to its rate. The social
+ * policy (admin console) sets that rate, or turns them off: then the room sends `reactions: null` and none are offered.
  */
-import { REACTION_BURST, REACTION_EMOJI, REACTIONS, reactionWait, type ReactionId } from '@jc/types';
+import { DEFAULT_REACTION_RULES, REACTION_EMOJI, REACTIONS, reactionWait, type ReactionId, type ReactionRules } from '@jc/types';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
@@ -24,15 +25,18 @@ export interface ReactionSender {
   wait: () => number;
 }
 
-export function useReactionSender(send: (msg: { t: 'react'; reaction: ReactionId }) => void): ReactionSender {
+/** `rules`: the limits the room sent (TableView.reactions); a room too old to send them keeps the defaults. */
+export function useReactionSender(send: (msg: { t: 'react'; reaction: ReactionId }) => void, rules: ReactionRules | undefined): ReactionSender {
   const times = useRef<number[]>([]);
+  const limits = useRef(DEFAULT_REACTION_RULES);
+  limits.current = rules ?? DEFAULT_REACTION_RULES;
   return useMemo(
     () => ({
-      wait: () => reactionWait(times.current, Date.now()),
+      wait: () => reactionWait(times.current, Date.now(), limits.current),
       send: (reaction) => {
         const now = Date.now();
-        if (reactionWait(times.current, now) > 0) return;
-        times.current = [...times.current.filter((at) => now - at < REACTION_BURST.windowMs), now];
+        if (reactionWait(times.current, now, limits.current) > 0) return;
+        times.current = [...times.current.filter((at) => now - at < limits.current.burstWindowMs), now];
         send({ t: 'react', reaction });
       },
     }),

@@ -24,6 +24,7 @@ import { and, desc, eq, gt, isNull, lt, lte, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
+import { badgesFor, type Badge } from '../lib/badges';
 import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
 
@@ -38,9 +39,12 @@ async function relation(c: Context<AppEnv>, me: string, other: string) {
   return c.var.db.query.friendships.findFirst({ where: and(eq(schema.friendships.userA, a), eq(schema.friendships.userB, b)) });
 }
 
-/** A member as other players see them, with the staff role (see PublicRole) drawn from `users.role`. */
-const toPublic = (u: { id: string; nickname: string; avatarUrl: string | null; role: string }): PublicUserDto => {
-  const role = publicRole(u.role);
+/**
+ * A member as other players see them, with the staff role (see PublicRole) drawn from `users.role` when the social
+ * policy shows that role's badge (`badge`, from badgesFor).
+ */
+const toPublic = (u: { id: string; nickname: string; avatarUrl: string | null; role: string }, badge: Badge = publicRole): PublicUserDto => {
+  const role = badge(u.role);
   return { id: u.id, nickname: u.nickname, avatarUrl: u.avatarUrl, ...(role ? { role } : {}) };
 };
 
@@ -52,7 +56,7 @@ async function publicUser(c: Context<AppEnv>, where: { id?: string; nickname?: s
   });
   if (!u || u.status === 'deleted') return null;
   if (u.isBot) fail(409, 'bot_account', 'table bots take no friend requests, blocks or messages');
-  return toPublic(u);
+  return toPublic(u, await badgesFor(c, [u.role]));
 }
 
 /**
@@ -115,8 +119,9 @@ export const friendRoutes = new Hono<AppEnv>()
       .bind(uid)
       .all<FriendRow>();
     const out: FriendsDto = { friends: [], incoming: [], outgoing: [] };
+    const badge = await badgesFor(c, results.map((r) => r.role));
     for (const r of results) {
-      const user = toPublic(r);
+      const user = toPublic(r, badge);
       if (r.status === 'pending') {
         const req: FriendRequestDto = { ...user, at: r.createdAt };
         (r.requesterId === uid ? out.outgoing : out.incoming).push(req);

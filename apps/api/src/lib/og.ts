@@ -138,6 +138,29 @@ interface PostMetaRow {
   body: string;
 }
 
+/**
+ * A shareable page as this deployment serves it (index.ts, and the admin brand check): the app's index.html from the
+ * static assets with the page's own link preview. A failed D1 read leaves the default preview.
+ */
+export async function sharePageResponse(assets: Fetcher, d1: D1Database, url: URL): Promise<Response> {
+  const res = await assets.fetch(new Request(new URL('/', url)));
+  if (!res.ok) return res;
+  let meta: PageMeta;
+  try {
+    meta = await metaFor(d1, url);
+  } catch (e) {
+    console.error('link preview failed', url.pathname, e instanceof Error ? e.message : String(e));
+    meta = defaultMeta(metaLocale(url));
+  }
+  const headers = new Headers(res.headers);
+  // The body differs from the file the validators describe.
+  headers.delete('etag');
+  headers.delete('content-length');
+  headers.set('content-type', 'text/html; charset=utf-8');
+  headers.set('cache-control', 'no-cache');
+  return new Response(replaceMeta(await res.text(), meta), { status: 200, headers });
+}
+
 /** The preview for a page. Reads D1 only for a table or a post; a failed read leaves the default preview. */
 export async function metaFor(d1: D1Database, url: URL): Promise<PageMeta> {
   const locale = metaLocale(url);

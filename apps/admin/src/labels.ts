@@ -116,6 +116,8 @@ const auditNames = labeler({
   'refill.resume': 'auditRefillResume',
   'refill.stats': 'auditRefillStats',
   'refill.view': 'auditRefillView',
+  'brand.og_image': 'auditBrandOgImage',
+  'brand.view': 'auditBrandView',
   'settings.member': 'auditSettingsMember',
   'settings.reset': 'auditSettingsReset',
   'settings.restore': 'auditSettingsRestore',
@@ -131,6 +133,8 @@ const auditNames = labeler({
   'report.note': 'auditReportNote',
   'report.update': 'auditReportUpdate',
   'report.resolve': 'auditReportResolve',
+  'social.policy': 'auditSocialPolicy',
+  'social.view': 'auditSocialView',
   'table.close': 'auditTableClose',
   'table.create': 'auditTableCreate',
   'table.update': 'auditTableUpdate',
@@ -178,7 +182,7 @@ export function auditActionLabel(t: Tr, v: string | null | undefined): string {
   return name === base ? v : t('auditFailedOf', { action: name });
 }
 /** The action families the audit page filters by (`family.*`). */
-export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'timebank', 'report', 'board', 'message', 'service', 'maintenance', 'tournament', 'tournament_template'] as const;
+export const AUDIT_FAMILIES = ['admin', 'user', 'note', 'table', 'hand', 'ledger', 'reconcile', 'refill', 'bots', 'referral', 'settings', 'timebank', 'social', 'report', 'board', 'message', 'service', 'maintenance', 'tournament', 'tournament_template'] as const;
 export const auditFamilyLabel = labeler({
   admin: 'famAdmin',
   user: 'famUser',
@@ -192,6 +196,7 @@ export const auditFamilyLabel = labeler({
   referral: 'famReferral',
   settings: 'famSettings',
   timebank: 'famTimeBank',
+  social: 'famSocial',
   report: 'famReport',
   board: 'famBoard',
   message: 'famMessage',
@@ -215,6 +220,7 @@ export const capabilityLabel = labeler({
   'bots.policy': 'capBotsPolicy',
   'referral.policy': 'capReferralPolicy',
   'timebank.policy': 'capTimeBankPolicy',
+  'social.policy': 'capSocialPolicy',
   'tournament.structure': 'capTournamentStructure',
 });
 /** Console features in the permission table; most are the menu's names. */
@@ -240,6 +246,8 @@ export const featureLabel = labeler({
   bots: 'featBots',
   referral: 'featReferral',
   settings: 'featSettings',
+  social: 'featSocial',
+  brand: 'featBrand',
   tournaments: 'tournamentsNav',
   audit: 'audit',
   reports: 'reports',

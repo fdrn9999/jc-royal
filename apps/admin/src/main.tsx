@@ -11,7 +11,9 @@ import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
 import { SecurityPage } from './pages/Security';
+import { BrandPage } from './pages/Brand';
 import { ServicePage } from './pages/Service';
+import { SocialPage } from './pages/Social';
 import { StatsPage } from './pages/Stats';
 import { DashboardPage } from './pages/Dashboard';
 import { EconomyPage, ReconcilePage } from './pages/Economy';
@@ -143,6 +145,7 @@ const router = createBrowserRouter([
       { path: '/users/:id', element: <UserDetailPage /> },
       { path: '/tables', element: <TablesPage /> },
       { path: '/tables/time-bank', element: <TimeBankPage /> },
+      { path: '/tables/social', element: <SocialPage /> },
       { path: '/tables/:id', element: <TableDetailPage /> },
       { path: '/bots', element: <BotsPage /> },
       { path: '/tournaments', element: <TournamentsPage /> },
@@ -162,6 +165,7 @@ const router = createBrowserRouter([
       { path: '/board', element: <BoardAdminPage /> },
       { path: '/messages', element: <MessagesAdminPage /> },
       { path: '/service', element: <ServicePage /> },
+      { path: '/service/brand', element: <BrandPage /> },
     ],
   },
 ]);

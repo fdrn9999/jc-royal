@@ -22,6 +22,8 @@ import { adminSecurityRoutes } from './admin-security';
 import { adminBotRoutes } from './admin-bots';
 import { adminReferralRoutes } from './admin-referral';
 import { adminSettingsRoutes } from './admin-settings';
+import { adminSocialRoutes } from './admin-social';
+import { adminBrandRoutes } from './admin-brand';
 import { adminRefillRoutes } from './admin-refill';
 import { adminTimeBankRoutes } from './admin-timebank';
 import { adminTournamentRoutes } from './admin-tournaments';
@@ -1336,4 +1338,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes));

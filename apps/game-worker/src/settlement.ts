@@ -5,9 +5,9 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
+import { applyLedger, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
-import { BOT_LEVELS, type BotLevel, type TimeBankPolicy } from '@jc/types';
+import { BOT_LEVELS, toSocialPolicy, type BotLevel, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
 import { TOURNAMENT_JSON, toTournamentRow, type TournamentRow } from './tournament';
 
 export interface TableRow {
@@ -40,6 +40,11 @@ export interface TableRow {
   botPolicyOn: boolean;
   /** The time bank policy (time_bank_policies, newest version) as D1 last showed it; read again with each hand record. */
   timeBank: TimeBankPolicy | null;
+  /**
+   * The social policy (social_policies, newest version: quick reactions, staff badges) as D1 last showed it; read again
+   * with each hand record. Null before any version exists, or for one this build cannot read: SOCIAL_DEFAULTS then.
+   */
+  social: SocialPolicy | null;
   /** The tournament this table plays (tournament tables only; see tournament.ts). */
   tournament: TournamentRow | null;
 }
@@ -78,7 +83,7 @@ export async function loadTable(d1: D1Database, tableId: string, now = Date.now(
                 room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash,
                 bots_enabled AS botsEnabled, bot_level AS botLevel, bot_min_humans AS botMinHumans, bot_max AS botMax,
                 bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn, (${TIME_BANK_POLICY}) AS timeBank,
-                (${TOURNAMENT_JSON}) AS tournament
+                (${SOCIAL_POLICY_JSON}) AS social, (${TOURNAMENT_JSON}) AS tournament
          FROM tables WHERE id = ?1`,
       )
       .bind(tableId),
@@ -116,6 +121,7 @@ function toTableRow(r: Record<string, unknown>): TableRow {
     },
     botPolicyOn: Number(r.botPolicyOn) === 1,
     timeBank: toTimeBankPolicy(r.timeBank),
+    social: toSocialPolicy(r.social),
     tournament: r.roomType === 'tournament' ? toTournamentRow(r.tournament) : null,
   };
 }
@@ -269,7 +275,7 @@ async function gzipBase64(text: string): Promise<string> {
  *
  * The same batch reads the maintenance window back (and, with `botPolicy`, the bot switch: only tables that allow bots
  * ask), so a dealing room that was never told of a change (the admin's fan-out did not reach it, and its occupancy did
- * not change) learns of it before its next hand; the time bank policy is read back the same way. `bots` is how many
+ * not change) learns of it before its next hand; the time bank and social policies are read back the same way. `bots` is how many
  * table bots were dealt in: hands with bots are kept apart from members-only play in statistics. `timeBank` is the
  * hand's time bank counters (added to the day's statistics only with the hand's first write).
  */
@@ -280,13 +286,13 @@ export async function recordHand(
   rec: HandRecord,
   engineLog: unknown,
   opts: { bots?: number; botPolicy?: boolean; timeBank?: Partial<Record<TimeBankMetric, number>> } = {},
-): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null; timeBank: TimeBankPolicy | null }> {
+): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null; timeBank: TimeBankPolicy | null; social: SocialPolicy | null }> {
   const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
   const policy = opts.botPolicy ? [d1.prepare(`SELECT (${BOT_POLICY_ON}) AS botPolicyOn`)] : [];
   const stmts: D1PreparedStatement[] = [
     maintenanceQuery(d1, Date.now()),
     ...policy,
-    d1.prepare(`SELECT (${TIME_BANK_POLICY}) AS timeBank`),
+    d1.prepare(`SELECT (${TIME_BANK_POLICY}) AS timeBank, (${SOCIAL_POLICY_JSON}) AS social`),
     // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
     ...handStatsIncrements(d1, statsDay(rec.endedAt), rec.handId, opts.timeBank ?? {}),
     d1
@@ -330,10 +336,12 @@ export async function recordHand(
   } catch (e) {
     console.error('hand stats failed', tableId, rec.handId, e);
   }
+  const policies = results[1 + policy.length]?.results[0] as { timeBank?: unknown; social?: unknown } | undefined;
   return {
     maintenance: toMaintenance(results[0]?.results[0] as Maintenance | undefined),
     botPolicyOn: policy.length ? Number((results[1]?.results[0] as { botPolicyOn?: unknown } | undefined)?.botPolicyOn) === 1 : null,
-    timeBank: toTimeBankPolicy((results[1 + policy.length]?.results[0] as { timeBank?: unknown } | undefined)?.timeBank),
+    timeBank: toTimeBankPolicy(policies?.timeBank),
+    social: toSocialPolicy(policies?.social),
   };
 }
 

@@ -98,9 +98,12 @@ export function TablePage() {
   if (picked || pickedBot || reporting) social.current = true;
   // Table chat from players I muted on this device or blocked; it hides their lines for me only.
   const hiddenChat = useHiddenChat(me?.id);
-  // Quick reactions: off in the settings, none show and none can be sent; muted or blocked players' are not shown.
-  const reactSender = useReactionSender(sock.send);
-  const reactions = useMemo(() => (prefs.reactions ? sock.reactions.filter((r) => !hiddenChat.has(r.userId)) : []), [prefs.reactions, sock.reactions, hiddenChat]);
+  // Quick reactions: off in the settings or by the social policy (`reactions: null`), none show and none can be sent;
+  // muted or blocked players' are not shown.
+  const reactRules = s?.reactions;
+  const reactOn = prefs.reactions && reactRules !== null;
+  const reactSender = useReactionSender(sock.send, reactRules ?? undefined);
+  const reactions = useMemo(() => (reactOn ? sock.reactions.filter((r) => !hiddenChat.has(r.userId)) : []), [reactOn, sock.reactions, hiddenChat]);
   const [toast, setToast] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [topUpOpen, setTopUpOpen] = useState(false);
@@ -498,7 +501,7 @@ export function TablePage() {
                 }
                 onShow={(card) => sock.send({ t: 'show', card })}
                 reactions={reactions}
-                react={seated && prefs.reactions ? reactSender : undefined}
+                react={seated && reactOn ? reactSender : undefined}
                 nextIn={nextIn}
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}

@@ -35,6 +35,7 @@
 - 서비스 점검 예약·변경·지금 종료·취소(사유 필수, `maintenance.*` 감사 기록에 사유와 룸 반영 결과). 공지 작성·수정·내리기·삭제는 재확인 없이 감사 기록만 남는다(`service.notice.*`)
 - 회원 계정 설정 초기화·복구(기능 `settings`, 아래 "계정 설정 동기화 관리")
 - 시간 은행 정책 변경(최고 관리자만)과 테이블 타이머 복구(기능 `tableControl`). 둘 다 사유가 필요하고 `timebank.policy`(변경 전후, 적용 경계, 반영한 룸 수)·`table.timer_recover`로 남는다(아래 "시간 은행 관리")
+- 소셜 정책 변경(빠른 반응 켜기·간격·횟수, 운영진 표시, 최고 관리자만). 사유가 필요하고 `social.policy`(변경 전후, 회원에게 바뀌는 것, 반영한 룸 수)로 남는다(아래 "소셜 운영")
 
 ## 계정 설정 동기화 관리
 
@@ -66,9 +67,30 @@
 - **감사 기록**: `timebank.policy` `{from, to, reason, appliesFrom, rooms{tables, reached, more}}`, `table.timer_recover`. 거절(409·400·403)은 `timebank.policy.failed`·`table.timer_recover.failed`로 남는다. 조회(`GET /time-bank`)는 회원 정보가 없어 남기지 않는다.
 - **운영 통계**: 날짜별 사용 횟수(`tb_use`), 사용한 초(`tb_sec`), 남은 시간 부족 거절(`tb_empty`), 더한 시간까지 다 쓴 타임아웃(`tb_expired`), 알람이 5초 넘게 늦은 타임아웃(`tb_late`), 타이머 복구(`tb_recover`). 운영 통계의 "시간 은행" 카드와 정책 화면의 기간별 표에 보인다. 회원별 수치는 없다.
 
+## 소셜 운영
+
+`apps/api/src/routes/admin-social.ts`, 콘솔은 "테이블 → 소셜 운영"(`apps/admin/src/pages/Social.tsx`, 메뉴를 새로 만들지 않고 테이블 화면의 링크)과 테이블 상세 "턴 타이머" 패널의 정책 버전 표시.
+
+- **정책(최고 관리자만)**: 빠른 반응 켜기, 회원당 반응 간격(0.5–30초), 구간 안 최대 횟수(1–20회)와 구간(5–300초), 다른 회원에게 최고 관리자 표시·관리자 표시를 보일지. 버전으로 쌓이고(`social_policies`, 최근 20개를 변경 이력으로) 마이그레이션 0028이 이전 동작과 같은 버전 1(켜짐, 2초, 30초 5회, 두 표시 모두 보임)을 넣는다. 정책 행이 없거나 읽을 수 없으면 모든 읽는 쪽이 같은 기본값(`SOCIAL_DEFAULTS`)을 쓴다.
+- **표시 숨김의 범위**: 숨기면 회원이 보는 응답(좌석·테이블 채팅·로비의 방장·게시판 글과 댓글·친구 목록·핸드 기록과 리플레이)에서 그 역할의 `role`을 뺀다. 역할 자체·권한·관리자 콘솔(회원 목록·게시판 관리 등은 실제 역할을 그대로 보여 줌)은 바뀌지 않고, 운영진 차단·신고 규칙(`block_staff`·`report_super_admin`)도 실제 역할로 정한다. 저장된 채팅 줄과 좌석은 역할을 가지고 있으므로 다시 보이게 하면 돌아온다. 회원 한 명의 표시를 따로 바꾸는 경로는 없다(역할은 여전히 `POST /users/:id/role`로만).
+- **적용 시점**: api 응답은 다음 요청부터(운영진이 들어 있는 응답에서만 요청당 한 번 D1을 읽는다). 룸은 저장 직후 연결이 있는 열린·종료 중 테이블(연결 많은 순 최대 100곳)이 다시 읽고(한 번 더 시도), 물은 곳·답한 곳·답하지 않은 곳을 화면과 감사 기록에 남긴다. 답하지 않았거나 100곳 밖의 룸은 다음 핸드를 기록할 때(같은 D1 batch) 읽는다. 표시가 바뀌면 룸이 화면의 채팅을 다시 보내고 좌석은 다음 상태부터 바뀐다.
+- **미리보기·재확인·사유·동시 수정**: `preview: true`로 정책 전 → 후, 회원에게 바뀌는 것(반응 켜짐·꺼짐, 제한 변경, 새로 보이거나 숨는 표시), 다시 읽힐 테이블 수(100곳 넘으면 표시)를 먼저 보여 주고, 저장은 비밀번호 재확인과 사유(2–200자)를 받는다. 요청은 관리자가 보던 `baseVersion`을 담고, 그 사이 다른 관리자가 저장했으면 409 `social_policy_conflict`(지금 정책을 `details.policy`로). 쓰기도 "최신 버전이 그대로일 때만" 넣는 한 문장이라 동시에 눌러도 하나만 저장된다. 바뀐 값이 없으면 400 `social_no_change`.
+- **회원 안내**: 서비스 전체에 같게 적용되는 표시 규칙이라 회원별 쪽지를 보내지 않는다(테이블 화면의 반응 버튼이 바로 꺼지거나 새 간격을 따른다).
+- **감사 기록**: `social.policy` `{from, to, reason, effects{reactions, limits, badgesShown, badgesHidden}, appliesFrom, rooms{tables, reached, more}}`. 거절(409·400·403)은 `social.policy.failed`. 조회(`GET /social`)는 회원 정보가 없어 남기지 않는다.
+- **권한**: 조회는 기능 `social`(스위치 `tables`, 테이블 업무), 변경은 능력 `social.policy`(최고 관리자, 스위치로 넘겨줄 수 없음).
+
+## 브랜드 상태
+
+`apps/api/src/routes/admin-brand.ts`·`apps/api/src/lib/brand.ts`, 콘솔은 "서비스 → 브랜드 상태"(`apps/admin/src/pages/Brand.tsx`, 서비스 화면의 링크).
+
+- **읽기 전용**: 이 배포가 링크 미리보기 크롤러와 설치하려는 브라우저에 주는 것을 Worker 안에서 검사한다. 공유 페이지(홈 한국어·영어, 가입, 공개 게시글·공개 테이블이 있으면 그것, 비공개 테이블이 자기 정보를 드러내지 않는지)는 크롤러에 답하는 코드(`og.ts` `sharePageResponse`)를 그대로 거치고, 이미지·manifest·아이콘·`index.html`은 정적 자산(ASSETS)에서 읽는다. 외부로 요청하지 않으므로 카카오톡·페이스북이 예전 미리보기를 캐시했는지는 알 수 없고, 각 서비스의 디버거(카카오 공유 디버거, Facebook Sharing Debugger) 링크만 준다. 바꾸는 API는 없다(미리보기 이미지·문구는 코드에서 바꿔 배포).
+- **검사 항목**: 페이지마다 응답(200, HTML), 필요한 메타 태그 17개(`REQUIRED_TAGS`)와 `<title>`의 유무, `og:`·`twitter:` 태그 중복, `og:url`·`canonical`이 그 페이지 주소인지, `og:image`가 서비스 이미지 주소인지, 태그의 이미지 크기 1200×630, `twitter:card` `summary_large_image`, `<html lang>`, 비공개 테이블은 사이트 기본 문구만. `index.html`의 미리보기 블록 표시(`og:begin`·`og:end`)와 기본 블록이 코드와 같은지. 이미지 응답(200, `image/png`, 실제 픽셀 1200×630, 8MB 이하, 같은 사이트 주소). manifest 응답·형식, 필수 항목·표시 방식·192·512 아이콘·maskable·테마 색, `index.html`의 manifest·`apple-touch-icon` 링크, https, 아이콘 파일 응답과 실제 크기, 서비스 워커 없음(결정 사항이라 '참고'로 표시).
+- **이미지 미리보기**: 콘솔의 CSP가 자기 출처 이미지만 허용하므로 `GET /brand/og-image`가 정적 자산의 이미지를 그대로 돌려준다(api 전체의 `cache-control: no-store`).
+- **감사·권한**: 조회는 기능 `brand`(스위치 `maintenance`, 서비스 상태와 같은 업무), 재확인 없음, 회원 정보가 없어 성공 조회는 남기지 않는다(거절은 `brand.view.failed`·`brand.og_image.failed`). 서비스 화면은 `maintenance`가 꺼진 관리자에게 링크를 보이지 않는다.
+
 ## 권한 매트릭스
 
-- 모든 관리자 API(`/api/admin/*`, 로그인·재확인 `/auth` 제외)는 `apps/api/src/lib/permissions.ts`의 `ROUTE_RULES`에 규칙이 하나씩 있다. 규칙은 기능(30개), 감사 이름, 최소 역할(ADMIN 또는 SUPER_ADMIN), 재확인 여부, 미리보기 지원 여부를 정한다. `requirePermission`이 라우트 실행 전에 역할 → 기능 스위치(아래 "관리자별 기능 권한") → 재확인 순서로 적용하고, **규칙이 없는 라우트는 403 `no permission rule for this action`으로 닫힌다**(새 라우트를 만들고 규칙을 빠뜨리면 열리지 않는다). 단위 테스트가 실제 라우트 목록과 표를 맞춰 본다.
+- 모든 관리자 API(`/api/admin/*`, 로그인·재확인 `/auth` 제외)는 `apps/api/src/lib/permissions.ts`의 `ROUTE_RULES`에 규칙이 하나씩 있다. 규칙은 기능(32개), 감사 이름, 최소 역할(ADMIN 또는 SUPER_ADMIN), 재확인 여부, 미리보기 지원 여부를 정한다. `requirePermission`이 라우트 실행 전에 역할 → 기능 스위치(아래 "관리자별 기능 권한") → 재확인 순서로 적용하고, **규칙이 없는 라우트는 403 `no permission rule for this action`으로 닫힌다**(새 라우트를 만들고 규칙을 빠뜨리면 열리지 않는다). 단위 테스트가 실제 라우트 목록과 표를 맞춰 본다.
 - 요청 내용에 따라 달라지는 권한은 능력(capability)으로 이름을 붙였고, 지금은 모두 슈퍼관리자 전용이다.
 
 | 능력 | 뜻 |
@@ -85,6 +107,7 @@
 | `bots.policy` | 테이블 봇 정책(켜기·기금 한도·최대 봇 수) 변경과 긴급 중지 뒤 다시 켜기(중지는 기능 `bots`가 있는 관리자 누구나). 테이블별 봇 설정은 테이블 수정 권한을 따른다 |
 | `referral.policy` | 추천 보상 정책(켜기·보상액·한도·필요 핸드 수·검토 기준) 변경과 지급 일시중지 해제(중지·승인·거절·다시 정산은 기능 `referral`이 있는 관리자 누구나) |
 | `timebank.policy` | 시간 은행 정책(켜기·회원 방·처음 지급·최대 보유·한 번 사용·보충) 변경. 조회는 기능 `tables`, 타이머 복구는 기능 `tableControl`이 있는 관리자 누구나 |
+| `social.policy` | 소셜 정책(빠른 반응 켜기·간격·횟수, 최고 관리자·관리자 표시) 변경. 조회는 기능 `social`(스위치 `tables`)이 있는 관리자 누구나 |
 | `tournament.structure` | 대회 템플릿(구조) 만들기·바꾸기·보관. 개별 대회 열기·진행 제어는 기능 `tournaments`가 있는 관리자 누구나 |
 | `admins.grants` | 관리자별 기능 스위치 보기·바꾸기(아래). 스위치로 넘겨줄 수 없다 |
 
@@ -95,7 +118,7 @@
 ## 관리자별 기능 권한
 
 - **유효 권한 = 역할이 허용하는 범위(위 표) ∩ 최고관리자가 켜 둔 기능 스위치.** 스위치는 관리자마다 D1 `admin_permissions`(관리자 ID, 켜진 스위치 JSON, 버전, 바꾼 사람·시각)에 저장하고, 서버가 요청마다 읽는다(요청 안에서 한 번). 최고관리자는 모든 스위치가 켜진 것으로 보고 스위치가 없다. 일반 관리자는 행이 없거나 목록에 없는 기능이 모두 꺼져 있다(**기본 거부**). 나중에 코드에 더하는 스위치도 최고관리자가 켜기 전까지 꺼져 있다.
-- **스위치(23개, `GRANTS`)**: 대시보드 조회(`dashboard`), 회원 조회(`members`, 회원 메모 포함), 회원 정지·해제(`sanctions`), 회원 강제 연결 종료(`disconnect`), 신고 조회·처리(`reports`), 게시판 관리(`board`), 공지 발송(`notices`), 쪽지 발송(`messages`), 테이블 생성·수정(`tables`), 테이블 긴급 제어(`tableControl`, 종료·타이머 복구 포함), 소액 칩 조정(`chips`), 원장 조회(`ledger`), 경제 통계(`economy`), 운영 통계(`stats`, 아카데미 통계 포함), 추천인 운영(`referral`), 봇 운영(`bots`), 그리고 기존 기능인 대회 진행(`tournaments`), 무료 칩 보충(`refill`), 핸드 기록(`hands`, 종료 핸드 카드 열람 포함), 정합성 점검(`reconcile`), 계정 설정 진단(`settings`), 재설정 링크(`resetLinks`), 점검 공지(`maintenance`).
+- **스위치(23개, `GRANTS`)**: 대시보드 조회(`dashboard`), 회원 조회(`members`, 회원 메모 포함), 회원 정지·해제(`sanctions`), 회원 강제 연결 종료(`disconnect`), 신고 조회·처리(`reports`), 게시판 관리(`board`), 공지 발송(`notices`), 쪽지 발송(`messages`), 테이블 생성·수정(`tables`, 소셜 정책 조회 포함), 테이블 긴급 제어(`tableControl`, 종료·타이머 복구 포함), 소액 칩 조정(`chips`), 원장 조회(`ledger`), 경제 통계(`economy`), 운영 통계(`stats`, 아카데미 통계 포함), 추천인 운영(`referral`), 봇 운영(`bots`), 그리고 기존 기능인 대회 진행(`tournaments`), 무료 칩 보충(`refill`), 핸드 기록(`hands`, 종료 핸드 카드 열람 포함), 정합성 점검(`reconcile`), 계정 설정 진단(`settings`), 재설정 링크(`resetLinks`), 점검 공지(`maintenance`, 브랜드 상태 조회 포함). 0028에서 기능 `social`·`brand`를 더했지만 새 스위치는 만들지 않고 같은 업무의 스위치에 붙였다(기존 관리자는 스위치를 다시 켜지 않아도 배포 직후 새 화면을 본다).
 - **넘겨줄 수 없는 것**: 관리자 권한 설정(`admins.grants`), 최고관리자 지정·강등(`roles.change`), 관리자·최고관리자 제재(`admins.manage`), 고액 칩 조정(`chips.large`), 원장 정합성 직접 보정(`ledger.correct`), 회원 정보 대량 내보내기(`members.export`), 각종 정책 변경(`*.policy`, `tournament.structure`)은 능력(역할)으로만 정해지고 스위치가 없다. 시스템 비밀(Cloudflare secret, 메일 키 등)은 콘솔 API가 아예 없다. 감사 로그(자기 기록)와 보안 화면(자기 세션·권한)은 모든 관리자에게 항상 열려 있다.
 - **거절**: 역할 밖이면 403 `forbidden`(`super admin only`), 역할은 되지만 스위치가 꺼져 있으면 403 `permission_off`(`this feature is turned off for your account`). 미리보기도 똑같이 거절하고, 둘 다 `<action>.failed`로 실패 감사에 남는다(요청 본문은 남기지 않는다). 한 라우트가 여러 기능의 정보를 돌려주면 라우트가 직접 나눈다: 회원 상세는 `ledger`가 꺼지면 원장, `reports`가 꺼지면 최근 신고를 빼고 `hidden`에 적으며, 회원 이력은 신고 항목을 뺀다. 테이블 수정으로 입장을 막는 것(`entryBlocked`)은 긴급 제어와 같아서 `tableControl`과 재확인을 함께 요구한다.
 - **바꾸기(최고관리자만)**: `GET /api/admin/security/admins`(닉네임·ID 검색, 역할 필터, 서버 페이지, 이메일 없음), `GET /api/admin/security/admins/:id`(스위치·버전·기능별 실제 권한·변경 이력, 이력에 IP 없음), `PUT /api/admin/security/admins/:id/grants` `{grants, baseVersion, reason, preview?}`. 본인(400 `cannot change your own permissions`), 최고관리자·회원(409 `not_plain_admin`), 그 사이 다른 최고관리자가 저장한 경우(409 `admin_grants_conflict`, 지금 스위치·버전을 `details`로), 바뀐 것이 없는 경우(400 `admin_grants_no_change`)는 거절한다. 미리보기는 켜지고 꺼지는 스위치와 쓸 수 있는 작업 수 전 → 후를 보여 주고 아무것도 쓰지 않는다. 저장은 비밀번호 재확인과 사유(2–200자)를 받고, "아직 일반 관리자이고 버전이 그대로일 때만" 쓰는 한 문장이라 동시에 저장해도 하나만 된다.
@@ -108,7 +131,7 @@
 
 ## 변경 미리보기
 
-회원 정지·해제·강제 연결 종료·권한 변경·칩 조정, 테이블 종료와 신고 처리(B9), 무료 칩 보충 정책 변경, 테이블 봇 정책 변경, 추천 보상 정책 변경, 시간 은행 정책 변경, 회원 계정 설정 초기화·복구는 실행 전에 무엇이 바뀌는지 먼저 보여 준다. 같은 라우트에 `preview: true`를 보내면 아무것도 쓰지 않고 다음을 돌려준다.
+회원 정지·해제·강제 연결 종료·권한 변경·칩 조정, 테이블 종료와 신고 처리(B9), 무료 칩 보충 정책 변경, 테이블 봇 정책 변경, 추천 보상 정책 변경, 시간 은행 정책 변경, 소셜 정책 변경, 회원 계정 설정 초기화·복구는 실행 전에 무엇이 바뀌는지 먼저 보여 준다. 같은 라우트에 `preview: true`를 보내면 아무것도 쓰지 않고 다음을 돌려준다.
 
 | 작업 | 미리보기 |
 |---|---|
@@ -122,6 +145,7 @@
 | 테이블 봇 정책 | 정책 전 → 후, 적용 시점(테이블마다 핸드 사이, 진행 중 핸드는 그대로), 봇을 허용한 테이블 수, 지금 앉은 봇 수, 발행한 기금과 남는 한도 |
 | 추천 보상 정책 | 정책 전 → 후, 적용 시점(보상액·필요 핸드 수는 다음 가입부터, 한도는 다음 지급부터, 이미 받아들인 추천은 가입 당시 약속대로), 지금 지급·검토 대기 중인 추천 수 |
 | 시간 은행 정책 | 정책 전 → 후, 적용 경계(각 테이블의 다음 핸드부터, 진행 중인 턴의 마감 시각은 그대로), 바뀌는 테이블 수와 그중 지금 핸드를 진행 중인 수, 최대를 낮춰 줄어들 남은 시간이 있는지 |
+| 소셜 정책 | 정책 전 → 후, 회원에게 바뀌는 것(반응 켜짐·꺼짐, 간격·횟수 변경, 새로 보이거나 숨는 운영진 표시), 적용 시점(api는 다음 요청부터, 룸은 저장 직후 다시 읽음), 다시 읽힐 테이블 수(100곳 초과 여부) |
 | 계정 설정 초기화 | 기본값으로 돌아갈 설정 수(7개 중)와 즐겨찾기 수, 착석한 테이블 수(자동 머크 반영), 복구 가능 기간(되돌릴 것이 없으면 복구 불가 안내), 기기별 설정은 그대로, 회원 쪽지 |
 | 계정 설정 복구 | 언제의 초기화를 되돌리는지, 돌아올 설정 수와 즐겨찾기 수, 착석한 테이블 수, 다시 복구할 수 없음 |
 | 신고 처리 | 함께 닫힐 같은 대상의 열린 신고 수, 결과 쪽지를 받을 신고자 수(탈퇴 제외)와 대상 회원 안내 여부, 실제로 숨겨질 공개 글·댓글이 있는지 |
@@ -191,7 +215,7 @@ service.notice.create, service.notice.update, service.notice.end, service.notice
 maintenance.schedule, maintenance.update, maintenance.end, maintenance.cancel,
 board.post.status, board.comment.status, message.send,
 report.view, report.resolved, report.dismissed, report.severity, report.assign, report.note,
-settings.reset, settings.restore, timebank.policy, table.timer_recover, tournament.create, tournament.registration, tournament.start, tournament.cancel, tournament.pause, tournament.resume, tournament.abort, tournament.recover, tournament_template.create, tournament_template.update, tournament_template.status
+settings.reset, settings.restore, timebank.policy, table.timer_recover, social.policy, tournament.create, tournament.registration, tournament.start, tournament.cancel, tournament.pause, tournament.resume, tournament.abort, tournament.recover, tournament_template.create, tournament_template.update, tournament_template.status
 ```
 
 조회도 남긴다. `user.list`(회원 목록·검색: 검색어, 필터, 정렬, 건수), `user.view`(회원 상세: 생년월일·동의 기록 포함), `report.view`(신고 목록: 1:1 메시지 신고 ID 포함)는 화면을 열 때마다 1행씩 쌓인다. 1:1 대화를 읽는 관리자 API는 없고, 관리자가 보는 1:1 메시지는 신고 증거뿐이다. 보관 기간은 정하지 않았다(`docs/PRIVACY_OPERATIONS.md` 5·9절). 회원 상세의 "관리 이력·메모"는 이 감사 로그(그 회원 대상의 제재·권한·칩·재설정 링크·메모 삭제와 그 회원에 대한 신고 결정)와 메모를 시간순으로 보여 준다. 최근 참여 테이블과 신고 건수는 상세 조회(`user.view`)에 함께 담기고, 기간별 활동(`/activity`)과 이력(`/timeline`) 조회는 따로 기록하지 않는다(콘솔은 상세를 연 뒤에만 부른다).

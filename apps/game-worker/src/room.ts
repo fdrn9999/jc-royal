@@ -21,9 +21,10 @@ import {
   MEMBER_IDLE_CLOSE_MS,
   PLAYER_REPORT_WINDOW_MS,
   publicRole,
-  REACTION_BURST,
   REACTION_SLACK_MS,
+  reactionRulesOf,
   reactionWait,
+  shownRole,
   TIME_BANK_MIN_USE_MS,
   timeBankRulesFor,
   tournamentTimeBankRules,
@@ -38,6 +39,7 @@ import {
   type PublicRole,
   type SeatView,
   type ServerMessage,
+  type SocialPolicy,
   type TableCue,
   type TableView,
   type TimeBankRules,
@@ -600,7 +602,10 @@ export class TableRoom extends DurableObject<Env> {
             const read = ++this.maintReads;
             const { table: t, maintenance } = await loadTable(this.env.DB, tableId);
             if (t) {
+              const social = this.table?.social;
               this.table = t;
+              // Quick reactions or staff badges changed: the views broadcast below show them, the chat is sent again.
+              this.takeSocial(social, t.social);
               // Maintenance an admin planned, moved or ended (this broadcast and afterChange show it and deal again).
               this.takeMaint(maintenance, read);
               // A tournament's pause or resume (from the next hand), or its abort (which comes with the close below).
@@ -693,7 +698,7 @@ export class TableRoom extends DurableObject<Env> {
     const connected = this.connectedUsers();
     connected.add(identity.userId);
     this.send(server, { t: 'state', state: this.view(attachment, connected), cues: [] });
-    this.send(server, { t: 'chatHistory', messages: this.chat });
+    this.send(server, { t: 'chatHistory', messages: this.chat.map((l) => this.shownLine(l)) });
     // Others see the (re)connection.
     this.broadcast();
     return new Response(null, { status: 101, webSocket: client });
@@ -799,19 +804,22 @@ export class TableRoom extends DurableObject<Env> {
         const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, ...(role ? { role } : {}), text: msg.text, at: now };
         this.chat = [...this.chat, line].slice(-CHAT_HISTORY);
         await this.ctx.storage.put('chat', this.chat);
-        for (const s of this.sockets()) this.send(s, { t: 'chat', message: line });
+        const shown = this.shownLine(line);
+        for (const s of this.sockets()) this.send(s, { t: 'chat', message: shown });
         return this.ack(ws, msg.reqId);
       }
       case 'react': {
         // Shown for a moment and gone: nothing is stored, and nothing about the hand or the seat changes.
+        const rules = reactionRulesOf(t.social);
+        if (!rules) throw new CommandError('reactions_off', 'quick reactions are off');
         const i = this.seatIndexOf(a.userId);
         if (i === null || this.room.seats[i]!.phase !== 'seated') throw new CommandError('forbidden', 'not seated');
         const now = Date.now();
         const times = this.reactedAt.get(a.userId) ?? [];
-        if (reactionWait(times, now) > REACTION_SLACK_MS) throw new CommandError('rate_limited', 'slow down');
-        this.reactedAt.set(a.userId, [...times.filter((at) => now - at < REACTION_BURST.windowMs), now]);
+        if (reactionWait(times, now, rules) > REACTION_SLACK_MS) throw new CommandError('rate_limited', 'slow down');
+        this.reactedAt.set(a.userId, [...times.filter((at) => now - at < rules.burstWindowMs), now]);
         if (this.reactedAt.size > 100) {
-          for (const [u, ts] of this.reactedAt) if (now - ts[ts.length - 1]! >= REACTION_BURST.windowMs) this.reactedAt.delete(u);
+          for (const [u, ts] of this.reactedAt) if (now - ts[ts.length - 1]! >= rules.burstWindowMs) this.reactedAt.delete(u);
         }
         for (const s of this.sockets()) this.send(s, { t: 'react', seatIndex: i, userId: a.userId, reaction: msg.reaction, at: now });
         return this.ack(ws, msg.reqId);
@@ -2363,6 +2371,8 @@ export class TableRoom extends DurableObject<Env> {
         if (r && r.botPolicyOn !== null && this.table) this.table.botPolicyOn = r.botPolicyOn;
         // A time bank policy the admin's fan-out did not bring here applies from the next hand all the same.
         if (r && this.table) this.table.timeBank = r.timeBank;
+        // So does a social policy (reactions, staff badges): the next view sent shows it.
+        if (r && this.table) this.takeSocial(this.table.social, r.social);
       } catch (e) {
         this.fault('recordHand failed; will retry', e);
         return;
@@ -2554,6 +2564,8 @@ export class TableRoom extends DurableObject<Env> {
         kept: Object.values(this.room.banks ?? {}).filter((b) => now - b.at < BANK_KEEP_MS).length,
         handUses: live && this.room.tbCount?.handId === h!.handId ? (this.room.tbCount.n.tb_use ?? 0) : 0,
       },
+      // The social policy version this room last read (null: none, the defaults) and whether reactions are taken here.
+      social: { policyVersion: t.social?.version ?? null, reactions: !!reactionRulesOf(t.social) },
       waitlist: this.room.waitlist.length,
       paused: t.handsPaused,
       maintenance: this.maint ? { ...this.maint, active: this.inMaintenance(now) } : null,
@@ -2610,13 +2622,15 @@ export class TableRoom extends DurableObject<Env> {
       // Only the chosen positions carry a card: the other one stays unknown to everybody but its owner.
       const picked = !revealed.has(i) ? shown[s.userId] : undefined;
       const dealt = picked?.length ? h!.holeCardsOf(s.userId) : null;
+      // A staff badge the social policy hides is left out; the seat keeps the role.
+      const role = shownRole(s.role, t.social);
       return {
         seatIndex: i,
         state,
         userId: s.userId,
         nickname: s.nickname,
         avatarUrl: s.avatarUrl,
-        ...(s.role ? { role: s.role } : {}),
+        ...(role ? { role } : {}),
         // Once the hand is settled the seat holds its final stack plus any top-up made since.
         stack: hi && !h!.isSettled ? hi.stack : s.stack,
         streetBet: hi?.streetBet ?? 0,
@@ -2674,6 +2688,7 @@ export class TableRoom extends DurableObject<Env> {
       paused: t.handsPaused,
       maintenance: this.maint ? { ...this.maint, active: this.inMaintenance() } : null,
       timeBank: publicRules(h && !h.isSettled ? (this.room.bankRules ?? null) : this.nextBankRules()),
+      reactions: reactionRulesOf(t.social),
       tournament: tv,
       you: {
         userId: a.userId,
@@ -2706,6 +2721,25 @@ export class TableRoom extends DurableObject<Env> {
   private muckOf(h: HandEngine): ReadonlySet<string> {
     const m = this.room.muck;
     return new Set(m && m.handId === h.handId ? m.ids : []);
+  }
+
+  /** A chat line as players see it: a staff badge the social policy hides is left out (the stored line keeps its role). */
+  private shownLine(l: ChatMessage): ChatMessage {
+    if (!l.role || shownRole(l.role, this.table?.social)) return l;
+    const { role: _hidden, ...rest } = l;
+    return rest;
+  }
+
+  /**
+   * A social policy read from D1 (an admin's reload, a hand record). When it shows or hides a staff badge, the chat
+   * lines already on screen are sent again with the new display; seats show it with the next view.
+   */
+  private takeSocial(before: SocialPolicy | null | undefined, next: SocialPolicy | null) {
+    if (this.table) this.table.social = next;
+    const badges = (p: SocialPolicy | null | undefined) => `${!!shownRole('admin', p)}:${!!shownRole('super_admin', p)}`;
+    if (badges(before) === badges(next) || !this.chat.some((l) => l.role)) return;
+    const messages = this.chat.map((l) => this.shownLine(l));
+    for (const s of this.sockets()) this.send(s, { t: 'chatHistory', messages });
   }
 
   /** Puts the staff role of `users.role` on the member's seat, if they have one here. True when the seat changed. */

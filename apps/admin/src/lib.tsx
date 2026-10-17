@@ -112,6 +112,8 @@ const BY_CODE: Record<string, Key> = {
   time_bank_policy_conflict: 'errTimeBankConflict',
   time_bank_no_change: 'errTimeBankNoChange',
   time_bank_invalid: 'errTimeBankInvalid',
+  social_policy_conflict: 'errSocialConflict',
+  social_no_change: 'errSocialNoChange',
   tournament_not_found: 'errTnNotFound',
   tournament_conflict: 'errTnConflict',
   tournament_state: 'errTnState',

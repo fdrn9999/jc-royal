@@ -9,22 +9,31 @@ export const AUTO_REBUY_MAX_TIMES = 5;
 export const REACTIONS = ['clap', 'laugh', 'cry', 'wow', 'cool', 'fire', 'heart', 'gg'] as const;
 export type ReactionId = (typeof REACTIONS)[number];
 export const REACTION_EMOJI: Record<ReactionId, string> = { clap: '👏', laugh: '😂', cry: '😭', wow: '😮', cool: '😎', fire: '🔥', heart: '❤️', gg: '🤝' };
-/** At least this long between two reactions from one player. */
+/** At least this long between two reactions from one player (the default; the social policy sets it). */
 export const REACTION_COOLDOWN_MS = 2_000;
-/** And at most `max` of them in any `windowMs`. */
+/** And at most `max` of them in any `windowMs` (the default; the social policy sets it). */
 export const REACTION_BURST = { max: 5, windowMs: 30_000 } as const;
 /** The room forgives this much early arrival: two taps the client spaced correctly can reach it a little closer. */
 export const REACTION_SLACK_MS = 300;
 
+/** How fast one seated player may send reactions: `cooldownMs` apart, and at most `burstMax` in any `burstWindowMs`. */
+export interface ReactionRules {
+  cooldownMs: number;
+  burstMax: number;
+  burstWindowMs: number;
+}
+/** The limits before the social policy existed, and for a room or a policy that does not say. */
+export const DEFAULT_REACTION_RULES: ReactionRules = { cooldownMs: REACTION_COOLDOWN_MS, burstMax: REACTION_BURST.max, burstWindowMs: REACTION_BURST.windowMs };
+
 /**
- * Milliseconds until a player who sent reactions at `times` (oldest first) may send another at `now` (0: now). The room
- * and the client apply the same rule: the client so that a tap the room would refuse is not offered.
+ * Milliseconds until a player who sent reactions at `times` (oldest first) may send another at `now` (0: now), under
+ * `rules`. The room and the client apply the same rule: the client so that a tap the room would refuse is not offered.
  */
-export function reactionWait(times: readonly number[], now: number): number {
-  const recent = times.filter((at) => now - at < REACTION_BURST.windowMs);
+export function reactionWait(times: readonly number[], now: number, rules: ReactionRules = DEFAULT_REACTION_RULES): number {
+  const recent = times.filter((at) => now - at < rules.burstWindowMs);
   const last = recent[recent.length - 1];
-  const cooldown = last === undefined ? 0 : last + REACTION_COOLDOWN_MS - now;
-  const burst = recent.length >= REACTION_BURST.max ? recent[recent.length - REACTION_BURST.max]! + REACTION_BURST.windowMs - now : 0;
+  const cooldown = last === undefined ? 0 : last + rules.cooldownMs - now;
+  const burst = recent.length >= rules.burstMax ? recent[recent.length - rules.burstMax]! + rules.burstWindowMs - now : 0;
   return Math.max(0, cooldown, burst);
 }
 
@@ -145,6 +154,8 @@ export type ErrorCode =
   | 'time_bank_empty'
   /** A tournament table: no sitting down, leaving, topping up, rebuying or waitlist (docs/TOURNAMENT.md). */
   | 'tournament_table'
+  /** Quick reactions are off service-wide (the social policy). */
+  | 'reactions_off'
   | 'internal';
 
 /**

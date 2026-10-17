@@ -106,6 +106,10 @@ export const TABLES: TestTable[] = [
   // Time bank: heads-up with long turns, so only the bank moves a deadline; and a short turn that still runs out.
   ...Array.from({ length: 5 }, (_, i) => ({ id: `it-tb-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-tb-fast', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 3 },
+  // Social policy: reactions turned off and limited while players sit; a staff member's badge hidden and shown again
+  // (heads-up, so one fold ends a hand for the history).
+  { id: 'it-social-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  { id: 'it-social-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {

@@ -809,6 +809,26 @@ export const timeBankPolicies = sqliteTable('time_bank_policies', {
 });
 
 /**
+ * Social policy (packages/types/src/social.ts SocialSettings), one row per version and never changed: the newest row is
+ * in force. Quick reactions (on, and how fast one seated player may send them) and which staff roles carry their badge
+ * next to their name. Rooms read it with the table; the api reads it when a reply would show a staff role. No row at
+ * all means what the service did before it existed (SOCIAL_DEFAULTS: reactions on at the old limits, both badges shown).
+ */
+export const socialPolicies = sqliteTable('social_policies', {
+  version: integer('version').primaryKey(),
+  reactionsEnabled: integer('reactions_enabled', { mode: 'boolean' }).notNull(),
+  reactionCooldownMs: integer('reaction_cooldown_ms').notNull(),
+  reactionBurstMax: integer('reaction_burst_max').notNull(),
+  reactionBurstWindowMs: integer('reaction_burst_window_ms').notNull(),
+  showSuperAdmin: integer('show_super_admin', { mode: 'boolean' }).notNull(),
+  showAdmin: integer('show_admin', { mode: 'boolean' }).notNull(),
+  change: text('change', { enum: ['seed', 'policy'] }).notNull(),
+  actorId: text('actor_id'),
+  reason: text('reason'),
+  createdAt: integer('created_at').notNull().default(now),
+});
+
+/**
  * Referral rewards policy (apps/api/src/lib/referral.ts), one row per version and never changed: the newest row is in
  * force. A signup with a code is accepted under the version in force then (its amounts and conditions are copied onto
  * the referral); `paused` holds payouts without closing anything; the caps are read when a referrer side is paid.

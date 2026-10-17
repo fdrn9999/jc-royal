@@ -145,6 +145,7 @@ const ko = {
   'err.illegal_action': '지금은 할 수 없는 액션입니다.',
   'err.stale_version': '테이블 상태가 바뀌었습니다. 다시 선택해 주세요.',
   'err.time_bank_off': '지금 이 테이블에서는 시간 은행을 쓸 수 없습니다.',
+  'err.reactions_off': '지금은 빠른 반응을 보낼 수 없습니다.',
   'err.time_bank_empty': '남은 시간 은행이 없습니다.',
   'err.duplicate': '이미 처리된 요청입니다.',
   'err.forbidden': '권한이 없습니다.',

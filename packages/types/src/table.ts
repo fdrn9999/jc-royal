@@ -1,4 +1,5 @@
 import type { Card, HandRankClass } from './cards';
+import type { ReactionRules } from './protocol';
 import type { PublicRole } from './social';
 import type { TimeBankRules } from './timebank';
 import type { TournamentTableView } from './tournament';
@@ -43,7 +44,10 @@ export interface SeatView {
   userId?: string;
   nickname?: string;
   avatarUrl?: string | null;
-  /** Staff only (see PublicRole): refreshed when the player connects and when an admin changes the role. */
+  /**
+   * Staff only (see PublicRole): refreshed when the player connects and when an admin changes the role; left out when
+   * the social policy hides that role's badge.
+   */
   role?: PublicRole;
   /**
    * A table bot of this level, not a member: it has no profile, and cannot be befriended, messaged or reported. `true`
@@ -142,6 +146,11 @@ export interface TableView {
    * knows them). Null when the time bank is off here; absent from older rooms.
    */
   timeBank?: Omit<TimeBankRules, 'version'> | null;
+  /**
+   * Quick reactions here: the limits the room holds seated players to (the social policy, as the room last read it).
+   * Null when the policy has them off (none are taken or shown); absent from older rooms, which keep the defaults.
+   */
+  reactions?: ReactionRules | null;
   /** A tournament table's tournament: levels, players left, places and the viewer's standing. Absent elsewhere. */
   tournament?: TournamentTableView | null;
   you: {

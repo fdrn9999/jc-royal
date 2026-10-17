@@ -30,7 +30,7 @@ export const adminCommunityRoutes = new Hono<AppEnv>()
     );
     const limit = paged ? Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 100) : 100;
     const offset = paged ? Math.max(Number(c.req.query('offset') ?? 0) || 0, 0) : 0;
-    const rows = await listItems(c, where, paged ? limit + 1 : limit, offset);
+    const rows = await listItems(c, where, paged ? limit + 1 : limit, offset, true);
     const items = rows.slice(0, limit);
     const statuses = await c.var.db.select({ id: schema.posts.id, status: schema.posts.status }).from(schema.posts).where(inArray(schema.posts.id, items.map((i) => i.id).concat('-')));
     const st = new Map(statuses.map((s) => [s.id, s.status]));

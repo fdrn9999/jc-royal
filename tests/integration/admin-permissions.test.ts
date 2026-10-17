@@ -97,6 +97,7 @@ describe('permission table', () => {
       'PUT /referrals/policy',
       'PUT /refill/policy',
       'PUT /security/admins/:id/grants',
+      'PUT /social/policy',
       'PUT /time-bank/policy',
       'PUT /tournament-templates/:id',
     ]);
@@ -131,7 +132,7 @@ describe('permission table', () => {
     // None of it changed the member, and the plain administrator's only records are the refused super-admin calls.
     expect(await d1(`SELECT status, role, balance, suspended_reason AS reason FROM users WHERE id = '${member.me.id}'`)).toEqual([{ status: 'active', role: 'user', balance: member.me.balance, reason: null }]);
     expect((await member.client.get('/api/auth/me')).status).toBe(200);
-    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['admin.grants.list.failed failed', 'admin.grants.update.failed failed', 'admin.grants.view.failed failed', 'bots.policy.failed failed', 'referral.policy.failed failed', 'referral.resume.failed failed', 'refill.policy.failed failed', 'refill.resume.failed failed', 'timebank.policy.failed failed', 'tournament_template.create.failed failed', 'tournament_template.status.failed failed', 'tournament_template.update.failed failed', 'user.export.failed failed', 'user.role.failed failed']);
+    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['admin.grants.list.failed failed', 'admin.grants.update.failed failed', 'admin.grants.view.failed failed', 'bots.policy.failed failed', 'referral.policy.failed failed', 'referral.resume.failed failed', 'refill.policy.failed failed', 'refill.resume.failed failed', 'social.policy.failed failed', 'timebank.policy.failed failed', 'tournament_template.create.failed failed', 'tournament_template.status.failed failed', 'tournament_template.update.failed failed', 'user.export.failed failed', 'user.role.failed failed']);
   });
 
   it('records failed changes and refusals, but not a missing password confirmation or a read that found nothing', async () => {

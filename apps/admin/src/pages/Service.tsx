@@ -1,9 +1,10 @@
 import { Badge, Button, Empty, Field, formatDate, Input, Panel } from '@jc/ui';
 import type { NoticeKind } from '@jc/types';
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useT } from '../i18n';
 import { maintStateLabel, noticeKindLabel, noticeStateLabel } from '../labels';
-import { ApiError, errText, useAdmin, useData } from '../lib';
+import { ApiError, errText, hasGrant, useAdmin, useData } from '../lib';
 import { Feedback, LoadError, Modal, type Note } from '../ui';
 
 interface NoticeRow {
@@ -427,9 +428,14 @@ function NoticesPanel() {
 
 export function ServicePage() {
   const { t } = useT();
+  const { me } = useAdmin();
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-extrabold">{t('service')}</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-extrabold">{t('service')}</h1>
+        {/* The brand check goes with maintenance (the API's permission table): a notices-only administrator is not sent to a refusal. */}
+        {hasGrant(me, 'maintenance') && <Link to="/service/brand" className="text-sm text-gold-300 hover:underline" data-testid="brand-link">{t('brManage')} →</Link>}
+      </div>
       <p className="text-xs text-ink-400">{t('serviceHint')}</p>
       <MaintenancePanel />
       <NoticesPanel />

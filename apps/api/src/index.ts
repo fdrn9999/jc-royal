@@ -2,7 +2,7 @@ import { createDb } from '@jc/db';
 import { Hono, type Context } from 'hono';
 import type { AppEnv, Env } from './env';
 import { housekeeping } from './lib/housekeeping';
-import { metaFor, metaLocale, defaultMeta, replaceMeta, type PageMeta } from './lib/og';
+import { sharePageResponse } from './lib/og';
 import { countOps } from './lib/ops';
 import { sweepReferrals } from './lib/referral';
 import { sweepRooms } from './lib/room';
@@ -54,23 +54,7 @@ app.get('/ws/tables/:id', tableSocket);
  */
 async function sharePage(c: Context<AppEnv>) {
   if (!c.env.ASSETS) return c.text('not found', 404);
-  const url = new URL(c.req.url);
-  const res = await c.env.ASSETS.fetch(new Request(new URL('/', url)));
-  if (!res.ok) return res;
-  let meta: PageMeta;
-  try {
-    meta = await metaFor(c.env.DB, url);
-  } catch (e) {
-    console.error('link preview failed', url.pathname, e instanceof Error ? e.message : String(e));
-    meta = defaultMeta(metaLocale(url));
-  }
-  const headers = new Headers(res.headers);
-  // The body differs from the file the validators describe.
-  headers.delete('etag');
-  headers.delete('content-length');
-  headers.set('content-type', 'text/html; charset=utf-8');
-  headers.set('cache-control', 'no-cache');
-  return new Response(replaceMeta(await res.text(), meta), { status: 200, headers });
+  return sharePageResponse(c.env.ASSETS, c.env.DB, new URL(c.req.url));
 }
 app.get('/', sharePage);
 app.get('/register', sharePage);

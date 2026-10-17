@@ -5,6 +5,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
+import { badgesFor, type Badge } from '../lib/badges';
 import { handReviews } from '../lib/community';
 import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
@@ -21,14 +22,18 @@ const author = {
 };
 
 type AuthorRow = { id: string; nickname: string; avatarUrl: string | null; role: string; status: string };
-/** Posts and comments outlive a deleted account; its tombstone nickname is not shown, only "withdrawn member". */
-const toAuthor = (a: AuthorRow): AuthorDto => {
+/**
+ * Posts and comments outlive a deleted account; its tombstone nickname is not shown, only "withdrawn member". The staff
+ * badge (and `isAdmin`, which older web builds show as one) only where the social policy shows it (`badge`).
+ */
+const toAuthor = (a: AuthorRow, badge: Badge): AuthorDto => {
   if (a.status === 'deleted') return { id: a.id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true };
-  const role = publicRole(a.role);
-  return { id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: a.role !== 'user', ...(role ? { role } : {}) };
+  const role = badge(a.role);
+  return { id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: !!role, ...(role ? { role } : {}) };
 };
 
-export async function listItems(c: Context<AppEnv>, where: ReturnType<typeof and>, limit: number, offset: number): Promise<PostListItemDto[]> {
+/** `staffView`: the admin console's list, which shows every author's role whatever the social policy hides. */
+export async function listItems(c: Context<AppEnv>, where: ReturnType<typeof and>, limit: number, offset: number, staffView = false): Promise<PostListItemDto[]> {
   const rows = await c.var.db
     .select({ p: schema.posts, a: author, hands: sql<number>`(SELECT COUNT(*) FROM post_hands ph WHERE ph.post_id = ${schema.posts.id})` })
     .from(schema.posts)
@@ -37,11 +42,12 @@ export async function listItems(c: Context<AppEnv>, where: ReturnType<typeof and
     .orderBy(desc(schema.posts.createdAt))
     .limit(limit)
     .offset(offset);
+  const badge = staffView ? publicRole : await badgesFor(c, rows.map((r) => r.a.role));
   return rows.map(({ p, a, hands }) => ({
     id: p.id,
     title: p.title,
     isNotice: p.isNotice,
-    author: toAuthor(a),
+    author: toAuthor(a, badge),
     commentCount: p.commentCount,
     viewCount: p.viewCount,
     handCount: Number(hands),
@@ -69,6 +75,7 @@ async function replaceHands(c: Context<AppEnv>, postId: string, handIds: string[
   if (handIds.length) await c.var.db.insert(schema.postHands).values(handIds.map((handId, sort) => ({ postId, handId, sort })));
 }
 
+/** `includeHidden`: the admin console's view, with hidden comments and every author's role whatever the social policy hides. */
 export async function postDetail(c: Context<AppEnv>, id: string, viewerId: string, includeHidden = false): Promise<PostDetailDto> {
   const row = await c.var.db
     .select({ p: schema.posts, a: author })
@@ -80,7 +87,7 @@ export async function postDetail(c: Context<AppEnv>, id: string, viewerId: strin
   if (!r) fail(404, 'not_found', 'post not found');
   const attached = await c.var.db.select().from(schema.postHands).where(eq(schema.postHands.postId, id)).orderBy(schema.postHands.sort);
   // Hand reviews are rendered from the AUTHOR's perspective, whoever is reading.
-  const hands = await handReviews(c.var.db, attached.map((h) => h.handId), r.p.authorId);
+  const hands = await handReviews(c.var.db, attached.map((h) => h.handId), r.p.authorId, (roles) => (includeHidden ? Promise.resolve(publicRole) : badgesFor(c, roles)));
   const all = await c.var.db
     .select({ c: schema.comments, a: author, replyTo: sql<string | null>`CASE WHEN ${replyTarget.status} = 'deleted' THEN NULL ELSE ${replyTarget.nickname} END` })
     .from(schema.comments)
@@ -92,12 +99,13 @@ export async function postDetail(c: Context<AppEnv>, id: string, viewerId: strin
   // A removed top-level comment stays as a placeholder while it still has visible replies.
   const liveReplies = new Set(all.filter((x) => x.c.parentId && shown(x.c.status)).map((x) => x.c.parentId!));
   const cm = all.filter((x) => shown(x.c.status) || (!x.c.parentId && liveReplies.has(x.c.id)));
+  const badge = includeHidden ? publicRole : await badgesFor(c, [r.a.role, ...cm.map((x) => x.a.role)]);
   return {
     id: r.p.id,
     title: r.p.title,
     body: r.p.body,
     isNotice: r.p.isNotice,
-    author: toAuthor(r.a),
+    author: toAuthor(r.a, badge),
     isMine: r.p.authorId === viewerId,
     commentCount: r.p.commentCount,
     viewCount: r.p.viewCount,
@@ -113,7 +121,7 @@ export async function postDetail(c: Context<AppEnv>, id: string, viewerId: strin
         replyTo: replyTo ?? null,
         deleted,
         body: deleted ? '' : x.body,
-        author: deleted ? { id: '', nickname: '', avatarUrl: null, isAdmin: false } : toAuthor(a),
+        author: deleted ? { id: '', nickname: '', avatarUrl: null, isAdmin: false } : toAuthor(a, badge),
         isMine: !deleted && x.authorId === viewerId,
         createdAt: x.createdAt,
         updatedAt: x.updatedAt,

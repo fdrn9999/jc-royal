@@ -52,6 +52,8 @@ export const CAPABILITIES = {
   'referral.policy': 'super_admin',
   /** Change the time bank policy (on, member rooms, first grant, maximum, one use, refill). */
   'timebank.policy': 'super_admin',
+  /** Change the social policy (quick reactions on, their limits, which staff badges players see). */
+  'social.policy': 'super_admin',
   /** Create, change and archive tournament templates (the structure every tournament opened from them copies). */
   'tournament.structure': 'super_admin',
   /** See every administrator's feature switches and turn them on or off (GRANTS). */
@@ -92,6 +94,8 @@ export const FEATURES = [
   'referral',
   'tournaments',
   'settings',
+  'social',
+  'brand',
   'audit',
   'reports',
   'board',
@@ -162,6 +166,9 @@ export const GRANT_OF: Record<Feature, Grant | 'always' | 'super'> = {
   referral: 'referral',
   tournaments: 'tournaments',
   settings: 'settings',
+  // Reactions and badges at the tables are table duty; the brand check (read only) sits with the service status.
+  social: 'tables',
+  brand: 'maintenance',
   audit: 'always',
   reports: 'reports',
   board: 'board',
@@ -267,6 +274,9 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   // Time bank (routes/admin-timebank.ts): anyone on table duty reads it; the policy is a super admin's.
   'GET /time-bank': r('tables', 'timebank.view'),
   'PUT /time-bank/policy': r('tables', 'timebank.policy', { role: CAPABILITIES['timebank.policy'], reauth, preview }),
+  // Social policy (routes/admin-social.ts): anyone on table duty reads it; the policy is a super admin's.
+  'GET /social': r('social', 'social.view'),
+  'PUT /social/policy': r('social', 'social.policy', { role: CAPABILITIES['social.policy'], reauth, preview }),
 
   'GET /hands': r('hands', 'hand.list'),
   // A finished hand with every player's cards. Hands are written only once settled, so a hand in play cannot be read.
@@ -345,6 +355,9 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /service/maintenance': r('maintenance', 'maintenance.schedule', { reauth }),
   'PATCH /service/maintenance/:id': r('maintenance', 'maintenance.update', { reauth, target: 'maintenance' }),
   'POST /service/maintenance/:id/stop': r('maintenance', 'maintenance.stop', { reauth, target: 'maintenance' }),
+  // Brand status (routes/admin-brand.ts): read only — link previews and install details as this deployment serves them.
+  'GET /brand': r('brand', 'brand.view'),
+  'GET /brand/og-image': r('brand', 'brand.og_image'),
 
   // Ending a session only protects an account, so it needs no password; whose sessions one sees is `sessions.all`.
   'GET /security/sessions': r('security', 'admin.session.list'),

@@ -90,7 +90,7 @@ test('permissions and audit: a plain admin is refused super-admin work and sees 
   await p.getByRole('link', { name: /^보안$|^Security$/ }).click();
   const mine = p.getByTestId('my-permissions');
   // One per capability in CAPABILITIES (apps/api/src/lib/permissions.ts); a plain administrator holds none of them.
-  await expect(mine.getByText(/^최고관리자 전용$|^Super admin only$/)).toHaveCount(14);
+  await expect(mine.getByText(/^최고관리자 전용$|^Super admin only$/)).toHaveCount(15);
   await expect(mine.getByText(/^가능$|^Allowed$/)).toHaveCount(0);
   await expect(p.getByTestId('permission-matrix').locator('tr').filter({ hasText: /회원 정보 내보내기|Member data export/ })).toContainText(/불가|None/);
   await expect(p.getByTestId('admin-session').first()).toBeVisible();

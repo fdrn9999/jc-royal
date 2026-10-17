@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import { Hono, type Context, type Handler } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
+import { badgesFor, type Badge } from '../lib/badges';
 import { sha256 } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
@@ -17,8 +18,9 @@ type TableRow = typeof schema.tables.$inferSelect;
 /** Tables quick play asks the room about, best ranked first, before giving up with tables_full. */
 const QUICK_PLAY_CHECKS = 5;
 
-export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null): LobbyTableDto {
-  const role = publicRole(hostUser?.role);
+/** `badge` (badgesFor): the host's staff badge, when the social policy shows it. */
+export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null, badge: Badge = publicRole): LobbyTableDto {
+  const role = badge(hostUser?.role);
   return {
     id: t.id,
     name: t.name,
@@ -80,7 +82,8 @@ export const tableRoutes = new Hono<AppEnv>()
       .where(and(inArray(schema.tables.status, ['open', 'closing']), ne(schema.tables.roomType, 'tournament')))
       // Official tables first, then members' rooms.
       .orderBy(desc(schema.tables.roomType), asc(schema.tables.bigBlind), asc(schema.tables.name));
-    return c.json(rows.map((r) => toLobbyDto(r.t, r.host)));
+    const badge = await badgesFor(c, rows.map((r) => (r.t.roomType === 'member' ? r.host?.role : null)));
+    return c.json(rows.map((r) => toLobbyDto(r.t, r.host, badge)));
   })
   /**
    * Quick play: picks a public open table for the caller. Newcomers (under NEWCOMER_HANDS hands) get beginner tables
@@ -136,7 +139,7 @@ export const tableRoutes = new Hono<AppEnv>()
     for (const r of ranked.slice(0, QUICK_PLAY_CHECKS)) {
       const check = await roomCall(c, r.t.id, 'seat-check', { user: me.id });
       if (check?.ok === true && typeof check.seatIndex === 'number') {
-        const out: QuickPlayDto = { table: toLobbyDto(r.t, r.host), seatIndex: check.seatIndex };
+        const out: QuickPlayDto = { table: toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null])), seatIndex: check.seatIndex };
         return c.json(out);
       }
     }
@@ -145,7 +148,7 @@ export const tableRoutes = new Hono<AppEnv>()
   .get('/:id', async (c) => {
     const [r] = await withHost(c).where(eq(schema.tables.id, c.req.param('id')));
     if (!r) fail(404, 'not_found', 'table not found');
-    return c.json(toLobbyDto(r.t, r.host));
+    return c.json(toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null])));
   })
   /**
    * Exchanges a private table's join code for a short-lived ticket cookie (see room-access.ts). Public tables and the
