@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
 import { d1 } from '../support/d1';
 import { TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 /** The bootstrapped super admin. */
@@ -45,7 +46,7 @@ async function reauth(c: Client = admin) {
 /** A new member made a plain administrator in D1, signed in to the console (not re-confirmed yet). */
 async function plainAdmin() {
   const u = await newUser();
-  await d1(`UPDATE users SET role = 'admin' WHERE id = '${u.me.id}'`);
+  await d1(promoteSql(`id = '${u.me.id}'`));
   const c = new Client(ADMIN_ORIGIN);
   expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
   return { ...u, c };

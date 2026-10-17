@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { expect } from '@playwright/test';
 import { PASSWORD, signUp, test } from './helpers';
+import { promoteSql } from '../support/grants';
 
 const ADMIN = 'http://localhost:5174';
 
@@ -22,7 +23,7 @@ test('emergency controls: an admin ends a seated member’s connections, the pag
   const b = await signUp(browser);
   const op = await signUp(browser);
   // A second administrator (the bootstrap is one-time and belongs to the admin console test).
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
 
   const opened: string[] = [];
   a.page.on('websocket', (ws) => {

@@ -67,6 +67,10 @@ export const stageLabel = labeler({ preflop: 'stagePreflop', flop: 'stageFlop', 
 const auditNames = labeler({
   'admin.access_denied': 'auditAccessDenied',
   'admin.bootstrap': 'auditAdminBootstrap',
+  'admin.grants.list': 'auditGrantsList',
+  'admin.grants.reset': 'auditGrantsReset',
+  'admin.grants.update': 'auditGrantsUpdate',
+  'admin.grants.view': 'auditGrantsView',
   'admin.login': 'auditAdminLogin',
   'admin.login.failed': 'auditAdminLoginFailed',
   'admin.reauth': 'auditAdminReauth',
@@ -201,6 +205,7 @@ export const capabilityLabel = labeler({
   'members.export': 'capMembersExport',
   'roles.change': 'capRolesChange',
   'admins.manage': 'capAdminsManage',
+  'admins.grants': 'capAdminsGrants',
   'chips.large': 'capChipsLarge',
   'ledger.correct': 'capLedgerCorrect',
   'notes.delete_any': 'capNotesDeleteAny',
@@ -219,6 +224,7 @@ export const featureLabel = labeler({
   memberExport: 'featMemberExport',
   memberNotes: 'featMemberNotes',
   sanctions: 'featSanctions',
+  disconnect: 'featDisconnect',
   chips: 'featChips',
   resetLinks: 'featResetLinks',
   roles: 'featRoles',
@@ -244,6 +250,8 @@ export const featureLabel = labeler({
   academy: 'academy',
   security: 'security',
 });
+/** A feature switch (the API's GRANTS): each is named after the feature it opens. */
+export const grantLabel = featureLabel;
 /** What became of a member's seat when an admin ended their connections (the room's `kick`). */
 export const seatOutcomeLabel = labeler({ left: 'seatLeft', after_hand: 'seatAfterHand', kept: 'seatKept', retrying: 'seatRetrying' });
 /** Problems the table room and the D1 comparison report on the admin table page. */

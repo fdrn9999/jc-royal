@@ -8,6 +8,7 @@ import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client'
 import { d1 } from '../support/d1';
 import { root } from '../support/worker';
 import { TableSocket } from '../support/ws';
+import { ALL_GRANTS, promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 /** The bootstrapped super admin. */
@@ -34,7 +35,7 @@ async function signIn(email: string) {
 /** A new member made a plain administrator in D1, signed in to the console. */
 async function plainAdmin() {
   const u = await newUser();
-  await d1(`UPDATE users SET role = 'admin' WHERE id = '${u.me.id}'`);
+  await d1(promoteSql(`id = '${u.me.id}'`));
   return { ...u, c: await signIn(u.email) };
 }
 
@@ -83,7 +84,22 @@ describe('permission table', () => {
     }));
     expect(routes.length).toBe(source.match(/^\s+'(GET|POST|PUT|PATCH|DELETE) /gm)!.length);
     expect(routes.length).toBeGreaterThan(55);
-    expect(routes.filter((r) => r.superOnly).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['POST /referrals/resume', 'POST /refill/resume', 'POST /tournament-templates', 'POST /tournament-templates/:id/status', 'POST /users/:id/role', 'POST /users/export', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'PUT /time-bank/policy', 'PUT /tournament-templates/:id']);
+    expect(routes.filter((r) => r.superOnly).map((r) => `${r.method} ${r.path}`).sort()).toEqual([
+      'GET /security/admins',
+      'GET /security/admins/:id',
+      'POST /referrals/resume',
+      'POST /refill/resume',
+      'POST /tournament-templates',
+      'POST /tournament-templates/:id/status',
+      'POST /users/:id/role',
+      'POST /users/export',
+      'PUT /bots/policy',
+      'PUT /referrals/policy',
+      'PUT /refill/policy',
+      'PUT /security/admins/:id/grants',
+      'PUT /time-bank/policy',
+      'PUT /tournament-templates/:id',
+    ]);
 
     const member = await newUser();
     const staff = await plainAdmin();
@@ -115,13 +131,13 @@ describe('permission table', () => {
     // None of it changed the member, and the plain administrator's only records are the refused super-admin calls.
     expect(await d1(`SELECT status, role, balance, suspended_reason AS reason FROM users WHERE id = '${member.me.id}'`)).toEqual([{ status: 'active', role: 'user', balance: member.me.balance, reason: null }]);
     expect((await member.client.get('/api/auth/me')).status).toBe(200);
-    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['bots.policy.failed failed', 'referral.policy.failed failed', 'referral.resume.failed failed', 'refill.policy.failed failed', 'refill.resume.failed failed', 'timebank.policy.failed failed', 'tournament_template.create.failed failed', 'tournament_template.status.failed failed', 'tournament_template.update.failed failed', 'user.export.failed failed', 'user.role.failed failed']);
+    expect((await rows(`actor_id = '${staff.me.id}' AND action <> 'admin.login'`)).map((r) => `${r.action} ${r.outcome}`).sort()).toEqual(['admin.grants.list.failed failed', 'admin.grants.update.failed failed', 'admin.grants.view.failed failed', 'bots.policy.failed failed', 'referral.policy.failed failed', 'referral.resume.failed failed', 'refill.policy.failed failed', 'refill.resume.failed failed', 'timebank.policy.failed failed', 'tournament_template.create.failed failed', 'tournament_template.status.failed failed', 'tournament_template.update.failed failed', 'user.export.failed failed', 'user.role.failed failed']);
   });
 
   it('records failed changes and refusals, but not a missing password confirmation or a read that found nothing', async () => {
     const staff = await plainAdmin();
     const [member, other] = [await newUser(), await newUser()];
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${other.me.id}'`);
+    await d1(promoteSql(`id = '${other.me.id}'`));
 
     // 401: the console asks for the password and retries; nothing is recorded.
     expect((await staff.c.post(`/api/admin/users/${member.me.id}/suspend`, { reason: 'spam links' })).status).toBe(401);
@@ -164,6 +180,210 @@ describe('permission table', () => {
     expect(await blocked()).toBe(1);
     expect((await staff.c.patch(`/api/admin/tables/${table}`, { entryBlocked: false, name: table })).status).toBe(200);
     expect(await blocked()).toBe(0);
+  });
+});
+
+describe('per-administrator feature switches', () => {
+  /** A plain administrator with exactly these features on, signed in. */
+  async function withGrants(grants: string[]) {
+    const u = await newUser();
+    await d1(promoteSql(`id = '${u.me.id}'`, grants));
+    return { ...u, c: await signIn(u.email) };
+  }
+  const put = (id: string, body: Record<string, unknown>, c: Client = admin) => c.req('PUT', `/api/admin/security/admins/${id}/grants`, body);
+  const stored = async (id: string) => (await d1<{ grants: string; version: number }>(`SELECT grants, version FROM admin_permissions WHERE user_id = '${id}'`))[0];
+
+  it('keeps the test helpers in step with the server: a super admin holds every switch', async () => {
+    expect((await admin.get('/api/admin/auth/me')).body.grants).toEqual([...ALL_GRANTS]);
+    expect((await admin.get('/api/admin/security/permissions')).body.grantKeys).toEqual([...ALL_GRANTS]);
+  });
+
+  it('refuses a feature that is off, before asking for the password, and records the attempt; own sessions, permissions and audit stay open', async () => {
+    const staff = await withGrants([]);
+    const member = await newUser();
+    const off = await staff.c.get('/api/admin/dashboard');
+    expect(off.status).toBe(403);
+    expect(off.body.error.code).toBe('permission_off');
+    // A switched-off change is refused as such, not with a password prompt (no password asked for what one may not do).
+    const suspend = await staff.c.post(`/api/admin/users/${member.me.id}/suspend`, { reason: 'spam links' });
+    expect(suspend.status).toBe(403);
+    expect(suspend.body.error.code).toBe('permission_off');
+    // Nor through a preview.
+    expect((await staff.c.post(`/api/admin/users/${member.me.id}/suspend`, { preview: true })).body.error.code).toBe('permission_off');
+    const failed = await rows(`actor_id = '${staff.me.id}' AND outcome = 'failed'`);
+    expect(failed.map((r) => r.action)).toEqual(['dashboard.view.failed', 'user.suspend.failed', 'user.suspend.failed']);
+    expect(JSON.parse(failed[1]!.detail!)).toMatchObject({ status: 403, code: 'permission_off', route: 'POST /users/:id/suspend' });
+    expect(failed[1]!.detail).not.toContain('spam links');
+    expect((await d1(`SELECT status FROM users WHERE id = '${member.me.id}'`))[0]).toEqual({ status: 'active' });
+
+    // What every administrator keeps: their own console sessions, permissions and audit entries.
+    expect((await staff.c.get('/api/admin/security/sessions')).status).toBe(200);
+    const mine = (await staff.c.get('/api/admin/security/permissions')).body;
+    expect(mine.grants).toEqual([]);
+    expect(mine.effective.filter((f: { allowed: number }) => f.allowed > 0).map((f: { feature: string }) => f.feature).sort()).toEqual(['audit', 'security']);
+    expect((await staff.c.get('/api/admin/audit?paged=1')).status).toBe(200);
+    expect((await staff.c.get('/api/admin/auth/me')).body).toMatchObject({ grants: [], permissions: [] });
+  });
+
+  it('applies each administrator their own switches, from the next request, without signing in again', async () => {
+    const [a, b] = [await withGrants(['ledger']), await withGrants(['members'])];
+    expect((await a.c.get('/api/admin/ledger')).status).toBe(200);
+    expect((await a.c.get('/api/admin/users')).body.error.code).toBe('permission_off');
+    expect((await b.c.get('/api/admin/users')).status).toBe(200);
+    expect((await b.c.get('/api/admin/ledger')).body.error.code).toBe('permission_off');
+
+    await reauth();
+    const before = (await admin.get(`/api/admin/security/admins/${a.me.id}`)).body;
+    expect(before.admin).toMatchObject({ id: a.me.id, role: 'admin', grants: ['ledger'], version: 1 });
+    expect(before.admin).not.toHaveProperty('email');
+    const r = await put(a.me.id, { grants: ['members'], baseVersion: 1, reason: 'moved to member support' });
+    expect(r.body).toEqual({ ok: true, grants: ['members'], version: 2 });
+    // Same session, next request: members on, ledger off. The other administrator is untouched.
+    expect((await a.c.get('/api/admin/users')).status).toBe(200);
+    expect((await a.c.get('/api/admin/ledger')).body.error.code).toBe('permission_off');
+    expect((await a.c.get('/api/admin/auth/me')).body.grants).toEqual(['members']);
+    expect((await b.c.get('/api/admin/users')).status).toBe(200);
+    expect(await stored(b.me.id)).toMatchObject({ grants: '["members"]', version: 1 });
+  });
+
+  it('only a super admin edits switches, never their own, another super admin’s or a member’s', async () => {
+    const staff = await plainAdmin();
+    const [other, member, boss] = [await withGrants([]), await newUser(), await newUser()];
+    await d1(`UPDATE users SET role = 'super_admin' WHERE id = '${boss.me.id}'`);
+    await reauth(staff.c);
+    for (const res of [
+      await staff.c.get('/api/admin/security/admins'),
+      await staff.c.get(`/api/admin/security/admins/${other.me.id}`),
+      await put(other.me.id, { grants: ['dashboard'], baseVersion: 1, reason: 'help a colleague' }, staff.c),
+      await put(staff.me.id, { grants: ['dashboard'], baseVersion: 1, reason: 'help myself' }, staff.c),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error.message).toBe('super admin only');
+    }
+    expect(await stored(other.me.id)).toMatchObject({ grants: '[]', version: 1 });
+
+    await reauth();
+    const superId = await meId(admin);
+    expect((await put(superId, { grants: ['dashboard'], baseVersion: 0, reason: 'grant myself' })).status).toBe(400);
+    for (const id of [boss.me.id, member.me.id]) {
+      const res = await put(id, { grants: ['dashboard'], baseVersion: 0, reason: 'not an admin' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('not_plain_admin');
+    }
+    expect((await put('no-such-admin', { grants: ['dashboard'], baseVersion: 0, reason: 'nobody' })).status).toBe(404);
+    expect(await d1(`SELECT user_id FROM admin_permissions WHERE user_id IN ('${superId}', '${boss.me.id}', '${member.me.id}')`)).toEqual([]);
+    // Unknown switches, a missing reason and no change are refused; never-delegated abilities have no switch to name.
+    for (const grants of [['roles'], ['members.export'], ['chips.large'], ['nope']]) expect((await put(other.me.id, { grants, baseVersion: 1, reason: 'try it' })).status).toBe(400);
+    expect((await put(other.me.id, { grants: ['dashboard'], baseVersion: 1 })).status).toBe(400);
+    const same = await put(other.me.id, { grants: [], baseVersion: 1, reason: 'nothing new' });
+    expect(same.body.error.code).toBe('admin_grants_no_change');
+  });
+
+  it('a preview writes nothing; a stale version is refused with the current switches; two saves at once: one wins', async () => {
+    const staff = await withGrants(['dashboard']);
+    await reauth();
+    const preview = await put(staff.me.id, { grants: ['dashboard', 'reports', 'ledger'], baseVersion: 1, preview: true });
+    expect(preview.body).toMatchObject({ preview: true, from: ['dashboard'], to: ['dashboard', 'reports', 'ledger'], gained: ['reports', 'ledger'], lost: [], version: 2, appliesFrom: 'next_request' });
+    expect(preview.body.actions.to).toBeGreaterThan(preview.body.actions.from);
+    expect(await stored(staff.me.id)).toMatchObject({ grants: '["dashboard"]', version: 1 });
+    expect(await rows(`target_id = '${staff.me.id}' AND action LIKE 'admin.grants%'`)).toEqual([]);
+
+    const stale = await put(staff.me.id, { grants: ['reports'], baseVersion: 0, reason: 'old screen' });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toMatchObject({ code: 'admin_grants_conflict', details: { version: 1, grants: ['dashboard'] } });
+
+    // Two super-admin screens saving from the same version: exactly one goes through.
+    const both = await Promise.all([
+      put(staff.me.id, { grants: ['dashboard', 'reports'], baseVersion: 1, reason: 'first screen' }),
+      put(staff.me.id, { grants: ['ledger'], baseVersion: 1, reason: 'second screen' }),
+    ]);
+    expect(both.map((r) => r.status).sort()).toEqual([200, 409]);
+    const won = both.find((r) => r.status === 200)!.body;
+    expect(await stored(staff.me.id)).toEqual({ grants: JSON.stringify(won.grants), version: 2 });
+
+    const log = await rows(`target_id = '${staff.me.id}' AND action LIKE 'admin.grants%'`);
+    expect(log.map((r) => [r.action, r.outcome])).toEqual([
+      ['admin.grants.update.failed', 'failed'],
+      ...(log[1]!.outcome === 'ok'
+        ? [
+            ['admin.grants.update', 'ok'],
+            ['admin.grants.update.failed', 'failed'],
+          ]
+        : [
+            ['admin.grants.update.failed', 'failed'],
+            ['admin.grants.update', 'ok'],
+          ]),
+    ]);
+    const ok = JSON.parse(log.find((r) => r.outcome === 'ok')!.detail!);
+    expect(ok).toEqual({ before: ['dashboard'], after: won.grants, gained: won.grants.filter((g: string) => g !== 'dashboard'), lost: won.grants.includes('dashboard') ? [] : ['dashboard'], reason: expect.stringMatching(/screen$/), version: 2 });
+    expect(JSON.parse(log[0]!.detail!)).toMatchObject({ status: 409, code: 'admin_grants_conflict', route: 'PUT /security/admins/:id/grants' });
+    expect(log[0]!.detail).not.toContain('old screen');
+
+    // The history on the administrator's page: who, what and why, newest first, without IP addresses.
+    const page = (await admin.get(`/api/admin/security/admins/${staff.me.id}`)).body;
+    expect(page.history.items.map((h: { action: string }) => h.action)).toHaveLength(3);
+    expect(page.history.items.find((h: { outcome: string }) => h.outcome === 'ok')).toMatchObject({ actor: { id: await meId(admin) }, detail: { version: 2 } });
+    expect(JSON.stringify(page.history)).not.toMatch(/"ip"/);
+  });
+
+  it('a role change clears the switches, so a returning administrator starts with nothing', async () => {
+    const u = await newUser();
+    await reauth();
+    expect((await admin.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin', reason: 'joined the staff' })).status).toBe(200);
+    expect((await admin.get(`/api/admin/security/admins/${u.me.id}`)).body.admin).toMatchObject({ grants: [], version: 0 });
+    expect((await put(u.me.id, { grants: ['members', 'reports'], baseVersion: 0, reason: 'first week' })).body).toMatchObject({ ok: true, version: 1 });
+    const preview = await admin.post(`/api/admin/users/${u.me.id}/role`, { preview: true, role: 'user' });
+    expect(preview.body.grantsCleared).toEqual(['members', 'reports']);
+    expect((await admin.post(`/api/admin/users/${u.me.id}/role`, { role: 'user', reason: 'left the staff' })).status).toBe(200);
+    expect(await stored(u.me.id)).toBeUndefined();
+    expect((await admin.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin', reason: 'came back' })).status).toBe(200);
+    const back = (await admin.get(`/api/admin/security/admins/${u.me.id}`)).body;
+    expect(back.admin).toMatchObject({ grants: [], version: 0 });
+    expect(back.history.items.map((h: { action: string }) => h.action)).toEqual(['admin.grants.reset', 'admin.grants.update']);
+    expect(back.history.items[0].detail).toMatchObject({ before: ['members', 'reports'], after: [], cause: 'role', reason: 'left the staff' });
+    const c = await signIn(u.email);
+    expect((await c.get('/api/admin/users')).body.error.code).toBe('permission_off');
+  });
+
+  it('blocking entry from the table settings needs the emergency-control switch as well as table editing', async () => {
+    const editor = await withGrants(['tables']);
+    const table = 'it-perm-0';
+    await reauth(editor.c);
+    const refused = await editor.c.patch(`/api/admin/tables/${table}`, { entryBlocked: true });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe('permission_off');
+    expect((await d1<{ b: number }>(`SELECT entry_blocked AS b FROM tables WHERE id = '${table}'`))[0]!.b).toBe(0);
+    expect((await editor.c.patch(`/api/admin/tables/${table}`, { name: 'it-perm-0 renamed' })).status).toBe(200);
+    expect((await editor.c.post(`/api/admin/tables/${table}/control`, { action: 'block' })).body.error.code).toBe('permission_off');
+    expect((await editor.c.patch(`/api/admin/tables/${table}`, { name: table })).status).toBe(200);
+  });
+
+  it('member detail leaves out the ledger and the latest reports when those features are off', async () => {
+    const member = await newUser();
+    const [narrow, wide] = [await withGrants(['members']), await withGrants(['members', 'ledger', 'reports'])];
+    const n = (await narrow.c.get(`/api/admin/users/${member.me.id}`)).body;
+    expect(n.ledger).toEqual([]);
+    expect(n.hidden).toEqual(['ledger', 'reports']);
+    const w = (await wide.c.get(`/api/admin/users/${member.me.id}`)).body;
+    expect(w.ledger.length).toBeGreaterThan(0);
+    expect(w.hidden).toEqual([]);
+  });
+
+  it('lists administrators with their switches, by page and search, without e-mail addresses', async () => {
+    const staff = await withGrants(['bots', 'dashboard']);
+    const found = (await admin.get(`/api/admin/security/admins?q=${encodeURIComponent(staff.me.nickname)}`)).body;
+    expect(found.items.every((i: { nickname: string }) => i.nickname.includes(staff.me.nickname))).toBe(true);
+    expect(found.items.find((i: { id: string }) => i.id === staff.me.id)).toMatchObject({ role: 'admin', grants: ['dashboard', 'bots'], version: 1 });
+    expect((await admin.get(`/api/admin/security/admins?q=${staff.me.id}`)).body).toMatchObject({ total: 1, items: [{ id: staff.me.id }] });
+    expect(JSON.stringify(found)).not.toContain('@');
+    const supers = (await admin.get('/api/admin/security/admins?role=super_admin')).body;
+    expect(supers.items.every((i: { role: string; grants: unknown }) => i.role === 'super_admin' && i.grants === null)).toBe(true);
+    const one = (await admin.get('/api/admin/security/admins?limit=1')).body;
+    expect(one.items).toHaveLength(1);
+    expect(one.total).toBeGreaterThan(1);
+    // Members are never listed.
+    const member = await newUser();
+    expect((await admin.get(`/api/admin/security/admins?q=${member.me.id}`)).body.total).toBe(0);
   });
 });
 

@@ -2,6 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { ADMIN, adminLogin, seedStats, sql } from './analytics-helpers';
 import { idOf, seedHands } from './hand-review-seed';
 import { signUp, test, widerThanDevice } from './helpers';
+import { promoteSql } from '../support/grants';
 
 const listed = (page: Page, ids: Record<string, string>) =>
   page
@@ -67,7 +68,7 @@ test('mobile: hand list filters fold away, bookmarks and tags are thumb-sized, t
 
   // The operator's panel on a phone.
   const op = await signUp(browser, { mobile: true });
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   seedStats();
   const admin = await adminLogin(browser, op.email, { mobile: true });
   await admin.goto(`${ADMIN}/stats`);

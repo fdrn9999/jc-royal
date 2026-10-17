@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
 import { d1 } from '../support/d1';
 import { isMyTurn, TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 /** The bootstrapped super admin. */
@@ -26,7 +27,7 @@ let plain: Promise<{ c: Client; id: string; loginBefore: number | null }> | null
 function plainAdmin() {
   plain ??= (async () => {
     const u = await newUser();
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${u.me.id}'`);
+    await d1(promoteSql(`id = '${u.me.id}'`));
     const loginBefore = (await d1<{ t: number | null }>(`SELECT last_login_at AS t FROM users WHERE id = '${u.me.id}'`))[0]!.t;
     const c = new Client(ADMIN_ORIGIN);
     expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
@@ -86,7 +87,7 @@ describe('member list', () => {
 
     // Status and role filters.
     await d1(`UPDATE users SET status = 'suspended' WHERE id = '${b.me.id}'`);
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${c.me.id}'`);
+    await d1(promoteSql(`id = '${c.me.id}'`));
     try {
       expect(names(await list('status=suspended'))).toEqual([`${t}b`]);
       expect((await list('status=active')).total).toBe(2);

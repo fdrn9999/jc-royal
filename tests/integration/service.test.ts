@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { BASE, Client, newUser, PASSWORD, signupBody, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
 import { isMyTurn, nextState, TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 const N = '/api/admin/service/notices';
@@ -175,7 +176,7 @@ describe('maintenance', () => {
 
     // An admin session that never re-confirmed its password (a new member made admin, so the shared one's sign-ins are not spent).
     const staff = await newUser();
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${staff.me.id}'`);
+    await d1(promoteSql(`id = '${staff.me.id}'`));
     const cold = new Client(ADMIN_ORIGIN);
     expect((await cold.post('/api/admin/auth/login', { email: staff.email, password: PASSWORD })).status).toBe(200);
     const refused = await cold.post(M, plan);
@@ -227,7 +228,7 @@ describe('maintenance', () => {
   it('under way: the running hand plays out, nobody new sits or queues, members cannot sign in (staff can); the table close and pause still work; play resumes when it ends', async () => {
     // Before: a hand running at it-mt-0 with a spectator; a full heads-up table with a waitlist; a paused table; a lone player.
     const [a, b, c, e, f, g, h, p, q, v, d, staff] = await Promise.all(Array.from({ length: 12 }, () => newUser()));
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${staff!.me.id}'`);
+    await d1(promoteSql(`id = '${staff!.me.id}'`));
     const wa = await sock(a!.client, 'it-mt-0');
     const wb = await sock(b!.client, 'it-mt-0');
     const wc = await sock(c!.client, 'it-mt-0');

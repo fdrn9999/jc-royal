@@ -330,6 +330,21 @@ export const adminAuditLog = sqliteTable(
 );
 
 /**
+ * What one plain administrator may use (apps/api/src/lib/permissions.ts GRANTS), set by a super admin. A feature not in
+ * the list is off, and an administrator without a row has none: a new administrator starts with nothing. Super admins
+ * hold every feature and need no row. `version` counts the saves, so two super admins editing at once are told of the
+ * conflict. Removed when the account's role changes.
+ */
+export const adminPermissions = sqliteTable('admin_permissions', {
+  userId: text('user_id').primaryKey(),
+  /** JSON array of the features that are on. */
+  grants: text('grants').notNull().default('[]'),
+  version: integer('version').notNull().default(1),
+  updatedBy: text('updated_by'),
+  updatedAt: integer('updated_at').notNull().default(now),
+});
+
+/**
  * Internal notes administrators leave on a member for handover (why a sanction was given, what to watch). Never shown
  * to the member. Not a place for personal data: the API refuses e-mail addresses and phone or ID numbers. Deleted with
  * the account, and by their author or a super admin (the audit log keeps who deleted which note, not its text).

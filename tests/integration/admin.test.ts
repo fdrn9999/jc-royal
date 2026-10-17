@@ -119,6 +119,9 @@ describe('member management', () => {
     expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin', reason: 'staffing change' })).status).toBe(200);
     const { c: adminC, r } = await adminClient(u.email);
     expect(r.status).toBe(200);
+    // A new administrator starts with every feature off until a super admin turns some on.
+    expect((await adminC.get('/api/admin/dashboard')).body.error?.code).toBe('permission_off');
+    expect((await superAdmin.c.req('PUT', `/api/admin/security/admins/${u.me.id}/grants`, { grants: ['dashboard'], baseVersion: 0, reason: 'staffing change' })).status).toBe(200);
     expect((await adminC.get('/api/admin/dashboard')).status).toBe(200);
     // a plain admin cannot change roles
     await reauth(adminC);
@@ -132,6 +135,8 @@ describe('member management', () => {
     const [a, other, member] = [await newUser(), await newUser(), await newUser()];
     await reauth(superAdmin.c);
     for (const u of [a, other]) expect((await superAdmin.c.post(`/api/admin/users/${u.me.id}/role`, { role: 'admin', reason: 'staffing change' })).status).toBe(200);
+    const grants = { grants: ['resetLinks', 'chips', 'sanctions'], baseVersion: 0, reason: 'staffing change' };
+    expect((await superAdmin.c.req('PUT', `/api/admin/security/admins/${a.me.id}/grants`, grants)).status).toBe(200);
     const { c: adminC, r } = await adminClient(a.email);
     expect(r.status).toBe(200);
     await reauth(adminC);

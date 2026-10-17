@@ -5,7 +5,7 @@ import { createBrowserRouter, NavLink, Outlet, RouterProvider } from 'react-rout
 import { setLocale, useT, type Key } from './i18n';
 import './index.css';
 import { roleLabel } from './labels';
-import { AdminProvider, useAdmin } from './lib';
+import { AdminProvider, hasGrant, useAdmin } from './lib';
 import { Modal } from './ui';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
@@ -23,25 +23,26 @@ import { ReferralsPage } from './pages/Referrals';
 import { AuditPage } from './pages/Audit';
 import { AcademyStatsPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPage, TablesPage, UserDetailPage, UsersPage } from './pages/Console';
 
-const NAV: [string, Key][] = [
-  ['/', 'dashboard'],
-  ['/stats', 'opsStats'],
-  ['/users', 'users'],
-  ['/tables', 'tables'],
-  ['/bots', 'botsNav'],
-  ['/tournaments', 'tournamentsNav'],
-  ['/referrals', 'referralNav'],
-  ['/academy', 'academy'],
-  ['/hands', 'hands'],
-  ['/ledger', 'ledger'],
-  ['/economy', 'economy'],
-  ['/reports', 'reports'],
-  ['/board', 'board'],
-  ['/messages', 'messages'],
-  ['/service', 'service'],
-  ['/reconcile', 'reconcile'],
-  ['/audit', 'audit'],
-  ['/security', 'security'],
+/** Menu entries with the feature switches whose pages they open (any one; none: every administrator). */
+const NAV: [string, Key, string[]][] = [
+  ['/', 'dashboard', ['dashboard']],
+  ['/stats', 'opsStats', ['stats']],
+  ['/users', 'users', ['members']],
+  ['/tables', 'tables', ['tables']],
+  ['/bots', 'botsNav', ['bots']],
+  ['/tournaments', 'tournamentsNav', ['tournaments']],
+  ['/referrals', 'referralNav', ['referral']],
+  ['/academy', 'academy', ['stats']],
+  ['/hands', 'hands', ['hands']],
+  ['/ledger', 'ledger', ['ledger']],
+  ['/economy', 'economy', ['economy', 'refill']],
+  ['/reports', 'reports', ['reports']],
+  ['/board', 'board', ['board']],
+  ['/messages', 'messages', ['messages']],
+  ['/service', 'service', ['notices', 'maintenance']],
+  ['/reconcile', 'reconcile', ['reconcile']],
+  ['/audit', 'audit', []],
+  ['/security', 'security', []],
 ];
 
 function ReauthModal() {
@@ -97,7 +98,7 @@ function Shell({ children }: { children: ReactNode }) {
           <Button size="sm" variant="ghost" onClick={logout}>{t('logout')}</Button>
         </div>
         <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 md:flex-wrap">
-          {NAV.map(([to, k]) => (
+          {NAV.filter(([, , g]) => g.length === 0 || g.some((x) => hasGrant(me, x))).map(([to, k]) => (
             <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${isActive ? 'bg-gold-500/15 text-gold-300' : 'text-ink-300 hover:text-ivory'}`}>
               {t(k)}
             </NavLink>
@@ -107,6 +108,20 @@ function Shell({ children }: { children: ReactNode }) {
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
       <ReauthModal />
+    </div>
+  );
+}
+
+/** The first page: the dashboard, or where to look when it is switched off for this administrator. */
+function Home() {
+  const { t } = useT();
+  const { me } = useAdmin();
+  if (hasGrant(me, 'dashboard')) return <DashboardPage />;
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-white/10 p-5 text-sm" data-testid="home-off">
+      <h1 className="text-xl font-extrabold">{t('dashboard')}</h1>
+      <p className="text-ink-300">{t('homeOff')}</p>
+      <NavLink to="/security" className="text-gold-300 hover:underline">{t('secMine')} →</NavLink>
     </div>
   );
 }
@@ -122,7 +137,7 @@ const router = createBrowserRouter([
   {
     element: <Gate />,
     children: [
-      { path: '/', element: <DashboardPage /> },
+      { path: '/', element: <Home /> },
       { path: '/stats', element: <StatsPage /> },
       { path: '/users', element: <UsersPage /> },
       { path: '/users/:id', element: <UserDetailPage /> },

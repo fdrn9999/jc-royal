@@ -9,6 +9,7 @@ import { Client, newUser, PASSWORD, sharedAdmin, signupBody, WEB_ORIGIN } from '
 import { d1 } from '../support/d1';
 import { prepareState, root, startWorker, TABLES, type RunningWorker } from '../support/worker';
 import { isMyTurn, TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 const admin = sharedAdmin();
@@ -39,7 +40,7 @@ let plain: Promise<Client> | null = null;
 function plainAdmin() {
   plain ??= (async () => {
     const u = await newUser();
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${u.me.id}'`);
+    await d1(promoteSql(`id = '${u.me.id}'`));
     const c = new Client(ADMIN_ORIGIN);
     expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
     return c;

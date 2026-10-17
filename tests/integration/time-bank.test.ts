@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
 import { d1 } from '../support/d1';
 import { isMyTurn, TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 const admin = sharedAdmin();
@@ -308,7 +309,7 @@ describe('time bank', () => {
 
   it('only the super admin changes the policy, with a fresh password and a reason; conflicts, unchanged and invalid policies are refused and audited', async () => {
     const plainUser = await newUser();
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${plainUser.me.id}'`);
+    await d1(promoteSql(`id = '${plainUser.me.id}'`));
     const plain = new Client(ADMIN_ORIGIN);
     expect((await plain.post('/api/admin/auth/login', { email: plainUser.email, password: PASSWORD })).status).toBe(200);
     await reauth(plain);

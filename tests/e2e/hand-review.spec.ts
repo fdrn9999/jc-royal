@@ -2,6 +2,7 @@ import { expect, type Page, type Route } from '@playwright/test';
 import { ADMIN, adminLogin, seedStats, sql, today } from './analytics-helpers';
 import { idOf, seedHands } from './hand-review-seed';
 import { signUp, test } from './helpers';
+import { promoteSql } from '../support/grants';
 
 /** The hands listed, by the letter seedHands gave them. */
 const listed = (page: Page, ids: Record<string, string>) =>
@@ -132,7 +133,7 @@ test('hand review: filter my hands on the server, bookmark and tag them, keep a 
 
   // The operator sees how much the feature is used and how saves fail, never what was written.
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   seedStats();
   const y = today() - 1;
   sql(

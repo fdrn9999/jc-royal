@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { ADMIN, adminLogin, sql } from './analytics-helpers';
 import { signUp, test, widerThanDevice } from './helpers';
+import { promoteSql } from '../support/grants';
 
 /** The open dialog stays inside the phone's width, and its ✕ is named in Korean. */
 async function dialogFits(page: Page) {
@@ -16,7 +17,7 @@ test('on a phone: a member’s ledger, a report decided through its confirmation
   const bad = await signUp(browser, { mobile: true });
   const reporter = await signUp(browser, { mobile: true });
   const op = await signUp(browser, { mobile: true });
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const title = `E2E 모바일 신고 ${Date.now().toString(36)}`;
   const postId = await bad.page.evaluate(async (t) => {
     const r = await fetch('/api/board/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t, body: '광고 링크' }) });

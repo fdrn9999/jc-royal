@@ -62,6 +62,7 @@ pnpm exec wrangler deploy --env production -c apps/admin/wrangler.jsonc         
   - PR과 다른 브랜치는 테스트만 하고 배포하지 않는다.
 - **수동 재배포**: GitHub → Actions → `Deploy` → Run workflow. 타입 검사와 단위 테스트를 먼저 돌린다.
 - **Worker 시크릿**(`INTERNAL_SECRET`, `RESEND_API_KEY` 등)은 Cloudflare에 남아 있어 배포마다 다시 넣지 않는다.
+- **마이그레이션 0027(관리자별 기능 권한)**: 그때 `role = 'admin'`인 계정마다 기능 스위치 23개를 모두 켠 행을 넣는다(`updated_by = 'migration'`). 위 순서(마이그레이션 → api → admin)를 지키면 배포 직후 관리자가 할 수 있는 일은 그대로이고, 최고관리자가 콘솔 보안 화면에서 줄인다. 마이그레이션 뒤 api 배포 전에 관리자가 된 계정은 행이 없어 모든 기능이 꺼진 채 시작한다(최고관리자가 켜면 된다). api를 되돌려도 이전 api는 `admin_permissions`를 읽지 않으므로 테이블을 지울 필요가 없다. 다만 되돌린 동안 역할이 바뀐 계정의 행은 지워지지 않으므로(역할 변경 때 행을 지우는 것은 새 api만 한다) 새 api를 다시 배포하면 그 계정에 이전 스위치가 다시 적용된다. 그 사이 관리자 역할을 바꿨다면 보안 화면에서 확인한다. 자세한 규칙은 `docs/ADMIN_SECURITY.md` "관리자별 기능 권한".
 - **승인 단계(선택)**: 배포 작업은 GitHub 환경 `production`을 쓴다. Settings → Environments → production에서 Required reviewers를 켜면 배포 전에 승인을 받는다.
 
 ### 저장소 시크릿(최초 1회)

@@ -64,6 +64,7 @@ const BY_MESSAGE: Record<string, Key> = {
   'botFillTo must be <= maxSeats': 'errBotFillTo',
   'botMax must leave a seat for a member': 'errBotMax',
   'botMinHumans must be < botFillTo': 'errBotMinHumans',
+  'cannot change your own permissions': 'errSelfGrants',
 };
 const BY_CODE: Record<string, Key> = {
   forbidden: 'errForbidden',
@@ -125,6 +126,10 @@ const BY_CODE: Record<string, Key> = {
   tournament_template_conflict: 'errTplConflict',
   tournament_template_no_change: 'errTplNoChange',
   tournament_template_state: 'errTplState',
+  permission_off: 'errPermissionOff',
+  admin_grants_conflict: 'errGrantsConflict',
+  admin_grants_no_change: 'errGrantsNoChange',
+  not_plain_admin: 'errNotPlainAdmin',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */
@@ -145,12 +150,23 @@ export interface AdminMe {
   sessionStartedAt: number;
   /** Super-admin abilities this administrator has (the API's permission table; absent from an older API). */
   permissions?: string[];
+  /** Feature switches on for this administrator (every one for a super admin; absent from an older API). */
+  grants?: string[];
 }
 
 /** Whether the signed-in administrator has a super-admin ability (lib/permissions.ts in the API). */
 export function canDo(me: AdminMe | null, capability: string): boolean {
   if (!me) return false;
   return me.permissions ? me.permissions.includes(capability) : me.user.role === 'super_admin';
+}
+
+/**
+ * Whether a feature switch is on for the signed-in administrator, so the console leaves out what would only be refused.
+ * The server checks every request itself; an older API without switches allows everything its role allows.
+ */
+export function hasGrant(me: AdminMe | null, grant: string): boolean {
+  if (!me) return false;
+  return me.grants ? me.grants.includes(grant) : true;
 }
 
 interface AdminCtx {
@@ -222,7 +238,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           return rawApi<T>(path, init);
         }
         // A role or status changed elsewhere applies at once: signed out, or the console's own view of what it may do.
-        if (e instanceof ApiError && (e.code === 'unauthorized' || e.message === 'not an administrator' || e.message === 'super admin only')) void refresh();
+        if (e instanceof ApiError && (e.code === 'unauthorized' || e.code === 'permission_off' || e.message === 'not an administrator' || e.message === 'super admin only')) void refresh();
         throw e;
       }
     },

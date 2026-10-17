@@ -20,7 +20,7 @@ import {
   topUpStateLabel,
   userStatusLabel,
 } from '../labels';
-import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { ApiError, canDo, errText, hasGrant, useAdmin, useData } from '../lib';
 import { dayStart, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 import { MemberSettingsPanel } from './MemberSettings';
@@ -274,6 +274,8 @@ interface UserDetail {
   /** Latest seatings with their tables, and reports by and about the member. Absent from older APIs. */
   recentTables?: RecentTable[];
   reports?: MemberReports;
+  /** What the server left out because the feature is off for this administrator (ledger, reports). Absent from older APIs. */
+  hidden?: ('ledger' | 'reports')[];
 }
 
 type Role = 'user' | 'admin' | 'super_admin';
@@ -537,6 +539,10 @@ export function UserDetailPage() {
   if (!data) return <PageState error={error} onRetry={reload} />;
   const u = data.user;
   const canModerate = me?.user.id !== u.id && (u.role === 'user' || canDo(me, 'admins.manage'));
+  // Switched-off features are left out here; the server refuses them anyway.
+  const on = (g: string) => hasGrant(me, g);
+  const hidden = data.hidden ?? [];
+  const statusActions = on('sanctions') || on('resetLinks') || canDo(me, 'roles.change');
   const pvData = pv && 'data' in pv ? pv.data : null;
   const pvError = pv && 'error' in pv && !(pv.error instanceof ApiError && pv.error.code === 'reauth_cancelled') ? errText(pv.error, t) : null;
   // Before → after, shown in the confirmation so the admin sees exactly what changes (the server's values once previewed).
@@ -570,7 +576,7 @@ export function UserDetailPage() {
         {!data.ledgerConsistent && <Badge tone="red">{t('ledgerMismatch')}</Badge>}
         <span className="ml-auto flex flex-wrap gap-3">
           <Link to={`/audit?targetType=user&targetId=${encodeURIComponent(u.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="user-audit">{t('audit')} →</Link>
-          <Link to={`/reports?status=all&userId=${u.id}`} className="text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>
+          {on('reports') && <Link to={`/reports?status=all&userId=${u.id}`} className="text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>}
         </span>
       </div>
       <Feedback note={note} />
@@ -604,7 +610,9 @@ export function UserDetailPage() {
           </div>
         </dl>
       </Panel>
+      {(on('chips') || statusActions) && (
       <div className="grid gap-6 lg:grid-cols-2">
+        {on('chips') && (
         <Panel title={t('adjustChips')}>
           <div ref={chipForm}>
           <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); askChips(); }}>
@@ -622,9 +630,11 @@ export function UserDetailPage() {
           </form>
           </div>
         </Panel>
+        )}
+        {statusActions && (
         <Panel title={t('status')}>
           <div className="flex flex-col gap-3">
-            {u.status === 'active' && me?.user.id !== u.id ? (
+            {!on('sanctions') ? null : u.status === 'active' && me?.user.id !== u.id ? (
               <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'suspend' }); }}>
                 <Input placeholder={t('reason')} aria-label={t('reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
                 <Button type="submit" variant="danger" disabled={reason.trim().length < 2} data-testid="suspend">{t('suspend')}</Button>
@@ -632,7 +642,7 @@ export function UserDetailPage() {
             ) : u.status === 'suspended' ? (
               <Button variant="outline" onClick={() => ask({ kind: 'unsuspend' })} data-testid="unsuspend">{t('unsuspend')} ({u.suspendedReason})</Button>
             ) : null}
-            <Button variant="subtle" onClick={issueReset} data-testid="reset-link">{t('resetLink')}</Button>
+            {on('resetLinks') && <Button variant="subtle" onClick={issueReset} data-testid="reset-link">{t('resetLink')}</Button>}
             {canDo(me, 'roles.change') && me?.user.id !== u.id && (
               <div className="flex flex-wrap gap-2">
                 <span className="self-center text-sm text-ink-300">{t('setRole')}:</span>
@@ -643,7 +653,9 @@ export function UserDetailPage() {
             )}
           </div>
         </Panel>
+        )}
       </div>
+      )}
       <Panel title={t('connectionsTitle')}>
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-2 text-sm" data-testid="user-sessions">
@@ -671,7 +683,7 @@ export function UserDetailPage() {
             )}
             <p className="text-xs text-ink-400">{t('onlineBasis')}</p>
           </div>
-          {canModerate && (
+          {canModerate && on('disconnect') && (
             <form className="flex min-w-0 flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'disconnect' }); }} data-testid="disconnect-form">
               <p className="text-xs text-ink-300">{t('disconnectHint')}</p>
               <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={dReason} onChange={(e) => setDReason(e.target.value)} />}</Field>
@@ -748,12 +760,13 @@ export function UserDetailPage() {
       </Modal>
       <MemberActivityPanel userId={u.id} />
       {data.recentTables && <RecentTablesPanel rows={data.recentTables} />}
-      {data.reports && <MemberReportsPanel userId={u.id} reports={data.reports} />}
+      {data.reports && <MemberReportsPanel userId={u.id} reports={data.reports} hidden={hidden.includes('reports')} />}
       <MemberHistoryPanel key={rev} userId={u.id} />
-      <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />
-      <MemberReferralPanel key={`referral${rev}`} userId={u.id} />
-      <MemberSettingsPanel key={`settings${rev}`} userId={u.id} />
+      {on('refill') && <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />}
+      {on('referral') && <MemberReferralPanel key={`referral${rev}`} userId={u.id} />}
+      {on('settings') && <MemberSettingsPanel key={`settings${rev}`} userId={u.id} />}
       <Panel title={t('ledger')}>
+        {hidden.includes('ledger') && <p className="mb-2 text-xs text-ink-400" data-testid="ledger-hidden">{t('hiddenLedger')}</p>}
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (
             <tr key={l.id}>

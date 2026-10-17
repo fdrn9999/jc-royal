@@ -4,6 +4,7 @@ import { Client, PASSWORD, signupBody, WEB_ORIGIN } from '../support/client';
 import { d1, holdD1WriteLock } from '../support/d1';
 import { prepareState, root, startWorker, TABLES, type RunningWorker } from '../support/worker';
 import { isMyTurn, TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 /**
  * Kills the workerd process in the middle of a hand and restarts it on the same
@@ -369,7 +370,7 @@ describe('server restart recovery', () => {
     const email = `adm-${Date.now()}@restart.dev`;
     const m = new Client(WEB_ORIGIN, base);
     expect((await m.post('/api/auth/register', await signupBody(m, { email, nickname: `adm${Date.now() % 100000}` }))).status).toBe(201);
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${(await m.get('/api/auth/me')).body.id}'`, state);
+    await d1(promoteSql(`id = '${(await m.get('/api/auth/me')).body.id}'`), state);
     const c = new Client('http://localhost:5174', base);
     expect((await c.post('/api/admin/auth/login', { email, password: PASSWORD })).status).toBe(200);
     await reauth(c);

@@ -15,7 +15,7 @@ import { assertRecentReauth, requireAdmin } from '../lib/auth';
 import { randomToken, sha256 } from '../lib/crypto';
 import { toCsv } from '../lib/csv';
 import { fail, isPreview, parseBody } from '../lib/http';
-import { can, capabilitiesOf, matchedRoute, requirePermission } from '../lib/permissions';
+import { can, capabilitiesOf, hasGrant, matchedRoute, parseGrants, requirePermission } from '../lib/permissions';
 import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
@@ -450,8 +450,11 @@ const admin = new Hono<AppEnv>()
     if (!u) fail(404, 'not_found', 'user not found');
     const S = schema.sessions;
     const DB = c.env.DB;
+    // The ledger rows and the latest reports belong to those features: an administrator with them off sees neither here.
+    const seeLedger = await hasGrant(c, 'ledger');
+    const seeReports = await hasGrant(c, 'reports');
     const [ledger, seats, hands, sessions, history] = await Promise.all([
-      c.var.db.select().from(schema.chipLedger).where(eq(schema.chipLedger.userId, id)).orderBy(desc(schema.chipLedger.createdAt)).limit(50),
+      seeLedger ? c.var.db.select().from(schema.chipLedger).where(eq(schema.chipLedger.userId, id)).orderBy(desc(schema.chipLedger.createdAt)).limit(50) : [],
       c.var.db.select().from(schema.tableSessions).where(and(eq(schema.tableSessions.userId, id), eq(schema.tableSessions.status, 'seated'))),
       DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
       // Sign-ins only: no token, address or browser string.
@@ -500,7 +503,14 @@ const admin = new Hono<AppEnv>()
       sessions,
       online,
       recentTables: recentTables?.results ?? [],
-      reports: { filed: counts(filed), against: counts(against), recentFiled: recentFiled?.results ?? [], recentAgainst: recentAgainst?.results ?? [] },
+      reports: {
+        filed: counts(filed),
+        against: counts(against),
+        recentFiled: seeReports ? (recentFiled?.results ?? []) : [],
+        recentAgainst: seeReports ? (recentAgainst?.results ?? []) : [],
+      },
+      // Parts left out because the feature is off for this administrator (the console says so instead of "none").
+      hidden: [...(seeLedger ? [] : ['ledger']), ...(seeReports ? [] : ['reports'])],
     });
   })
   /**
@@ -563,7 +573,8 @@ const admin = new Hono<AppEnv>()
           WHERE a.target_type = 'user' AND a.target_id = ?1 AND a.action IN (${marks}) AND ${page('a')}`,
       ).bind(id, before, limit + 1, beforeId || '￿', ...actions),
     ];
-    if (kind === 'all' || kind === 'sanction') {
+    // How reports about the member were handled: part of the reports feature.
+    if ((kind === 'all' || kind === 'sanction') && (await hasGrant(c, 'reports'))) {
       stmts.push(
         DB.prepare(
           `SELECT a.id, a.action, a.detail, a.created_at AS createdAt, a.actor_id AS actorId, u.nickname AS actorNickname
@@ -722,6 +733,10 @@ const admin = new Hono<AppEnv>()
     const target = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id) });
     if (!target || target.status !== 'active') fail(404, 'not_found', 'active user not found');
     refuseBot(target);
+    // A plain administrator's feature switches belong to that role: any role change clears them, so a new (or returning)
+    // administrator starts with every feature off until a super admin turns some on.
+    const switches = await c.var.db.query.adminPermissions.findFirst({ where: eq(schema.adminPermissions.userId, id), columns: { grants: true } });
+    const cleared = parseGrants(switches?.grants);
     if (preview) {
       const sessions = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?1 AND kind = 'admin' AND expires_at > ?2`).bind(id, Date.now()).first<{ n: number }>();
       const before = capabilitiesOf(target.role);
@@ -735,12 +750,18 @@ const admin = new Hono<AppEnv>()
         // Saving ends the member's console sessions; the new role applies from their next sign-in.
         adminSessions: sessions?.n ?? 0,
         capabilities: { gained: after.filter((k) => !before.includes(k)), lost: before.filter((k) => !after.includes(k)) },
+        // The feature switches turned off by the change ([] when none were on); a new plain administrator has none.
+        grantsCleared: cleared,
       });
     }
-    await c.var.db.update(schema.users).set({ role: body.role, updatedAt: Date.now() }).where(eq(schema.users.id, id));
-    // Role changes take effect immediately: drop existing admin sessions of the target.
-    await c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
+    // Role changes take effect immediately: drop existing admin sessions of the target, and the switches with the role.
+    await c.var.db.batch([
+      c.var.db.update(schema.users).set({ role: body.role, updatedAt: Date.now() }).where(eq(schema.users.id, id)),
+      c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin'))),
+      c.var.db.delete(schema.adminPermissions).where(eq(schema.adminPermissions.userId, id)),
+    ]);
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
+    if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
     // The staff badge other players see at the tables where the member sits.
     const tables = await refreshRoleEverywhere(c.env, id, body.role);
     return c.json({ ok: true, tables });
@@ -929,8 +950,11 @@ const admin = new Hono<AppEnv>()
     const id = c.req.param('id');
     const body = await parseBody(c, TablePatchSchema);
     // Blocking entry is a table control (POST /tables/:id/control asks for the password again); this route does not
-    // become a way around that. Other settings do not need it.
-    if (body.entryBlocked !== undefined) assertRecentReauth(c);
+    // become a way around that, nor around its switch (tableControl). Other settings need neither.
+    if (body.entryBlocked !== undefined) {
+      if (!(await hasGrant(c, 'tableControl'))) fail(403, 'permission_off', 'this feature is turned off for your account');
+      assertRecentReauth(c);
+    }
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t || t.status === 'closed') fail(404, 'not_found', 'table not found');
     // A tournament's table is run by its tournament (routes/admin-tournaments.ts: pause, resume, stop), not as a cash table.

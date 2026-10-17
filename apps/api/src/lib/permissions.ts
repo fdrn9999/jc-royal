@@ -10,8 +10,14 @@
  * Some checks depend on what the request is about (an administrator as the target, the size of a chip adjustment):
  * the route keeps that check and asks `can()` for the capability below.
  *
- * Code-defined on purpose: changing who may do what is a reviewed code change, not a setting an administrator edits.
+ * On top of the role, a super admin turns each feature on or off for each plain administrator (GRANTS, kept in
+ * admin_permissions and read from D1 on every request, so a change applies from the next request). What a plain
+ * administrator may do is the intersection: the role allows the route AND its feature is on for the account. Off unless
+ * turned on. The table itself — which role may do what, and what is never delegated — stays code-defined: changing it
+ * is a reviewed code change, not a setting.
  */
+import { schema } from '@jc/db';
+import { eq } from 'drizzle-orm';
 import type { Context, MiddlewareHandler } from 'hono';
 import { matchedRoutes } from 'hono/route';
 import type { AppEnv } from '../env';
@@ -48,6 +54,8 @@ export const CAPABILITIES = {
   'timebank.policy': 'super_admin',
   /** Create, change and archive tournament templates (the structure every tournament opened from them copies). */
   'tournament.structure': 'super_admin',
+  /** See every administrator's feature switches and turn them on or off (GRANTS). */
+  'admins.grants': 'super_admin',
 } as const satisfies Record<string, AdminRole>;
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -67,6 +75,7 @@ export const FEATURES = [
   'memberExport',
   'memberNotes',
   'sanctions',
+  'disconnect',
   'chips',
   'resetLinks',
   'roles',
@@ -93,6 +102,118 @@ export const FEATURES = [
   'security',
 ] as const;
 export type Feature = (typeof FEATURES)[number];
+
+/**
+ * The features a super admin turns on or off for each plain administrator. Not here, so never delegated: what only a
+ * super admin may do (CAPABILITIES: roles, large adjustments, ledger corrections, member export, the policies, these
+ * switches themselves). A feature added later is off for every administrator until a super admin turns it on.
+ */
+export const GRANTS = [
+  'dashboard',
+  'members',
+  'sanctions',
+  'disconnect',
+  'reports',
+  'board',
+  'notices',
+  'messages',
+  'tables',
+  'tableControl',
+  'chips',
+  'ledger',
+  'economy',
+  'stats',
+  'referral',
+  'bots',
+  'tournaments',
+  'refill',
+  'hands',
+  'reconcile',
+  'settings',
+  'resetLinks',
+  'maintenance',
+] as const;
+export type Grant = (typeof GRANTS)[number];
+
+/**
+ * The switch each feature's routes stand behind. 'always': every administrator (their own console sessions and
+ * permissions, their own audit entries). 'super': only super admins, so it has no switch.
+ */
+export const GRANT_OF: Record<Feature, Grant | 'always' | 'super'> = {
+  dashboard: 'dashboard',
+  members: 'members',
+  memberExport: 'super',
+  memberNotes: 'members',
+  sanctions: 'sanctions',
+  disconnect: 'disconnect',
+  chips: 'chips',
+  resetLinks: 'resetLinks',
+  roles: 'super',
+  tables: 'tables',
+  tableControl: 'tableControl',
+  hands: 'hands',
+  handRecords: 'hands',
+  ledger: 'ledger',
+  economy: 'economy',
+  stats: 'stats',
+  reconcile: 'reconcile',
+  refill: 'refill',
+  bots: 'bots',
+  referral: 'referral',
+  tournaments: 'tournaments',
+  settings: 'settings',
+  audit: 'always',
+  reports: 'reports',
+  board: 'board',
+  messages: 'messages',
+  notices: 'notices',
+  maintenance: 'maintenance',
+  academy: 'stats',
+  security: 'always',
+};
+
+/** The stored list, keeping only features this code knows (a feature removed later is simply gone). */
+export function parseGrants(raw: string | null | undefined): Grant[] {
+  if (!raw) return [];
+  try {
+    const v: unknown = JSON.parse(raw);
+    return Array.isArray(v) ? GRANTS.filter((g) => v.includes(g)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The features this request's administrator has on: every one for a super admin, the stored ones for a plain
+ * administrator (none without a row). Read from D1 once per request.
+ */
+export async function grantsOf(c: Context<AppEnv>): Promise<Grant[]> {
+  const u = c.var.user;
+  if (u?.role === 'super_admin') return [...GRANTS];
+  if (u?.role !== 'admin') return [];
+  if (c.var.grants) return c.var.grants;
+  const row = await c.var.db.query.adminPermissions.findFirst({ where: eq(schema.adminPermissions.userId, u.id), columns: { grants: true } });
+  const grants = parseGrants(row?.grants);
+  c.set('grants', grants);
+  return grants;
+}
+
+/** Whether this request's administrator has the feature on (a route's own check on part of what it returns). */
+export async function hasGrant(c: Context<AppEnv>, grant: Grant): Promise<boolean> {
+  return (await grantsOf(c)).includes(grant);
+}
+
+/** What an account may actually use: per feature, how many of its routes the role and the switches both allow. */
+export function effectiveFeatures(role: string | undefined, grants: readonly Grant[]) {
+  const rules = Object.values(ROUTE_RULES);
+  return FEATURES.map((feature) => {
+    const mine = rules.filter((r) => r.feature === feature);
+    const grant = GRANT_OF[feature];
+    const on = grant === 'always' || (grant !== 'super' && grants.includes(grant));
+    const allowed = role === 'super_admin' ? mine.length : role === 'admin' && on ? mine.filter((r) => r.role === 'admin').length : 0;
+    return { feature, grant, allowed, total: mine.length };
+  });
+}
 
 export interface RouteRule {
   feature: Feature;
@@ -128,7 +249,7 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /users/:id/notes': r('memberNotes', 'note.create', { target: 'user' }),
   'DELETE /users/:id/notes/:noteId': r('memberNotes', 'note.delete', { target: 'user' }),
   'POST /users/:id/suspend': r('sanctions', 'user.suspend', { reauth, preview, target: 'user' }),
-  'POST /users/:id/disconnect': r('sanctions', 'user.disconnect', { reauth, preview, target: 'user' }),
+  'POST /users/:id/disconnect': r('disconnect', 'user.disconnect', { reauth, preview, target: 'user' }),
   'POST /users/:id/unsuspend': r('sanctions', 'user.unsuspend', { reauth, preview, target: 'user' }),
   'POST /users/:id/role': r('roles', 'user.role', { role: CAPABILITIES['roles.change'], reauth, preview, target: 'user' }),
   'POST /users/:id/chips': r('chips', 'user.chips', { reauth, preview, target: 'user' }),
@@ -230,6 +351,10 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'DELETE /security/sessions/:id': r('security', 'admin.session.end', { target: 'session' }),
   'POST /security/sessions/end-others': r('security', 'admin.session.end_others'),
   'GET /security/permissions': r('security', 'admin.permission.view'),
+  // Each plain administrator's feature switches (routes/admin-security.ts): a super admin's, never delegated.
+  'GET /security/admins': r('security', 'admin.grants.list', { role: CAPABILITIES['admins.grants'] }),
+  'GET /security/admins/:id': r('security', 'admin.grants.view', { role: CAPABILITIES['admins.grants'], target: 'user' }),
+  'PUT /security/admins/:id/grants': r('security', 'admin.grants.update', { role: CAPABILITIES['admins.grants'], reauth, preview, target: 'user' }),
 
   // Sit & Go tournaments (routes/admin-tournaments.ts): anyone on duty opens one from a template, runs it (registration,
   // start, pause, resume, recovery) and cancels or stops it (password and reason). Templates — the structure — are a
@@ -285,14 +410,17 @@ export function matchedRoute(c: Context<AppEnv>): MatchedRoute | null {
 }
 
 /**
- * Applies the route's rule (after requireAdmin). Same refusals as before the table: 'super admin only', reauth_required.
- * The role is checked for previews too; only the password is left to the change itself.
+ * Applies the route's rule (after requireAdmin), in this order: the role ('super admin only'), the feature switched on
+ * for this administrator (permission_off), then the password (reauth_required), so no one is asked for a password for
+ * what they may not do. Role and switch are checked for previews too; only the password is left to the change itself.
  */
 export const requirePermission: MiddlewareHandler<AppEnv> = async (c, next) => {
   const m = matchedRoute(c);
   if (!m) return next();
   if (!m.rule) fail(403, 'forbidden', 'no permission rule for this action');
   if (m.rule.role === 'super_admin' && c.var.user?.role !== 'super_admin') fail(403, 'forbidden', 'super admin only');
+  const grant = GRANT_OF[m.rule.feature];
+  if (grant !== 'always' && grant !== 'super' && !(await hasGrant(c, grant))) fail(403, 'permission_off', 'this feature is turned off for your account');
   if (m.rule.reauth && !(m.rule.preview && (await isPreview(c)))) assertRecentReauth(c);
   return next();
 };

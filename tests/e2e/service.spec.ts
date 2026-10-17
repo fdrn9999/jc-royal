@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { balanceOf, PASSWORD, signUp, test, widerThanDevice } from './helpers';
+import { promoteSql } from '../support/grants';
 
 const ADMIN = 'http://localhost:5174';
 
@@ -30,7 +31,7 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
   const member = await signUp(browser);
   const phone = await signUp(browser, { mobile: true });
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const visitorCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await visitorCtx.addInitScript(() => localStorage.setItem('jc.locale', 'en'));
   const visitor = await visitorCtx.newPage();
@@ -253,7 +254,7 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
 test('a dismissed general notice stays hidden on this device, but shows again once an administrator raises it to urgent', async ({ browser }) => {
   const member = await signUp(browser);
   const op = await signUp(browser);
-  sql(`UPDATE users SET role = 'admin' WHERE email = '${op.email}'`);
+  sql(promoteSql(`email = '${op.email}'`));
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);

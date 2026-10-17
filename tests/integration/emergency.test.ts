@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
 import { d1, holdD1WriteLock } from '../support/d1';
 import { isMyTurn, TableSocket } from '../support/ws';
+import { promoteSql } from '../support/grants';
 
 const ADMIN_ORIGIN = 'http://localhost:5174';
 const admin = sharedAdmin();
@@ -29,7 +30,7 @@ let cold: Promise<Client> | null = null;
 function coldAdmin() {
   cold ??= (async () => {
     const u = await newUser();
-    await d1(`UPDATE users SET role = 'admin' WHERE id = '${u.me.id}'`);
+    await d1(promoteSql(`id = '${u.me.id}'`));
     const c = new Client(ADMIN_ORIGIN);
     expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
     return c;
