@@ -504,8 +504,9 @@ function leastHeight(w: number, p: PlanInput, s: Parts, hi: number) {
 /**
  * Lays the table out at the given width with the height free (the replay): the largest seats whose table fits in
  * `budget`, around an ellipse when that fits too, as tall as `cap` allows (what keeps the controls on screen as the
- * replay opens), the seats one size smaller where that is what fits within it, else as tall as those largest seats
- * need; if nothing fits, the shortest table.
+ * replay opens), the seats one size smaller where that is what fits within it, else the shortest of those tables, so
+ * the cap is passed by as little as it can be (the largest seats' least height could pass it by a third of a phone's
+ * table, where the smaller seats needed a few px more); if nothing fits, the shortest table.
  */
 export function planHeight(w: number, budget: number, cap: number, p: PlanInput, densities: readonly Density[]): TablePlan {
   const all = ways(p.n, densities).map((way) => parts(p, way));
@@ -518,11 +519,13 @@ export function planHeight(w: number, budget: number, cap: number, p: PlanInput,
       const t = fitBox(w, target, p, s);
       if (t) return t;
     }
-  }
-  for (const s of all) {
-    if (!fitBox(w, budget, p, s)) continue;
-    const h = leastHeight(w, p, s, budget);
-    if (Number.isFinite(h)) return fitBox(w, h, p, s)!;
+    // Searched from the smallest seats so the bound tightens early; ties keep the larger.
+    let short: { s: Parts; h: number } | null = null;
+    for (const s of all.filter((x) => densities.indexOf(x.way.density) <= floor).reverse()) {
+      const h = leastHeight(w, p, s, short ? short.h : budget);
+      if (h <= (short ? short.h : budget)) short = { s, h };
+    }
+    if (short) return fitBox(w, short.h, p, short.s)!;
   }
   // Nothing fits: the shortest table, searched from the smallest seats so the bound tightens early; ties keep the larger.
   let best: { s: Parts | null; h: number } = { s: null, h: Math.max(600, budget, 2.4 * w) };
