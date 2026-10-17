@@ -1,20 +1,84 @@
+== P12 full integration, 2026-10-17 (local workerd + D1 + Durable Objects, one wrangler dev, wrangler 4.150.0).
+   Every one of the 307 tests passed in at least one of the two full runs. The three failures stopped in test setup,
+   before any assertion (see docs/TEST_REPORT.md, 전체 검증(P12) > 통합 실패 조사).
 
-> vitest run --config tests/vitest.config.ts tests/integration/service.test.ts -t "a table the start was never sent"
-  (before the fix, at the tournament work's tree: 1 passed of 8 runs, and it failed in its group run; failing at
-   the second foldOut with "timeout waiting for next state; last hand: {number 2, preflop, actorSeat 1, seq 0}")
-  (at 3ebc2b6, before the tournament work: passed 8 of 8 runs that reached the test; one more stopped in
-   wrangler's migration step before it)
+> vitest run --config tests/vitest.config.ts        (run 1)
 
-> after tests/support/ws.ts nextState (wait on every socket, not the first)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
 
- Test Files  1 passed (1)   x4 runs
-      Tests  1 passed | 5 skipped (6)
+ FAIL  tests/integration/members.test.ts > member history > records each sanction with before, after and the reason; filters by kind; pages without skipping ties
+Error: d1 execute failed (attempt 1): {
+  "error": {
+    "text": "fetch failed"
+  }
+}
+ ❯ d1 tests/support/d1.ts:36:41
+     34|       const why = (stdout || stderr || message).trim().slice(0, 2000);
+     35|       const busy = why.includes('SQLITE_BUSY') || (readOnly && /fetch …
+     36|       if (!busy || attempt >= 10) throw new Error(`d1 execute failed (…
+       |                                         ^
+     37|       await new Promise((r) => setTimeout(r, 100 * attempt + Math.rand…
+     38|     }
+ ❯ tests/integration/members.test.ts:260:7
 
-> vitest run --config tests/vitest.config.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
 
- RUN  v4.1.11 <repo>
+ FAIL  tests/integration/tournaments.test.ts > registration > an operator starts with the minimum, re-reading each registration, and never twice
+Error: verification request failed 500 "Error: Network connection lost.\n    at async Object.fetch (file:///<repo>/node_modules/.pnpm/miniflare@5.20261006.2-beta_@types+node@26.6.5/node_modules/miniflare/dist/src/workers/core/entry.worker.js:5347:22)"
+ ❯ verifyEmail tests/support/client.ts:75:50
+     73| export async function verifyEmail(c: Client, email: string): Promise<s…
+     74|   const r = await c.post('/api/auth/email-verification/request', { ema…
+     75|   if (r.status !== 200 || !r.body.devCode) throw new Error(`verificati…
+       |                                                  ^
+     76|   const v = await c.post('/api/auth/email-verification/confirm', { ema…
+     77|   if (v.status !== 200) throw new Error(`verification confirm failed $…
+ ❯ signupBody tests/support/client.ts:83:123
+ ❯ newUser tests/support/client.ts:89:48
+ ❯ tests/integration/tournaments.test.ts:302:20
 
- Test Files  42 passed (42)
-      Tests  293 passed (293)
-   Start at  10:23:09
-   Duration  1567.35s (transform 817ms, setup 0ms, import 4.75s, tests 1533.62s, environment 4ms)
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 41 passed (43)
+      Tests  2 failed | 305 passed (307)
+   Start at  14:03:55
+   Duration  1630.97s (transform 774ms, setup 0ms, import 3.32s, tests 1599.65s, environment 4ms)
+
+
+> vitest run --config tests/vitest.config.ts tests/integration/members.test.ts tests/integration/tournaments.test.ts   (the two failed files again)
+
+
+ Test Files  2 passed (2)
+      Tests  17 passed (17)
+   Start at  14:31:52
+   Duration  167.65s (transform 81ms, setup 0ms, import 143ms, tests 146.28s, environment 0ms)
+
+
+> vitest run --config tests/vitest.config.ts        (run 2)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/admin-permissions.test.ts > audit log search > filters by actor, action family, outcome, target, time and text, pages by cursor and counts the first page
+Error: d1 execute failed (attempt 1): {
+  "error": {
+    "text": "fetch failed"
+  }
+}
+ ❯ d1 tests/support/d1.ts:36:41
+     34|       const why = (stdout || stderr || message).trim().slice(0, 2000);
+     35|       const busy = why.includes('SQLITE_BUSY') || (readOnly && /fetch …
+     36|       if (!busy || attempt >= 10) throw new Error(`d1 execute failed (…
+       |                                         ^
+     37|       await new Promise((r) => setTimeout(r, 100 * attempt + Math.rand…
+     38|     }
+ ❯ plainAdmin tests/integration/admin-permissions.test.ts:38:3
+ ❯ tests/integration/admin-permissions.test.ts:472:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 42 passed (43)
+      Tests  1 failed | 306 passed (307)
+   Start at  14:36:25
+   Duration  1603.48s (transform 749ms, setup 0ms, import 3.27s, tests 1572.70s, environment 4ms)
+

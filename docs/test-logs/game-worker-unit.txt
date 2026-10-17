@@ -1,0 +1,13 @@
+
+> @jc/game-worker@0.0.0 test <repo>\apps\game-worker
+> vitest run
+
+
+ RUN  v4.1.11 <repo>/apps/game-worker
+
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  15:51:35
+   Duration  905ms (transform 175ms, setup 0ms, import 687ms, tests 10ms, environment 0ms)
+

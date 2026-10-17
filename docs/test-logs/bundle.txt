@@ -1,6 +1,6 @@
+> node tests/bundle-check.mjs  (after pnpm build)
 
-> jc-royal@ check:bundle <repo>
-> node tests/bundle-check.mjs
-
-entry index-BUKE1u40.js + i18n-DNXjT86x.js + service-C_0iPXKj.js: 649 KB; engine in: routes-DOzJUXge.js
+entry index-dI0S6ZEH.js + react-DB-4Zxce.js + i18n-BeNVzNlK.js + api-RqXQen_0.js + src-CMB8czyg.js + prefs-DZbDuyZS.js + auth-CiTOxN2a.js: 644 KB; engine in: routes-B9vPqVld.js
 ✓ bundle guard passed
+
+admin console (no limit): dist/assets/index-C7wXiAi1.js 1,036.03 kB | gzip: 290.92 kB

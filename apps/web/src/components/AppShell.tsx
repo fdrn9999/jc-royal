@@ -70,15 +70,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
   const tab = ({ isActive }: { isActive: boolean }) => `relative py-3 text-center text-[13px] font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`;
   const link = ({ isActive }: { isActive: boolean }) =>
-    `px-3 py-2 text-sm font-semibold tracking-wide transition ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
+    `shrink-0 whitespace-nowrap px-2 py-2 text-sm font-semibold tracking-wide transition lg:px-3 ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
   return (
     <div className="min-h-dvh" style={{ background: 'var(--t-bg)' }}>
       <header className="sticky top-0 z-40 border-b border-gold-500/10 bg-ink-950/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
           <Link to="/" className="shrink-0" aria-label="JC ROYAL">
-            <Logo size={38} withWordmark className="[&>span]:hidden sm:[&>span]:inline" />
+            <Logo size={38} withWordmark className="[&>span]:hidden lg:[&>span]:inline" />
           </Link>
-          <nav className="ml-2 hidden items-center sm:flex">
+          {/* Between the phone layout and a wide window the wordmark, language switch and logout (both also in the
+              settings) step aside for the six links; a window narrower still scrolls the links (a thin scrollbar for a
+              mouse) rather than wrapping them. The padding keeps a focused link's outline inside the scrolling strip, and a
+              link reached by Tab is brought fully into it (the browser leaves a half-hidden one as it is). */}
+          <nav
+            className="hidden min-w-0 scroll-px-1 items-center overflow-x-auto p-1 [scrollbar-width:thin] sm:flex lg:ml-2"
+            onFocus={(e) => e.target.scrollIntoView({ block: 'nearest', inline: 'nearest' })}
+            data-testid="header-nav"
+          >
             <NavLink to="/" end className={link}>
               {t('nav.lobby')}
             </NavLink>
@@ -99,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {t('nav.me')}
             </NavLink>
           </nav>
-          <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
             {me && <BalancePill amount={me.balance} />}
             {me && (
               <Link to="/messages" className="relative rounded-full p-2 text-ink-200 hover:text-ivory" aria-label={`${t('nav.messages')}${unread ? ` (${unread})` : ''}`} data-testid="inbox-link">
@@ -107,7 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <CountBadge n={unread} testId="unread-badge" className="absolute -right-0.5 -top-0.5" />
               </Link>
             )}
-            <span className="hidden md:inline"><LangToggle /></span>
+            <span className="hidden xl:inline"><LangToggle /></span>
             <button type="button" className="rounded-full p-2 text-ink-200 hover:text-ivory" onClick={() => setSettings(true)} aria-label={t('settings.title')} data-testid="settings-open">
               <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <circle cx="12" cy="12" r="3" />
@@ -115,7 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </svg>
             </button>
             {me && (
-              <button className="hidden text-sm text-ink-300 hover:text-ivory sm:inline" onClick={signOut}>
+              <button className="hidden whitespace-nowrap text-sm text-ink-300 hover:text-ivory lg:inline" onClick={signOut}>
                 {t('nav.logout')}
               </button>
             )}
