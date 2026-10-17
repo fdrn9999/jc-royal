@@ -8,10 +8,11 @@ import { ChipStack, Logo, PlayingCard } from '@jc/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { amounts as chipAmounts, type Amounts, type AmountUnit } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { CueLayer } from './CueLayer';
+import { Flights, useCueStaging } from './CueLayer';
 import { DIMS, planHeight, planTable, type Density, type PlanInput, type Point, type SeatGeometry, type TablePlan } from './layout';
 import type { ReactionSender, SeatReaction } from './Reactions';
 import { Seat } from './Seat';
+import { collected as collectedOf } from './staging';
 import type { CueEvent } from './useTableSocket';
 
 export function useBoxSize<T extends HTMLElement>() {
@@ -146,6 +147,7 @@ export function TableScene({
   consumeCues,
   reducedMotion,
   amounts = CHIPS,
+  onResultShown,
 }: {
   s: TableView;
   layout: TableLayout;
@@ -166,17 +168,26 @@ export function TableScene({
   reducedMotion: boolean;
   /** How amounts read (the player's unit at a real table or a replay; the Academy keeps chips, as its lessons do). */
   amounts?: Amounts;
+  /** Told whether the hand's result shows yet: it waits for the hands to turn, so a page can hold its own word on it. */
+  onResultShown?: (shown: boolean) => void;
 }) {
   const { t } = useI18n();
   const { portrait, density, box, geometry, plan } = layout;
   const d = DIMS[density];
   const hand = s.hand;
-  const winners = useMemo(() => new Map((hand?.result?.winners ?? []).map((w) => [w.seatIndex, w.amount])), [hand?.result]);
-  const showdown = useMemo(() => new Map((hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x])), [hand?.result]);
-  const topWinner = hand?.result?.winners?.[0]?.seatIndex;
+  // The server state, as the cues that brought it play out (CueLayer): bets land, then go to the pot, cards turn in
+  // order, the hands show before the result, the result before the payouts.
+  const { staged, flights, start, arrival } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion);
+  const result = !staged || staged.result;
+  const reveal = !staged || staged.reveal;
+  useEffect(() => onResultShown?.(result), [result, onResultShown]);
+  const winners = useMemo(() => new Map(result ? (hand?.result?.winners ?? []).map((w) => [w.seatIndex, w.amount]) : []), [hand?.result, result]);
+  const showdown = useMemo(() => new Map(result ? (hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x]) : []), [hand?.result, result]);
+  const topWinner = result ? hand?.result?.winners?.[0]?.seatIndex : undefined;
   const winningFive = topWinner !== undefined ? (showdown.get(topWinner)?.bestFive ?? []) : [];
   // Chips already gathered in the middle; after settlement they have been paid out.
-  const collected = hand && hand.stage !== 'settled' ? hand.potTotal - s.seats.reduce((a, x) => a + x.streetBet, 0) : 0;
+  const collected = staged?.pot ?? collectedOf(s);
+  const boardShown = staged?.board ?? hand?.board.length ?? 0;
   const boardSize = `${plan.board}px`;
   const status = !hand ? (nextIn !== null ? t('table.nextHand', { s: nextIn }) : t('table.waiting')) : hand.stage === 'settled' && nextIn !== null ? t('table.nextHand', { s: nextIn }) : null;
   const sidePots =
@@ -203,9 +214,17 @@ export function TableScene({
         </div>
         <div className="flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
           {Array.from({ length: 5 }, (_, i) => {
-            const c = hand?.board[i] as Card | undefined;
+            const c = i < boardShown ? (hand?.board[i] as Card | undefined) : undefined;
+            // A staged card turns when it is drawn; the cards of a street that arrived at once turn one after another.
             return c ? (
-              <PlayingCard key={`${hand!.id}-${c}`} card={c} size={boardSize} animate="flip" highlight={winningFive.includes(c)} style={{ animationDelay: `${(i % 3) * 120}ms` }} />
+              <PlayingCard
+                key={`${hand!.id}-${c}`}
+                card={c}
+                size={boardSize}
+                animate={arrival?.still?.has(c) ? false : 'flip'}
+                highlight={winningFive.includes(c)}
+                style={{ animationDelay: `${staged?.board != null ? 0 : (i % 3) * 120}ms` }}
+              />
             ) : (
               <div key={i} className="jc-card border border-dashed border-white/10 bg-black/10" style={{ ['--card-size' as string]: boardSize, boxShadow: 'none' }} />
             );
@@ -230,10 +249,15 @@ export function TableScene({
         const g = geometry[seat.seatIndex]!;
         const sd = showdown.get(seat.seatIndex);
         const label = sd ? t(`hand.${handLabelKey(sd.rankClass, sd.bestFive)}` as MsgKey) : null;
+        const bet = staged?.bets[seat.seatIndex] ?? (hand?.stage !== 'settled' ? seat.streetBet : 0);
+        const held = staged?.stacks[seat.seatIndex];
+        // Other players' showdown cards stay face down until the hands show; a winner's stack until its chips arrive.
+        const hide = !reveal && seat.seatIndex !== mySeat && !!seat.holeCards?.length;
+        const shownSeat = held !== undefined || hide ? { ...seat, ...(held !== undefined && { stack: held }), ...(hide && { holeCards: null }) } : seat;
         return (
           <div key={seat.seatIndex}>
             <Seat
-              seat={seat}
+              seat={shownSeat}
               isMe={seat.seatIndex === mySeat}
               isActor={!!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled'}
               deadline={hand?.deadline ?? null}
@@ -245,6 +269,8 @@ export function TableScene({
               handLabel={label}
               bestFive={sd?.bestFive ?? null}
               newHandKey={hand?.id ?? null}
+              deal={arrival?.deal?.[seat.seatIndex] ?? null}
+              still={arrival?.still ?? null}
               canSit={canSit}
               onSit={() => onSit(seat.seatIndex)}
               onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
@@ -255,16 +281,16 @@ export function TableScene({
               amounts={amounts}
               style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
             />
-            {seat.streetBet > 0 && hand?.stage !== 'settled' && (
+            {bet > 0 && (
               <div className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
-                <ChipStack amount={seat.streetBet} size={`${d.chip}px`} text={amounts.fmt(seat.streetBet, true)} />
+                <ChipStack amount={bet} size={`${d.chip}px`} text={amounts.fmt(bet, true)} />
               </div>
             )}
           </div>
         );
       })}
 
-      <CueLayer cues={cues} consume={consumeCues} geometry={geometry} pot={layout.pot} mySeat={mySeat} reducedMotion={reducedMotion} />
+      <Flights flights={flights} start={start} geometry={geometry} pot={layout.pot} amounts={amounts} />
     </div>
   );
 }

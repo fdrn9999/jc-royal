@@ -120,6 +120,10 @@ export interface SeatProps {
   handLabel: string | null;
   bestFive: string[] | null;
   newHandKey: string | null;
+  /** A hand dealt in front of us: when each of this seat's cards lands (ms from the deal). */
+  deal?: [number, number] | null;
+  /** A hand under way when we arrived: the cards already showing then, which stay put. */
+  still?: ReadonlySet<string> | null;
   canSit: boolean;
   onSit: () => void;
   /** Opens this player's card (other occupied seats only). */
@@ -224,10 +228,12 @@ export function Seat(p: SeatProps) {
                 key={`${c ?? 'x'}-${i}`}
                 card={c ?? null}
                 size={cardSize}
-                animate={c ? 'flip' : 'deal'}
+                animate={p.still && (!c || p.still.has(c)) ? false : c ? 'flip' : 'deal'}
                 highlight={!!c && !!p.bestFive?.includes(c)}
                 dim={folded && !isShown(i)}
-                style={{ animationDelay: `${i * 90}ms`, transform: !p.isMe ? `rotate(${i === 0 ? -6 : 6}deg)` : undefined }}
+                // Dealt round the table in order; cards turned later (a showdown) one after the other. The fan is a
+                // variable, so the card's lift and its animations keep it.
+                style={{ animationDelay: `${p.deal && (p.isMe || !c) ? p.deal[i] : i * 90}ms`, ['--card-rot' as string]: !p.isMe ? `${i === 0 ? -6 : 6}deg` : undefined }}
               />
             ))}
             {p.onShow && (

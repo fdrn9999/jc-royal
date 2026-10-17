@@ -8,8 +8,9 @@ import { sound } from '@jc/audio';
 import type { Card } from '@jc/types';
 import { Button, cx, PlayingCard } from '@jc/ui';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../lib/auth';
+import { HAND_PAGE, useBack } from '../lib/back';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { cardName, l, useTr, type L } from './content';
 import { completeLesson, recordAnswer, startLesson, updateProgress, type LessonId } from './progress';
@@ -19,6 +20,7 @@ import { track } from './sync';
 export const UI = {
   academy: l('포커 아카데미', 'Poker Academy'),
   back: l('아카데미', 'Academy'),
+  toHand: l('핸드로 돌아가기', 'Back to the hand'),
   prev: l('이전', 'Back'),
   next: l('다음', 'Next'),
   finish: l('레슨 완료', 'Finish lesson'),
@@ -64,6 +66,9 @@ export function LessonShell({ id, title, steps, next }: { id: LessonId; title: L
   const { me } = useAuth();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
+  const { state } = useLocation();
+  // Opened from a hand's review, back goes to that hand.
+  const back = useBack(HAND_PAGE, '/academy');
   const step = Math.min(steps.length - 1, Math.max(0, Number(params.get('step') ?? 0) || 0));
   const [finished, setFinished] = useState(false);
   const top = useRef<HTMLDivElement>(null);
@@ -75,7 +80,7 @@ export function LessonShell({ id, title, steps, next }: { id: LessonId; title: L
   }, [me, id, step]);
 
   const go = (s: number) => {
-    setParams({ step: String(s) }, { replace: true });
+    setParams({ step: String(s) }, { replace: true, state });
     top.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   const cur = steps[step]!;
@@ -90,8 +95,8 @@ export function LessonShell({ id, title, steps, next }: { id: LessonId; title: L
   return (
     <div ref={top} className="mx-auto flex max-w-3xl scroll-mt-20 flex-col gap-4" data-testid={`lesson-${id}`}>
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/academy" className="jc-tap -ml-2 rounded-lg px-2 py-2 text-ink-300 hover:text-ivory">
-          ← {tr(UI.back)}
+        <Link to={back.to} onClick={back.onClick} className="jc-tap -ml-2 rounded-lg px-2 py-2 text-ink-300 hover:text-ivory" data-testid="lesson-back">
+          ← {tr(back.from ? UI.toHand : UI.back)}
         </Link>
       </div>
       <header className="flex flex-col gap-3">

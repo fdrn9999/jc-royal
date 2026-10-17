@@ -1,11 +1,11 @@
 import type { LobbyTableDto, TournamentSummaryDto } from '@jc/types';
 import { Badge, Button, cx, Empty, formatChips, Input, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
 import { JoinCodeModal } from '../components/JoinCode';
 import { BOT_LEVEL_LABEL, HostedBy } from '../components/MemberName';
-import { ANY, QuickPlayPanel, useLobbyFilters } from '../components/QuickPlay';
+import { ANY, filtersOf, QuickPlayPanel, useLobbyFilters, type QuickFilters } from '../components/QuickPlay';
 import { CreateRoomModal } from '../components/Rooms';
 import { InstallOfferLazy } from '../components/InstallLazy';
 import { MaintenanceNote } from '../components/MaintenanceNote';
@@ -14,6 +14,7 @@ import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { entryOf, latest, lobbyPoller, POLL_MS, useTablePrefs, type Latest } from '../lib/lobby';
+import { rememberLobby } from '../lib/lobbyReturn';
 import { setFavourite, useFavourites } from '../lib/prefs';
 import { useMaintenance } from '../lib/service';
 import { siteUrl } from '../lib/share';
@@ -109,10 +110,32 @@ export function LobbyPage() {
   const { me } = useAuth();
   const academy = useProgress(me?.id);
   const { tables, error, refresh } = useLobbyTables();
-  const { filters, blinds, setFilters, any } = useLobbyFilters(tables);
+  // The tab, the search and the size/blind filters live in the address: back from a table, a reload or a shared link
+  // finds the list as it was. One write for all of them (two in one go would each start from the same address).
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') as Filter | null;
+  const filter: Filter = tab && FILTERS.includes(tab) ? tab : 'all';
+  const q = params.get('q') ?? '';
+  const view = (next: { filter?: Filter; q?: string; filters?: QuickFilters }) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        const put = (k: string, v: string, none: string) => (v === none ? p.delete(k) : p.set(k, v));
+        if (next.filter !== undefined) put('tab', next.filter, 'all');
+        if (next.q !== undefined) put('q', next.q, '');
+        if (next.filters) {
+          put('seats', String(next.filters.maxSeats), '0');
+          put('bb', String(next.filters.bigBlind), '0');
+        }
+        return p;
+      },
+      { replace: true },
+    );
+  const { search } = useLocation();
+  useEffect(() => rememberLobby(search), [search]);
+  const { filters, blinds, any } = useLobbyFilters(tables, filtersOf(params));
+  const setFilters = (f: QuickFilters) => view({ filters: f });
   const prefs = useTablePrefs(me?.id);
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
   const [codeFor, setCodeFor] = useState<{ table: LobbyTableDto; then: 'sit' | 'wait' } | null>(null);
   const [creating, setCreating] = useState(false);
   // Maintenance under way: the server refuses new rooms, quick play and seats, so those buttons wait for its end.
@@ -153,11 +176,7 @@ export function LobbyPage() {
   }, [tables, q, filter, filters.maxSeats, filters.bigBlind, favs, visited]);
 
   const narrowed = filter !== 'all' || q.trim() !== '' || !any;
-  const resetAll = () => {
-    setFilter('all');
-    setQ('');
-    setFilters(ANY);
-  };
+  const resetAll = () => view({ filter: 'all', q: '', filters: ANY });
 
   function open(tb: LobbyTableDto, how: 'sit' | 'wait' | 'watch') {
     if (tb.isPrivate && how !== 'watch') {
@@ -193,7 +212,7 @@ export function LobbyPage() {
           </Button>
         </div>
         <div className="flex gap-2">
-          <Input placeholder={t('lobby.search')} value={q} onChange={(e) => setQ(e.target.value)} className="sm:w-64" aria-label={t('lobby.search')} />
+          <Input placeholder={t('lobby.search')} value={q} onChange={(e) => view({ q: e.target.value })} className="sm:w-64" aria-label={t('lobby.search')} />
           <Button variant="subtle" onClick={refresh} aria-label={t('lobby.refresh')} data-testid="lobby-refresh">
             ↻
           </Button>
@@ -225,7 +244,7 @@ export function LobbyPage() {
                 key={f}
                 role="tab"
                 aria-selected={filter === f}
-                onClick={() => setFilter(f)}
+                onClick={() => view({ filter: f })}
                 data-testid={`lobby-filter-${f}`}
                 className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${filter === f ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory'}`}
               >

@@ -23,6 +23,7 @@ import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { rememberVisit } from '../lib/lobby';
+import { lobbyHref } from '../lib/lobbyReturn';
 import { siteUrl } from '../lib/share';
 import { hasPendingMuck, pullSettings, usePrefs, useSettingsSync } from '../lib/prefs';
 import { useAmounts } from '../lib/amount';
@@ -125,11 +126,15 @@ export function TablePage() {
 
   // Server errors that are not tied to a request → transient toast.
   useEffect(() => {
-    if (!sock.lastError) return;
-    setToast(err(sock.lastError.code));
-    const h = setTimeout(() => setToast(null), 3_500);
-    return () => clearTimeout(h);
+    if (sock.lastError) setToast(err(sock.lastError.code));
   }, [sock.lastError, err]);
+  // Every toast clears itself, on one clock: a newer one starts it again (an older timer never cuts it short), and
+  // leaving the page stops it. The full-table note stays a little longer; it says what to do next.
+  useEffect(() => {
+    if (!toast) return;
+    const h = setTimeout(() => setToast(null), toast === t('invite.fullNow') ? 5_000 : 3_500);
+    return () => clearTimeout(h);
+  }, [toast, t]);
 
   // What happened to my top-up or automatic rebuy after a hand; the wallet changed (or a request ended), so refresh it.
   // A cancelled pre-action is only shown.
@@ -185,7 +190,6 @@ export function TablePage() {
       setQuickMissed(true);
     } else if (s.you.seatIndex === null && s.seats.every((x) => x.state !== 'empty')) {
       setToast(t('invite.fullNow'));
-      setTimeout(() => setToast(null), 5_000);
     }
     params.delete('sit');
     setParams(params, { replace: true });
@@ -278,7 +282,6 @@ export function TablePage() {
         const code = e instanceof RequestError ? e.code : null;
         if (code === 'stale_version') return;
         setToast(err(code));
-        setTimeout(() => setToast(null), 3_500);
       }
     },
     [sock, err],
@@ -321,7 +324,7 @@ export function TablePage() {
     try {
       await sock.request({ t: 'leave' });
       void refresh();
-      if (s?.you.seatIndex === null) nav('/');
+      if (s?.you.seatIndex === null) nav(lobbyHref());
     } catch (e) {
       setToast(err(e instanceof RequestError ? e.code : null));
     }
@@ -361,6 +364,9 @@ export function TablePage() {
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
+  // Seated, a page about something else opens in a new tab: leaving this one would leave the game behind (the
+  // connection, then the hand), as the player's 1:1 chat does.
+  const away = seated ? ({ target: '_blank', rel: 'noopener' } as const) : {};
   // A tournament table: no wallet chips here (no buy-in, top-up, rebuy or waiting list), and its seat is not given up
   // by leaving the screen; the way out goes to the tournament's page.
   const tn = s?.tournament ?? null;
@@ -371,7 +377,7 @@ export function TablePage() {
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }}>
       {/* top bar */}
       <header className="jc-game-surface z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
-        <Link to="/" aria-label={t('nav.lobby')} className="shrink-0">
+        <Link to={lobbyHref()} aria-label={t('nav.lobby')} className="shrink-0">
           <Logo size={32} />
         </Link>
         {(() => {
@@ -423,7 +429,7 @@ export function TablePage() {
               <span className="hidden sm:inline">{t('tn.toTournament')}</span>
             </Button>
           ) : (
-            <Button size="icon" variant="outline" onClick={seated ? leave : () => nav('/')} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
+            <Button size="icon" variant="outline" onClick={seated ? leave : () => nav(lobbyHref())} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
               <span aria-hidden className="sm:hidden">⏏</span>
               <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
             </Button>
@@ -453,7 +459,7 @@ export function TablePage() {
             </button>
           )}
           {sock.status === 'kicked' && (
-            <Link to="/" className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" data-testid="kicked-lobby">
+            <Link to={lobbyHref()} className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" data-testid="kicked-lobby">
               {t('nav.lobby')}
             </Link>
           )}
@@ -464,7 +470,7 @@ export function TablePage() {
           {quickPlay.miss ? (
             <>
               <QuickMissNote miss={quickPlay.miss} filtered={false} />
-              <Link to="/" className="self-start text-xs font-semibold text-gold-300 underline underline-offset-2 sm:self-center">
+              <Link to={lobbyHref()} className="self-start text-xs font-semibold text-gold-300 underline underline-offset-2 sm:self-center">
                 {t('nav.lobby')}
               </Link>
             </>
@@ -553,7 +559,10 @@ export function TablePage() {
                 {prefs.beginner ? (
                   <ActionHelp s={s} />
                 ) : (
-                  <div className="hidden rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:block sm:self-end">{t('table.yourTurn')}</div>
+                  // On a phone the bar itself shows it; a screen reader still hears it.
+                  <div role="status" className="sr-only rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:not-sr-only sm:block sm:self-end">
+                    {t('table.yourTurn')}
+                  </div>
                 )}
                 <TimeBankButton s={s} onUse={addBankTime} />
                 <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} />
@@ -651,7 +660,7 @@ export function TablePage() {
             <div className="mt-3 border-t border-white/5 pt-3 text-xs text-ink-400">
               {s.spectatorCount > 0 && <div>{t('lobby.spectators', { n: s.spectatorCount })}</div>}
               {s.waitlist.length > 0 && <div>{t('lobby.waitlist', { n: s.waitlist.length })}</div>}
-              <Link to="/me" className="mt-1 inline-block text-gold-300 hover:underline">
+              <Link to="/me/hands" {...away} className="jc-tap mt-1 inline-block py-1 text-gold-300 hover:underline" data-testid="table-history">
                 {t('table.history')} →
               </Link>
             </div>
@@ -719,7 +728,7 @@ export function TablePage() {
         <Suspense fallback={<div className="h-40" />}>
           <HandRankingChart compact />
         </Suspense>
-        <Link to="/academy/hands" className="mt-3 inline-block text-sm text-gold-300 hover:underline">
+        <Link to="/academy/hands" {...away} className="jc-tap mt-3 inline-block py-1 text-sm text-gold-300 hover:underline" data-testid="chart-academy">
           {t('table.toAcademy')} →
         </Link>
       </Modal>

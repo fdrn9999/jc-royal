@@ -1,8 +1,9 @@
 import type { AuthorDto, CommentDto, HandSummaryDto, PostDetailDto, PostListItemDto, PostPageDto, PublicUserDto } from '@jc/types';
-import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PlayingCard, Spinner } from '@jc/ui';
+import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PlayingCard } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { HandReview } from '../components/HandReview';
+import { isGone, LoadFailed, Loading } from '../components/Loading';
 import { MemberName, RoleBadge } from '../components/MemberName';
 import { MaintenanceNote } from '../components/MaintenanceNote';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
@@ -72,10 +73,20 @@ export function BoardPage() {
   const q = params.get('q') ?? '';
   const [search, setSearch] = useState(q);
   const [data, setData] = useState<PostPageDto | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    let live = true;
     setData(null);
-    void api<PostPageDto>(`/api/board/posts?page=${page}&q=${encodeURIComponent(q)}`).then(setData);
-  }, [page, q]);
+    setFailed(false);
+    api<PostPageDto>(`/api/board/posts?page=${page}&q=${encodeURIComponent(q)}`).then(
+      (d) => live && setData(d),
+      () => live && setFailed(true),
+    );
+    return () => {
+      live = false;
+    };
+  }, [page, q, attempt]);
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   return (
     <div className="flex flex-col gap-5">
@@ -95,7 +106,7 @@ export function BoardPage() {
       {paused && <MaintenanceNote m={paused} what="posting" />}
       <div className="jc-panel overflow-hidden">
         {!data ? (
-          <div className="flex justify-center py-12 text-gold-400"><Spinner /></div>
+          failed ? <LoadFailed onRetry={() => setAttempt((n) => n + 1)} /> : <Loading />
         ) : (
           <ul className="divide-y divide-white/5">
             {data.notices.map((p) => <PostRow key={p.id} p={p} notice />)}
@@ -123,16 +134,20 @@ export function PostPage() {
   const nav = useNavigate();
   const [post, setPost] = useState<PostDetailDto | null>(null);
   const [missing, setMissing] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [comment, setComment] = useState('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<PublicUserDto | null>(null);
   const [reporting, setReporting] = useState<ReportSubject | null>(null);
   const load = useCallback(async () => {
+    setFailed(false);
     try {
       setPost(await api<PostDetailDto>(`/api/board/posts/${id}`));
-    } catch {
-      setMissing(true);
+    } catch (e) {
+      // Gone (deleted, never there) reads as not found; a lost connection keeps the post shown, or offers a retry.
+      if (isGone(e)) setMissing(true);
+      else setFailed(true);
     }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
@@ -147,7 +162,7 @@ export function PostPage() {
     }
   }
   if (missing) return <Empty>{t('notFound')}</Empty>;
-  if (!post) return <div className="flex justify-center py-12 text-gold-400"><Spinner /></div>;
+  if (!post) return failed ? <LoadFailed onRetry={() => void load()} /> : <Loading />;
   return (
     <div className="flex flex-col gap-5">
       <Link to="/board" className="text-sm text-gold-300 hover:underline">← {t('board.title')}</Link>
@@ -275,19 +290,27 @@ export function PostEditorPage() {
   const [busy, setBusy] = useState(false);
   // In edit mode the form is shown only after the post is loaded, so typing can never be overwritten.
   const [loaded, setLoaded] = useState(!id);
+  const [failed, setFailed] = useState<'post' | 'hands' | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!id) return;
-    void api<PostDetailDto>(`/api/board/posts/${id}`).then((p) => {
-      setTitle(p.title);
-      setBody(p.body);
-      setHandIds(p.hands.map((h) => h.id));
-      setLoaded(true);
-    });
-  }, [id]);
+    setFailed(null);
+    void api<PostDetailDto>(`/api/board/posts/${id}`).then(
+      (p) => {
+        setTitle(p.title);
+        setBody(p.body);
+        setHandIds(p.hands.map((h) => h.id));
+        setLoaded(true);
+      },
+      () => setFailed('post'),
+    );
+  }, [id, attempt]);
   useEffect(() => {
-    if (picker && !myHands) void api<HandSummaryDto[]>('/api/me/hands?limit=50').then(setMyHands);
-  }, [picker, myHands]);
+    if (!picker || myHands) return;
+    setFailed(null);
+    void api<HandSummaryDto[]>('/api/me/hands?limit=50').then(setMyHands, () => setFailed('hands'));
+  }, [picker, myHands, attempt]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -307,7 +330,7 @@ export function PostEditorPage() {
       setBusy(false);
     }
   }
-  if (!loaded) return <div className="flex justify-center py-12 text-gold-400"><Spinner /></div>;
+  if (!loaded) return failed === 'post' ? <LoadFailed onRetry={() => setAttempt((n) => n + 1)} /> : <Loading />;
   const toggle = (hid: string) => setHandIds((cur) => (cur.includes(hid) ? cur.filter((x) => x !== hid) : cur.length >= 3 ? cur : [...cur, hid]));
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
@@ -332,7 +355,7 @@ export function PostEditorPage() {
         </div>
       </form>
       <Modal open={picker} onClose={() => setPicker(false)} title={t('board.pickHands')} wide footer={<Button onClick={() => setPicker(false)}>{t('common.confirm')} ({handIds.length}/3)</Button>}>
-        {!myHands ? <div className="flex justify-center py-6 text-gold-400"><Spinner /></div> : myHands.length === 0 ? <Empty>{t('board.noHands')}</Empty> : (
+        {!myHands ? failed === 'hands' ? <LoadFailed className="py-6" onRetry={() => setAttempt((n) => n + 1)} /> : <Loading className="py-6" /> : myHands.length === 0 ? <Empty>{t('board.noHands')}</Empty> : (
           <ul className="flex flex-col gap-1.5">
             {myHands.map((h) => (
               <li key={h.id}>

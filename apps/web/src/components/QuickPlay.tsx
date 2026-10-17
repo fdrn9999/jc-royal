@@ -117,12 +117,17 @@ export function blindLevels(tables: LobbyTableDto[] | null, maxSeats: QuickFilte
   return [...seen].sort((a, b) => a[0] - b[0]);
 }
 
+/** The size and blind filters a lobby address (`seats`, `bb`) asks for. */
+export function filtersOf(params: URLSearchParams): QuickFilters {
+  const seats = Number(params.get('seats'));
+  return { maxSeats: (SEATS as readonly number[]).includes(seats) ? (seats as QuickFilters['maxSeats']) : 0, bigBlind: Math.max(0, Math.floor(Number(params.get('bb')) || 0)) };
+}
+
 /** The lobby's size and blind filters drive quick play too; a blind level the chosen size doesn't play reads as any. */
-export function useLobbyFilters(tables: LobbyTableDto[] | null) {
-  const [f, setF] = useState<QuickFilters>(ANY);
+export function useLobbyFilters(tables: LobbyTableDto[] | null, f: QuickFilters) {
   const blinds = useMemo(() => blindLevels(tables, f.maxSeats), [tables, f.maxSeats]);
   const filters: QuickFilters = { ...f, bigBlind: blinds.some(([bb]) => bb === f.bigBlind) ? f.bigBlind : 0 };
-  return { filters, blinds, setFilters: setF, any: !filters.maxSeats && !filters.bigBlind };
+  return { filters, blinds, any: !filters.maxSeats && !filters.bigBlind };
 }
 
 export function QuickPlayPanel({

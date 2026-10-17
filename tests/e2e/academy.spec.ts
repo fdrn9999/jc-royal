@@ -138,6 +138,8 @@ test('real table: hand chart opens without dropping the game; beginner mode show
   await a.page.getByTestId('hand-chart-open').click();
   await expect(a.page.getByTestId('hand-chart')).toBeVisible();
   await expect(a.page.getByTestId('hand-chart').locator('[data-testid^=rank-]')).toHaveCount(10);
+  // Seated, the lesson behind the chart opens in a new tab: this one keeps the seat and the connection.
+  await expect(a.page.getByTestId('chart-academy')).toHaveAttribute('target', '_blank');
   await a.page.keyboard.press('Escape');
   await expect(a.page.getByTestId('hand-chart')).toHaveCount(0);
   // Still connected and playable: the hand goes on.

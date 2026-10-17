@@ -179,7 +179,9 @@ export function useTableSocket(tableId: string): TableSocketApi {
             // An action whose turn has passed was applied or overtaken: either way nothing is waiting for it.
             const turn = m.state.hand ? `${m.state.hand.id}:${m.state.hand.seq}` : null;
             for (const o of box.values()) if (o.h.turn && o.h.turn !== turn) box.take(o.id);
-            if (m.cues.length) {
+            // A state of the version already shown carries cues already played (a settled hand sent again): the table
+            // takes the state, the cues are not played twice.
+            if (m.cues.length && !(prev && m.state.version <= prev.version)) {
               const evs = m.cues.map((cue) => ({ id: ++cueSeq.current, cue, state: m.state }));
               setCues((q) => [...q, ...evs].slice(-60));
             }
