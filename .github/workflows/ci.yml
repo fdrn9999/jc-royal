@@ -13,8 +13,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # The whole job took 28.9 minutes on 2026-10-16 (integration 13.4, E2E 14.1).
-    timeout-minutes: 40
+    # The whole job took 37.6 minutes on 2026-10-17 (PR #6: integration 17.7, E2E 18.7; 312 and 108 tests).
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

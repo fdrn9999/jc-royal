@@ -12,7 +12,7 @@
 | game-worker 단위 | `pnpm --filter @jc/game-worker test` | **18 / 18 통과** | `test-logs/game-worker-unit.txt` |
 | 통합(실제 workerd) | `pnpm test:integration` | **312건**(43개 파일). G014 전체 1회 311/312. 실패 1건은 단정문 전 준비 단계에서 난 로컬 개발 도구 오류(ProxyWorker가 끊긴 POST를 다시 보내지 않음, P12 실패 B와 같은 위치)이고, 그 파일만 다시 돌려 11/11(아래 'Codex 브랜치 리뷰(G014)'). 그 전 P12 전체 2회는 305/307·306/307, 실패 3건은 같은 종류의 도구 오류(금지 포트 포함)로 다시 돌려 17/17(아래 '전체 검증(P12)') | `test-logs/integration.txt` |
 | E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e --project=desktop\|mobile --retries=0` | **108 / 108 통과**(G014, 데스크톱 67·40개 파일, 모바일 41·33개 파일, 다시 시도 없이. P12는 107/107) | `test-logs/e2e.txt` |
-| 부하(로컬) | `pnpm test:load` | 통과(기본 10테이블, 50핸드, 오류 0, 칩 보존 일치. P12에서 기본 1회도 오류 0·400,000=400,000·정합성 불일치 0·놓친 전달 0·남은 테이블 세션 0, `test-logs/load-p12-default.json`. 핸드 통계 추가 후 2회, 충전 멱등 수정 후 1회, PART A 회귀로 기본·지속 각 1회 재실행도 오류 0·칩 보존 일치. B1 뒤 기본 1회도 오류 0·400,000=400,000, 부하 중 쓴 운영 카운터 행 0. B2 뒤 기본 1회도 오류 0·400,000=400,000·정합성 불일치 0. B4 뒤 기본 3회, B5 뒤 기본 1회, PART C 뒤 기본 1회도 같음) | `test-logs/load-*.json` |
+| 부하(로컬) | `pnpm test:load` | 통과(기본 10테이블, 50핸드, 오류 0, 칩 보존 일치. P12에서 기본 1회도 오류 0·400,000=400,000·정합성 불일치 0·놓친 전달 0·남은 테이블 세션 0, `test-logs/load-p12-default.json`. 핸드 통계 추가 후 2회, 충전 멱등 수정 후 1회, PART A 회귀로 기본·지속 각 1회 재실행도 오류 0·칩 보존 일치. B1 뒤 기본 1회도 오류 0·400,000=400,000, 부하 중 쓴 운영 카운터 행 0. B2 뒤 기본 1회도 오류 0·400,000=400,000·정합성 불일치 0. B4 뒤 기본 3회, B5 뒤 기본 1회, PART C 뒤 기본 1회, G014 뒤 기본 1회(`load-g014-default.json`)도 같음) | `test-logs/load-*.json` |
 | 타입 검사 | `pnpm typecheck`, `tsc --noEmit -p tests/tsconfig.json`, 웹·관리자 `tsc --noEmit` | 오류 0 | — |
 | 번들 가드 | `pnpm check:bundle` | 엔진은 지연 청크에만, 첫 화면에 받는 JS(진입 파일 + 미리 받는 공용 청크) 644KB(한도 650KB). 관리자 콘솔은 한도 없음, 1,036.6KB(gzip 291.1KB, G014) | `test-logs/bundle.txt` |
 
@@ -1930,6 +1930,8 @@ E2E가 남긴 스크린샷을 직접 열어 확인했다(`test-results/`, 저장
 | 통합(실제 workerd) | `pnpm test:integration` | 312건(43개 파일, 새 5건 포함) 중 311건 통과, 1,697.6초. 실패 1건(`tournaments.test.ts:302`, 단정문 전 준비 단계)은 아래 '통합 실패 조사(G014)'. 그 파일만 다시 돌려 11/11(122.1초) |
 | E2E(Playwright, 실제 Chrome) | `PW_CHANNEL=chrome pnpm test:e2e --retries=0`(데스크톱·휴대폰을 한 번에, 작업자 1) | **108/108 통과**(데스크톱 67, 휴대폰 41, 22.3분, 다시 시도 없이). 그 전에 새 `admin-table-conflict.spec.ts`만 따로 돌려 통과(9.3초) |
 | 빌드·번들 가드 | `pnpm build`, `node tests/bundle-check.mjs` | 통과. 첫 화면 JS 644KB(한도 650KB). 관리자 콘솔 1,036.6KB(gzip 291.1KB) |
+| 부하(로컬) | `pnpm test:load`(기본 10테이블, 50핸드) | 통과(56.7초). 1,084액션, 오류 0, 지갑 합 400,000 = 400,000, 정합성 불일치 0, 놓친 전달 0, 남은 테이블 세션 0, 워커 로그 오류 0줄(`test-logs/load-g014-default.json`). 룸의 머크 처리를 바꿨기 때문에 회귀를 확인하려고 돌렸다 |
+| CI(GitHub Actions, ubuntu) | PR #6 실행 39022975009(6c1ecc4) | 통과. 타입 0, 단위 66·234·101·18 모두 통과, 통합 312/312(1,062.3초, 한 번에), E2E 108/108(18.7분), 운영 번들 dry-run 통과. 테스트 잡 37.6분으로 제한 40분에 가까워 제한을 55분으로 늘렸다(main 실행 38842961101은 28.3분. 통합은 약 210건에서 312건으로, E2E는 약 70건에서 108건으로 늘었다). 제한을 넘기면 테스트 잡이 실패하고 운영 배포 잡이 건너뛰어진다 |
 
 #### 통합 실패 조사(G014)
 
