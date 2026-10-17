@@ -171,7 +171,8 @@ test('admin settings reset: counts only, a preview with its scope, reason and re
   failing = false;
   await openSettings(m.page);
   const retry = m.page.getByTestId('settings-sync-retry');
-  if (await retry.isVisible()) await retry.click().catch(() => {});
+  // The device also retries by itself (2 s after the failure): if that answer removes the button first, the click must not wait for it.
+  if (await retry.isVisible()) await retry.click({ timeout: 3_000 }).catch(() => {});
   await expect(look(m.page)).toHaveAttribute('data-theme', 'royal');
   await expect(m.page.getByTestId('settings-sync')).toHaveAttribute('data-state', 'saved');
   await expect(m.page.getByTestId('settings-sync')).toContainText(/초기화하거나 되돌려|reset or restored/);
