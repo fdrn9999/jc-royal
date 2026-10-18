@@ -1,0 +1,236 @@
+{
+  "what": "Stopping a sound for one that tells the hand (packages/audio fade), and the first frame of a synthesized part. docs/TEST_REPORT.md 후속 개선 7.",
+  "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+  "realtime": {
+    "sampleRate": 48000,
+    "baseLatency": 0.01
+  },
+  "engine": {
+    "how": "packages/audio/src/index.ts at HEAD and as changed, transpiled as is and played in a real-time AudioContext. Only its sources are swapped for a constant 1 (flip, the sound stopped) or 0 (the five others), and its filter for a pass-through, so the engine's output is flip's level: envelope x fader x effects 0.8 x master 0.8 (flip's peak 0.0768). 'win' as the sixth sound takes flip's place 2-62ms in, half of the stops inside flip's tone attack (20-32ms). 'Without cancelAndHoldAtTime' deletes it from AudioParam.prototype before the engine loads.",
+    "columns": {
+      "jump": "loudest level in the 40ms after the stop over the level the frame before it",
+      "maxOfPeak": "loudest level after the stop over flip's own peak",
+      "maxTailAfter60ms": "loudest level 60ms or more after the stop",
+      "startSpikes": "stops where a frame was louder than flip's peak (a frame at the gain's default 1, 0.64 here)"
+    },
+    "results": {
+      "HEAD | cancelAndHoldAtTime": {
+        "stops": 40,
+        "jumped": 1,
+        "maxJump": 1.298,
+        "maxOfPeak": 0.389,
+        "maxTailAfter60ms": 0,
+        "startSpikes": 4,
+        "maxFrame": 0.6472
+      },
+      "HEAD | without cancelAndHoldAtTime (the Firefox path)": {
+        "stops": 40,
+        "jumped": 3,
+        "maxJump": 14.581,
+        "maxOfPeak": 1.417,
+        "maxTailAfter60ms": 0,
+        "startSpikes": 5,
+        "maxFrame": 0.6472
+      },
+      "changed | cancelAndHoldAtTime": {
+        "stops": 40,
+        "jumped": 3,
+        "maxJump": 1.024,
+        "maxOfPeak": 0.439,
+        "maxTailAfter60ms": 0,
+        "startSpikes": 0,
+        "maxFrame": 0.0768
+      },
+      "changed | without cancelAndHoldAtTime (the Firefox path)": {
+        "stops": 40,
+        "jumped": 3,
+        "maxJump": 1.024,
+        "maxOfPeak": 0.439,
+        "maxTailAfter60ms": 0,
+        "startSpikes": 0,
+        "maxFrame": 0.0768
+      }
+    },
+    "unstopped": {
+      "HEAD | cancelAndHoldAtTime": {
+        "unstopped": 3,
+        "peaks": [
+          0.0768,
+          0.0768,
+          0.0768
+        ]
+      },
+      "HEAD | without cancelAndHoldAtTime (the Firefox path)": {
+        "unstopped": 3,
+        "peaks": [
+          0.6472,
+          0.0768,
+          0.0768
+        ]
+      },
+      "changed | cancelAndHoldAtTime": {
+        "unstopped": 3,
+        "peaks": [
+          0.0768,
+          0.0768,
+          0.0768
+        ]
+      },
+      "changed | without cancelAndHoldAtTime (the Firefox path)": {
+        "unstopped": 3,
+        "peaks": [
+          0.0768,
+          0.0768,
+          0.0768
+        ]
+      }
+    }
+  },
+  "envelopeAlone": {
+    "how": "One part's gain envelope alone (a buffer of ones through it), stopped 2ms-60% in: HEAD's silence() with and without cancelAndHoldAtTime, and the change (the part's own envelope untouched, a fader after it falls). 'preset' also sets the gain's value to the envelope's first value before scheduling, as the change does.",
+    "withoutPreset": {
+      "chip noise 0.14/0.09s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 1,
+        "maxStartFrame": 1
+      },
+      "chip noise 0.14/0.09s | fallback": {
+        "trials": 20,
+        "jumped": 2,
+        "maxJump": 125,
+        "startSpikes": 3,
+        "maxStartFrame": 1
+      },
+      "chip noise 0.14/0.09s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 2,
+        "maxStartFrame": 1
+      },
+      "click noise 0.18/0.04s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "click noise 0.18/0.04s | fallback": {
+        "trials": 20,
+        "jumped": 1,
+        "maxJump": 42.254,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "click noise 0.18/0.04s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "chip tone 0.14/0.045s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 4,
+        "maxStartFrame": 1
+      },
+      "chip tone 0.14/0.045s | fallback": {
+        "trials": 20,
+        "jumped": 3,
+        "maxJump": 59.829,
+        "startSpikes": 9,
+        "maxStartFrame": 1
+      },
+      "chip tone 0.14/0.045s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 10,
+        "maxStartFrame": 1
+      },
+      "win note 0.14/0.32s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 2,
+        "maxStartFrame": 1
+      },
+      "win note 0.14/0.32s | fallback": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 4,
+        "maxStartFrame": 1
+      },
+      "win note 0.14/0.32s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 2,
+        "maxStartFrame": 1
+      }
+    },
+    "preset": {
+      "chip noise 0.14/0.09s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "chip noise 0.14/0.09s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "click noise 0.18/0.04s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "click noise 0.18/0.04s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 0.996,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "chip tone 0.14/0.045s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "chip tone 0.14/0.045s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "win note 0.14/0.32s | native": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      },
+      "win note 0.14/0.32s | new": {
+        "trials": 20,
+        "jumped": 0,
+        "maxJump": 1,
+        "startSpikes": 0,
+        "maxStartFrame": 0
+      }
+    }
+  }
+}

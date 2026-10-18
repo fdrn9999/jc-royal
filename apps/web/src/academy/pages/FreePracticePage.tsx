@@ -5,7 +5,7 @@
 import { sound } from '@jc/audio';
 import type { ActionType, TableView } from '@jc/types';
 import { Button, cx, formatChips, Modal } from '@jc/ui';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { ActionHelp, CurrentHandPill } from '../../game/BeginnerAids';
 import { ActionBar } from '../../game/ActionBar';
@@ -142,7 +142,8 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
   // Chips nobody called, handed back, are no win.
   const outcome = !s.settled || !result ? null : hero?.state === 'folded' ? 'folded' : wonFrom(result).some((w) => w.seatIndex === 0) ? 'you' : 'lost';
   const told = outcome === 'folded' || resultShown;
-  useEffect(() => {
+  // Before the screen is drawn, as the table tells it: the net never lags the word by a frame.
+  useLayoutEffect(() => {
     if (!s.settled || resultShown) setNet(s.net);
   }, [view, resultShown, s]);
 
