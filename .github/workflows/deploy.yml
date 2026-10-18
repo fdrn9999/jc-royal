@@ -74,10 +74,14 @@ jobs:
             [ "$code" = 200 ] || { echo "::error::$url answered $code"; exit 1; }
           done
           for url in "$PLAY_URL/api/health" "$PLAY_URL/" "$ADMIN_URL/"; do
-            head=$(curl -sS -o /dev/null -D - "$url" | tr -d '\r')
+            head=$(curl -sS -o "$RUNNER_TEMP/smoke-body" -D - "$url" | tr -d '\r')
             code=$(printf '%s\n' "$head" | awk 'NR == 1 { print $2 }')
             echo "$url $code"
-            [ "$code" = 200 ] && continue
+            if [ "$code" = 200 ]; then
+              # The health JSON itself, not just any page the domain answers 200 with.
+              case "$url" in */api/health) grep -q '"ok":true' "$RUNNER_TEMP/smoke-body" || { echo "::error::$url answered 200 without ok"; exit 1; } ;; esac
+              continue
+            fi
             if [ "$code" = 403 ] && printf '%s\n' "$head" | grep -qi '^cf-mitigated: *challenge'; then
               echo "::warning::$url answered this runner with a Cloudflare challenge; the workers answered on workers.dev"
               continue
