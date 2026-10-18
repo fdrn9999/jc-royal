@@ -262,9 +262,15 @@ describe('replay settlement', () => {
     await store(side, ids, { log: publicLog(side) });
     const detail = async (rec: HandRecord) => (await u0.client.get(`/api/me/hands/${rec.handId}`)).body as HandDetailDto;
 
-    // Until the statistics are filled: the pots as stored, and nothing said to have come back.
-    expect(await detail(foldWin)).toMatchObject({ pots: foldWin.pots, returned: null });
-    expect(await detail(side)).toMatchObject({ pots: side.pots, returned: null });
+    // Until the statistics are filled: the pots as stored, and nothing said to have come back. Tables left by earlier
+    // files keep playing on this worker, and every hand they record fills the statistics of all hands, these two
+    // included; once filled they stay filled, so rows still empty after both reads were empty during them.
+    const before = [await detail(foldWin), await detail(side)];
+    const empty = (await d1<{ n: number }>(`SELECT COUNT(*) AS n FROM hand_players WHERE hand_id IN (${q(foldWin.handId)}, ${q(side.handId)}) AND pot_won IS NULL`))[0]!.n;
+    if (empty === 6) {
+      expect(before[0]).toMatchObject({ pots: foldWin.pots, returned: null });
+      expect(before[1]).toMatchObject({ pots: side.pots, returned: null });
+    }
 
     // What the game worker runs after recording a hand.
     await d1(HAND_STATS_SQL);
