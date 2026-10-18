@@ -129,8 +129,13 @@ export function LobbyPage() {
         }
         return p;
       },
-      { replace: true },
+      // Not in a transition (as in Hands): the next tap or key starts from this address, not from the one before it.
+      { replace: true, flushSync: true },
     );
+  // The box holds what is typed, so a key in the middle of the text stays there; a change the address makes elsewhere
+  // (a reset, the logo) comes back into it.
+  const [text, setText] = useState(q);
+  useEffect(() => setText(q), [q]);
   const { search } = useLocation();
   useEffect(() => rememberLobby(search), [search]);
   const { filters, blinds, any } = useLobbyFilters(tables, filtersOf(params));
@@ -212,7 +217,7 @@ export function LobbyPage() {
           </Button>
         </div>
         <div className="flex gap-2">
-          <Input placeholder={t('lobby.search')} value={q} onChange={(e) => view({ q: e.target.value })} className="sm:w-64" aria-label={t('lobby.search')} />
+          <Input placeholder={t('lobby.search')} value={text} onChange={(e) => { setText(e.target.value); view({ q: e.target.value }); }} className="sm:w-64" aria-label={t('lobby.search')} />
           <Button variant="subtle" onClick={refresh} aria-label={t('lobby.refresh')} data-testid="lobby-refresh">
             ↻
           </Button>

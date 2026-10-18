@@ -1,0 +1,200 @@
+{
+  "about": "Lobby tab/search address race (main CI 39087151823, lobby.spec.ts:103). Real Chrome 155 via Playwright against the local E2E server; CPU throttled with CDP Emulation.setCPUThrottlingRate where noted. before = main 20e33b4, after = fix/lobby-url-race. Case A writes both in one task (not something a person can do).",
+  "rows": [
+    {
+      "what": "A same task: tab click + input",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #1",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #2",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #3",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #4",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #5",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #6",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #7",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "B throttled click+fill #8",
+      "before": {
+        "search": "?seats=6&bb=6&q=Fav",
+        "box": "Fav",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&tab=open&q=Fav",
+        "box": "Fav",
+        "openSelected": "true",
+        "caret": null
+      }
+    },
+    {
+      "what": "C throttled typing \"Favo\" #1",
+      "before": {
+        "search": "?seats=6&bb=6&q=o",
+        "box": "o",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&q=Favo",
+        "box": "Favo",
+        "openSelected": "false",
+        "caret": null
+      }
+    },
+    {
+      "what": "C throttled typing \"Favo\" #2",
+      "before": {
+        "search": "?seats=6&bb=6&q=o",
+        "box": "o",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&q=Favo",
+        "box": "Favo",
+        "openSelected": "false",
+        "caret": null
+      }
+    },
+    {
+      "what": "C throttled typing \"Favo\" #3",
+      "before": {
+        "search": "?seats=6&bb=6&q=o",
+        "box": "o",
+        "openSelected": "false",
+        "caret": null
+      },
+      "after": {
+        "search": "?seats=6&bb=6&q=Favo",
+        "box": "Favo",
+        "openSelected": "false",
+        "caret": null
+      }
+    },
+    {
+      "what": "D mid-text edit: Home, Right, x, y",
+      "before": {
+        "search": "?seats=6&bb=6&q=Favy",
+        "box": "Favy",
+        "openSelected": null,
+        "caret": 4
+      },
+      "after": {
+        "search": "?seats=6&bb=6&q=Fxyav",
+        "box": "Fxyav",
+        "openSelected": null,
+        "caret": 3
+      }
+    }
+  ]
+}
