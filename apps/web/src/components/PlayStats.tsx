@@ -42,20 +42,22 @@ export function PositionTable({ positions }: { positions: PositionStatsDto[] }) 
   return (
     <div className="overflow-hidden rounded-xl border border-white/5 bg-ink-850/80" data-testid="stats-positions">
       <div className="px-3 pt-3 text-[11px] font-semibold tracking-[0.04em] text-ink-400 sm:px-4">{t('me.positions')}</div>
+      {/* On a phone the columns stand 12px apart, as far as from the box's edges: with digits 0.6em wide (a phone's own
+          monospace font) and "Position" over the first column, the English table had 0.2px to spare at 360px. */}
       <table className="mt-1 w-full text-sm tabular-nums">
         <thead>
           <tr className="text-left text-[11px] text-ink-400">
-            <th className="px-3 py-1.5 font-medium sm:px-4">{t('me.position')}</th>
+            <th className="py-1.5 pl-3 pr-1.5 font-medium sm:px-4">{t('me.position')}</th>
             <th className="px-1.5 py-1.5 text-right font-medium sm:px-2">{t('me.posHands')}</th>
             <th className="px-1.5 py-1.5 text-right font-medium sm:px-2">VPIP</th>
             <th className="px-1.5 py-1.5 text-right font-medium sm:px-2">PFR</th>
-            <th className="px-3 py-1.5 text-right font-medium sm:px-4">{t('me.posNet')}</th>
+            <th className="py-1.5 pl-1.5 pr-3 text-right font-medium sm:px-4">{t('me.posNet')}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/5">
           {positions.map((p) => (
             <tr key={p.position} data-testid={`stats-pos-${p.position}`}>
-              <td className="px-3 py-2 sm:px-4">
+              <td className="py-2 pl-3 pr-1.5 sm:px-4">
                 <span className="font-mono font-semibold text-ivory">{p.position}</span>
                 <span className="ml-2 text-xs text-ink-400 max-sm:hidden">{t(`me.pos.${p.position}` as MsgKey)}</span>
               </td>
@@ -65,7 +67,7 @@ export function PositionTable({ positions }: { positions: PositionStatsDto[] }) 
               </td>
               <td className="px-1.5 py-2 text-right font-mono sm:px-2">{pct(p.vpip, p.hands)}</td>
               <td className="px-1.5 py-2 text-right font-mono sm:px-2">{pct(p.pfr, p.hands)}</td>
-              <td className={cx('px-3 py-2 text-right font-mono sm:px-4', p.hands > 0 && (p.net >= 0 ? POS : NEG))}>{p.hands > 0 ? <Figure>{signed(p.net)}</Figure> : '—'}</td>
+              <td className={cx('py-2 pl-1.5 pr-3 text-right font-mono sm:px-4', p.hands > 0 && (p.net >= 0 ? POS : NEG))}>{p.hands > 0 ? <Figure>{signed(p.net)}</Figure> : '—'}</td>
             </tr>
           ))}
         </tbody>

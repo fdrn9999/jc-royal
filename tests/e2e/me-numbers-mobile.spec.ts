@@ -17,6 +17,12 @@ function sql(command: string) {
 
 const DAY = 86_400_000;
 const shot = (name: string) => `test-results/me-numbers-${name}.png`;
+/**
+ * The figures are drawn in the device's own monospace font (the app names JetBrains Mono but doesn't load it). Windows
+ * has Consolas, 0.55em a digit; phones, Macs and Linux have 0.6em (Droid Sans Mono, SF Mono, Menlo, DejaVu Sans Mono).
+ * Courier New and Liberation Mono are 0.6em as well, so the page is measured the way a phone draws it on any machine.
+ */
+const PHONE_MONO = `:root { --font-mono: 'Courier New', 'Liberation Mono', 'DejaVu Sans Mono', monospace; }`;
 
 /**
  * Every box in the page whose content runs out of it (drawn past its edge, or cut off by it), innermost only. What is
@@ -40,6 +46,9 @@ function overflowing(page: Page) {
 
 test('the Me page on a phone keeps nine- and ten-digit amounts inside their boxes, whole and exact', async ({ browser }) => {
   const { page } = await signUp(browser, { mobile: true });
+  await page.addInitScript((css) => {
+    document.addEventListener('DOMContentLoaded', () => document.head.append(Object.assign(document.createElement('style'), { textContent: css })));
+  }, PHONE_MONO);
 
   // A wallet of 123,456,789 chips, through an adjustment the ledger records (the books stay balanced).
   const id = await page.evaluate(async () => ((await (await fetch('/api/auth/me')).json()) as { id: string }).id);
@@ -84,6 +93,16 @@ test('the Me page on a phone keeps nine- and ten-digit amounts inside their boxe
   const check = async (w: number, h: number, name: string) => {
     await page.setViewportSize({ width: w, height: h });
     await page.goto('/me');
+    // Digits as wide as a phone's.
+    const digit = await page.evaluate(() => {
+      const s = Object.assign(document.createElement('span'), { className: 'font-mono', textContent: '0123456789' });
+      s.style.fontSize = '100px';
+      document.body.append(s);
+      const em = s.getBoundingClientRect().width / 1000;
+      s.remove();
+      return em;
+    });
+    expect(digit, 'a digit of the monospace font, in em').toBeCloseTo(0.6, 2);
     // Every amount whole and exact (a wrap between digit groups adds nothing to the text).
     await expect(page.getByTestId('refill-wallet')).toHaveText('123,456,789');
     await expect(page.getByTestId('refill-tables')).toHaveText('0');
