@@ -526,6 +526,7 @@ export const en: Dict = {
   'replay.line.shows': '{name} shows {hand}',
   'replay.line.wins': '{name} wins {amount}',
   'replay.settlement': 'Pot payout',
+  'replay.toSettlement': 'See payout',
   'replay.mainPot': 'Main pot',
   'replay.returned': 'Uncalled bet returned',
   'replay.contenders': 'Contested by {names}',

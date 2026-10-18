@@ -68,4 +68,30 @@ test('a raise everyone folds to: the raise above the call goes straight back, on
   }
   await r.screenshot({ path: 'test-results/uncalled-raise-fold.png' });
   for (const p of [a.page, b.page]) await p.getByTestId('leave').click();
+
+  // The stored hand keeps the engine's one pot of 110 (nobody was all in, so nothing marks the 90 as handed back); its
+  // replay reads it as the table did: 20 won, 90 back.
+  const json = <T,>(u: string) => r.evaluate(async (x) => (await fetch(x)).json(), u) as Promise<T>;
+  let id = '';
+  await expect(async () => {
+    for (const h of await json<{ id: string }[]>('/api/me/hands')) {
+      const d = await json<{ potTotal: number; pots: { amount: number; uncalled: boolean }[] | null }>(`/api/me/hands/${h.id}`);
+      if (d.potTotal === 110) {
+        expect(d.pots).toEqual([expect.objectContaining({ amount: 110, uncalled: false })]);
+        id = h.id;
+      }
+    }
+    expect(id).not.toBe('');
+  }).toPass({ timeout: 30_000 });
+  await r.goto(`/me/hands/${id}`);
+  await r.getByTestId('replay-last').click();
+  await expect(r.getByTestId('replay-step')).toHaveText(/^결과 · .+ 20 획득$/);
+  await expect(r.getByTestId('hand-replay').getByTestId(`seat-${seat}`)).toContainText('+20');
+  await expect(r.getByTestId('hand-replay').getByTestId(`seat-${seat}`)).not.toContainText('+110');
+  const rows = r.getByTestId('replay-pot-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText(/^메인 팟20.*\+20$/);
+  await expect(rows.nth(1)).toContainText(/^돌려받은 베팅90.* 90$/);
+  await expect(rows.nth(1)).not.toContainText('+');
+  await r.getByTestId('replay-pots').screenshot({ path: 'test-results/uncalled-replay-settlement.png' });
 });

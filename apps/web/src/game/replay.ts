@@ -8,6 +8,7 @@ import {
   SUPPORTED_MAX_SEATS,
   type ActionType,
   type Card,
+  type HandPotDto,
   type HandReplayFields,
   type HandReplayPlayer,
   type HandResultView,
@@ -104,13 +105,44 @@ export function replayPots(put: ReadonlyMap<number, number>, folded: ReadonlySet
 }
 
 /**
+ * Chips nobody called, handed back to the player who put in the most: what that player put in above the next most (as
+ * the hand stats count it), no more than came back to them. The stored pots show these as a pot of their own only when
+ * someone was all in; a bet everyone folded to sits in the one pot. Null when the pots already show it, or none came back.
+ */
+export function handedBack(h: ReplayInput): { seatIndex: number; amount: number } | null {
+  if (h.pots?.some((p) => p.uncalled)) return null;
+  const [top, next] = h.players.map((p) => ({ p, put: p.won - p.net })).sort((x, y) => y.put - x.put);
+  if (!top) return null;
+  const amount = Math.min(top.put - (next?.put ?? 0), top.p.won);
+  return amount > 0 ? { seatIndex: top.p.seatIndex, amount } : null;
+}
+
+/** The stored pots, main pot first, with the chips handed back (handedBack) out of the pot that held them as one of their own. */
+export function settledPots(h: ReplayInput): HandPotDto[] | null {
+  if (!h.pots) return null;
+  const back = handedBack(h);
+  const k = back ? h.pots.findLastIndex((p) => p.winners.some((w) => w.seatIndex === back.seatIndex)) : -1;
+  if (!back || k < 0) return h.pots;
+  const pot = h.pots[k]!;
+  const amount = Math.min(back.amount, pot.winners.find((w) => w.seatIndex === back.seatIndex)!.amount);
+  const kept: HandPotDto = {
+    ...pot,
+    amount: pot.amount - amount,
+    winners: pot.winners.map((w) => (w.seatIndex === back.seatIndex ? { ...w, amount: w.amount - amount } : w)).filter((w) => w.amount > 0),
+  };
+  const returned: HandPotDto = { amount, eligibleSeats: [back.seatIndex], winners: [{ seatIndex: back.seatIndex, amount }], uncalled: true };
+  return [...h.pots.slice(0, k), ...(kept.amount > 0 ? [kept] : []), returned, ...h.pots.slice(k + 1)];
+}
+
+/**
  * Winners as the table shows them, main pot first: chips won from contested pots (an uncalled bet handed back is not
  * a win). The first one's best five is what the board highlights.
  */
 function resultWinners(h: ReplayInput): HandResultView['winners'] {
   const won = new Map<number, { amount: number; potIds: string[] }>();
-  if (h.pots) {
-    h.pots.forEach((pot, i) => {
+  const pots = settledPots(h);
+  if (pots) {
+    pots.forEach((pot, i) => {
       if (pot.uncalled) return;
       for (const w of pot.winners) {
         const e = won.get(w.seatIndex) ?? { amount: 0, potIds: [] };
@@ -120,8 +152,12 @@ function resultWinners(h: ReplayInput): HandResultView['winners'] {
       }
     });
   } else {
-    // Hands recorded before pots were stored: only each player's total (it may include a bet handed back).
-    for (const p of h.players) if (p.won > 0) won.set(p.seatIndex, { amount: p.won, potIds: [] });
+    // Hands recorded before pots were stored: each player's total, less the chips handed back.
+    const back = handedBack(h);
+    for (const p of h.players) {
+      const amount = p.won - (back?.seatIndex === p.seatIndex ? back.amount : 0);
+      if (amount > 0) won.set(p.seatIndex, { amount, potIds: [] });
+    }
   }
   return [...won].map(([seatIndex, e]) => ({ seatIndex, ...e }));
 }

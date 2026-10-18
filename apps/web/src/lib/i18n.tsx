@@ -526,6 +526,7 @@ const ko = {
   'replay.line.shows': '{name} {hand}',
   'replay.line.wins': '{name} {amount} 획득',
   'replay.settlement': '팟 정산',
+  'replay.toSettlement': '정산 보기',
   'replay.mainPot': '메인 팟',
   'replay.returned': '돌려받은 베팅',
   'replay.contenders': '경쟁: {names}',

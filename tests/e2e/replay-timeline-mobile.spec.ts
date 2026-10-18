@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
-import { signUp, test, widerThanDevice } from './helpers';
-import { HAND_2, HAND_6 } from './replay-hands';
+import { setRange, signUp, test, widerThanDevice } from './helpers';
+import { HAND_2, HAND_6, HAND_9 } from './replay-hands';
 
 // HAND_6: where the deal, the flop, the turn, the river, the showdown and the payout begin, out of 22 steps.
 const PARTS = { preflop: 1, flop: 9, turn: 13, river: 18, showdown: 21, result: 22 };
@@ -69,6 +69,59 @@ test('mobile: replay timeline by touch — each street a tap away, the slider dr
   for (const id of ['replay-prev', 'replay-next', 'replay-play', 'replay-first', 'replay-last', 'replay-speed-2']) await expect(page.getByTestId(id)).toBeInViewport({ ratio: 1 });
   // The board's cards still turning over from the quick jumps are shown as they land.
   await page.screenshot({ path: test.info().outputPath('timeline-mobile.png'), animations: 'disabled' });
+});
+
+test('mobile: nothing above the payout moves from step to step; the payout a tap away, and stepping back from it leaves the slider where it was', async ({ browser }) => {
+  const { page } = await signUp(browser, { mobile: true });
+  await page.route(`**/api/me/hands/${HAND_9.id}`, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(HAND_9) }));
+  await page.goto(`/me/hands/${HAND_9.id}`);
+  const index = page.getByTestId('replay-index');
+  const slider = page.getByTestId('replay-slider');
+  const toPayout = page.getByTestId('replay-to-settlement');
+  await expect(index).toHaveText('1/30');
+  await page.waitForTimeout(400);
+  // Where the status, the step line, the table and the controls are on the page, and how tall each is.
+  const boxes = () =>
+    page.evaluate(() =>
+      ['replay-status', 'replay-step', 'replay-table', 'replay-controls'].map((id) => {
+        const b = document.querySelector(`[data-testid=${id}]`)!.getBoundingClientRect();
+        return `${id} ${Math.round(b.top + scrollY)} ${Math.round(b.height)}`;
+      }),
+    );
+  const first = await boxes();
+  // Through the hand, the side pots splitting and joining and the long payout line included: nothing moves or changes size.
+  for (let k = 1; k < 30; k++) {
+    await setRange(slider, k);
+    await expect(index).toHaveText(`${k + 1}/30`);
+    expect(await boxes(), `step ${k + 1}`).toEqual(first);
+    // Its place is kept on every step, shown only on the payout's.
+    if (k < 29) await expect(toPayout).toBeHidden();
+  }
+
+  // On the payout step the status line offers it; a tap brings it between the header and the bottom navigation, focused.
+  await expect(page.getByTestId('replay-step')).toHaveCSS('-webkit-line-clamp', '3');
+  await expect(toPayout).toBeVisible();
+  const band = () =>
+    page.evaluate(() => {
+      const nav = Array.from(document.querySelectorAll('nav')).find((n) => getComputedStyle(n).position === 'fixed')!.getBoundingClientRect().top;
+      const header = document.querySelector('header')!.getBoundingClientRect().bottom;
+      const p = document.querySelector('[data-testid=replay-pots]')!.getBoundingClientRect();
+      return p.top >= header && (p.bottom <= nav || p.top <= header + 13);
+    });
+  expect(await band()).toBe(false);
+  await toPayout.tap();
+  await expect.poll(band).toBe(true);
+  await expect(page.getByTestId('replay-pots')).toBeFocused();
+  await page.screenshot({ path: test.info().outputPath('payout-mobile.png') });
+
+  // Read to its end, then one step back: the page keeps its length, and the slider stays under the finger.
+  await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+  const at = async () => Math.round((await slider.boundingBox())!.y);
+  const before = await at();
+  await setRange(slider, 28);
+  await expect(index).toHaveText('29/30');
+  await expect(page.getByTestId('replay-pots')).toHaveCount(0);
+  expect(await at()).toBe(before);
 });
 
 test('mobile: a heads-up replay opens with the table, the timeline and play all above the bottom navigation', async ({ browser }) => {

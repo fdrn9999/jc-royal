@@ -28,6 +28,15 @@ const areas = (page: Page) =>
     };
   });
 
+/** Where the status, the step line, the table and the controls sit in the page, and how big each is. */
+const placed = (page: Page) =>
+  page.evaluate(() =>
+    ['replay-status', 'replay-step', 'replay-table', 'replay-controls'].map((id) => {
+      const r = document.querySelector(`[data-testid=${id}]`)!.getBoundingClientRect();
+      return `${id} ${Math.round(r.left)},${Math.round(r.top + scrollY)} ${Math.round(r.width)}×${Math.round(r.height)}`;
+    }),
+  );
+
 /** Problems no scroll position excuses: overlapping pieces, anything cut off by the table or the screen, anything drawn over. */
 const hard = (m: LayoutReport) => m.issues.filter((x) => x.kind === 'overlap' || x.kind === 'clipped' || x.kind === 'covered');
 
@@ -57,6 +66,7 @@ test('replay: at 2, 6 and 9 seats on phones, a tablet and desktops, every seat, 
           expect(Math.min(m.r, n.r) - Math.max(m.l, n.l) <= 0.5 || Math.min(m.b, n.b) - Math.max(m.t, n.t) <= 0.5, `${where}: areas ${x} and ${y}`).toBe(true);
         }
 
+      let first: string[] | null = null;
       for (let k = 1; k <= total; k++) {
         if (k > 1) {
           await p.getByTestId('replay-next').evaluate((b: HTMLButtonElement) => b.click());
@@ -91,6 +101,11 @@ test('replay: at 2, 6 and 9 seats on phones, a tablet and desktops, every seat, 
           }
         }
         expect(never, `${where} · step ${k} never whole on screen`).toEqual([]);
+        // From step to step nothing above the settlement moves or changes size: not for the long payout line, the side
+        // pots or the step count (taken once measuring has given the first step's table time to take its size).
+        const at = await placed(p);
+        first ??= at;
+        expect(at, `${where} · step ${k} placed as step 1`).toEqual(first);
       }
       await p.screenshot({ path: test.info().outputPath(`replay-${sc.name}-${hand.maxSeats}.png`), fullPage: true });
     }
