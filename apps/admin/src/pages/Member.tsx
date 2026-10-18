@@ -9,7 +9,7 @@ import { Link } from 'react-router';
 import { useT } from '../i18n';
 import { auditActionLabel, roleLabel, userStatusLabel, type Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
-import { LoadError, Modal } from '../ui';
+import { jumpTarget, LoadError, Modal } from '../ui';
 import { Table } from './Console';
 import { REASON, STATUS } from './Reports';
 
@@ -277,7 +277,7 @@ export function MemberHistoryPanel({ userId }: { userId: string }) {
   };
   const canDelete = (it: TimelineItem) => it.action === 'note' && (it.actor.id === me?.user.id || me?.user.role === 'super_admin');
   return (
-    <Panel title={t('historyTitle')}>
+    <Panel title={t('historyTitle')} id="member-history" className={jumpTarget}>
       <form className="flex flex-col gap-2" onSubmit={addNote} data-testid="note-form">
         <textarea
           className="min-h-20 w-full rounded-lg border border-white/10 bg-ink-850 px-3 py-2 text-sm text-ivory placeholder:text-ink-400 focus:border-gold-500/70 focus:outline-none focus:ring-2 focus:ring-gold-500/20"

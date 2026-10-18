@@ -66,6 +66,8 @@ export function SecurityPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; error: boolean } | null>(null);
   const time = (ms: number | null | undefined) => (ms ? formatDate(ms, locale) : '—');
+  // A session's column name over its value on a phone, where the table's header is hidden.
+  const cap = (k: 'secSignedIn' | 'lastSeen' | 'secEnds' | 'colIp' | 'secDevice' | 'secReauthUntil') => <span className="block text-[10px] text-ink-400 sm:hidden">{t(k)}</span>;
   const mine = sessions.data?.items.filter((s) => s.user.id === me?.user.id && !s.current).length ?? 0;
   const grantKeys = perms.data?.grantKeys;
   const myGrants = perms.data?.grants ?? [];
@@ -121,23 +123,24 @@ export function SecurityPage() {
           {sessions.data && sessions.data.items.length === 0 ? (
             <Empty>{t('noSessions')}</Empty>
           ) : (
-            <Table head={[t('actor'), t('secSignedIn'), t('lastSeen'), t('secEnds'), t('colIp'), t('secDevice'), t('secReauthUntil'), '']}>
+            // On a phone each session is a card (its column names over the values), its end button inside the screen.
+            <Table stack head={[t('actor'), t('secSignedIn'), t('lastSeen'), t('secEnds'), t('colIp'), t('secDevice'), t('secReauthUntil'), '']}>
               {sessions.data?.items.map((s) => (
-                <tr key={s.id} className={s.current ? 'bg-gold-500/5' : undefined} data-testid="admin-session">
-                  <td className="px-2 py-1.5">
+                <tr key={s.id} className={`max-sm:grid max-sm:grid-cols-2 max-sm:gap-x-2 max-sm:py-2 ${s.current ? 'bg-gold-500/5' : ''}`} data-testid="admin-session">
+                  <td className="px-2 py-1.5 max-sm:col-span-2">
                     <span className="flex flex-wrap items-center gap-1">
                       {s.user.nickname}
                       {s.current && <Badge tone="gold" className="whitespace-nowrap">{t('secCurrent')}</Badge>}
                     </span>
                     <span className="block text-[10px] text-ink-400">{roleLabel(t, s.user.role)}</span>
                   </td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{time(s.createdAt)}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{time(s.lastSeenAt)}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{time(Math.min(s.idleExpiresAt, s.absoluteExpiresAt))}</td>
-                  <td className="px-2 py-1.5 font-mono text-xs">{s.ip ?? '—'}</td>
-                  <td className="px-2 py-1.5 text-xs" title={s.userAgent ?? undefined}>{device(s.userAgent)}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{s.reauthValidUntil ? time(s.reauthValidUntil) : '—'}</td>
-                  <td className="px-2 py-1.5 text-right">
+                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{cap('secSignedIn')}{time(s.createdAt)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{cap('lastSeen')}{time(s.lastSeenAt)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{cap('secEnds')}{time(Math.min(s.idleExpiresAt, s.absoluteExpiresAt))}</td>
+                  <td className="px-2 py-1.5 font-mono text-xs">{cap('colIp')}{s.ip ?? '—'}</td>
+                  <td className="px-2 py-1.5 text-xs" title={s.userAgent ?? undefined}>{cap('secDevice')}{device(s.userAgent)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-300">{cap('secReauthUntil')}{s.reauthValidUntil ? time(s.reauthValidUntil) : '—'}</td>
+                  <td className="px-2 py-1.5 text-right max-sm:col-span-2">
                     <Button size="sm" variant={s.current ? 'outline' : 'danger'} disabled={busy} onClick={() => setEnding(s)} data-testid="end-session">
                       {s.current ? t('secSignOutHere') : t('secEnd')}
                     </Button>

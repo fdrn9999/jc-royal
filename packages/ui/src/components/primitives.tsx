@@ -110,9 +110,9 @@ export function Badge({ tone = 'neutral', children, className }: { tone?: 'neutr
   return <span className={cx('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide', tones[tone], className)}>{children}</span>;
 }
 
-export function Panel({ className, children, title, actions }: { className?: string; children: ReactNode; title?: ReactNode; actions?: ReactNode }) {
+export function Panel({ className, children, title, actions, id }: { className?: string; children: ReactNode; title?: ReactNode; actions?: ReactNode; id?: string }) {
   return (
-    <section className={cx('jc-panel p-5', className)}>
+    <section id={id} className={cx('jc-panel p-5', className)}>
       {(title || actions) && (
         <header className="mb-4 flex items-center justify-between gap-3">
           {title && <h2 className="text-sm font-bold tracking-[0.06em] text-gold-300">{title}</h2>}

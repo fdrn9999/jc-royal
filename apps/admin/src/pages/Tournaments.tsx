@@ -149,7 +149,7 @@ export function TournamentsPage() {
         {countStat('tnStRunning', c?.running, () => { reset(); setStatus('running'); }, 'tn-count-running')}
         {countStat('tnRecoveryNeeded', c?.recovery, () => { reset(); setStatus(''); setRecovery(true); }, 'tn-count-recovery', c?.recovery ? 'text-danger' : undefined)}
       </div>
-      <Feedback note={note} testid="tn-feedback" />
+      <Feedback note={note} testid="tn-feedback" pin />
       <CreatePanel onCreated={setNote} />
       <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); filter(setQ)(text.trim()); }}>
         <Input className="min-w-0 flex-1 basis-56" placeholder={t('tnSearch')} aria-label={t('tnSearch')} value={text} maxLength={60} onChange={(e) => setText(e.target.value)} data-testid="tn-q" />
@@ -536,7 +536,7 @@ export function TournamentDetailPage() {
         <StatusBadges r={r} />
         <span className="font-mono text-xs text-ink-400">{r.id} · v{r.version}</span>
       </div>
-      <Feedback note={note} testid="tn-detail-feedback" />
+      <Feedback note={note} testid="tn-detail-feedback" pin />
       {error && <LoadError error={error} onRetry={reload} />}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="tn-stats">
         <Stat label={t('tnColPlayers')} value={<span className="break-keep font-sans text-lg">{r.status === 'running' || ended ? t('tnLeftOf', { n: r.playersLeft ?? 0, total: r.registered }) : t('tnRegisteredOf', { n: r.registered, cap: r.capacity })}</span>} sub={r.status === 'registering' || r.status === 'closed' ? t('tnMinPlayersN', { n: r.minPlayers }) : undefined} />
@@ -802,7 +802,7 @@ export function TournamentTemplatesPage() {
       </div>
       <p className="text-sm text-ink-300">{t('tplIntro')}</p>
       {!superAdmin && <p className="text-sm text-ink-400" data-testid="tpl-super-only">{t('tplSuperOnly')}</p>}
-      <Feedback note={note} testid="tpl-feedback" />
+      <Feedback note={note} testid="tpl-feedback" pin />
       <div className="flex flex-wrap gap-1" role="group" aria-label={t('status')}>
         {(['active', 'archived'] as const).map((s) => (
           <Button key={s} size="sm" variant={status === s ? 'gold' : 'outline'} aria-pressed={status === s} onClick={() => { setStatus(s); setOffset(0); }} data-testid={`tpl-tab-${s}`}>

@@ -94,7 +94,7 @@ export function BoardAdminPage() {
         </select>
         {filtered && <Button size="sm" variant="ghost" onClick={() => { setFilter(''); setText(''); setQ(''); setOffset(0); }} data-testid="board-reset">{t('auditReset')}</Button>}
       </div>
-      <Feedback note={note} />
+      <Feedback note={note} pin />
       {error && <LoadError error={error} onRetry={reload} />}
       <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
         <ul className="divide-y divide-white/5">
