@@ -8,8 +8,8 @@ async function recordFlights(page: Page) {
     w.__flights = [];
     new MutationObserver((records) => {
       for (const r of records)
-        for (const n of r.addedNodes)
-          for (const el of n instanceof HTMLElement ? [n, ...n.querySelectorAll<HTMLElement>('[data-flight]')] : [])
+        for (const n of Array.from(r.addedNodes))
+          for (const el of n instanceof HTMLElement ? [n, ...Array.from(n.querySelectorAll<HTMLElement>('[data-flight]'))] : [])
             if (el.dataset.flight) w.__flights.push(`${el.dataset.flight}:${el.dataset.seat}:${el.dataset.amount}`);
     }).observe(document.body, { childList: true, subtree: true });
   });

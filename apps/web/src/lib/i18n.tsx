@@ -507,6 +507,7 @@ const ko = {
   'replay.again': '다시 보기',
   'replay.timeline': '타임라인',
   'replay.position': '재생 위치',
+  'replay.tableWindow': '테이블 · 위아래로 밀어 다른 좌석 보기',
   'replay.unreached': '이 핸드는 여기 전에 끝났습니다',
   'replay.result': '결과',
   'replay.step.deal': '카드 배분',

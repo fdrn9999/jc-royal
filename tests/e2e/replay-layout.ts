@@ -15,6 +15,8 @@ export interface LayoutReport {
   band: { top: number; bottom: number };
   table: { top: number; bottom: number; left: number; right: number };
   controls: { top: number; bottom: number } | null;
+  /** Where a table drawn in a scrolling window (upright phones) is scrolled to, how far it goes and how much shows. */
+  window: { top: number; max: number; view: number } | null;
 }
 
 /**
@@ -25,12 +27,17 @@ export interface LayoutReport {
  * table where there is none) to just under the header, as a player looking at it would; `'bottom'` scrolls its end (the
  * controls, or the settlement under them) to just above the bottom navigation; `'controls'` scrolls the controls' end
  * there, as a player reaching for them would; `'none'` measures the page as it opened.
+ *
+ * A table drawn in a scrolling window is whole inside the window's scrolled extent (else it is cut off); a piece past
+ * the part showing is off screen for now, as one past the bottom navigation is. `windowTo` scrolls the window first.
  */
-export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls' | 'none', root = '[data-testid=hand-replay]'): Promise<LayoutReport> {
+export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls' | 'none', root = '[data-testid=hand-replay]', windowTo?: number): Promise<LayoutReport> {
   return page.evaluate(
-    ([scrollMode, rootSel]) => {
+    ([scrollMode, rootSel, windowAt]) => {
       const host = document.querySelector(rootSel)!;
       const surface = (host.querySelector('[data-testid=replay-table]') ?? host.querySelector('.jc-game-surface'))!;
+      const win = surface instanceof HTMLElement && surface.dataset.window === '1' ? surface : null;
+      if (win && windowAt !== null) win.scrollTop = windowAt;
       // Where the header ends, its own content included: on a tablet its labels wrap and run past its 64px box, and
       // whatever lies under them is under the header.
       const headerEl = document.querySelector('header');
@@ -47,6 +54,9 @@ export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls
       if (scrollMode === 'controls' && controlsEl) scrollBy(0, controlsEl.getBoundingClientRect().bottom - bottom);
       const top = Math.max(0, headerEnd());
       const s = surface.getBoundingClientRect();
+      // The table's whole extent, and the part of it showing (the window's inside, or all of it).
+      const whole = win ? { left: s.left, right: s.right, top: s.top + win.clientTop - win.scrollTop, bottom: s.top + win.clientTop - win.scrollTop + win.scrollHeight } : s;
+      const shown = win ? { top: s.top + win.clientTop, bottom: s.top + win.clientTop + win.clientHeight } : { top: -Infinity, bottom: Infinity };
 
       interface Item {
         id: string;
@@ -95,13 +105,16 @@ export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls
         Math.max(b.left - r.left, r.right - b.right, b.top - r.top, r.bottom - b.bottom, 0);
       for (const it of items) {
         const r = it.el.getBoundingClientRect();
+        // What of the screen this piece can show in: the band, and for the table's pieces the window's inside.
+        const lo = it.table ? Math.max(top, shown.top) : top;
+        const hi = it.table ? Math.min(bottom, shown.bottom) : bottom;
         if (it.table) {
-          const px = out(r, s);
+          const px = out(r, whole);
           if (px > 0.5) issues.push({ kind: 'clipped', item: it.id, by: 'table', px: Math.round(px) });
         }
         const sx = Math.max(-r.left, r.right - vw, 0);
         if (sx > 0.5) issues.push({ kind: 'clipped', item: it.id, by: 'screen', px: Math.round(sx) });
-        if (r.top < top - 0.5 || r.bottom > bottom + 0.5) issues.push({ kind: 'offscreen', item: it.id, px: Math.round(Math.max(top - r.top, r.bottom - bottom)) });
+        if (r.top < lo - 0.5 || r.bottom > hi + 0.5) issues.push({ kind: 'offscreen', item: it.id, px: Math.round(Math.max(lo - r.top, r.bottom - hi)) });
         const pts = it.text
           ? [
               [0.5, 0.5],
@@ -120,7 +133,7 @@ export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls
           const x = r.left + r.width * fx!;
           const y = r.top + r.height * fy!;
           // Within a pixel of the screen's edge Chrome rounds the point out of the viewport and finds nothing there.
-          if (x < 0 || x > vw - 1 || y < top || y > bottom - 1) continue;
+          if (x < 0 || x > vw - 1 || y < lo || y > hi - 1) continue;
           const hit = document.elementFromPoint(x, y);
           if (!hit || !it.owner.contains(hit)) by.add(describe(hit));
         }
@@ -149,8 +162,9 @@ export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls
         band: { top: Math.round(top), bottom: Math.round(bottom) },
         table: { top: Math.round(s.top), bottom: Math.round(s.bottom), left: Math.round(s.left), right: Math.round(s.right) },
         controls: c ? { top: Math.round(c.top), bottom: Math.round(c.bottom) } : null,
+        window: win ? { top: Math.round(win.scrollTop), max: win.scrollHeight - win.clientHeight, view: win.clientHeight } : null,
       } as LayoutReport;
     },
-    [scroll, root] as const,
+    [scroll, root, windowTo ?? null] as const,
   );
 }

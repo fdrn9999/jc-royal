@@ -28,6 +28,14 @@ const AIR = 8;
 const PAD = 26;
 /** Half the slider's thumb (1.75rem): the thumb's centre runs from this far inside one end to as far inside the other. */
 const THUMB_HALF = 14;
+/** The least height of a table window worth having: about two rows of the smallest seats (px). */
+const WINDOW_MIN = 160;
+/** How far the window's edge fades out where more of the table lies past it (px). */
+const EDGE = 28;
+const fade = (up: boolean, down: boolean) => {
+  const g = `linear-gradient(to bottom, ${up ? 'transparent' : '#000'}, #000 ${EDGE}px, #000 calc(100% - ${EDGE}px), ${down ? 'transparent' : '#000'})`;
+  return { maskImage: g, WebkitMaskImage: g };
+};
 /** Actions the line reads in words; anything else shows as stored. */
 const DOES = new Set(['post-sb', 'post-bb', 'fold', 'check', 'call', 'bet', 'raise', 'allin', 'timeout-fold', 'timeout-check']);
 
@@ -141,6 +149,40 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
   const sideW = Math.round(Math.max(SIDE_W, Math.min(SIDE_MAX, root.w - GAP - 2 * INSET - layout.box.w)));
   // Narrow controls keep play and speed on one row: the play button shows its icon only, the speed no label.
   const roomy = (side ? sideW : root.w) - PAD >= 372;
+  // Upright phones where even the smallest seats leave the controls under the screen's edge as the replay opens: the
+  // table is drawn whole in a window as tall as keeps the controls on screen, and the window scrolls to what each step
+  // is about. A window shorter than WINDOW_MIN is no use; it then takes what the band leaves once the replay is scrolled
+  // up under the header, and the page scrolls once to get there.
+  const fit = room >= WINDOW_MIN ? room : Math.max(room, budget);
+  const windowH = !side && tableW < 640 && layout.box.h > fit + 1 ? Math.floor(Math.max(WINDOW_MIN / 2, fit)) : null;
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState({ up: false, down: false });
+  const edges = () => {
+    const f = frameRef.current;
+    const up = !!f && windowH !== null && f.scrollTop > 1;
+    const down = !!f && windowH !== null && f.scrollTop + f.clientHeight < f.scrollHeight - 1;
+    setMore((m) => (m.up === up && m.down === down ? m : { up, down }));
+  };
+  // Who acted, showed or won, or the board; the viewer's own seat on the deal (the blinds' otherwise): scrolled into the
+  // window when outside it, its top first when it is taller than the window. A finger's own scrolling stays until the next step.
+  useLayoutEffect(() => {
+    const f = frameRef.current;
+    if (windowH !== null && f) {
+      const seats = step.kind === 'deal' && heroSeat !== null ? [heroSeat] : step.line.flatMap((x) => ('seat' in x ? [x.seat] : []));
+      const sel = seats.flatMap((s) => [`[data-testid="seat-${s}"]`, `[data-testid="bet-${s}"]`]);
+      if (step.line.some((x) => x.kind === 'board')) sel.push('[data-testid=board]');
+      const boxes = sel.flatMap((q) => Array.from(f.querySelectorAll(q), (e) => e.getBoundingClientRect())).filter((r) => r.height > 0);
+      if (boxes.length > 0) {
+        const at = f.getBoundingClientRect().top + f.clientTop - f.scrollTop;
+        const top = Math.min(...boxes.map((r) => r.top)) - at - AIR;
+        const bottom = Math.max(...boxes.map((r) => r.bottom)) - at + AIR;
+        const to = top < f.scrollTop ? top : bottom > f.scrollTop + f.clientHeight ? Math.min(top, bottom - f.clientHeight) : f.scrollTop;
+        if (Math.abs(to - f.scrollTop) > 1) f.scrollTo({ top: to, behavior: reducedMotion ? 'auto' : 'smooth' });
+      }
+    }
+    edges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `edges` only reads the frame
+  }, [step, windowH, heroSeat, reducedMotion]);
 
   useEffect(() => {
     if (!playing) return;
@@ -211,10 +253,26 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
             </p>
           )}
         </div>
-        {/* The table at the size its plan asked for: every seat, bet and the board inside it, nothing drawn over it. */}
+        {/* The table at the size its plan asked for: every seat, bet and the board inside it, nothing drawn over it; in a
+            window it scrolls up and down under a finger, the rest of the table past the faded edge. */}
         <div
-          className={cx('jc-game-surface relative flex justify-center overflow-hidden rounded-2xl p-1.5', side && 'col-start-1 row-span-2 row-start-1')}
-          style={{ background: 'var(--t-bg)' }}
+          ref={frameRef}
+          className={cx('jc-game-surface relative flex justify-center rounded-2xl p-1.5', windowH === null ? 'overflow-hidden' : 'overflow-x-hidden overflow-y-auto', side && 'col-start-1 row-span-2 row-start-1')}
+          style={{
+            background: 'var(--t-bg)',
+            ...(windowH !== null && {
+              height: windowH + 2 * INSET,
+              touchAction: 'pan-y',
+              // At either end a swipe goes on to the page, as anywhere else on it.
+              overscrollBehavior: 'auto',
+              ...((more.up || more.down) && fade(more.up, more.down)),
+            }),
+          }}
+          onScroll={windowH === null ? undefined : edges}
+          tabIndex={windowH === null ? undefined : 0}
+          role={windowH === null ? undefined : 'region'}
+          aria-label={windowH === null ? undefined : t('replay.tableWindow')}
+          data-window={windowH === null ? undefined : '1'}
           data-testid="replay-table"
         >
           <TableScene s={step.view} layout={layout} mySeat={heroSeat} canSit={false} onSit={() => {}} nextIn={null} cues={[]} consumeCues={() => {}} reducedMotion={reducedMotion} amounts={a} />

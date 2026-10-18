@@ -72,11 +72,23 @@ test('replay: at 2, 6 and 9 seats on phones, a tablet and desktops, every seat, 
         const hidden = (m: LayoutReport) => new Set(m.issues.filter((x) => x.kind === 'offscreen').map((x) => x.item));
         const [h1, h2] = [hidden(top), hidden(end)];
         let never = top.items.filter((x) => h1.has(x) && h2.has(x));
-        if (never.length > 0) {
+        if (never.length > 0 || top.window) {
           const reach = await measureReplay(p, 'controls');
           expect(hard(reach), `${where} · step ${k} at the controls`).toEqual([]);
           const h3 = hidden(reach);
           never = never.filter((x) => h3.has(x));
+          // A table in a window (upright phones): scrolled through half a window at a time with the controls in reach,
+          // nothing overlaps, is cut off or drawn over anywhere, and every piece shows whole somewhere.
+          if (reach.window) {
+            const { max, view } = reach.window;
+            for (let at = 0; ; at = Math.min(max, at + Math.max(1, Math.floor(view / 2)))) {
+              const m = await measureReplay(p, 'controls', undefined, at);
+              expect(hard(m), `${where} · step ${k} with the table window at ${at}/${max}`).toEqual([]);
+              const h = hidden(m);
+              never = never.filter((x) => h.has(x));
+              if (at >= max) break;
+            }
+          }
         }
         expect(never, `${where} · step ${k} never whole on screen`).toEqual([]);
       }

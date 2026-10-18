@@ -507,6 +507,7 @@ export const en: Dict = {
   'replay.again': 'Replay',
   'replay.timeline': 'Timeline',
   'replay.position': 'Replay position',
+  'replay.tableWindow': 'Table · scroll for the other seats',
   'replay.unreached': 'The hand ended before this',
   'replay.result': 'Result',
   'replay.step.deal': 'Cards dealt',
