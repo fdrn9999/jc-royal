@@ -307,6 +307,48 @@ describe('pot breakdown in the hand record (replays)', () => {
   });
 });
 
+describe('chips nobody called (views only: the payouts stay as the engine made them)', () => {
+  it('a raise everyone folds to: the raise above the big blind goes back on its own, only the blinds are won', async () => {
+    const h = start([1000, 1000, 1000], { button: 0 });
+    await must(h, 'p0', 'raise', 40);
+    await must(h, 'p1', 'fold');
+    const r = await must(h, 'p2', 'fold');
+    expect(r.cues).toEqual([
+      { kind: 'action', seatIndex: 2, type: 'fold', amount: 0 },
+      { kind: 'returned', seatIndex: 0, amount: 30 },
+      { kind: 'payout', seatIndex: 0, amount: 25 },
+      { kind: 'handEnd' },
+    ]);
+    const v = h.handView();
+    expect(v.result!.winners).toEqual([{ seatIndex: 0, amount: 55, potIds: expect.any(Array) }]);
+    expect(v.result!.returned).toEqual({ seatIndex: 0, amount: 30 });
+  });
+
+  it('a covering all-in that loses: the excess goes back before the run-out, and the payout is only the winner\'s', async () => {
+    // Heads-up, button p0: p1 is dealt first and holds the aces; p0 covers.
+    const h = start([1000, 500], { deck: stackedDeck([c('Ac Ad'), c('2c 7d')], c('Kh 9s 5d 4c 3h')) });
+    await must(h, 'p0', 'allin');
+    const r = await must(h, 'p1', 'allin');
+    expect(r.cues.map((x) => x.kind)).toEqual(['action', 'returned', 'street', 'street', 'street', 'showdown', 'payout', 'handEnd']);
+    expect(r.cues[1]).toEqual({ kind: 'returned', seatIndex: 0, amount: 500 });
+    expect(r.cues[6]).toEqual({ kind: 'payout', seatIndex: 1, amount: 1000 });
+    const v = h.handView();
+    expect(v.result!.winners.map((w) => [w.seatIndex, w.amount]).sort()).toEqual([
+      [0, 500],
+      [1, 1000],
+    ]);
+    expect(v.result!.returned).toEqual({ seatIndex: 0, amount: 500 });
+  });
+
+  it('a called bet hands nothing back', async () => {
+    const h = start([1000, 1000]);
+    const r = await must(h, 'p0', 'call');
+    await checkDown(h);
+    expect(r.cues.some((x) => x.kind === 'returned')).toBe(false);
+    expect(h.handView().result!.returned).toBeUndefined();
+  });
+});
+
 describe('server-side guards', () => {
   it('rejects out-of-turn actions, illegal amounts and duplicate intent ids', async () => {
     const h = start([1000, 1000, 1000]);

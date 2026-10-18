@@ -14,6 +14,7 @@ import type { ReactionSender, SeatReaction } from './Reactions';
 import { Seat } from './Seat';
 import { collected as collectedOf } from './staging';
 import type { CueEvent } from './useTableSocket';
+import { wonFrom } from './won';
 
 export function useBoxSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -182,9 +183,11 @@ export function TableScene({
   const reveal = !staged || staged.reveal;
   // Before the frame is painted, so a page holding its word never shows it a frame early.
   useLayoutEffect(() => onResultShown?.(result), [result, onResultShown]);
-  const winners = useMemo(() => new Map(result ? (hand?.result?.winners ?? []).map((w) => [w.seatIndex, w.amount]) : []), [hand?.result, result]);
+  // What each winner won: chips nobody called, handed back, are no win.
+  const won = useMemo(() => (result ? wonFrom(hand?.result) : []), [hand?.result, result]);
+  const winners = useMemo(() => new Map(won.map((w) => [w.seatIndex, w.amount])), [won]);
   const showdown = useMemo(() => new Map(result ? (hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x]) : []), [hand?.result, result]);
-  const topWinner = result ? hand?.result?.winners?.[0]?.seatIndex : undefined;
+  const topWinner = won[0]?.seatIndex;
   const winningFive = topWinner !== undefined ? (showdown.get(topWinner)?.bestFive ?? []) : [];
   // Chips already gathered in the middle; after settlement they have been paid out.
   const collected = staged?.pot ?? collectedOf(s);

@@ -133,7 +133,7 @@ export function Flights({ flights, start, geometry, pot, amounts }: { flights: F
       {flights.map((f) => {
         const g = geometry[f.seat];
         if (!g) return null;
-        const [from, to] = f.kind === 'bet' ? [g.seat, g.bet] : f.kind === 'sweep' ? [g.bet, pot] : [pot, g.seat];
+        const [from, to] = f.kind === 'bet' ? [g.seat, g.bet] : f.kind === 'sweep' ? [g.bet, pot] : f.kind === 'return' ? [g.bet, g.seat] : [pot, g.seat];
         return <FlyingChips key={`${start}-${f.id}`} flight={f} from={from} to={to} start={start} text={f.kind === 'payout' ? amounts.fmt(f.amount, true) : null} />;
       })}
     </div>

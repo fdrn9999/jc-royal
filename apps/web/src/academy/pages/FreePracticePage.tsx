@@ -10,6 +10,7 @@ import { Link } from 'react-router';
 import { ActionHelp, CurrentHandPill } from '../../game/BeginnerAids';
 import { ActionBar } from '../../game/ActionBar';
 import { TableScene, useBoxSize, useStackRoom, useTableLayout } from '../../game/TableScene';
+import { wonFrom } from '../../game/won';
 import { useAuth } from '../../lib/auth';
 import { useI18n, type MsgKey } from '../../lib/i18n';
 import { l, useTr } from '../content';
@@ -138,7 +139,8 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
   const onAct = (type: ActionType, amount?: number) => void guard(() => s.heroAct(type, amount));
   const hero = view.seats.find((x) => x.seatIndex === 0);
   const result = view.hand?.result;
-  const outcome = !s.settled || !result ? null : hero?.state === 'folded' ? 'folded' : result.winners.some((w) => w.seatIndex === 0) ? 'you' : 'lost';
+  // Chips nobody called, handed back, are no win.
+  const outcome = !s.settled || !result ? null : hero?.state === 'folded' ? 'folded' : wonFrom(result).some((w) => w.seatIndex === 0) ? 'you' : 'lost';
   const told = outcome === 'folded' || resultShown;
   useEffect(() => {
     if (!s.settled || resultShown) setNet(s.net);
