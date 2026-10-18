@@ -754,6 +754,7 @@ const ko = {
   'err.table_unavailable': '이 테이블은 지금 입장할 수 없습니다.',
   'err.room_unavailable': '방이 응답하지 않습니다. 잠시 후 다시 시도해 주세요. 다시 시도해도 칩이 중복 처리되지 않습니다.',
   'nav.tournaments': '토너먼트',
+  'nav.tournamentsTab': '토너먼트',
   'tn.status.registering': '등록 중',
   'tn.status.closed': '등록 마감',
   'tn.status.running': '진행 중',

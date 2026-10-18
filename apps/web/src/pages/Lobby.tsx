@@ -69,8 +69,8 @@ function useLobbyTables() {
 }
 
 /**
- * The way into tournaments (the bottom navigation has no room for it on a phone). Asked once per visit, not polled:
- * the viewer's own tournament, if any, names itself; otherwise the card just describes them.
+ * Tournaments from the lobby (the navigation also has them, on a phone as the second tab). Asked once per visit, not
+ * polled: the viewer's own tournament, if any, names itself; otherwise the card just describes them.
  */
 function TournamentCard() {
   const { t } = useI18n();

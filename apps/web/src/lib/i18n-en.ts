@@ -754,6 +754,7 @@ export const en: Dict = {
   'err.table_unavailable': 'This table is not taking players right now.',
   'err.room_unavailable': 'The room did not respond. Please try again in a moment; retrying never moves chips twice.',
   'nav.tournaments': 'Tournaments',
+  'nav.tournamentsTab': 'Tourneys',
   'tn.status.registering': 'Registering',
   'tn.status.closed': 'Registration closed',
   'tn.status.running': 'Running',
