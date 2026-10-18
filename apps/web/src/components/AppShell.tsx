@@ -4,6 +4,7 @@ import { Link, NavLink, useNavigate } from 'react-router';
 import { SettingsModal } from '../game/Panels';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { useTopOnNewPage } from '../lib/scroll';
 import { useUnread } from '../lib/unread';
 import { ServiceBanner } from './ServiceBanner';
 
@@ -63,6 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { unread, dmUnread, friendRequests } = useUnread();
   const [settings, setSettings] = useState(false);
   const social = dmUnread + friendRequests;
+  useTopOnNewPage();
   async function signOut() {
     setSettings(false);
     await logout();

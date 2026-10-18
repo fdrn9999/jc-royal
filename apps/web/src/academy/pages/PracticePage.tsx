@@ -11,6 +11,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { ActionBar } from '../../game/ActionBar';
 import { TableScene, useBoxSize, useStackRoom, useTableLayout } from '../../game/TableScene';
 import { useAuth } from '../../lib/auth';
+import { HAND_PAGE, useBack } from '../../lib/back';
 import { useI18n, type MsgKey } from '../../lib/i18n';
 import { currentHand, l, useTr, type L } from '../content';
 import { HAND_RANKS } from '../data/hands';
@@ -135,6 +136,8 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
   const { t } = useI18n();
   const { me } = useAuth();
   const nav = useNavigate();
+  // Opened from a hand's review, back goes to that hand.
+  const back = useBack(HAND_PAGE, '/academy/practice');
   const sc = useMemo(() => buildScenarios(me?.nickname ?? 'You').find((s) => s.id === id)!, [id, me?.nickname]);
   const session = useRef<PracticeSession | null>(null);
   if (!session.current) session.current = new PracticeSession(sc);
@@ -248,7 +251,7 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }} data-testid="practice-table" data-scenario={sc.id}>
       <header className="jc-game-surface z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
-        <Link to="/academy/practice" className="jc-tap grid size-10 place-items-center rounded-lg text-ink-200" aria-label={tr(T.list)}>
+        <Link to={back.to} onClick={back.onClick} className="jc-tap grid size-10 place-items-center rounded-lg text-ink-200" aria-label={tr(back.from ? UI.toHand : T.list)} data-testid="practice-back">
           ←
         </Link>
         <div className="min-w-0">

@@ -9,7 +9,15 @@
  * Card and chip sounds play short recordings from Pixabay (Pixabay Content License; sources in
  * THIRD_PARTY_NOTICES.md). Until a recording is fetched and decoded — or if that fails — the
  * synthesized voice plays instead, so a sound is never silently lost.
+ *
+ * What plays is the mixer's call (mixer.ts): a burst plays once, and too much at once drops cards and chips first.
+ * A sound only plays at once on a running context in a visible tab: one asked for while the tab is hidden or the
+ * context is suspended (iOS, a phone call, the first moments after a tap) is dropped, not saved for later, so a tab
+ * coming back or a reconnect never sets off a pile of old sounds.
  */
+import { Mixer } from './mixer';
+
+export { AMBIENT, GAP_MS, LENGTH_MS, MAX_VOICES, Mixer } from './mixer';
 
 export type SoundId =
   | 'deal'
@@ -36,12 +44,18 @@ export interface AudioSettings {
 }
 
 const KEY = 'jc.audio';
+/**
+ * Events that count as a user gesture for audio. iOS Safari only starts audio from the end of a touch (touchend, a
+ * tap's click), not from touchstart or a touch's pointerdown.
+ */
+const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
 const DEFAULTS: AudioSettings = { master: 0.8, effects: 0.8, muted: false };
 
 /**
  * Recorded voices. The files are peak-normalised; `volume` brings each one to the loudness
  * (RMS of the audible part) of the synthesized voice it replaces, with a -36 dB floor for the
- * very soft card noises.
+ * very soft card noises. As played (ffmpeg volumedetect over the audible part, times `volume`): cards and the fold
+ * -34 dB, chips and actions -27 to -31 dB, and my win -27 dB, so it is not quieter than someone else's chips.
  */
 const SAMPLES: Partial<Record<SoundId, { url: string; volume: number }>> = {
   deal: { url: new URL('./sfx/deal.mp3', import.meta.url).href, volume: 0.5 },
@@ -51,7 +65,7 @@ const SAMPLES: Partial<Record<SoundId, { url: string; volume: number }>> = {
   raise: { url: new URL('./sfx/raise.mp3', import.meta.url).href, volume: 0.56 },
   allin: { url: new URL('./sfx/allin.mp3', import.meta.url).href, volume: 0.33 },
   fold: { url: new URL('./sfx/fold.mp3', import.meta.url).href, volume: 0.09 },
-  win: { url: new URL('./sfx/win.mp3', import.meta.url).href, volume: 0.45 },
+  win: { url: new URL('./sfx/win.mp3', import.meta.url).href, volume: 0.6 },
 };
 
 function readSettings(): AudioSettings {
@@ -72,6 +86,10 @@ class SoundEngine {
   private files = new Map<SoundId, Promise<ArrayBuffer | null>>();
   private buffers = new Map<SoundId, AudioBuffer>();
   private decoding = false;
+  private mixer = new Mixer();
+  /** While a sound is being started: how to silence each of its parts, should the mixer need its place. */
+  private hush: (() => void)[] | null = null;
+  private gesture: (() => void) | null = null;
   private listeners = new Set<(s: AudioSettings) => void>();
   settings: AudioSettings = typeof window === 'undefined' ? { ...DEFAULTS } : readSettings();
 
@@ -88,10 +106,19 @@ class SoundEngine {
         this.fx.connect(this.master);
         this.master.connect(this.ctx.destination);
         this.applyGains();
+        // iOS suspends ("interrupted") the context for a call or the app switcher: the next tap starts it again.
+        this.ctx.addEventListener('statechange', () => this.ctx && this.ctx.state !== 'running' && this.listen());
       }
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      const ctx = this.ctx;
+      if (ctx.state !== 'running') void ctx.resume().then(() => ctx.state === 'running' && this.unlisten(), () => {});
+      else this.unlisten();
+      // Older iOS only lets a context sound after something played inside the gesture itself.
+      const src = ctx.createBufferSource();
+      src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      src.connect(ctx.destination);
+      src.start();
       this.unlocked = true;
-      this.decode(this.ctx);
+      this.decode(ctx);
     } catch {
       /* audio unsupported */
     }
@@ -124,15 +151,23 @@ class SoundEngine {
     }
   }
 
-  /** Installs one-shot listeners that unlock audio on the first interaction. */
+  /** Unlocks audio on the first interaction; the listeners stay until the context is actually running. */
   installAutoUnlock() {
     if (typeof window === 'undefined') return;
     this.preload();
-    const handler = () => {
-      this.unlock();
-      if (this.unlocked) for (const ev of ['pointerdown', 'keydown', 'touchstart']) window.removeEventListener(ev, handler);
-    };
-    for (const ev of ['pointerdown', 'keydown', 'touchstart']) window.addEventListener(ev, handler, { passive: true });
+    if (this.ctx?.state !== 'running') this.listen();
+  }
+
+  private listen() {
+    if (this.gesture || typeof window === 'undefined') return;
+    this.gesture = () => this.unlock();
+    for (const ev of GESTURES) window.addEventListener(ev, this.gesture, { passive: true });
+  }
+
+  private unlisten() {
+    if (!this.gesture) return;
+    for (const ev of GESTURES) window.removeEventListener(ev, this.gesture);
+    this.gesture = null;
   }
 
   update(patch: Partial<AudioSettings>) {
@@ -162,7 +197,11 @@ class SoundEngine {
 
   private ready(): AudioContext | null {
     if (!this.unlocked || !this.ctx || this.settings.muted) return null;
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    // A suspended context's clock stands still: what is started on it would all sound together once it runs again.
+    if (this.ctx.state !== 'running') {
+      void this.ctx.resume().catch(() => {});
+      return null;
+    }
     return this.ctx;
   }
 
@@ -183,6 +222,7 @@ class SoundEngine {
     gain.connect(this.fx);
     osc.start(t0);
     osc.stop(t0 + dur + 0.05);
+    this.hush?.push(silence(ctx, gain, osc, t0));
   }
 
   private noise(o: { duration?: number; volume?: number; filterFreq?: number; start?: number }) {
@@ -208,6 +248,7 @@ class SoundEngine {
     gain.connect(this.fx);
     src.start(t0);
     src.stop(t0 + dur);
+    this.hush?.push(silence(ctx, gain, src, t0));
   }
 
   private sample(buffer: AudioBuffer, volume: number) {
@@ -220,9 +261,23 @@ class SoundEngine {
     src.connect(gain);
     gain.connect(this.fx);
     src.start();
+    this.hush?.push(silence(ctx, gain, src, ctx.currentTime));
   }
 
   play(id: SoundId) {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const recorded = this.buffers.get(id);
+    const parts: (() => void)[] = [];
+    if (!this.ready() || !this.mixer.admit(id, performance.now(), recorded && recorded.duration * 1000, () => parts.forEach((f) => f()))) return;
+    this.hush = parts;
+    try {
+      this.voice(id);
+    } finally {
+      this.hush = null;
+    }
+  }
+
+  private voice(id: SoundId) {
     const recorded = this.buffers.get(id);
     if (recorded) return this.sample(recorded, SAMPLES[id]!.volume);
     switch (id) {
@@ -243,7 +298,7 @@ class SoundEngine {
         this.noise({ duration: 0.04, volume: 0.14, filterFreq: 600, start: 0.11 });
         return;
       case 'call':
-        this.play('chip');
+        this.voice('chip');
         this.tone({ type: 'sine', freq: 1300, endFreq: 700, duration: 0.055, volume: 0.1, start: 0.08 });
         return;
       case 'raise':
@@ -292,6 +347,29 @@ class SoundEngine {
       }
     }
   }
+}
+
+/** Fades a playing part (started at `t0`) out within a few ms, without a click; one not started yet never starts. */
+function silence(ctx: AudioContext, gain: GainNode, src: AudioScheduledSourceNode, t0: number) {
+  return () => {
+    try {
+      const t = ctx.currentTime;
+      // Its envelope has not begun (the gain stands at 1 until then): stopped before it starts, it never sounds.
+      if (t < t0) return src.stop(t);
+      const g = gain.gain;
+      // Held where it is, so a fade under way never jumps back up to where its ramp began.
+      if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(t);
+      else {
+        const v = g.value;
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(v, t);
+      }
+      g.setTargetAtTime(0, t, 0.006);
+      src.stop(t + 0.04);
+    } catch {
+      /* already over */
+    }
+  };
 }
 
 function clamp01(n: number) {

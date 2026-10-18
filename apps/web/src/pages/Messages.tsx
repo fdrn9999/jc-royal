@@ -1,6 +1,7 @@
 import type { MessageDto } from '@jc/types';
-import { Badge, Button, Empty, formatDate, Spinner } from '@jc/ui';
+import { Badge, Button, Empty, formatDate } from '@jc/ui';
 import { useCallback, useEffect, useState } from 'react';
+import { LoadFailed, Loading } from '../components/Loading';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { refreshUnread } from '../lib/unread';
@@ -11,8 +12,16 @@ export function MessagesPage() {
   const { t, locale } = useI18n();
   const [list, setList] = useState<MessageDto[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const load = useCallback(async () => {
-    setList(await api<MessageDto[]>('/api/messages'));
+    setFailed(false);
+    try {
+      setList(await api<MessageDto[]>('/api/messages'));
+    } catch {
+      // A list already shown stays; with none, the page says it could not load.
+      setFailed(true);
+      return;
+    }
     void refreshUnread();
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -32,7 +41,7 @@ export function MessagesPage() {
         <Button size="sm" variant="subtle" onClick={async () => { await api('/api/messages/read-all', { body: {} }); await load(); }}>{t('msg.readAll')}</Button>
       </div>
       <p className="text-xs text-ink-400">{t('msg.oneWay')}</p>
-      {!list ? <div className="flex justify-center py-12 text-gold-400"><Spinner /></div> : list.length === 0 ? <Empty>{t('msg.empty')}</Empty> : (
+      {!list ? failed ? <LoadFailed onRetry={() => void load()} /> : <Loading /> : list.length === 0 ? <Empty>{t('msg.empty')}</Empty> : (
         <ul className="jc-panel divide-y divide-white/5 overflow-hidden">
           {list.map((m) => (
             <li key={m.id} data-testid="message">

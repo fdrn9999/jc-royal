@@ -143,3 +143,12 @@ Error: verification request failed 500 "Error: Network connection lost.\n    at 
      base2 2 failed | 9 passed (same error at :302; the restart test's migration "bad port", then
            afterAll "read ECONNRESET")
      warm runs: 3,152 health requests, 0 failed, 0 dropped connections in the dev log
+
+== feat/polish full integration, 2026-10-18 (same environment as P12; no server, engine or schema change on this branch).
+
+> vitest run --config tests/vitest.config.ts
+
+ Test Files  43 passed (43)
+      Tests  312 passed (312)
+   Start at  03:24:46
+   Duration  1754.16s (transform 785ms, setup 0ms, import 3.41s, tests 1721.57s, environment 4ms)

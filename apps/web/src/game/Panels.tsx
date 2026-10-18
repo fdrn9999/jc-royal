@@ -224,7 +224,8 @@ export function TopUpModal({
         ) : wallet < lo ? (
           <div className="flex flex-col gap-1 text-sm" data-testid="topup-short">
             <p className="text-[#f3b0b2]">{t('topup.short', { need: fmt(lo) })}</p>
-            <Link to="/me" className="self-start text-gold-300 underline underline-offset-2">
+            {/* A new tab: only a seated player tops up, and leaving this page would leave the game behind. */}
+            <Link to="/me" target="_blank" rel="noopener" className="jc-tap self-start py-1 text-gold-300 underline underline-offset-2" data-testid="topup-wallet-link">
               {t('topup.wallet')} →
             </Link>
           </div>

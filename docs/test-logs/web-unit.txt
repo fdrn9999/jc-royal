@@ -1,4 +1,3 @@
-
 > @jc/web@0.0.0 test <repo>\apps\web
 > vitest run
 
@@ -6,8 +5,7 @@
  RUN  v4.1.11 <repo>/apps/web
 
 
- Test Files  18 passed (18)
-      Tests  234 passed (234)
-   Start at  15:51:28
-   Duration  3.22s (transform 3.47s, setup 0ms, import 8.32s, tests 4.04s, environment 3ms)
-
+ Test Files  20 passed (20)
+      Tests  257 passed (257)
+   Start at  05:13:45
+   Duration  4.73s (transform 5.12s, setup 0ms, import 12.20s, tests 8.82s, environment 4ms)

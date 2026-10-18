@@ -6,12 +6,15 @@
 import { HAND_MIN_POTS, HAND_RESULTS, HAND_TAGS, POSITIONS, type HandSummaryDto } from '@jc/types';
 import { Button, cx, Empty, Field, Input, Panel } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router';
 import { HandRow } from '../components/HandNotes';
 import { api, ApiError } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { useKeptScroll } from '../lib/scroll';
 
 const PAGE = 20;
+/** Per history entry: how many hands the list showed, so coming back shows as many (in one request, at most 100). */
+const shown = new Map<string, number>();
 const PERIODS = ['all', 'today', '7', '30', 'custom'] as const;
 /** Address keys, in the order they read. */
 const KEYS = ['period', 'from', 'to', 'position', 'result', 'pot', 'tag', 'bookmarked'] as const;
@@ -54,6 +57,9 @@ export function HandsPage() {
   const { t, err } = useI18n();
   const [params, setParams] = useSearchParams();
   const query = useMemo(() => apiQuery(params).toString(), [params]);
+  const { key } = useLocation();
+  const back = useNavigationType() === 'POP';
+  const [again] = useState(() => ({ query, n: back ? Math.min(100, Math.max(PAGE, shown.get(key) ?? PAGE)) : PAGE }));
   const [hands, setHands] = useState<HandSummaryDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
@@ -65,15 +71,17 @@ export function HandsPage() {
   const load = useCallback(
     async (after?: HandSummaryDto, signal?: AbortSignal) => {
       const q = new URLSearchParams(query);
+      const n = !after && query === again.query ? again.n : PAGE;
+      q.set('limit', String(n));
       if (after) {
         q.set('before', String(after.endedAt));
         q.set('beforeId', after.id);
       }
       const page = await api<HandSummaryDto[]>(`/api/me/hands?${q}`, { signal });
-      setMore(page.length === PAGE);
+      setMore(page.length === n);
       return page;
     },
-    [query],
+    [query, again],
   );
   const fail = (x: unknown) => setError(x instanceof ApiError && x.code === 'rate_limited' ? err(x.code) : t('hands.loadFailed'));
   const first = useCallback(
@@ -91,6 +99,10 @@ export function HandsPage() {
     first(ac.signal);
     return () => ac.abort();
   }, [first]);
+  useEffect(() => {
+    if (hands) shown.set(key, hands.length);
+  }, [hands, key]);
+  useKeptScroll(hands !== null);
 
   async function loadMore() {
     if (!hands?.length) return;

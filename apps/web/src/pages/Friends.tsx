@@ -15,6 +15,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { Link, useNavigate, useParams } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { JoinCodeModal } from '../components/JoinCode';
+import { isGone, LoadFailed, Loading } from '../components/Loading';
 import { MemberName } from '../components/MemberName';
 import { Avatar, BlockConfirm, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
@@ -150,11 +151,14 @@ export function FriendsPage() {
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [inviting, setInviting] = useState<FriendDto | null>(null);
+  const [failed, setFailed] = useState(false);
   const load = useCallback(async () => {
     try {
       setData(await api<FriendsDto>('/api/friends'));
+      setFailed(false);
     } catch {
-      /* offline: keep the last list */
+      // Offline: the last list stays; with none yet, the page says it could not load (the poll keeps trying).
+      setFailed(true);
     }
   }, []);
   useEffect(() => {
@@ -202,7 +206,7 @@ export function FriendsPage() {
       </form>
 
       {!data ? (
-        <div className="flex justify-center py-12 text-gold-400"><Spinner /></div>
+        failed ? <LoadFailed onRetry={() => void load()} /> : <Loading />
       ) : (
         <>
           {data.incoming.length > 0 && (
@@ -303,11 +307,21 @@ export function FriendSettingsPage() {
   const [settings, setSettings] = useState<SocialSettingsDto | null>(null);
   const [blocks, setBlocks] = useState<BlockedUserDto[] | null>(null);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // Each part offers its own retry. A block list that failed to load must not read as "nobody blocked".
+  const [failed, setFailed] = useState({ settings: false, blocks: false });
+  const [attempt, setAttempt] = useState({ settings: 0, blocks: 0 });
+  const meId = me?.id;
   useEffect(() => {
-    if (!me) return;
-    void api<SocialSettingsDto>('/api/friends/settings').then(setSettings, () => setNote({ ok: false, text: t('common.error') }));
-    void loadBlocks(me.id).then(setBlocks, () => setBlocks([]));
-  }, [me, t]);
+    if (!meId) return;
+    setFailed((f) => ({ ...f, settings: false }));
+    void api<SocialSettingsDto>('/api/friends/settings').then(setSettings, () => setFailed((f) => ({ ...f, settings: true })));
+  }, [meId, attempt.settings]);
+  useEffect(() => {
+    if (!meId) return;
+    setFailed((f) => ({ ...f, blocks: false }));
+    void loadBlocks(meId).then(setBlocks, () => setFailed((f) => ({ ...f, blocks: true })));
+  }, [meId, attempt.blocks]);
+  const retry = (k: 'settings' | 'blocks') => setAttempt((a) => ({ ...a, [k]: a[k] + 1 }));
 
   async function save(patch: Partial<SocialSettingsDto>) {
     setNote(null);
@@ -339,7 +353,7 @@ export function FriendSettingsPage() {
       {note && <p className={cx('text-sm', note.ok ? 'text-gold-300' : 'text-danger')} role={note.ok ? 'status' : 'alert'}>{note.text}</p>}
       <Panel title={t('social.receive')}>
         {!settings ? (
-          <div className="flex justify-center py-6 text-gold-400"><Spinner /></div>
+          failed.settings ? <LoadFailed className="py-6" onRetry={() => retry('settings')} testId="settings-failed" /> : <Loading className="py-6" />
         ) : (
           <div className="divide-y divide-white/5">
             <SettingToggle
@@ -359,9 +373,9 @@ export function FriendSettingsPage() {
           </div>
         )}
       </Panel>
-      <Panel title={t('social.blocked', { n: blocks?.length ?? 0 })}>
+      <Panel title={t('social.blocked', { n: blocks?.length ?? '–' })}>
         {!blocks ? (
-          <div className="flex justify-center py-6 text-gold-400"><Spinner /></div>
+          failed.blocks ? <LoadFailed className="py-6" onRetry={() => retry('blocks')} testId="blocks-failed" /> : <Loading className="py-6" />
         ) : blocks.length === 0 ? (
           <Empty>{t('social.blockedEmpty')}</Empty>
         ) : (
@@ -457,6 +471,8 @@ export function ConversationPage() {
   const [conv, setConv] = useState<Omit<ConversationDto, 'messages' | 'peerRead'> | null>(null);
   const [msgs, setMsgs] = useState<DirectMessageDto[]>([]);
   const [missing, setMissing] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [text, setText] = useState('');
   const field = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
@@ -507,6 +523,7 @@ export function ConversationPage() {
     setConv(null);
     setMsgs([]);
     setMissing(false);
+    setFailed(false);
     synced.current = 0;
     void api<ConversationDto>(`/api/dm/${userId}`)
       .then(({ messages, peerRead: _, ...rest }) => {
@@ -517,11 +534,14 @@ export function ConversationPage() {
         setMsgs(messages);
         if (messages.some((m) => !m.fromMe && !m.readAt)) void markRead(synced.current);
       })
-      .catch(() => live && setMissing(true));
+      .catch((e: unknown) => {
+        // No such player reads as not found; a lost connection offers a retry.
+        if (live) (isGone(e) ? setMissing : setFailed)(true);
+      });
     return () => {
       live = false;
     };
-  }, [userId, markRead]);
+  }, [userId, markRead, attempt]);
 
   const poll = useCallback(async () => {
     // One at a time: a slow request is not stacked under the next tick.
@@ -618,7 +638,7 @@ export function ConversationPage() {
   }
 
   if (missing) return <Empty>{t('notFound')}</Empty>;
-  if (!conv) return <div className="flex justify-center py-12 text-gold-400"><Spinner /></div>;
+  if (!conv) return failed ? <LoadFailed onRetry={() => setAttempt((n) => n + 1)} /> : <Loading />;
   const lastMine = msgs.filter((m) => m.fromMe).at(-1);
   const timeFmt = new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', { timeStyle: 'short' });
   const dateFmt = new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', { dateStyle: 'medium' });
