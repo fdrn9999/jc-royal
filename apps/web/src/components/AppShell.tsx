@@ -72,10 +72,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
   // Six tabs share the row as evenly as their labels allow: a label never wraps or clips (a longer one takes the room
   // it needs from the shorter ones), and below 360px the labels shrink with the width, to 11px at 304px, while the tabs
-  // stay 44px tall. Should they still not fit (a wide phone font, enlarged text), the row scrolls sideways instead of
-  // cutting off the last tab.
+  // stay 44px tall. The English labels leave 12–15% of the row spare from 304 to 360px: Linux draws the same font up to
+  // 8% wider than Windows does. Should they still not fit (a wide phone font, enlarged text), the row scrolls sideways
+  // instead of cutting off the last tab.
   const tab = ({ isActive }: { isActive: boolean }) =>
-    `relative flex-1 whitespace-nowrap px-1 py-3 text-center text-[length:clamp(11px,3.62vw,13px)] leading-5 font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`;
+    `relative flex-1 whitespace-nowrap px-[3px] py-3 text-center text-[length:clamp(11px,3.62vw,13px)] leading-5 font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`;
   const link = ({ isActive }: { isActive: boolean }) =>
     `shrink-0 whitespace-nowrap px-2 py-2 text-sm font-semibold tracking-wide transition lg:px-3 ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
   return (
@@ -144,7 +145,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </footer>
       <SettingsModal open={settings} onClose={() => setSettings(false)} onLogout={me ? signOut : undefined} />
       {/* Mobile bottom navigation */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex overflow-x-auto border-t border-gold-500/15 bg-ink-950/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex overflow-x-auto border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
         <NavLink to="/" end className={tab}>
           {t('nav.lobby')}
         </NavLink>

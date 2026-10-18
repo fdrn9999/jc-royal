@@ -26,10 +26,15 @@ async function call<T = any>(page: Page, path: string, body?: unknown): Promise<
   );
 }
 const idOf = async (page: Page) => (await call<{ id: string }>(page, '/api/auth/me')).id;
-/** Waits for the sheet to finish rising, then whether anything (the bottom bar) covers the middle of the element. */
+/**
+ * Waits for the sheet to finish rising, then whether anything (the bottom bar) covers the middle of the element. Only
+ * animations with a set end are waited for, and one taken away counts as ended: the card's spinner turns until the
+ * friendship has loaded, and its removal then cancels it (its `finished` rejects with an AbortError).
+ */
 const onTop = (page: Page, testId: string) =>
   page.getByTestId(testId).evaluate(async (el) => {
-    await Promise.all(document.getAnimations().map((a) => a.finished));
+    const ending = document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime));
+    await Promise.all(ending.map((a) => a.finished.catch(() => undefined)));
     const r = el.getBoundingClientRect();
     return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
   });
