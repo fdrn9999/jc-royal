@@ -6,7 +6,7 @@ import { setLocale, useT, type Key } from './i18n';
 import './index.css';
 import { roleLabel } from './labels';
 import { AdminProvider, hasGrant, useAdmin } from './lib';
-import { Modal } from './ui';
+import { keepJumps, Modal } from './ui';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
@@ -100,6 +100,8 @@ function Shell({ children }: { children: ReactNode }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // A jump link's panel stays where it landed while the panels above it load.
+  useEffect(() => keepJumps(), []);
   return (
     <div className="min-h-dvh" style={{ background: 'var(--t-bg)' }}>
       <header ref={header} className="sticky top-0 z-30 border-b border-gold-500/10 bg-ink-950/90 backdrop-blur">
