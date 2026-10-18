@@ -219,7 +219,7 @@ export const meRoutes = new Hono<AppEnv>()
       smallBlind: t.sb,
       bigBlind: t.bb,
       maxSeats: t.maxSeats,
-      ...replayLog(hand.eventLog),
+      ...replayLog(hand.eventLog, players.map((p) => p.hp)),
       players: players
         .sort((a, b) => a.hp.seatIndex - b.hp.seatIndex)
         .map(({ hp, user }) => ({ ...replayPlayer(hp, user, uid, badge), userId: hp.userId, isYou: hp.userId === uid })),

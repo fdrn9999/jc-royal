@@ -1,3 +1,4 @@
+import type { HandDetailDto } from '@jc/types';
 import { expect, type Page } from '@playwright/test';
 import { balanceOf, signUp, test } from './helpers';
 
@@ -69,15 +70,21 @@ test('a raise everyone folds to: the raise above the call goes straight back, on
   await r.screenshot({ path: 'test-results/uncalled-raise-fold.png' });
   for (const p of [a.page, b.page]) await p.getByTestId('leave').click();
 
-  // The stored hand keeps the engine's one pot of 110 (nobody was all in, so nothing marks the 90 as handed back); its
-  // replay reads it as the table did: 20 won, 90 back.
+  // The engine stores one pot of 110 (nobody was all in, so nothing marks the 90 as handed back). The server sends the
+  // replay that pot as the table showed it, 20 won and 90 back, by what the hand's statistics say came back (filled
+  // right after the hand is recorded); the replay only reads it.
   const json = <T,>(u: string) => r.evaluate(async (x) => (await fetch(x)).json(), u) as Promise<T>;
   let id = '';
   await expect(async () => {
     for (const h of await json<{ id: string }[]>('/api/me/hands')) {
-      const d = await json<{ potTotal: number; pots: { amount: number; uncalled: boolean }[] | null }>(`/api/me/hands/${h.id}`);
+      const d = await json<HandDetailDto>(`/api/me/hands/${h.id}`);
       if (d.potTotal === 110) {
-        expect(d.pots).toEqual([expect.objectContaining({ amount: 110, uncalled: false })]);
+        expect(d.returned).toEqual({ seatIndex: Number(seat), amount: 90 });
+        expect(d.pots).toEqual([
+          { amount: 20, eligibleSeats: [Number(seat)], winners: [{ seatIndex: Number(seat), amount: 20 }], uncalled: false },
+          { amount: 90, eligibleSeats: [Number(seat)], winners: [{ seatIndex: Number(seat), amount: 90 }], uncalled: true },
+        ]);
+        expect(d.players.find((p) => p.seatIndex === Number(seat))).toMatchObject({ won: 110, net: 10 });
         id = h.id;
       }
     }

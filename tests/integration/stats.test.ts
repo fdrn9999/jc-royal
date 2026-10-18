@@ -1,5 +1,5 @@
 import { dealOrder, HandEngine, stackedDeck, type HandRecord } from '@jc/poker-engine';
-import { POSITIONS, type Card, type Position, type StatsDto, type StatsTrendDto, type TableView } from '@jc/types';
+import { POSITIONS, type Card, type HandDetailDto, type HandReviewDto, type Position, type StatsDto, type StatsTrendDto, type TableView } from '@jc/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HAND_STATS_SQL } from '../../packages/db/src/handStats';
 import { Client, newUser } from '../support/client';
@@ -241,6 +241,52 @@ describe('play statistics', () => {
     }
     // Only for the signed-in user themself.
     for (const p of ['/api/me/stats', '/api/me/stats/trend']) expect((await new Client().get(p)).status, p).toBe(401);
+  });
+});
+
+/** The public log the game worker stores with a hand (settlement.ts): actions, button and pots. */
+const publicLog = (rec: HandRecord) => JSON.stringify({ actions: rec.actions, button: rec.buttonSeat, pots: rec.pots });
+
+describe('replay settlement', () => {
+  it('shows a bet nobody called as handed back by what the hand’s statistics stored, on the hand page and in a board post', async () => {
+    const [u0, u1, u2] = await Promise.all([newUser(), newUser(), newUser()]);
+    const ids = [u0, u1, u2].map((u) => u.me.id);
+    // p0 (button) raises to 40, both blinds fold. Nobody was all in, so the engine pays one pot of 55; 30 of it is p0's
+    // raise nobody called.
+    const foldWin = await play([1000, 1000, 1000], [['p0', 'raise', 40], ['p1', 'fold'], ['p2', 'fold']]);
+    expect(foldWin.pots).toEqual([{ amount: 55, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 55 }], uncalled: false }]);
+    // All in: the engine pays p1's last 200, which nobody called, as a pot of its own.
+    const side = await play([100, 500, 300], [['p0', 'allin'], ['p1', 'allin'], ['p2', 'allin']], { holes: ['Ac Ad', '2c 7d', 'Kc Kd'], board: '9h 8s 4d 3c Jh' });
+    expect(side.pots!.filter((p) => p.uncalled)).toEqual([{ amount: 200, eligibleSeats: [1], winners: [{ seatIndex: 1, amount: 200 }], uncalled: true }]);
+    await store(foldWin, ids, { log: publicLog(foldWin) });
+    await store(side, ids, { log: publicLog(side) });
+    const detail = async (rec: HandRecord) => (await u0.client.get(`/api/me/hands/${rec.handId}`)).body as HandDetailDto;
+
+    // Until the statistics are filled: the pots as stored, and nothing said to have come back.
+    expect(await detail(foldWin)).toMatchObject({ pots: foldWin.pots, returned: null });
+    expect(await detail(side)).toMatchObject({ pots: side.pots, returned: null });
+
+    // What the game worker runs after recording a hand.
+    await d1(HAND_STATS_SQL);
+    const split = [
+      { amount: 25, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 25 }], uncalled: false },
+      { amount: 30, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 30 }], uncalled: true },
+    ];
+    expect(await detail(foldWin)).toMatchObject({ potTotal: 55, pots: split, returned: { seatIndex: 0, amount: 30 } });
+    // The engine's own pot and the statistics agree on it: the pots stay as stored.
+    expect(await detail(side)).toMatchObject({ potTotal: 900, pots: side.pots, returned: { seatIndex: 1, amount: 200 } });
+    // The record itself is as the engine settled it.
+    expect((await detail(foldWin)).players.map((p) => [p.won, p.net])).toEqual([[55, 15], [0, -5], [0, -10]]);
+
+    // A board post's hand review reads the same, for a reader who played neither hand.
+    const post = await u0.client.post('/api/board/posts', { title: '레이즈 폴드', body: 'x', handIds: [foldWin.handId, side.handId] });
+    expect(post.status).toBe(201);
+    const reader = await newUser();
+    const view = (await reader.client.get(`/api/board/posts/${post.body.id}`)).body as { hands: HandReviewDto[] };
+    expect(view.hands.map((h) => [h.id, h.pots, h.returned])).toEqual([
+      [foldWin.handId, split, { seatIndex: 0, amount: 30 }],
+      [side.handId, side.pots, { seatIndex: 1, amount: 200 }],
+    ]);
   });
 });
 

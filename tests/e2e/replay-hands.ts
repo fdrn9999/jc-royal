@@ -44,6 +44,7 @@ export function build(id: string, maxSeats: number, button: number, board: strin
     maxSeats,
     buttonSeat: button,
     pots: pots.map((p) => ({ amount: p.amount, eligibleSeats: p.eligible, winners: p.winners.map(([seatIndex, amount]) => ({ seatIndex, amount })), uncalled: false })),
+    returned: null,
     actions: acts.map(([seatIndex, stage, type, amount]) => ({ seatIndex, stage, type, amount })),
     players: seats.map((s) => ({
       seatIndex: s.seat,

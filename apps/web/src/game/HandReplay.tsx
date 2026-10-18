@@ -11,7 +11,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject }
 import { MemberName } from '../components/MemberName';
 import { useAmounts, type Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { buildReplay, handedBack, REPLAY_PHASES, replayParts, replayPhase, settledPots, type ReplayInput, type ReplayLinePart, type ReplayPhase } from './replay';
+import { buildReplay, REPLAY_PHASES, replayParts, replayPhase, wonLessReturned, type ReplayInput, type ReplayLinePart, type ReplayPhase } from './replay';
 import { TableScene, useBoxSize, useTableLayout } from './TableScene';
 
 const STEP_MS = 1400;
@@ -444,12 +444,12 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
 
 /**
  * Each pot of the hand and who won it, or each player's total for hands recorded before pots were stored; chips nobody
- * called show as handed back, not won.
+ * called show as handed back, not won. Pots and the chips handed back are as the server sent them.
  */
 function Settlement({ hand, name, amounts: a, sectionRef }: { hand: ReplayInput; name: (seat: number) => string; amounts: Amounts; sectionRef: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
-  const pots = settledPots(hand);
-  const back = pots ? null : handedBack(hand);
+  const pots = hand.pots;
+  const back = pots ? null : hand.returned;
   let side = 0;
   return (
     <section ref={sectionRef} tabIndex={-1} className="rounded-xl border border-white/10 bg-black/25 p-3 focus-visible:outline-2 focus-visible:outline-gold-400" data-testid="replay-pots">
@@ -478,7 +478,7 @@ function Settlement({ hand, name, amounts: a, sectionRef }: { hand: ReplayInput;
         <>
           <ul className="flex flex-col gap-1 text-sm">
             {hand.players
-              .map((p) => ({ p, won: p.won - (back?.seatIndex === p.seatIndex ? back.amount : 0) }))
+              .map((p) => ({ p, won: wonLessReturned(hand, p) }))
               .filter((x) => x.won > 0)
               .map(({ p, won }) => (
                 <li key={p.seatIndex} className="flex justify-between gap-2">
