@@ -135,6 +135,26 @@ test('lobby: the size and blind filters narrow the list as well as quick play', 
   expect(await cards.count()).toBeGreaterThan(1);
 });
 
+test('lobby: on a slow device a tab tapped and a search typed right after both stay, key by key, and a key in the middle stays there', async ({ browser }) => {
+  const { page } = await signUp(browser);
+  const box = page.getByRole('textbox', { name: /테이블 검색|Search tables/ });
+  // As a slow phone: the next key comes before the page has drawn the last one (CI lost the tab this way).
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 20 });
+  await page.getByTestId('lobby-filter-open').click();
+  await box.pressSequentially('Fav');
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  await expect(page).toHaveURL('/?tab=open&q=Fav');
+  await expect(box).toHaveValue('Fav');
+  await expect(page.getByTestId('lobby-filter-open')).toHaveAttribute('aria-selected', 'true');
+  await box.press('Home');
+  await box.press('ArrowRight');
+  await box.press('x');
+  await expect(box).toHaveValue('Fxav');
+  expect(await box.evaluate((el: HTMLInputElement) => el.selectionStart)).toBe(2);
+  await expect(page).toHaveURL('/?tab=open&q=Fxav');
+});
+
 test('lobby: polls only while visible, never overlaps, and refreshes on coming back', async ({ browser }) => {
   const { page: first } = await signUp(browser);
   const page = await first.context().newPage();
