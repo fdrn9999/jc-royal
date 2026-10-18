@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
 import logo128 from '../../assets/logo-128.webp';
 import logo192 from '../../assets/logo-192.webp';
 import { cx } from '../util';
@@ -163,11 +163,32 @@ export function Modal({ open, onClose, title, children, footer, wide, closeLabel
   );
 }
 
+/**
+ * A figure ("9,876,543,210") that may wrap after a comma and nowhere else: in a box too narrow for it, a long amount
+ * goes on to a second line a whole digit group at a time instead of running out of the box. It reads the same.
+ */
+export function Figure({ children }: { children: string }) {
+  return (
+    <>
+      {children.split(',').map((part, i) =>
+        i ? (
+          <Fragment key={i}>
+            ,<wbr />
+            {part}
+          </Fragment>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
 export function Stat({ label, value, sub }: { label: ReactNode; value: ReactNode; sub?: ReactNode }) {
   return (
     <div className="rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3">
       <div className="text-[11px] font-semibold tracking-[0.04em] text-ink-400">{label}</div>
-      <div className="mt-1 font-mono text-xl font-semibold text-ivory tabular-nums">{value}</div>
+      <div className="mt-1 font-mono text-xl font-semibold text-ivory tabular-nums">{typeof value === 'string' ? <Figure>{value}</Figure> : value}</div>
       {sub && <div className="mt-0.5 text-xs text-ink-400">{sub}</div>}
     </div>
   );
