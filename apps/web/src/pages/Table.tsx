@@ -518,7 +518,7 @@ export function TablePage() {
           </div>
 
           {/* bottom: action bar / status */}
-          <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
+          <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6" data-testid="table-stack">
             {tn && (
             <Suspense fallback={null}>
               <TournamentResult tn={tn} />

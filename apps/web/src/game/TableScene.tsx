@@ -35,13 +35,14 @@ export function useBoxSize<T extends HTMLElement>() {
  * stack sits in the bottom-right corner and the area keeps clear of its height, or of its width beside it (a phone on
  * its side), whichever leaves the table more room. Measured, since the stack depends on the state, the language and the
  * width, and only growing within a `mode` (and width), so the table does not move turn by turn. Passing toasts and
- * notices (data-transient) are left out.
+ * notices (data-transient) are left out. A panel opened for a moment (data-momentary: the raise being sized) gets its
+ * room only while it is open: the table makes way for it and comes back when it closes, instead of staying small.
  */
 export function useStackRoom(mode: string) {
   const [colRef, col] = useBoxSize<HTMLDivElement>();
   const stackRef = useRef<HTMLDivElement>(null);
   const key = `${mode}|${Math.round(col.w)}`;
-  const [room, setRoom] = useState({ key, w: 0, h: 0 });
+  const [room, setRoom] = useState<{ key: string; w: number; h: number; open: { w: number; h: number } | null }>({ key, w: 0, h: 0, open: null });
   useLayoutEffect(() => {
     const el = stackRef.current;
     if (!el) return;
@@ -49,14 +50,19 @@ export function useStackRoom(mode: string) {
       const kids = Array.from(el.children as HTMLCollectionOf<HTMLElement>).filter((k) => k.dataset.transient === undefined && k.offsetHeight > 0);
       const h = kids.length ? Math.ceil(el.getBoundingClientRect().bottom - Math.min(...kids.map((k) => k.getBoundingClientRect().top))) : 0;
       const w = Math.max(0, ...kids.map((k) => k.offsetWidth));
-      setRoom((r) => (r.key !== key ? { key, w, h } : w > r.w || h > r.h ? { key, w: Math.max(w, r.w), h: Math.max(h, r.h) } : r));
+      const momentary = el.querySelector('[data-momentary]') !== null;
+      setRoom((r) => {
+        const kept = r.key === key ? r : { w: 0, h: 0 };
+        const next = momentary ? { key, w: kept.w, h: kept.h, open: { w, h } } : { key, w: Math.max(w, kept.w), h: Math.max(h, kept.h), open: null };
+        return next.key === r.key && next.w === r.w && next.h === r.h && next.open?.w === r.open?.w && next.open?.h === r.open?.h ? r : next;
+      });
     };
     read();
     const ro = new ResizeObserver(read);
     ro.observe(el);
     return () => ro.disconnect();
   }, [key]);
-  const { w, h } = room.key === key ? room : { w: 0, h: 0 };
+  const { w, h } = room.key === key ? { w: Math.max(room.w, room.open?.w ?? 0), h: Math.max(room.h, room.open?.h ?? 0) } : { w: 0, h: 0 };
   let style: CSSProperties = { marginBottom: h };
   if (col.w >= 640) {
     // The box a fixed table fills (useTableLayout), in the area left by sm:mx-6, sm:mt-6 and the margin kept here.
