@@ -37,11 +37,16 @@ export function useBoxSize<T extends HTMLElement>() {
  * width, and only growing within a `mode` (and width), so the table does not move turn by turn. Passing toasts and
  * notices (data-transient) are left out. A panel opened for a moment (data-momentary: the raise being sized) gets its
  * room only while it is open: the table makes way for it and comes back when it closes, instead of staying small.
+ *
+ * `side` (a short screen, short.ts): the stack is a column of a fixed width at the right edge, and the area keeps clear
+ * of that width whatever it holds, so the table keeps one size through the turns and with the raise panel open.
+ *
+ * `open`: such a panel is open (the table may drop what only matters off the turn, such as room for the show-card buttons).
  */
-export function useStackRoom(mode: string) {
+export function useStackRoom(mode: string, side = false) {
   const [colRef, col] = useBoxSize<HTMLDivElement>();
   const stackRef = useRef<HTMLDivElement>(null);
-  const key = `${mode}|${Math.round(col.w)}`;
+  const key = `${mode}|${side}|${Math.round(col.w)}`;
   const [room, setRoom] = useState<{ key: string; w: number; h: number; open: { w: number; h: number } | null }>({ key, w: 0, h: 0, open: null });
   useLayoutEffect(() => {
     const el = stackRef.current;
@@ -49,7 +54,7 @@ export function useStackRoom(mode: string) {
     const read = () => {
       const kids = Array.from(el.children as HTMLCollectionOf<HTMLElement>).filter((k) => k.dataset.transient === undefined && k.offsetHeight > 0);
       const h = kids.length ? Math.ceil(el.getBoundingClientRect().bottom - Math.min(...kids.map((k) => k.getBoundingClientRect().top))) : 0;
-      const w = Math.max(0, ...kids.map((k) => k.offsetWidth));
+      const w = side ? el.offsetWidth : Math.max(0, ...kids.map((k) => k.offsetWidth));
       const momentary = el.querySelector('[data-momentary]') !== null;
       setRoom((r) => {
         const kept = r.key === key ? r : { w: 0, h: 0 };
@@ -64,14 +69,31 @@ export function useStackRoom(mode: string) {
   }, [key]);
   const { w, h } = room.key === key ? { w: Math.max(room.w, room.open?.w ?? 0), h: Math.max(room.h, room.open?.h ?? 0) } : { w: 0, h: 0 };
   let style: CSSProperties = { marginBottom: h };
-  if (col.w >= 640) {
+  if (side && col.w >= 640) {
+    // Beside the column, with the home indicator's room below (none on most phones).
+    style = { marginBottom: 'max(4px, env(safe-area-inset-bottom))', marginRight: w + 4 };
+  } else if (col.w >= 640) {
     // The box a fixed table fills (useTableLayout), in the area left by sm:mx-6, sm:mt-6 and the margin kept here.
     const fit = (x: number, y: number) => Math.max(0, Math.min(x, 2.1 * y)) * Math.max(0, Math.min(y, 1.9 * x));
     const below = Math.max(h, 24);
     const beside = 24 + w + 8;
     style = fit(col.w - 24 - beside, col.h - 48) > fit(col.w - 48, col.h - 24 - below) ? { marginBottom: 24, marginRight: beside } : { marginBottom: below };
   }
-  return { colRef, stackRef, style };
+  return { colRef, stackRef, style, open: room.key === key && room.open !== null };
+}
+
+/**
+ * The table's status line: waiting for players or the next hand's countdown between hands, the side pots while a hand
+ * has them. Under the board, or in a short screen's column (short.ts).
+ */
+export function useTableStatus(s: TableView | null, nextIn: number | null, amounts: Amounts) {
+  const { t } = useI18n();
+  if (!s) return { status: null, sidePots: null };
+  const hand = s.hand;
+  const status = !hand ? (nextIn !== null ? t('table.nextHand', { s: nextIn }) : t('table.waiting')) : hand.stage === 'settled' && nextIn !== null ? t('table.nextHand', { s: nextIn }) : null;
+  const sidePots =
+    hand && hand.pots.length > 1 && hand.stage !== 'settled' ? hand.pots.map((p, i) => `${i === 0 ? t('table.pot') : t('table.sidePot', { n: i })} ${amounts.fmt(p.amount, true)}`).join(' · ') : null;
+  return { status, sidePots };
 }
 
 export interface TableLayout {
@@ -101,6 +123,8 @@ export interface LayoutOptions {
   chars?: PlanInput['chars'];
   /** The height is free (the replay): `area.h` is the most it may take, and it grows no taller than this. */
   grow?: number;
+  /** The least share of the width the table may narrow to where that keeps every bet by its own seat (planTable's minW). */
+  narrow?: number;
 }
 
 /** Longest amounts a table usually shows in a unit: a full-size stack ("1,234,567", "1,234.5 BB"), a bet and the pot. */
@@ -112,12 +136,27 @@ const ALL: Density[] = ['full', 'compact', 'dense'];
 const SMALL: Density[] = ['compact', 'dense'];
 
 /**
+ * The last plans laid out, the latest last. A raise panel opening and closing upright gives the table two areas in
+ * turn, and on a small phone with nine seats each plan costs some 13–18ms on a desktop CPU, more on a phone's
+ * (TEST_REPORT): a repeat costs nothing.
+ */
+const plans = new Map<string, TablePlan>();
+function planned(key: string, make: () => TablePlan) {
+  let plan = plans.get(key);
+  if (plan) plans.delete(key);
+  else plan = make();
+  plans.set(key, plan);
+  if (plans.size > 16) plans.delete(plans.keys().next().value!);
+  return plan;
+}
+
+/**
  * The table laid out in the available area (layout.ts): every seat, bet and the board in a place of its own, the
  * seats smaller when the area is. A fixed area is kept from stretching into a band, at most 2.1 times as wide as tall
  * and 1.9 times as tall as wide.
  */
 export function useTableLayout(area: { w: number; h: number }, maxSeats: number | undefined, anchor: number, opts: LayoutOptions = {}): TableLayout {
-  const { me = false, meTop = 0, footer = false, grow = 0 } = opts;
+  const { me = false, meTop = 0, footer = false, grow = 0, narrow = 1 } = opts;
   const { stack, bet, pot } = opts.chars ?? amountChars('chips');
   const n = maxSeats ?? 0;
   return useMemo(() => {
@@ -127,14 +166,16 @@ export function useTableLayout(area: { w: number; h: number }, maxSeats: number 
     const input: PlanInput = { n, anchor, me, meTop, footer, chars: { stack, bet, pot } };
     const w = Math.max(1, area.w);
     const h = Math.max(1, area.h);
-    const plan = grow > 0 ? planHeight(w, h, grow, input, densities) : planTable(Math.min(w, 2.1 * h), Math.min(h, 1.9 * w), input, densities);
+    const bw = Math.min(w, 2.1 * h);
+    const key = [w, h, grow, narrow, n, anchor, me, meTop, footer, stack, bet, pot, densities.length].join();
+    const plan = planned(key, () => (grow > 0 ? planHeight(w, h, grow, input, densities) : planTable(bw, Math.min(h, 1.9 * w), input, densities, Math.round(narrow * bw))));
     const pct = (q: Point): Point => ({ x: (q.x / plan.w) * 100, y: (q.y / plan.h) * 100 });
     const geometry = plan.seats.map((seat, i) => {
       const b = pct(plan.bets[i] ?? seat);
       return { seat: pct(seat), bet: b, button: b };
     });
     return { portrait: plan.w / plan.h < 0.95, compact: plan.density !== 'full', density: plan.density, box: { w: plan.w, h: plan.h }, geometry, pot: pct(plan.pot), footer, plan };
-  }, [area.w, area.h, n, anchor, me, meTop, footer, stack, bet, pot, grow]);
+  }, [area.w, area.h, n, anchor, me, meTop, footer, stack, bet, pot, grow, narrow]);
 }
 
 const CHIPS = chipAmounts('chips', 0);
@@ -147,6 +188,7 @@ export function TableScene({
   onSit,
   onSeatClick,
   onShow,
+  showOnCards = false,
   reactions,
   react,
   nextIn,
@@ -165,6 +207,8 @@ export function TableScene({
   onSeatClick?: (seat: SeatView) => void;
   /** Shows one of my cards after the hand (the real table only; offered while `you.canShow`). */
   onShow?: (card: 0 | 1) => void;
+  /** The show-card buttons lie on my cards instead of above them (a short screen keeps no room there: short.ts). */
+  showOnCards?: boolean;
   /** Quick reactions showing now (the real table only), each at its sender's seat while that player still sits there. */
   reactions?: SeatReaction[];
   /** Sending reactions from my seat (the real table only, while seated). */
@@ -199,9 +243,7 @@ export function TableScene({
   const collected = staged?.pot ?? collectedOf(s);
   const boardShown = staged?.board ?? hand?.board.length ?? 0;
   const boardSize = `${plan.board}px`;
-  const status = !hand ? (nextIn !== null ? t('table.nextHand', { s: nextIn }) : t('table.waiting')) : hand.stage === 'settled' && nextIn !== null ? t('table.nextHand', { s: nextIn }) : null;
-  const sidePots =
-    hand && hand.pots.length > 1 && hand.stage !== 'settled' ? hand.pots.map((p, i) => `${i === 0 ? t('table.pot') : t('table.sidePot', { n: i })} ${amounts.fmt(p.amount, true)}`).join(' · ') : null;
+  const { status, sidePots } = useTableStatus(s, nextIn, amounts);
 
   return (
     <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'} data-density={density}>
@@ -285,6 +327,7 @@ export function TableScene({
               onSit={() => onSit(seat.seatIndex)}
               onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
               onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? onShow : undefined}
+              showOver={showOnCards}
               reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
               react={seat.seatIndex === mySeat ? react : undefined}
               density={density}

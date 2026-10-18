@@ -12,7 +12,8 @@ import { useI18n } from '../lib/i18n';
 /** Draw the eye to the button this long before the turn runs out. */
 const URGENT_MS = 8_000;
 
-export function TimeBankButton({ s, onUse }: { s: TableView; onUse: (handId: string, seq: number, seen: number) => Promise<void> }) {
+/** `column`: in a short screen's column (short.ts) the pill takes its width and wraps instead of widening it. */
+export function TimeBankButton({ s, onUse, column = false }: { s: TableView; onUse: (handId: string, seq: number, seen: number) => Promise<void>; column?: boolean }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [urgent, setUrgent] = useState(false);
@@ -45,7 +46,13 @@ export function TimeBankButton({ s, onUse }: { s: TableView; onUse: (handId: str
   }
 
   return (
-    <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/10 bg-ink-950/85 py-1 pl-3 pr-1 text-xs backdrop-blur sm:self-end" data-testid="time-bank">
+    <div
+      className={cx(
+        'pointer-events-auto flex items-center border border-white/10 bg-ink-950/85 pl-3 pr-1 text-xs backdrop-blur',
+        column ? 'flex-wrap gap-x-2 gap-y-1 rounded-2xl' : 'gap-2 rounded-full py-0.5 sm:self-end',
+      )}
+      data-testid="time-bank"
+    >
       <span className="text-ink-300">
         {t('timeBank.label')} <b className="font-mono text-ivory tabular-nums" data-testid="time-bank-left">{t('timeBank.seconds', { n: left })}</b>
       </span>
@@ -57,7 +64,8 @@ export function TimeBankButton({ s, onUse }: { s: TableView; onUse: (handId: str
       <button
         type="button"
         className={cx(
-          'jc-tap min-h-9 rounded-full px-3.5 font-bold tabular-nums transition-colors',
+          'jc-tap min-h-10 rounded-full px-3.5 font-bold tabular-nums transition-colors',
+          column && 'ml-auto',
           usable ? 'bg-gold-500 text-ink-950 hover:bg-gold-400 disabled:opacity-60' : 'bg-white/5 text-ink-400',
           usable && urgent && !busy && 'jc-pulse-gold',
         )}

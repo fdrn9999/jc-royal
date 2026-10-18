@@ -10,7 +10,8 @@ import { useState } from 'react';
 import { useI18n } from '../lib/i18n';
 import { preActionSpot } from './preAction';
 
-export function PreActions({ s, onPick }: { s: TableView; onPick: (kind: PreActionKind | null) => void }) {
+/** `column`: in a short screen's column (short.ts) the title takes a line and the buttons share the next. */
+export function PreActions({ s, onPick, column = false }: { s: TableView; onPick: (kind: PreActionKind | null) => void; column?: boolean }) {
   const { t } = useI18n();
   const [pressed, setPressed] = useState<{ version: number; kind: PreActionKind | null } | null>(null);
   const spot = preActionSpot(s);
@@ -22,8 +23,13 @@ export function PreActions({ s, onPick }: { s: TableView; onPick: (kind: PreActi
     onPick(next);
   };
   return (
-    <div role="group" aria-label={t('pre.title')} className="pointer-events-auto flex items-center gap-1.5 rounded-2xl border border-white/5 bg-ink-950/80 p-1.5 backdrop-blur sm:self-end" data-testid="pre-actions">
-      <span className="px-1.5 text-[11px] font-semibold text-ink-300">{t('pre.title')}</span>
+    <div
+      role="group"
+      aria-label={t('pre.title')}
+      className={cx('pointer-events-auto flex items-center gap-1.5 rounded-2xl border border-white/5 bg-ink-950/80 p-1.5 backdrop-blur', column ? 'flex-wrap' : 'sm:self-end')}
+      data-testid="pre-actions"
+    >
+      <span className={cx('px-1.5 text-[11px] font-semibold text-ink-300', column && 'w-full')}>{t('pre.title')}</span>
       {spot.choices.map((k) => (
         <button
           key={k}
@@ -31,7 +37,8 @@ export function PreActions({ s, onPick }: { s: TableView; onPick: (kind: PreActi
           aria-pressed={kept === k}
           onClick={() => pick(k)}
           className={cx(
-            'jc-tap h-10 min-w-[5.5rem] rounded-xl border px-3 text-sm font-semibold transition',
+            'jc-tap h-10 rounded-xl border font-semibold transition',
+            column ? 'min-w-0 flex-1 px-1 text-xs' : 'min-w-[5.5rem] px-3 text-sm',
             kept === k ? 'border-gold-400 bg-gold-500/25 text-gold-300' : 'border-white/10 bg-ink-850 text-ivory hover:bg-ink-800',
           )}
           data-testid={`pre-${k}`}

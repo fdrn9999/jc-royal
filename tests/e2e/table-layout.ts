@@ -12,17 +12,31 @@ export interface TableReport {
   stack: { top: number; bottom: number; left: number; right: number } | null;
 }
 
+/** Every button and field of the action bar smaller than 40px either way, by what it says and its size. */
+export function smallTargets(page: Page): Promise<string[]> {
+  return page.getByTestId('action-bar').evaluate((bar) =>
+    Array.from(bar.querySelectorAll('button, input'))
+      .map((e) => ({ e, r: e.getBoundingClientRect() }))
+      .filter(({ r }) => r.width > 0 && (r.width < 40 || r.height < 40))
+      .map(({ e, r }) => `${e.getAttribute('aria-label') ?? e.textContent?.trim()} ${Math.round(r.width)}×${Math.round(r.height)}`),
+  );
+}
+
 /**
  * The live table as drawn: each seat's name, stack, cards, dealer button and status, each empty seat, the bets, the
  * board, the pot and the table status, and every control and line of the stack under the table (the action bar or the
  * pre-actions, the status line, the beginner aids). Each must lie inside the screen below the header, not under anything
  * else (hit tests at several points of each: a seat's own pieces may lie on one another, nothing from elsewhere may),
- * and no seat's or the board's piece may overlap another's, or any piece of the stack. A box that paints nothing (no
+ * and no seat's or the board's piece may overlap another's, or any piece of the stack, and each bet must lie nearer its
+ * own seat than any other (else it reads as that seat's). A box that paints nothing (no
  * background, border, shadow or text of its own, one that only places others, like the room kept for the pot and the
  * board) hides nothing under it; over a control (a sit button, the stack's) it would take the taps, so there it counts.
+ * `dense`: the pieces (by id) hit-tested over a grid of their text (or, cards, of their face) rather than at a few points,
+ * so a thin edge laid over a rank, a suit or an amount is found too.
  */
-export function measureTable(page: Page): Promise<TableReport> {
-  return page.evaluate(() => {
+export function measureTable(page: Page, dense?: RegExp): Promise<TableReport> {
+  return page.evaluate((denseSource) => {
+    const denseRe = denseSource === null ? null : new RegExp(denseSource);
     const scene = document.querySelector('[data-testid=table]')!;
     const stackEl = document.querySelector('[data-testid=table-stack]');
     const column = (stackEl?.parentElement ?? scene.parentElement)!;
@@ -84,6 +98,20 @@ export function measureTable(page: Page): Promise<TableReport> {
       const t = e.closest('[data-testid]')?.getAttribute('data-testid') ?? '';
       return `${t}>${e.tagName.toLowerCase()}${typeof e.className === 'string' && e.className ? `.${e.className.split(' ')[0]}` : ''}`;
     };
+    /** What a piece's content takes: its text and the boxes inside it, without its own padding, within its own box (a
+     * name cut short with an ellipsis lays out its whole text past it). */
+    const textBox = (e: Element) => {
+      const own = e.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      const rs = Array.from(range.getClientRects()).filter((q) => q.width > 0 && q.height > 0);
+      if (!rs.length) return own;
+      const l = Math.max(own.left, Math.min(...rs.map((q) => q.left)));
+      const t = Math.max(own.top, Math.min(...rs.map((q) => q.top)));
+      const r = Math.min(own.right, Math.max(...rs.map((q) => q.right)));
+      const b = Math.min(own.bottom, Math.max(...rs.map((q) => q.bottom)));
+      return r > l && b > t ? new DOMRect(l, t, r - l, b - t) : own;
+    };
     const clear = (c: string) => c === 'transparent' || /^rgba\(.*,\s*0\)$/.test(c);
     const paints = (e: Element) => {
       if (!(e instanceof HTMLElement) || e.matches('button, a, input, select, textarea, img, canvas, video')) return true;
@@ -100,23 +128,28 @@ export function measureTable(page: Page): Promise<TableReport> {
       if (r.top < top - 0.5 || r.bottom > bottom + 0.5) issues.push({ kind: 'offscreen', item: it.id, px: Math.round(Math.max(top - r.top, r.bottom - bottom)) });
       // A hit test passes through what takes no pointer (the stack's plain lines): only the box checks below see those.
       if (getComputedStyle(it.el).pointerEvents === 'none') continue;
-      const pts = it.text
-        ? [
-            [0.5, 0.5],
-            [0.12, 0.5],
-            [0.88, 0.5],
-          ]
-        : [
-            [0.5, 0.5],
-            [0.25, 0.3],
-            [0.75, 0.3],
-            [0.25, 0.6],
-            [0.75, 0.6],
-          ];
+      const grid = denseRe?.test(it.id);
+      // Densely, over the text itself (its glyphs and chips, not the padding round them) or a card's whole face.
+      const area = grid && it.text ? textBox(it.el) : r;
+      const pts = grid
+        ? [0.1, 0.3, 0.5, 0.7, 0.9].flatMap((fx) => (it.text ? [0.25, 0.5, 0.75] : [0.1, 0.3, 0.5, 0.7, 0.9]).map((fy) => [fx, fy]))
+        : it.text
+          ? [
+              [0.5, 0.5],
+              [0.12, 0.5],
+              [0.88, 0.5],
+            ]
+          : [
+              [0.5, 0.5],
+              [0.25, 0.3],
+              [0.75, 0.3],
+              [0.25, 0.6],
+              [0.75, 0.6],
+            ];
       const by = new Set<string>();
       for (const [fx, fy] of pts) {
-        const x = r.left + r.width * fx!;
-        const y = r.top + r.height * fy!;
+        const x = area.left + area.width * fx!;
+        const y = area.top + area.height * fy!;
         // Within a pixel of the screen's edge Chrome rounds the point out of the viewport and finds nothing there.
         if (x < 0 || x > vw - 1 || y < top || y > bottom - 1) continue;
         let hit = 'nothing';
@@ -147,6 +180,29 @@ export function measureTable(page: Page): Promise<TableReport> {
         if (px) issues.push({ kind: 'overlap', item: table[a]!.id, by: table[b]!.id, px });
       }
     }
+    // A bet nearer another seat than its own reads as that seat's ('astray', by the nearer seat): from its centre to the
+    // nearest point of each seat as drawn (all its pieces, and the plate they sit on).
+    const seatBox = new Map<string, { l: number; t: number; r: number; b: number }>();
+    const grow = (g: string, r: DOMRect) => {
+      const u = seatBox.get(g);
+      seatBox.set(g, u ? { l: Math.min(u.l, r.left), t: Math.min(u.t, r.top), r: Math.max(u.r, r.right), b: Math.max(u.b, r.bottom) } : { l: r.left, t: r.top, r: r.right, b: r.bottom });
+    };
+    for (const it of items) if (it.group.startsWith('seat-')) grow(it.group, box(it.el));
+    for (const g of seatBox.keys()) {
+      const plate = scene.querySelector(`[data-testid="stack-${g.slice(5)}"]`)?.parentElement?.parentElement;
+      if (plate) grow(g, box(plate));
+    }
+    for (const it of items) {
+      if (!/^bet-\d+$/.test(it.id)) continue;
+      const own = seatBox.get(`seat-${it.id.slice(4)}`);
+      if (!own) continue;
+      const r = box(it.el);
+      const x = (r.left + r.right) / 2;
+      const y = (r.top + r.bottom) / 2;
+      const away = (u: { l: number; t: number; r: number; b: number }) => Math.hypot(Math.max(u.l - x, 0, x - u.r), Math.max(u.t - y, 0, y - u.b));
+      const d = away(own);
+      for (const [g, u] of seatBox) if (g !== `seat-${it.id.slice(4)}` && away(u) <= d) issues.push({ kind: 'astray', item: it.id, by: g, px: Math.round(d - away(u)) });
+    }
     // The stack's lines, whole (a bar's padding included), against every piece of the table.
     for (const line of lines) {
       const id = line.getAttribute('data-testid') ?? `line-${lines.indexOf(line)}`;
@@ -174,5 +230,5 @@ export function measureTable(page: Page): Promise<TableReport> {
           }
         : null,
     };
-  });
+  }, dense?.source ?? null);
 }

@@ -17,7 +17,7 @@ interface Box {
 /**
  * Every part a plan places, rebuilt from the sizes Seat.tsx and TableScene.tsx draw (not from the planner's own
  * boxes): each seat from the top of what rises over its cards to the bottom of its status line, each bet's chips and
- * label, and the pot with the board.
+ * label, the pot (its row draws only the pot, in the middle) and the board with the status line under it.
  */
 function parts(plan: TablePlan, p: PlanInput): Box[] {
   const d = DIMS[plan.density];
@@ -36,7 +36,9 @@ function parts(plan: TablePlan, p: PlanInput): Box[] {
     out.push({ name: `bet-${i}`, l: b.x - bw / 2, t: b.y - bh / 2, r: b.x + bw / 2, b: b.y + bh / 2 });
   }
   const k = plan.block;
-  out.push({ name: 'board', l: k.x, t: k.y, r: k.x + k.w, b: k.y + k.h });
+  const potW = d.potChip + 18 + p.chars.pot * 6.6;
+  out.push({ name: 'pot', l: k.x + k.w / 2 - potW / 2, t: k.y, r: k.x + k.w / 2 + potW / 2, b: k.y + plan.potRowH });
+  out.push({ name: 'board', l: k.x, t: k.y + plan.potRowH + 8, r: k.x + k.w, b: k.y + k.h });
   return out;
 }
 
@@ -52,6 +54,19 @@ function problems(plan: TablePlan, p: PlanInput): string[] {
       const b = boxes[j]!;
       if (Math.min(a.r, b.r) - Math.max(a.l, b.l) > e && Math.min(a.b, b.b) - Math.max(a.t, b.t) > e) out.push(`${a.name} × ${b.name}`);
     }
+  return out;
+}
+
+/** Bets nearer another seat as drawn (from its cards to its status line) than their own: they read as that seat's. */
+function astray(plan: TablePlan, p: PlanInput): string[] {
+  const seats = parts(plan, p)
+    .filter((x) => x.name.startsWith('seat-'))
+    .map((x, i) => ({ ...x, t: x.t + (p.me && i === p.anchor ? Math.max(4, p.meTop) : 6) }));
+  const out: string[] = [];
+  plan.bets.forEach((b, i) => {
+    const away = (s: Box) => Math.hypot(Math.max(s.l - b.x, 0, b.x - s.r), Math.max(s.t - b.y, 0, b.y - s.b));
+    for (const s of seats) if (s.name !== `seat-${i}` && away(s) <= away(seats[i]!)) out.push(`bet-${i} by ${s.name}`);
+  });
   return out;
 }
 
@@ -98,7 +113,52 @@ describe('table layout: every seat, bet and the board in a place of its own', ()
         const plan = planTable(Math.min(w, 2.1 * h), Math.min(h, 1.9 * w), p, w < 640 || h < 520 ? SMALL : ALL);
         expect(plan.overlap).toBe(0);
         expect(problems(plan, p)).toEqual([]);
+        // Nine seats fit a small phone's area (iPhone SE) only with some bets nearer a neighbour (TEST_REPORT).
+        if (!(name === 'iPhone SE' && n === 9)) expect(astray(plan, p)).toEqual([]);
       });
+
+  // A phone held sideways (short.ts): the area beside the controls' column on a 844×390 screen, no status line under
+  // the table, the cards' raised room cut to 4px, and the table free to narrow by 15%.
+  for (const chars of [CHIPS, BB])
+    for (const n of [2, 6, 9])
+      it(`live table · phone sideways 844×390 · ${n} seats · ${chars === BB ? 'BB' : 'chips'}`, () => {
+        const p = input(n, { meTop: 4, chars });
+        const plan = planTable(624, 338, p, SMALL, Math.round(0.85 * 624));
+        expect(plan.overlap).toBe(0);
+        expect(problems(plan, p)).toEqual([]);
+        expect(astray(plan, p)).toEqual([]);
+      });
+
+  it('narrows the table, within what it is let, where that keeps every bet by its own seat', () => {
+    const p = input(9, { meTop: 4 });
+    // At its full width nine seats fit, but a bet lies nearer a neighbour; 8px narrower each lies by its own.
+    const full = planTable(608, 308, p, SMALL);
+    expect(full.overlap).toBe(0);
+    expect(astray(full, p)).not.toEqual([]);
+    const narrow = planTable(608, 308, p, SMALL, Math.round(0.85 * 608));
+    expect(narrow.w).toBeLessThan(608);
+    expect(narrow.overlap).toBe(0);
+    expect(problems(narrow, p)).toEqual([]);
+    expect(astray(narrow, p)).toEqual([]);
+  });
+
+  it('keeps every bet by its own seat at 800×360 sideways: a bet may lie beside the pot, not under a neighbour', () => {
+    // The pot's row draws only the pot, in its middle: the top row's middle seats' bets lie under them, beside it.
+    const p = input(9, { meTop: 4 });
+    const plan = planTable(580, 308, p, SMALL, Math.round(0.85 * 580));
+    expect(plan.overlap).toBe(0);
+    expect(problems(plan, p)).toEqual([]);
+    expect(astray(plan, p)).toEqual([]);
+  });
+
+  it('keeps a fit with nothing overlapping over every bet by its own seat when it cannot have both', () => {
+    // Nine seats in 576×300 fit, at whatever width they are let, only with a bet nearer a neighbour.
+    const p = input(9, { meTop: 4 });
+    const plan = planTable(576, 300, p, SMALL, Math.round(0.85 * 576));
+    expect(plan.overlap).toBe(0);
+    expect(problems(plan, p)).toEqual([]);
+    expect(astray(plan, p)).not.toEqual([]);
+  });
 
   it('turns the table so any seat can sit at the bottom', () => {
     for (const anchor of [0, 3, 8]) {
@@ -163,6 +223,20 @@ describe('table layout: every seat, bet and the board in a place of its own', ()
     const plan = planTable(120, 90, input(9), SMALL);
     expect(plan.overlap).toBeGreaterThan(0);
     expect(plan.seats).toHaveLength(9);
+  });
+
+  it('where nothing fits, lays no bet over the board’s cards nor nearer another seat: they come before the bets', () => {
+    // A 320px phone upright, the raise panel open: the six-seat table has 312×209, where no way fits (it would need some
+    // 360px). The player's own bet lay over the board's middle card; now it lies on its own seat's room (TEST_REPORT).
+    const p = input(6, { footer: true });
+    const plan = planTable(312, 209, p, SMALL);
+    expect(plan.overlap).toBeGreaterThan(0);
+    const k = plan.block;
+    const top = k.y + plan.potRowH + 8;
+    const cards = { l: k.x, t: top, r: k.x + k.w, b: top + 1.4 * plan.board + 2 * DIMS[plan.density].boardPad };
+    const over = parts(plan, p).filter((x) => x.name.startsWith('bet-') && Math.min(x.r, cards.r) - Math.max(x.l, cards.l) > 0.5 && Math.min(x.b, cards.b) - Math.max(x.t, cards.t) > 0.5);
+    expect(over.map((x) => x.name)).toEqual([]);
+    expect(astray(plan, p)).toEqual([]);
   });
 
   it('keeps the fixed seat ring the Academy lessons draw', () => {

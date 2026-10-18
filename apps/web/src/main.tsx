@@ -1,5 +1,5 @@
 import { Logo, Spinner } from '@jc/ui';
-import { lazy, StrictMode, Suspense, useEffect, type ComponentType, type ReactNode } from 'react';
+import { lazy, StrictMode, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, Outlet, useLocation } from 'react-router';
 // The react-dom build of the provider: it honours `flushSync` on a navigation (the hand filters use it).
@@ -13,7 +13,6 @@ import { startInstallWatch } from './lib/install';
 import { applyInitialTheme, closeAccount, openAccount, setSyncState } from './lib/prefs';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { LobbyPage } from './pages/Lobby';
-import { TableRoute } from './pages/Table';
 
 applyInitialTheme();
 // Before the browser can offer its install prompt, so the lobby and settings can hand it on.
@@ -55,9 +54,42 @@ function Legal({ kind }: { kind: 'privacy' | 'terms' }) {
   );
 }
 
+/**
+ * In place of a page whose code would not load (after a deploy the files a page opened before it named are gone): online,
+ * the page loads again, from the deploy, at most once a minute; else the error shows. Only once it is on screen: a load
+ * that fails after someone went on to another page (a table) reloads nothing there.
+ */
+function ReloadFor({ error }: { error: unknown }): ReactNode {
+  // Decided once as it comes on screen: the reload below marks the minute, which must not turn it into the error meanwhile.
+  const [reload, setReload] = useState(() => {
+    try {
+      return navigator.onLine && Date.now() - Number(sessionStorage.getItem('jc.reloadedFor') ?? 0) > 60_000;
+    } catch {
+      return false; // no storage: the error shows
+    }
+  });
+  useEffect(() => {
+    if (!reload) return;
+    try {
+      sessionStorage.setItem('jc.reloadedFor', String(Date.now()));
+    } catch {
+      setReload(false); // the minute cannot be marked (storage full): the error shows rather than risk a loop
+      return;
+    }
+    location.reload();
+  }, [reload]);
+  if (!reload) throw error;
+  return <Splash />;
+}
+
 /** My page (with the statistics), the board, friends and messages are away from the lobby and the table, so they load on demand too. */
 function onDemand<M extends Record<string, unknown>>(load: () => Promise<M>, name: keyof M & string) {
-  const C = lazy(() => load().then((m) => ({ default: m[name] as ComponentType })));
+  const C = lazy<ComponentType>(() =>
+    load().then(
+      (m) => ({ default: m[name] as ComponentType }),
+      (error: unknown) => ({ default: () => <ReloadFor error={error} /> }),
+    ),
+  );
   return (
     <Suspense fallback={<Splash />}>
       <C />
@@ -71,6 +103,24 @@ const loadMaintenance = () => import('./pages/Maintenance');
 const loadFriends = () => import('./pages/Friends');
 const loadMessages = () => import('./pages/Messages');
 const loadTournaments = () => import('./pages/Tournaments');
+
+/**
+ * The table (its scene, layout, cues and controls) loads on demand as well, so sign-in and the lobby come up sooner.
+ * Signed in, it is fetched once the browser is idle after the first screen, so a table seldom waits for it.
+ */
+const loadTable = () => import('./pages/Table');
+function PrefetchTable() {
+  useEffect(() => {
+    const go = () => void loadTable().catch(() => {});
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(go, { timeout: 5000 });
+      return () => cancelIdleCallback(id);
+    }
+    const id = setTimeout(go, 2000);
+    return () => clearTimeout(id);
+  }, []);
+  return null;
+}
 
 /** Keeps Academy progress in sync with the server while someone is signed in. */
 function AcademySync() {
@@ -139,12 +189,13 @@ const router = createBrowserRouter([
   { path: '/terms', element: <Legal kind="terms" /> },
   // Public as well: sign-in may be paused while it runs.
   { path: '/maintenance', element: onDemand(loadMaintenance, 'MaintenancePage') },
-  { path: '/table/:id', element: <RequireAuth><TableRoute /></RequireAuth> },
+  { path: '/table/:id', element: <RequireAuth>{onDemand(loadTable, 'TableRoute')}</RequireAuth> },
   { path: '/academy/practice/free', element: <RequireAuth><Academy page="FreePracticePage" /></RequireAuth> },
   { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },
   {
     element: (
       <RequireAuth>
+        <PrefetchTable />
         <AppShell>
           <Outlet />
         </AppShell>

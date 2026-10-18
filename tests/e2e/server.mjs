@@ -40,7 +40,8 @@ writeFileSync(
    ('e2e-vault', 'E2E Vault', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-vault:vault-88').digest('base64url')}', 0);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, bots_enabled, bot_level, bot_max, bot_fill_to) VALUES
    ('e2e-bots-m', 'E2E Bots Mobile', 6, 5, 10, 100, 1000, 60, 1, 'normal', 2, 3), ('e2e-bots-admin', 'E2E Bots Admin', 2, 5, 10, 100, 1000, 60, 1, 'hard', 1, 2),
-   ('e2e-nine', 'E2E Nine', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9), ('e2e-sound', 'E2E Sound', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2);
+   ('e2e-nine', 'E2E Nine', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9), ('e2e-sound', 'E2E Sound', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2),
+   ('e2e-phones', 'E2E Phones', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6);
    INSERT INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) VALUES (2, 1, 1000000, 20, 'policy', 'e2e seed');
    INSERT INTO referral_policies (version, enabled, paused, referrer_amount, invitee_amount, daily_cap, total_cap, min_hands, burst_limit, change, reason) VALUES (2, 1, 0, 1000, 1000, 5, 50, 0, 20, 'policy', 'e2e seed');`,
 );

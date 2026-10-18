@@ -16,7 +16,8 @@ import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels
 import { PreActions } from '../game/PreActions';
 import { TimeBankButton } from '../game/TimeBank';
 import { useReactionSender } from '../game/Reactions';
-import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout } from '../game/TableScene';
+import { realTableOptions, useShortScreen } from '../game/short';
+import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -250,12 +251,25 @@ export function TablePage() {
   }, [opened, myId, id]);
 
   const anchor = s?.you.seatIndex ?? 0;
-  // Seated, my seat is at the bottom with room above my cards for the show-card buttons.
-  const layout = useTableLayout(area, s?.table.maxSeats, anchor, { me: s?.you.seatIndex != null, meTop: 28, footer: true, chars: amountChars(amt.unit) });
+  // A phone on its side: the controls go to a column at the right and the seats get the height (short.ts).
+  const short = useShortScreen();
+  const academy = useProgress(me?.id);
+  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
+  // Seated, my seat is at the bottom, with room above my cards for the show-card buttons unless the screen is short.
+  // The raise panel open (my turn, so no cards to show), that room goes to the table too.
+  const tableOpts = realTableOptions(short);
+  const layout = useTableLayout(area, s?.table.maxSeats, anchor, {
+    me: s?.you.seatIndex != null,
+    ...tableOpts,
+    meTop: room.open ? 0 : tableOpts.meTop,
+    chars: amountChars(amt.unit),
+  });
 
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
   const nextIn = useCountdown(s?.nextHandAt ?? null);
+  // Short, the status line under the board goes to the column instead.
+  const tableStatus = useTableStatus(s, nextIn, amt);
 
   // Timer warning beeps on my turn.
   const lastBeep = useRef(0);
@@ -287,9 +301,7 @@ export function TablePage() {
     [sock, err],
   );
 
-  const academy = useProgress(me?.id);
   const tip = coachActive(academy, s?.you.seatIndex != null) && myTurn && s ? coachTip(s) : null;
-  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${coachActive(academy, s?.you.seatIndex != null)}`);
   // First-hands coach: count each real hand this player was dealt into while coaching is on.
   const coachedHands = useRef(new Set<string>());
   useEffect(() => {
@@ -376,7 +388,13 @@ export function TablePage() {
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }}>
       {/* top bar */}
-      <header className="jc-game-surface z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
+      <header
+        className={cx(
+          'jc-game-surface z-40 flex shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 backdrop-blur-md',
+          // Short, every pixel of height goes to the seats; the notch's side (a phone on its side) stays clear.
+          short ? 'h-11 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]' : 'h-14 px-3',
+        )}
+      >
         <Link to={lobbyHref()} aria-label={t('nav.lobby')} className="shrink-0">
           <Logo size={32} />
         </Link>
@@ -494,7 +512,14 @@ export function TablePage() {
         {/* table area */}
         <div ref={room.colRef} className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
           {/* Beginner aids and coaching stack above the action bar: the room they take is kept free so they never cover my seat. */}
-          <div ref={areaRef} className="relative mx-2 mt-1 flex min-h-0 flex-1 items-center justify-center sm:mx-6 sm:mt-6" style={room.style}>
+          <div
+            ref={areaRef}
+            className={cx(
+              'relative flex min-h-0 flex-1 items-center justify-center',
+              short ? 'ml-[max(0.5rem,env(safe-area-inset-left))] mt-1' : 'mx-2 mt-1 sm:mx-6 sm:mt-6',
+            )}
+            style={room.style}
+          >
             {s && (
               <TableScene
                 s={s}
@@ -506,6 +531,7 @@ export function TablePage() {
                   seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}) })
                 }
                 onShow={(card) => sock.send({ t: 'show', card })}
+                showOnCards={short}
                 reactions={reactions}
                 react={seated && reactOn ? reactSender : undefined}
                 nextIn={nextIn}
@@ -518,7 +544,30 @@ export function TablePage() {
           </div>
 
           {/* bottom: action bar / status */}
-          <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6" data-testid="table-stack">
+          <div
+            ref={room.stackRef}
+            className={cx(
+              'pointer-events-none absolute z-40 flex flex-col',
+              // Short: a column of one width at the right edge, every line as wide as it, scrolled rather than cut if a
+              // beginner's notes make it taller than the screen.
+              short
+                ? 'inset-y-0 right-0 w-[calc(12.5rem+max(0.5rem,env(safe-area-inset-right)))] items-stretch justify-end-safe gap-1.5 overflow-y-auto pb-[max(0.375rem,env(safe-area-inset-bottom))] pl-2 pr-[max(0.5rem,env(safe-area-inset-right))] pt-1 *:w-full! *:max-w-none!'
+                : 'inset-x-0 bottom-0 items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6',
+            )}
+            data-testid="table-stack"
+          >
+            {short && s && (
+              // Kept while empty (out of the column's flow, so it takes no gap), so a screen reader hears it as it changes.
+              <div className={cx('pointer-events-none rounded-xl text-center text-ink-200', tableStatus.status || tableStatus.sidePots ? 'bg-black/45 px-2 py-1' : 'sr-only')} data-testid="table-status" aria-live="polite">
+                {tableStatus.status ? (
+                  <span className="text-xs tracking-[0.06em]">{tableStatus.status}</span>
+                ) : tableStatus.sidePots ? (
+                  <span className="block text-[10px] leading-3" data-testid="side-pots">
+                    {tableStatus.sidePots}
+                  </span>
+                ) : null}
+              </div>
+            )}
             {tn && (
             <Suspense fallback={null}>
               <TournamentResult tn={tn} />
@@ -559,16 +608,19 @@ export function TablePage() {
                 {prefs.beginner ? (
                   <ActionHelp s={s} />
                 ) : (
-                  // On a phone the bar itself shows it; a screen reader still hears it.
-                  <div role="status" className="sr-only rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold sm:not-sr-only sm:block sm:self-end">
+                  // On a phone (and in a short screen's column) the bar itself shows it; a screen reader still hears it.
+                  <div
+                    role="status"
+                    className={cx('sr-only rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold', !short && 'sm:not-sr-only sm:block sm:self-end')}
+                  >
                     {t('table.yourTurn')}
                   </div>
                 )}
-                <TimeBankButton s={s} onUse={addBankTime} />
-                <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} />
+                <TimeBankButton s={s} onUse={addBankTime} column={short} />
+                <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={short} />
               </>
             )}
-            {s && !myTurn && seated && <PreActions s={s} onPick={sock.preAct} />}
+            {s && !myTurn && seated && <PreActions s={s} onPick={sock.preAct} column={short} />}
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
                 {s.you.leaving && <span className="text-gold-300">{t('table.leavingAfterHand')}</span>}
