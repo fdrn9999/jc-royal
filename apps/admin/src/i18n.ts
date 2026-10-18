@@ -1014,6 +1014,8 @@ const ko = {
   osNoteReports: '신고 처리 시간은 접수부터 처리(조치·기각)까지이며, 처리한 날의 기간에 넣습니다.',
   // B9 console states, lists and confirmations
   closeDialog: '닫기',
+  closeNote: '결과 메시지 닫기',
+  jumpTo: '바로 가기',
   retry: '다시 시도',
   stEmpty: '표시할 항목이 없습니다.',
   connOffline: '인터넷 연결이 끊겼습니다. 화면의 내용은 마지막으로 불러온 것이며, 연결되면 다시 시도해 주세요.',
@@ -2969,6 +2971,8 @@ const en: Dict = {
   osNoteReports: 'Time to decide runs from filing to a decision (action or dismissal), counted in the period of the decision.',
   // B9 console states, lists and confirmations
   closeDialog: 'Close',
+  closeNote: 'Close the message',
+  jumpTo: 'Jump to',
   retry: 'Try again',
   stEmpty: 'Nothing to show.',
   connOffline: 'You are offline. What is shown was loaded earlier; try again once connected.',

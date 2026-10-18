@@ -82,8 +82,16 @@ export interface HandReplayFields {
   maxSeats: number;
   /** Null for hands recorded before the button seat was stored. */
   buttonSeat: number | null;
-  /** Null for hands recorded before pot payouts were stored. */
+  /**
+   * Main pot first; chips nobody called show as a pot of their own (`uncalled`), also those the engine kept in the pot
+   * it paid (a bet everyone folded to). Null for hands recorded before pot payouts were stored.
+   */
   pots: HandPotDto[] | null;
+  /**
+   * Chips nobody called, handed back to the player who put in the most, as the hand's statistics count them. Null when
+   * none came back or it isn't known yet; pots and totals are then as stored.
+   */
+  returned: { seatIndex: number; amount: number } | null;
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
 }
 

@@ -103,9 +103,13 @@ export function replayPots(put: ReadonlyMap<number, number>, folded: ReadonlySet
   return out;
 }
 
+/** What a player won, less the chips nobody called that the server says came back to them (HandReplayFields.returned). */
+export const wonLessReturned = (h: ReplayInput, p: { seatIndex: number; won: number }) => p.won - (h.returned?.seatIndex === p.seatIndex ? h.returned.amount : 0);
+
 /**
  * Winners as the table shows them, main pot first: chips won from contested pots (an uncalled bet handed back is not
- * a win). The first one's best five is what the board highlights.
+ * a win). The first one's best five is what the board highlights. The pots and the chips handed back are the server's
+ * (HandReplayFields); nothing here works them out.
  */
 function resultWinners(h: ReplayInput): HandResultView['winners'] {
   const won = new Map<number, { amount: number; potIds: string[] }>();
@@ -120,8 +124,11 @@ function resultWinners(h: ReplayInput): HandResultView['winners'] {
       }
     });
   } else {
-    // Hands recorded before pots were stored: only each player's total (it may include a bet handed back).
-    for (const p of h.players) if (p.won > 0) won.set(p.seatIndex, { amount: p.won, potIds: [] });
+    // Hands recorded before pots were stored: each player's total, less the chips handed back.
+    for (const p of h.players) {
+      const amount = wonLessReturned(h, p);
+      if (amount > 0) won.set(p.seatIndex, { amount, potIds: [] });
+    }
   }
   return [...won].map(([seatIndex, e]) => ({ seatIndex, ...e }));
 }

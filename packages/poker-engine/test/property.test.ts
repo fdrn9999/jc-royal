@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import type { TableCue } from '@jc/types';
 import { HandEngine, type MaxSeats } from '../src';
 
 /**
@@ -23,9 +24,19 @@ const tableArb = fc
     }),
   );
 
-const coverage = { hands: 0, showdowns: 0, sidePots: 0, stalls: 0 };
+const coverage = { hands: 0, showdowns: 0, sidePots: 0, stalls: 0, returned: 0 };
 
 type TableCase = typeof tableArb extends fc.Arbitrary<infer T> ? T : never;
+
+/**
+ * Chips nobody called go back with the action that ends the betting (or the stall of a hand whose blinds put everyone
+ * all in), while still in front of the seat: only actions before them, never a card that takes the bets to the pot.
+ */
+function checkBatch(cues: TableCue[]) {
+  const at = cues.findIndex((c) => c.kind === 'returned');
+  if (at < 0) return;
+  expect(cues.slice(0, at).every((c) => c.kind === 'action'), JSON.stringify(cues)).toBe(true);
+}
 
 async function playRandomHand(t: TableCase, avoidFold: boolean) {
         const seats = t.players.map((seatIndex, i) => ({ playerId: `u${seatIndex}`, seatIndex, stack: t.stacks[i]!, displayName: `U${seatIndex}` }));
@@ -38,10 +49,13 @@ async function playRandomHand(t: TableCase, avoidFold: boolean) {
           now: 1,
         });
         let step = 0;
+        // The cues as a room sends them: an action's, with those of the stalls it leads to.
+        let batch: TableCue[] = [];
+        const sent: TableCue[] = [];
         while (!h.isSettled) {
           if (h.isStalled()) {
             coverage.stalls++;
-            await h.resolveStall(10 + step);
+            batch.push(...(await h.resolveStall(10 + step)));
             expect(h.totalChips()).toBe(total);
             expect(h.isStalled()).toBe(false);
             continue;
@@ -66,6 +80,9 @@ async function playRandomHand(t: TableCase, avoidFold: boolean) {
           }
           const r = step % 13 === 12 ? await h.timeout(actor!, 10 + step) : await h.act(actor!, { type: pick.type, amount }, `i${step}`, 10 + step);
           expect(r.ok, JSON.stringify({ pick, amount, r })).toBe(true);
+          checkBatch(batch);
+          sent.push(...batch);
+          batch = r.ok ? [...r.cues] : [];
           expect(h.totalChips()).toBe(total);
           for (const s of h.snapshot.seating.seats) expect(s.stack).toBeGreaterThanOrEqual(0);
           step++;
@@ -76,8 +93,22 @@ async function playRandomHand(t: TableCase, avoidFold: boolean) {
           }
           expect(step).toBeLessThan(400);
         }
+        checkBatch(batch);
+        sent.push(...batch);
         const rec = h.record(99);
         coverage.hands++;
+        // Chips nobody called go back once: what the one who put in the most put in above the next most (as pot_won
+        // leaves out), the record's uncalled pot when it has one; with the payouts they are what the engine paid.
+        const back = sent.filter((c) => c.kind === 'returned');
+        expect(back.length).toBeLessThanOrEqual(1);
+        const [top, next] = rec.players.map((p) => [p.seatIndex, p.won - p.net] as const).sort((a, b) => b[1] - a[1]);
+        expect(back.map((c) => [c.seatIndex, c.amount])).toEqual(top![1] > next![1] ? [[top![0], top![1] - next![1]]] : []);
+        for (const p of rec.pots!.filter((x) => x.uncalled)) expect(back.map((c) => [c.seatIndex, c.amount])).toEqual([[p.winners[0]!.seatIndex, p.amount]]);
+        expect(h.handView().result!.returned).toEqual(back[0] ? { seatIndex: back[0].seatIndex, amount: back[0].amount } : undefined);
+        if (back[0]) coverage.returned++;
+        const cued = new Map<number, number>();
+        for (const c of sent) if (c.kind === 'payout' || c.kind === 'returned') cued.set(c.seatIndex, (cued.get(c.seatIndex) ?? 0) + c.amount);
+        for (const p of rec.players) expect(cued.get(p.seatIndex) ?? 0).toBe(p.won);
         if (rec.players.some((p) => p.wentToShowdown)) coverage.showdowns++;
         if ((h.snapshot.hand.payouts?.entries ?? []).some((e) => e.amount > 0 && e.potIds.some((id) => id.includes('side')))) coverage.sidePots++;
         expect(rec.players.reduce((a, p) => a + p.net, 0)).toBe(0);
@@ -105,8 +136,10 @@ describe('property: random legal play', () => {
     await fc.assert(fc.asyncProperty(tableArb, (t) => playRandomHand(t, true)), { numRuns: 2000 });
     const showdowns = coverage.showdowns - before.showdowns;
     const sidePots = coverage.sidePots - before.sidePots;
-    console.log('coverage', JSON.stringify({ hands: coverage.hands - before.hands, showdowns, sidePots, stalls: coverage.stalls - before.stalls }));
+    const returned = coverage.returned - before.returned;
+    console.log('coverage', JSON.stringify({ hands: coverage.hands - before.hands, showdowns, sidePots, stalls: coverage.stalls - before.stalls, returned }));
     expect(showdowns).toBeGreaterThan(500);
     expect(sidePots).toBeGreaterThan(100);
+    expect(returned).toBeGreaterThan(100);
   }, 300_000);
 });

@@ -28,6 +28,15 @@ const areas = (page: Page) =>
     };
   });
 
+/** Where the status, the step line, the table and the controls sit in the page, and how big each is. */
+const placed = (page: Page) =>
+  page.evaluate(() =>
+    ['replay-status', 'replay-step', 'replay-table', 'replay-controls'].map((id) => {
+      const r = document.querySelector(`[data-testid=${id}]`)!.getBoundingClientRect();
+      return `${id} ${Math.round(r.left)},${Math.round(r.top + scrollY)} ${Math.round(r.width)}×${Math.round(r.height)}`;
+    }),
+  );
+
 /** Problems no scroll position excuses: overlapping pieces, anything cut off by the table or the screen, anything drawn over. */
 const hard = (m: LayoutReport) => m.issues.filter((x) => x.kind === 'overlap' || x.kind === 'clipped' || x.kind === 'covered');
 
@@ -57,6 +66,7 @@ test('replay: at 2, 6 and 9 seats on phones, a tablet and desktops, every seat, 
           expect(Math.min(m.r, n.r) - Math.max(m.l, n.l) <= 0.5 || Math.min(m.b, n.b) - Math.max(m.t, n.t) <= 0.5, `${where}: areas ${x} and ${y}`).toBe(true);
         }
 
+      let first: string[] | null = null;
       for (let k = 1; k <= total; k++) {
         if (k > 1) {
           await p.getByTestId('replay-next').evaluate((b: HTMLButtonElement) => b.click());
@@ -72,13 +82,30 @@ test('replay: at 2, 6 and 9 seats on phones, a tablet and desktops, every seat, 
         const hidden = (m: LayoutReport) => new Set(m.issues.filter((x) => x.kind === 'offscreen').map((x) => x.item));
         const [h1, h2] = [hidden(top), hidden(end)];
         let never = top.items.filter((x) => h1.has(x) && h2.has(x));
-        if (never.length > 0) {
+        if (never.length > 0 || top.window) {
           const reach = await measureReplay(p, 'controls');
           expect(hard(reach), `${where} · step ${k} at the controls`).toEqual([]);
           const h3 = hidden(reach);
           never = never.filter((x) => h3.has(x));
+          // A table in a window (upright phones): scrolled through half a window at a time with the controls in reach,
+          // nothing overlaps, is cut off or drawn over anywhere, and every piece shows whole somewhere.
+          if (reach.window) {
+            const { max, view } = reach.window;
+            for (let at = 0; ; at = Math.min(max, at + Math.max(1, Math.floor(view / 2)))) {
+              const m = await measureReplay(p, 'controls', undefined, at);
+              expect(hard(m), `${where} · step ${k} with the table window at ${at}/${max}`).toEqual([]);
+              const h = hidden(m);
+              never = never.filter((x) => h.has(x));
+              if (at >= max) break;
+            }
+          }
         }
         expect(never, `${where} · step ${k} never whole on screen`).toEqual([]);
+        // From step to step nothing above the settlement moves or changes size: not for the long payout line, the side
+        // pots or the step count (taken once measuring has given the first step's table time to take its size).
+        const at = await placed(p);
+        first ??= at;
+        expect(at, `${where} · step ${k} placed as step 1`).toEqual(first);
       }
       await p.screenshot({ path: test.info().outputPath(`replay-${sc.name}-${hand.maxSeats}.png`), fullPage: true });
     }

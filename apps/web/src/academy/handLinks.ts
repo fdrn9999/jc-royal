@@ -9,6 +9,8 @@ export interface ReviewedHand {
   board: string[];
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
   players: { seatIndex: number; isYou: boolean; won: number; rankClass: string | null; stackStart: number }[];
+  /** The pots as paid (absent for hands recorded before pots were stored). */
+  pots?: { uncalled: boolean; winners: { seatIndex: number; amount: number }[] }[] | null;
 }
 
 export interface LessonLink {
@@ -22,7 +24,10 @@ export function lessonLinksFor(h: ReviewedHand): LessonLink[] {
   const out: LessonLink[] = [];
   const me = h.players.find((p) => p.isYou);
   const allIns = h.actions.filter((a) => a.type === 'allin');
-  const winners = h.players.filter((p) => p.won > 0);
+  // Chips nobody called, handed back, are no win: a covering all-in that lost the showdown is no split.
+  const back = new Map<number, number>();
+  for (const pot of h.pots ?? []) if (pot.uncalled) for (const w of pot.winners) back.set(w.seatIndex, (back.get(w.seatIndex) ?? 0) + w.amount);
+  const winners = h.players.filter((p) => p.won - (back.get(p.seatIndex) ?? 0) > 0);
   const showdown = h.players.filter((p) => p.rankClass);
   // A side pot needs an all-in for less than what at least two others kept betting.
   const shortAllIn = allIns.some((a) => {

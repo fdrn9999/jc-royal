@@ -193,7 +193,8 @@ export function ActionBar({
   return (
     <div className="pointer-events-auto flex w-full flex-col gap-2 sm:w-auto" data-testid="action-bar">
       {open && window_ && (
-        <div className="jc-panel flex flex-col gap-3 p-3 sm:w-[26rem]">
+        // Open for a moment: the table makes way for it while it is open, then takes the room back (useStackRoom).
+        <div className="jc-panel flex flex-col gap-3 p-3 sm:w-[26rem]" data-momentary>
           <div className="flex items-center justify-between gap-3">
             <span className="flex flex-col">
               <span className="text-xs font-semibold uppercase tracking-wider text-ink-300">{bet ? t('action.betTo') : t('action.raiseTo')}</span>

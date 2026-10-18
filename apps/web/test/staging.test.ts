@@ -248,6 +248,90 @@ describe('staging: chips', () => {
   });
 });
 
+describe('staging: chips nobody called', () => {
+  it('a raise everyone folds to: the raise above the call goes straight back from its spot, only the blinds go through the pot', () => {
+    // Seat 0 raised to 40 over the blinds (5, 10); seat 1 folded, seat 2 folds now.
+    const prev = view({ seq: 4, stage: 'preflop', potTotal: 55, seats: { 0: { bet: 40, stack: 960 }, 1: { bet: 5, stack: 995, cards: false }, 2: { bet: 10, stack: 990 } } });
+    const next = view({ seq: 5, stage: 'settled', potTotal: 55, seats: { 0: { stack: 1015 }, 1: { stack: 995, cards: false }, 2: { stack: 990, cards: false } }, winners: [{ seatIndex: 0, amount: 55, potIds: ['pot-main-0'] }] });
+    const p = plan(prev, batch(act(2, 'fold'), { kind: 'returned', seatIndex: 0, amount: 30 }, { kind: 'payout', seatIndex: 0, amount: 25 }, { kind: 'handEnd' }), next, 0)!;
+    expect(p).not.toBeNull();
+    expect(p.flights.map((f) => [f.kind, f.seat, f.amount])).toEqual([
+      ['return', 0, 30],
+      ['sweep', 0, 10],
+      ['sweep', 1, 5],
+      ['sweep', 2, 10],
+      ['payout', 0, 25],
+    ]);
+    const back = p.flights[0]!;
+    const pay = p.flights.at(-1)!;
+    // Back before anything goes to the pot; the bet in front of the seat shrinks to the call as it leaves.
+    expect(back.at + back.dur).toBeLessThanOrEqual(p.flights[1]!.at);
+    expect(stagedAt(p, back.at, next)!.bets[0]).toBe(10);
+    // The stack shows what it had, then the chips back, then the pot won.
+    expect(stagedAt(p, 0, next)!.stacks[0]).toBe(960);
+    expect(stagedAt(p, back.at + back.dur, next)!.stacks[0]).toBe(990);
+    expect(stagedAt(p, pay.at + pay.dur, next)!.stacks[0]).toBeUndefined();
+    expect(p.sounds.map((x) => x.id)).toEqual(['fold', 'chip', 'win']);
+    const total = chips(next);
+    for (const t of moments(p)) expect(shown(p, t, next), `t=${t}`).toBe(total);
+  });
+
+  it('a covering all-in that loses: its excess goes back before the run-out, the winner alone is paid (and no win sound for it)', () => {
+    // Heads-up preflop: seat 0 all in for 1000, seat 1 calls all in for 500 and wins.
+    const prev = view({ seq: 3, stage: 'preflop', potTotal: 1010, seats: { 0: { bet: 1000, stack: 0 }, 1: { bet: 10, stack: 490 } } });
+    const board: Card[] = [...FLOP, '2s', '9d'];
+    const winners = [
+      { seatIndex: 1, amount: 1000, potIds: ['pot-main-0'] },
+      { seatIndex: 0, amount: 500, potIds: ['pot-side-1'] },
+    ];
+    const next = view({ seq: 9, stage: 'settled', board, potTotal: 1500, seats: { 0: { stack: 500 }, 1: { stack: 1000 } }, winners });
+    const cues = batch(
+      act(1, 'allin', 490),
+      { kind: 'returned', seatIndex: 0, amount: 500 },
+      { kind: 'street', stage: 'flop', cards: FLOP },
+      { kind: 'street', stage: 'turn', cards: ['2s'] },
+      { kind: 'street', stage: 'river', cards: ['9d'] },
+      { kind: 'showdown' },
+      { kind: 'payout', seatIndex: 1, amount: 1000 },
+      { kind: 'handEnd' },
+    );
+    const p = plan(prev, cues, next, 0)!;
+    expect(p).not.toBeNull();
+    expect(p.end).toBeLessThanOrEqual(BUDGET);
+    expect(p.flights.map((f) => [f.kind, f.seat, f.amount])).toEqual([
+      ['bet', 1, 490],
+      ['return', 0, 500],
+      ['sweep', 0, 500],
+      ['sweep', 1, 500],
+      ['payout', 1, 1000],
+    ]);
+    const back = p.flights[1]!;
+    expect(back.at + back.dur).toBeLessThanOrEqual(p.board!.at[0]!);
+    expect(stagedAt(p, 0, next)!.stacks).toEqual({ 0: 0, 1: 0 });
+    expect(stagedAt(p, back.at + back.dur, next)!.stacks).toEqual({ 1: 0 });
+    expect(boundaries(p)).toContain(back.at + back.dur);
+    expect(p.sounds.some((x) => x.id === 'win')).toBe(false);
+    const lastBet = p.flights[0]!.at + p.flights[0]!.dur;
+    for (const t of moments(p)) {
+      if (t >= lastBet) expect(shown(p, t, next), `t=${t}`).toBe(chips(next));
+      else expect(shown(p, t, next), `t=${t}`).toBeLessThanOrEqual(chips(next));
+    }
+  });
+
+  it('chips handed back that are not in front of the seat do not add up: the state shows at once', () => {
+    const prev = view({ seq: 4, stage: 'preflop', potTotal: 55, seats: { 0: { bet: 40, stack: 960 }, 1: { bet: 5, stack: 995, cards: false }, 2: { bet: 10, stack: 990 } } });
+    const next = view({ seq: 5, stage: 'settled', potTotal: 55, seats: { 0: { stack: 1015 }, 1: { stack: 995, cards: false }, 2: { stack: 990, cards: false } }, winners: [{ seatIndex: 0, amount: 55, potIds: ['pot-main-0'] }] });
+    expect(plan(prev, batch(act(2, 'fold'), { kind: 'returned', seatIndex: 0, amount: 45 }, { kind: 'payout', seatIndex: 0, amount: 10 }), next, 0)).toBeNull();
+    expect(plan(prev, batch(act(2, 'fold'), { kind: 'returned', seatIndex: 2, amount: 30 }, { kind: 'payout', seatIndex: 0, amount: 25 }), next, 0)).toBeNull();
+    // An older room without the cue: the payout is the whole pot, as before.
+    expect(plan(prev, batch(act(2, 'fold'), { kind: 'payout', seatIndex: 0, amount: 55 }), next, 0)!.flights.map((f) => f.kind)).toEqual(['sweep', 'sweep', 'sweep', 'payout']);
+  });
+
+  it('without a plan, chips handed back sound as a chip, not a win', () => {
+    expect(quickSounds(batch({ kind: 'returned', seatIndex: 0, amount: 30 }), 0)).toEqual(['chip']);
+  });
+});
+
 describe('staging: cards', () => {
   it('an all-in run-out shows the hands first, then each street in turn, then the result, within the budget', () => {
     const prev = view({ seq: 3, stage: 'preflop', potTotal: 1010, seats: { 0: { bet: 1000, stack: 0 }, 1: { bet: 10, stack: 990 } } });
@@ -344,6 +428,10 @@ describe('staging: real hands', () => {
       const perSeat = (xs: [number, number][]) => xs.reduce<Record<number, number>>((a, [seat, v]) => ((a[seat] = (a[seat] ?? 0) + v), a), {});
       expect(flown.map((f) => f.seat)).toEqual([...new Set(flown.map((f) => f.seat))]);
       expect(perSeat(flown.map((f) => [f.seat, f.amount]))).toEqual(perSeat(pays.map((x) => [x.seatIndex, x.amount])));
+      // Chips nobody called fly back from their spot, as they were handed back, never through the pot.
+      const backs = cues.filter((c) => c.cue.kind === 'returned').map((c) => c.cue as { seatIndex: number; amount: number });
+      expect(p!.flights.filter((f) => f.kind === 'return').map((f) => [f.seat, f.amount])).toEqual(backs.map((x) => [x.seatIndex, x.amount]));
+      if (backs.length) kinds.add('returned');
       for (const f of p!.flights) expect(f.amount).toBeGreaterThan(0);
       // Never more chips on the table than there are (a bet leaves its stack before it lands, so fewer while bets fly);
       // from the result on, every chip is in a stack, the pot or the air.
@@ -383,6 +471,6 @@ describe('staging: real hands', () => {
       s.consumeCues(Number.MAX_SAFE_INTEGER);
     }
     expect(seen).toBeGreaterThan(200);
-    expect([...kinds]).toEqual(expect.arrayContaining(['action:fold', 'action:call', 'action:raise', 'street', 'showdown', 'payout', 'multi-payout', 'allin', 'runout']));
+    expect([...kinds]).toEqual(expect.arrayContaining(['action:fold', 'action:call', 'action:raise', 'street', 'showdown', 'payout', 'multi-payout', 'allin', 'runout', 'returned']));
   });
 });

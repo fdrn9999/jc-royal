@@ -79,7 +79,13 @@ export interface PotView {
 }
 
 export interface HandResultView {
+  /** Everyone paid, as the engine paid them: with `returned` in the amount of the player it went back to. */
   winners: { seatIndex: number; amount: number; potIds: string[] }[];
+  /**
+   * The chips nobody called, handed back to the player who put them in (absent when none, and in older rooms). Not won:
+   * what a player won is their `winners` amount without it, and one who won nothing is no winner.
+   */
+  returned?: { seatIndex: number; amount: number };
   showdown: { seatIndex: number; cards: Card[]; rankClass: HandRankClass; bestFive: Card[] }[];
 }
 
@@ -189,6 +195,9 @@ export type TableCue =
   | { kind: 'action'; seatIndex: number; type: ActionType; amount: number }
   | { kind: 'street'; stage: 'flop' | 'turn' | 'river'; cards: Card[] }
   | { kind: 'showdown' }
+  /** The player's own chips nobody called, handed back when the hand ends: right after the last action, before a run-out. */
+  | { kind: 'returned'; seatIndex: number; amount: number }
+  /** Chips won from the pots (without chips handed back): one or more per winner. */
   | { kind: 'payout'; seatIndex: number; amount: number }
   | { kind: 'handEnd' }
   | { kind: 'seat'; seatIndex: number; nickname: string }

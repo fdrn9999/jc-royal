@@ -1,0 +1,424 @@
+{
+  "what": "Free practice: the frame the header net ('free-net') changes against the frame the outcome is told ('free-outcome'). docs/TEST_REPORT.md 후속 개선 7.",
+  "how": "Chrome, 390x844 mobile emulation, local E2E server (tests/e2e/server.mjs), 2-handed free practice (1 bot, mixed), hero checks or calls. Every animation frame where the net, the outcome text or the number of flying chips changes is logged; times are ms from page load. A null net is a hand whose net did not move (a split pot).",
+  "runs": {
+    "useEffect (before), 6 hands": {
+      "hands": 6,
+      "netMoved": 6,
+      "sameFrame": 6,
+      "later": [],
+      "earlier": [],
+      "perHand": [
+        {
+          "hand": 0,
+          "toldAtMs": 6966,
+          "netAtMs": 6966,
+          "net": "+0 -> +10",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 1,
+          "toldAtMs": 11899,
+          "netAtMs": 11899,
+          "net": "+10 -> +15",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 2,
+          "toldAtMs": 20479,
+          "netAtMs": 20479,
+          "net": "+15 -> +25",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 3,
+          "toldAtMs": 29415,
+          "netAtMs": 29415,
+          "net": "+25 -> +35",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 4,
+          "toldAtMs": 38116,
+          "netAtMs": 38116,
+          "net": "+35 -> +45",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 5,
+          "toldAtMs": 47055,
+          "netAtMs": 47055,
+          "net": "+45 -> +15",
+          "netMinusToldMs": 0
+        }
+      ]
+    },
+    "useEffect (before), 24 hands": {
+      "hands": 24,
+      "netMoved": 24,
+      "sameFrame": 21,
+      "later": [
+        {
+          "hand": 2,
+          "ms": 17
+        },
+        {
+          "hand": 7,
+          "ms": 17
+        },
+        {
+          "hand": 14,
+          "ms": 17
+        }
+      ],
+      "earlier": [],
+      "perHand": [
+        {
+          "hand": 0,
+          "toldAtMs": 7467,
+          "netAtMs": 7467,
+          "net": "+0 -> -106",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 1,
+          "toldAtMs": 16853,
+          "netAtMs": 16853,
+          "net": "-106 -> -128",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 2,
+          "toldAtMs": 25179,
+          "netAtMs": 25196,
+          "net": "-128 -> -118",
+          "netMinusToldMs": 17
+        },
+        {
+          "hand": 3,
+          "toldAtMs": 34123,
+          "netAtMs": 34123,
+          "net": "-118 -> -108",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 4,
+          "toldAtMs": 43241,
+          "netAtMs": 43241,
+          "net": "-108 -> -156",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 5,
+          "toldAtMs": 47674,
+          "netAtMs": 47674,
+          "net": "-156 -> -151",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 6,
+          "toldAtMs": 56236,
+          "netAtMs": 56236,
+          "net": "-151 -> -141",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 7,
+          "toldAtMs": 65176,
+          "netAtMs": 65193,
+          "net": "-141 -> -131",
+          "netMinusToldMs": 17
+        },
+        {
+          "hand": 8,
+          "toldAtMs": 74416,
+          "netAtMs": 74416,
+          "net": "-131 -> -141",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 9,
+          "toldAtMs": 83942,
+          "netAtMs": 83942,
+          "net": "-141 -> -121",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 10,
+          "toldAtMs": 92644,
+          "netAtMs": 92644,
+          "net": "-121 -> -131",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 11,
+          "toldAtMs": 97573,
+          "netAtMs": 97573,
+          "net": "-131 -> -126",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 12,
+          "toldAtMs": 106720,
+          "netAtMs": 106720,
+          "net": "-126 -> -116",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 13,
+          "toldAtMs": 111648,
+          "netAtMs": 111648,
+          "net": "-116 -> -111",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 14,
+          "toldAtMs": 121191,
+          "netAtMs": 121208,
+          "net": "-111 -> -137",
+          "netMinusToldMs": 17
+        },
+        {
+          "hand": 15,
+          "toldAtMs": 130589,
+          "netAtMs": 130589,
+          "net": "-137 -> -163",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 16,
+          "toldAtMs": 138905,
+          "netAtMs": 138905,
+          "net": "-163 -> -153",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 17,
+          "toldAtMs": 147845,
+          "netAtMs": 147845,
+          "net": "-153 -> -163",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 18,
+          "toldAtMs": 157020,
+          "netAtMs": 157020,
+          "net": "-163 -> -189",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 19,
+          "toldAtMs": 165467,
+          "netAtMs": 165467,
+          "net": "-189 -> -199",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 20,
+          "toldAtMs": 174122,
+          "netAtMs": 174122,
+          "net": "-199 -> -189",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 21,
+          "toldAtMs": 183061,
+          "netAtMs": 183061,
+          "net": "-189 -> -179",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 22,
+          "toldAtMs": 192776,
+          "netAtMs": 192776,
+          "net": "-179 -> -231",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 23,
+          "toldAtMs": 201207,
+          "netAtMs": 201207,
+          "net": "-231 -> -221",
+          "netMinusToldMs": 0
+        }
+      ]
+    },
+    "useLayoutEffect (after), 24 hands": {
+      "hands": 24,
+      "netMoved": 23,
+      "sameFrame": 23,
+      "later": [],
+      "earlier": [],
+      "perHand": [
+        {
+          "hand": 0,
+          "toldAtMs": 7012,
+          "netAtMs": 7012,
+          "net": "+0 -> +10",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 1,
+          "toldAtMs": 15954,
+          "netAtMs": 15954,
+          "net": "+10 -> +0",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 2,
+          "toldAtMs": 25700,
+          "netAtMs": 25700,
+          "net": "+0 -> +22",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 3,
+          "toldAtMs": 30178,
+          "netAtMs": 30178,
+          "net": "+22 -> +27",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 4,
+          "toldAtMs": 38755,
+          "netAtMs": 38755,
+          "net": "+27 -> +17",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 5,
+          "toldAtMs": 43689,
+          "netAtMs": 43689,
+          "net": "+17 -> +22",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 6,
+          "toldAtMs": 52267,
+          "netAtMs": 52267,
+          "net": "+22 -> +32",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 7,
+          "toldAtMs": 62699,
+          "netAtMs": 62699,
+          "net": "+32 -> -36",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 8,
+          "toldAtMs": 71019,
+          "netAtMs": 71019,
+          "net": "-36 -> -16",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 9,
+          "toldAtMs": 81992,
+          "netAtMs": 81992,
+          "net": "-16 -> -122",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 10,
+          "toldAtMs": 91375,
+          "netAtMs": null,
+          "net": null,
+          "netMinusToldMs": null
+        },
+        {
+          "hand": 11,
+          "toldAtMs": 95815,
+          "netAtMs": 95815,
+          "net": "-122 -> -117",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 12,
+          "toldAtMs": 104910,
+          "netAtMs": 104910,
+          "net": "-117 -> -95",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 13,
+          "toldAtMs": 109352,
+          "netAtMs": 109352,
+          "net": "-95 -> -90",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 14,
+          "toldAtMs": 118501,
+          "netAtMs": 118501,
+          "net": "-90 -> -70",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 15,
+          "toldAtMs": 128338,
+          "netAtMs": 128338,
+          "net": "-70 -> -50",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 16,
+          "toldAtMs": 137203,
+          "netAtMs": 137203,
+          "net": "-50 -> -60",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 17,
+          "toldAtMs": 142136,
+          "netAtMs": 142136,
+          "net": "-60 -> -55",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 18,
+          "toldAtMs": 151196,
+          "netAtMs": 151196,
+          "net": "-55 -> -35",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 19,
+          "toldAtMs": 161503,
+          "netAtMs": 161503,
+          "net": "-35 -> -57",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 20,
+          "toldAtMs": 169806,
+          "netAtMs": 169806,
+          "net": "-57 -> -47",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 21,
+          "toldAtMs": 174752,
+          "netAtMs": 174752,
+          "net": "-47 -> -42",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 22,
+          "toldAtMs": 184382,
+          "netAtMs": 184382,
+          "net": "-42 -> -32",
+          "netMinusToldMs": 0
+        },
+        {
+          "hand": 23,
+          "toldAtMs": 189319,
+          "netAtMs": 189319,
+          "net": "-32 -> -27",
+          "netMinusToldMs": 0
+        }
+      ]
+    }
+  }
+}

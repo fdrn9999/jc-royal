@@ -582,6 +582,8 @@ export class HandEngine {
     const seat = this.seatOf(event.actor);
     const type = mapActionType(event.action);
     if (seat !== null && type) cues.push({ kind: 'action', seatIndex: seat, type, amount: event.contribution });
+    const back = before.hand.stage !== 'settled' ? this.handedBack() : null;
+    if (back) cues.push({ kind: 'returned', seatIndex: back.seatIndex, amount: back.amount });
     const prevBoard = boardOf(before);
     const nextBoard = boardOf(after);
     if (nextBoard.length > prevBoard.length) {
@@ -592,13 +594,35 @@ export class HandEngine {
     }
     if (after.hand.stage === 'settled' && before.hand.stage !== 'settled') {
       if (after.hand.showdown && after.hand.showdown.evaluatedHands.length > 1) cues.push({ kind: 'showdown' });
+      // The chips handed back go back first (before a run-out), so the payouts are only what was won.
+      let left = back?.amount ?? 0;
       for (const p of after.hand.payouts?.entries ?? []) {
         const s = this.seatOf(p.playerId);
-        if (s !== null && p.amount > 0) cues.push({ kind: 'payout', seatIndex: s, amount: p.amount });
+        const own = back && p.playerId === back.playerId ? Math.min(left, p.amount) : 0;
+        left -= own;
+        if (s !== null && p.amount - own > 0) cues.push({ kind: 'payout', seatIndex: s, amount: p.amount - own });
       }
       cues.push({ kind: 'handEnd' });
     }
     return cues;
+  }
+
+  /**
+   * The chips nobody called, handed back with the payouts once the hand is settled: what the player who put in the most
+   * put in above the next most, never more than they were paid (as hand_players.pot_won leaves out, handStats.ts). For
+   * the views only; the payouts themselves are the engine's. Null when there are none or the hand is not settled.
+   */
+  private handedBack(): { playerId: string; seatIndex: number; amount: number } | null {
+    const s = this.snapshot;
+    if (s.hand.stage !== 'settled') return null;
+    const put = new Map<string, number>();
+    for (const round of s.hand.bettingRounds) for (const t of round.turns) put.set(t.actor, (put.get(t.actor) ?? 0) + t.contribution);
+    const [top, next] = [...put].sort((a, b) => b[1] - a[1]);
+    if (!top || top[1] <= (next?.[1] ?? 0)) return null;
+    const paid = (s.hand.payouts?.entries ?? []).filter((e) => e.playerId === top[0]).reduce((a, e) => a + e.amount, 0);
+    const amount = Math.min(top[1] - (next?.[1] ?? 0), paid);
+    const seatIndex = this.seatOf(top[0]);
+    return amount > 0 && seatIndex !== null ? { playerId: top[0], seatIndex, amount } : null;
   }
 
   private foldedSet(): Set<string> {
@@ -722,10 +746,12 @@ export class HandEngine {
     let result: HandResultView | null = null;
     if (this.isSettled) {
       const revealed = this.revealedHands(autoMuck);
+      const back = this.handedBack();
       result = {
         winners: (s.hand.payouts?.entries ?? [])
           .filter((e) => e.amount > 0)
           .map((e) => ({ seatIndex: seatIdx(e.playerId) ?? -1, amount: e.amount, potIds: [...e.potIds] })),
+        ...(back ? { returned: { seatIndex: back.seatIndex, amount: back.amount } } : {}),
         showdown: (s.hand.showdown?.evaluatedHands ?? [])
           .filter((h) => revealed.has(h.playerId))
           .map((h) => ({

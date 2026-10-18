@@ -87,8 +87,8 @@ class SoundEngine {
   private buffers = new Map<SoundId, AudioBuffer>();
   private decoding = false;
   private mixer = new Mixer();
-  /** While a sound is being started: how to silence each of its parts, should the mixer need its place. */
-  private hush: (() => void)[] | null = null;
+  /** While a sound is being started: the fader its parts play through, and the parts, should the mixer need its place. */
+  private current: { bus: GainNode; parts: Part[] } | null = null;
   private gesture: (() => void) | null = null;
   private listeners = new Set<(s: AudioSettings) => void>();
   settings: AudioSettings = typeof window === 'undefined' ? { ...DEFAULTS } : readSettings();
@@ -215,14 +215,16 @@ class SoundEngine {
     osc.type = o.type ?? 'sine';
     osc.frequency.setValueAtTime(o.freq, t0);
     if (o.endFreq) osc.frequency.exponentialRampToValueAtTime(Math.max(o.endFreq, 1), t0 + dur);
+    // From now, not only from t0: a source can play the frame just before t0, which would sound at the default gain 1.
+    gain.gain.value = 0;
     gain.gain.setValueAtTime(0, t0);
     gain.gain.linearRampToValueAtTime(o.volume ?? 0.2, t0 + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.connect(gain);
-    gain.connect(this.fx);
+    gain.connect(this.current?.bus ?? this.fx);
     osc.start(t0);
     osc.stop(t0 + dur + 0.05);
-    this.hush?.push(silence(ctx, gain, osc, t0));
+    this.current?.parts.push({ src: osc, t0 });
   }
 
   private noise(o: { duration?: number; volume?: number; filterFreq?: number; start?: number }) {
@@ -241,14 +243,16 @@ class SoundEngine {
     filter.frequency.value = o.filterFreq ?? 2200;
     filter.Q.value = 0.8;
     const gain = ctx.createGain();
+    // As in tone(): from now, so no frame plays at the default gain 1.
+    gain.gain.value = o.volume ?? 0.15;
     gain.gain.setValueAtTime(o.volume ?? 0.15, t0);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(filter);
     filter.connect(gain);
-    gain.connect(this.fx);
+    gain.connect(this.current?.bus ?? this.fx);
     src.start(t0);
     src.stop(t0 + dur);
-    this.hush?.push(silence(ctx, gain, src, t0));
+    this.current?.parts.push({ src, t0 });
   }
 
   private sample(buffer: AudioBuffer, volume: number) {
@@ -259,21 +263,26 @@ class SoundEngine {
     const gain = ctx.createGain();
     gain.gain.value = volume;
     src.connect(gain);
-    gain.connect(this.fx);
+    gain.connect(this.current?.bus ?? this.fx);
     src.start();
-    this.hush?.push(silence(ctx, gain, src, ctx.currentTime));
+    this.current?.parts.push({ src, t0: ctx.currentTime });
   }
 
   play(id: SoundId) {
     if (typeof document !== 'undefined' && document.hidden) return;
+    const ctx = this.ready();
+    if (!ctx || !this.fx) return;
     const recorded = this.buffers.get(id);
-    const parts: (() => void)[] = [];
-    if (!this.ready() || !this.mixer.admit(id, performance.now(), recorded && recorded.duration * 1000, () => parts.forEach((f) => f()))) return;
-    this.hush = parts;
+    const parts: Part[] = [];
+    let bus: GainNode | undefined;
+    if (!this.mixer.admit(id, performance.now(), recorded && recorded.duration * 1000, () => bus && fade(ctx, bus, parts))) return;
+    bus = ctx.createGain();
+    bus.connect(this.fx);
+    this.current = { bus, parts };
     try {
       this.voice(id);
     } finally {
-      this.hush = null;
+      this.current = null;
     }
   }
 
@@ -349,27 +358,28 @@ class SoundEngine {
   }
 }
 
-/** Fades a playing part (started at `t0`) out within a few ms, without a click; one not started yet never starts. */
-function silence(ctx: AudioContext, gain: GainNode, src: AudioScheduledSourceNode, t0: number) {
-  return () => {
+/** A part of a sound: its source, and when it starts. */
+interface Part {
+  src: AudioScheduledSourceNode;
+  t0: number;
+}
+
+/**
+ * Fades a sound out within a few ms, without a click: its own fader falls to 0 from where it stands. Nothing is ever
+ * scheduled on the fader, so no part's envelope has to be held or read mid-ramp. Without `cancelAndHoldAtTime` (as in
+ * Firefox) holding meant reading `gain.value`, which can lag the audio thread enough to put a fading sound back at
+ * full volume. Each part stops once faded; one not started yet stops before it starts, so it never sounds.
+ */
+function fade(ctx: AudioContext, bus: GainNode, parts: Part[]) {
+  const t = ctx.currentTime;
+  bus.gain.setTargetAtTime(0, t, 0.006);
+  for (const p of parts) {
     try {
-      const t = ctx.currentTime;
-      // Its envelope has not begun (the gain stands at 1 until then): stopped before it starts, it never sounds.
-      if (t < t0) return src.stop(t);
-      const g = gain.gain;
-      // Held where it is, so a fade under way never jumps back up to where its ramp began.
-      if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(t);
-      else {
-        const v = g.value;
-        g.cancelScheduledValues(t);
-        g.setValueAtTime(v, t);
-      }
-      g.setTargetAtTime(0, t, 0.006);
-      src.stop(t + 0.04);
+      p.src.stop(t < p.t0 ? t : t + 0.04);
     } catch {
       /* already over */
     }
-  };
+  }
 }
 
 function clamp01(n: number) {

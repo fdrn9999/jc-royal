@@ -275,6 +275,25 @@ describe('hand review lesson links and first-hands coach', () => {
     expect(fold.map((x) => x.id)).toEqual(['no-showdown', 'fold']);
   });
 
+  it('a covering all-in that lost the showdown is no split: the chips it got back were never called', () => {
+    // Heads-up: seat 0 all in for 1000 and called for 500; seat 1 wins 1000, seat 0 gets its 500 back.
+    const players = [
+      { seatIndex: 0, isYou: true, won: 500, rankClass: 'pair', stackStart: 1000 },
+      { seatIndex: 1, isYou: false, won: 1000, rankClass: 'two-pair', stackStart: 500 },
+    ];
+    const actions = [
+      { seatIndex: 0, stage: 'preflop', type: 'allin', amount: 995 },
+      { seatIndex: 1, stage: 'preflop', type: 'allin', amount: 490 },
+    ];
+    const pots = [
+      { uncalled: false, winners: [{ seatIndex: 1, amount: 1000 }] },
+      { uncalled: true, winners: [{ seatIndex: 0, amount: 500 }] },
+    ];
+    expect(lessonLinksFor({ board: c('2h 7s 9d 3c 4h'), actions, players, pots }).map((x) => x.id)).not.toContain('split');
+    // Without the pots (an older record), as before.
+    expect(lessonLinksFor({ board: c('2h 7s 9d 3c 4h'), actions, players }).map((x) => x.id)).toContain('split');
+  });
+
   it('coaching runs only after a lesson, for a limited number of hands, and can be turned off', () => {
     const fresh = P.emptyProgress();
     const learned = P.completeLesson(fresh, 'cards', 1);

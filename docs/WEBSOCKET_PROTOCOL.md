@@ -61,7 +61,8 @@
 - **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시').
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 자동 머크로 공개되지 않은 패는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
   - `shown`은 핸드가 끝난 뒤 주인이 보이기로 고른 카드입니다. `[카드 또는 null, 카드 또는 null]`로 고른 자리에만 카드가 있고, 고르지 않은 카드는 누구에게도 보내지 않습니다. 쇼다운에서 이미 공개된 좌석과 고른 카드가 없는 좌석에는 이 필드가 없습니다.
-- **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`(시간 은행으로 더한 시간 포함), `extraMs`(지금 차례에 시간 은행으로 더한 시간, 없으면 필드 없음), `result`(winners, showdown).
+- **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`(시간 은행으로 더한 시간 포함), `extraMs`(지금 차례에 시간 은행으로 더한 시간, 없으면 필드 없음), `result`(winners, showdown, returned).
+  - `result.winners`는 엔진이 지급한 그대로입니다(콜되지 않아 돌려받은 칩 포함). `result.returned`(`{seatIndex, amount}`, 없으면 필드 없음)는 그중 콜되지 않아 돌려받은 칩입니다. 가장 많이 넣은 사람이 두 번째로 많이 넣은 사람보다 더 넣은 만큼이고, 그 사람이 받은 금액을 넘지 않습니다(`hand_players.pot_won`이 빼는 것과 같음). 화면은 이것을 뺀 금액만 '획득'으로 보입니다. 이전 룸은 보내지 않습니다.
 - **timeBank**(최상위): 이 테이블의 시간 은행 규칙 `{initialMs, maxMs, unitMs, refillHands, refillMs}`. 핸드 중에는 그 핸드를 시작할 때의 규칙, 핸드 사이에는 다음 핸드에 쓸 규칙. 꺼진 테이블은 null, 이전 룸은 보내지 않음.
 - **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `autoMuck`(착석했으면 룸에 저장된 내 자동 머크 설정, 아니면 null. 이전 룸은 보내지 않음). 다른 사람의 설정은 어디에도 들어가지 않습니다. `canShow`(지금 `show`를 보낼 수 있음: 끝난 핸드에 참여했고, 자동 머크가 켜져 있고, 내 패가 쇼다운에서 공개되지 않음. 이전 룸은 보내지 않음), `timeBank`(착석했으면 내 시간 은행 `{ms, hands}`(`hands`는 다음 보충까지 센 핸드 수), 아직 받은 적 없거나 봇·꺼진 테이블이면 null. 다른 사람의 시간 은행은 어디에도 들어가지 않음. 이전 룸은 보내지 않음).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
@@ -69,7 +70,9 @@
 
 ### TableCue (연출 전용, 권한 없음)
 
-`handStart`, `deal`, `action{seatIndex,type,amount}`, `street{stage,cards}`, `showdown`, `payout{seatIndex,amount}`, `handEnd`, `seat`, `leave`.
+`handStart`, `deal`, `action{seatIndex,type,amount}`, `returned{seatIndex,amount}`, `street{stage,cards}`, `showdown`, `payout{seatIndex,amount}`, `handEnd`, `seat`, `leave`.
+
+- `returned`는 콜되지 않아 돌려받는 칩입니다(`result.returned`와 같은 값). 베팅을 끝낸 액션 바로 뒤, 스트리트 cue보다 먼저 옵니다(블라인드로 모두 올인한 핸드는 액션 없이 맨 앞). 그 좌석의 `payout`은 이 금액을 뺀 실제 획득이고, 다 돌려받기만 하면 `payout`이 없습니다. 원장과 지급은 엔진 그대로이며, 이 cue는 칩을 베팅 자리에서 바로 돌려보내는 연출에만 씁니다. 이전 클라이언트는 모르는 cue를 무시하고, 지급 합계가 맞지 않아 연출 없이 서버 상태를 바로 보입니다.
 
 ## 순서·중복 처리
 

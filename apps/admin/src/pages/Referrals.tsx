@@ -189,7 +189,7 @@ export function ReferralsPage() {
     <div className="flex flex-col gap-6">
       {header}
       <p className="text-sm text-ink-300">{t('referralIntro')}</p>
-      <Feedback note={note} testid="referral-feedback" />
+      <Feedback note={note} testid="referral-feedback" pin />
       {overview.error && <LoadError error={overview.error} onRetry={overview.reload} />}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Panel title={t('refillPolicy')}>

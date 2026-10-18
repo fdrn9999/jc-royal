@@ -60,12 +60,13 @@
 - **자동 머크**: 계정 값이 바뀌면 그 회원이 착석한 모든 테이블의 좌석이 다음 쇼다운부터 같은 값을 쓴다(아래 `PUT /settings`, 관리자 초기화·복구). 테이블 화면도 착석 중 룸의 값과 다르면 이 기기의 값을 한 번 보낸다(`docs/WEBSOCKET_PROTOCOL.md`).
 - 탈퇴하면 행을 지운다. 관리자는 값을 보지도 바꾸지도 못하고 초기화·복구만 한다(아래 관리자 API).
 
-**핸드 재생 필드(`HandReplayFields`, `packages/types/src/community.ts`):** `/hands/:id`와 게시판 첨부 핸드 리뷰가 같이 준다. 종료 핸드의 저장된 기록만 쓰고, 새 정보를 계산해 내지 않는다.
+**핸드 재생 필드(`HandReplayFields`, `packages/types/src/community.ts`):** `/hands/:id`와 게시판 첨부 핸드 리뷰가 같이 준다. 종료 핸드의 저장된 기록만 쓰고, 새 정보를 계산해 내지 않는다. 팟을 나눠 보이는 일은 서버(`apps/api/src/lib/community.ts` `replaySettlement`)가 하고, 화면은 받은 값을 그대로 읽는다.
 - `maxSeats`(테이블 좌석 수), `buttonSeat`(딜러 버튼), `smallBlind`·`bigBlind`, `board`, `potTotal`.
 - `actions`: `{seatIndex, stage, type, amount}`. `amount`는 그 액션으로 **더 낸 칩**(레이즈 총액이 아님). 블라인드는 `post-sb`·`post-bb`.
-- `pots`: 메인 팟부터 `{amount, eligibleSeats, winners: [{seatIndex, amount}], uncalled}`. `uncalled: true`는 콜 받지 못해 돌려준 베팅. 각 팟의 `winners` 합은 `amount`, 모든 팟의 합은 `potTotal`, 플레이어별 합은 `won`.
+- `returned`: 콜 받지 못해 가장 많이 낸 플레이어에게 돌아간 칩 `{seatIndex, amount}`. 금액은 핸드 통계가 저장한 `won − pot_won`(`packages/db/src/handStats.ts`, 정의는 한 곳)이고 여기서 다시 계산하지 않는다. 돌아간 칩이 없거나, 통계가 아직 채워지지 않았거나(게임 워커가 핸드 기록 직후 채운다), 저장된 팟과 맞지 않으면(한 사람 몫이 아님, 엔진이 따로 둔 팟과 다름, 그 사람의 팟 몫보다 큼) null이고 `pots`는 저장된 그대로다.
+- `pots`: 메인 팟부터 `{amount, eligibleSeats, winners: [{seatIndex, amount}], uncalled}`. `uncalled: true`는 콜 받지 못해 돌려준 베팅. 엔진은 누군가 올인했을 때만 이를 따로 둔다. 모두가 폴드한 베팅은 엔진이 지급한 팟 안에 남아 있어, `returned`가 있으면 그 플레이어가 이긴 마지막 팟에서 떼어 `uncalled: true` 팟으로 보낸다. 나눈 뒤에도 각 팟의 `winners` 합은 `amount`, 모든 팟의 합은 `potTotal`, 플레이어별 합은 `won`이다. 저장된 기록(`hands.event_log`, `hand_players`)은 바꾸지 않는다.
 - 플레이어별 `stackStart`, `net`, `won`, `holeCards`, `rankClass`, `bestFive`. 카드 세 필드는 본인과 쇼다운에서 공개된 패만 값이 있고 나머지는 null(위 머크 규칙).
-- 이 변경 전에 기록된 핸드는 `buttonSeat`·`pots`가 null이다. 화면은 플레이어별 `won`만 보여 주고, 이때 `won`에는 돌려받은 베팅이 섞일 수 있다.
+- 이 변경 전에 기록된 핸드는 `buttonSeat`·`pots`가 null이다. 화면은 플레이어별 `won`에서 `returned`만큼 뺀 값을 보여 주고, `returned`가 null이면 `won`에 돌려받은 베팅이 섞일 수 있다.
 
 ## 테이블 `/api/tables`, WebSocket
 

@@ -1,12 +1,12 @@
 import { Button, Input, Logo, Spinner } from '@jc/ui';
-import { StrictMode, useState, type ReactNode } from 'react';
+import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, NavLink, Outlet, RouterProvider } from 'react-router';
 import { setLocale, useT, type Key } from './i18n';
 import './index.css';
 import { roleLabel } from './labels';
 import { AdminProvider, hasGrant, useAdmin } from './lib';
-import { Modal } from './ui';
+import { keepJumps, Modal } from './ui';
 import { BoardAdminPage, MessagesAdminPage } from './pages/Community';
 import { LoginPage } from './pages/Login';
 import { ReportsPage } from './pages/Reports';
@@ -88,9 +88,23 @@ function ConnectionBanner() {
 function Shell({ children }: { children: ReactNode }) {
   const { t, locale } = useT();
   const { me, logout } = useAdmin();
+  // The header's height (its menu wraps, the connection banner comes and goes) as --shell-h: a pinned result and a
+  // jump link's panel stop under it.
+  const header = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = header.current;
+    if (!el) return;
+    const keep = () => document.documentElement.style.setProperty('--shell-h', `${el.offsetHeight}px`);
+    keep();
+    const ro = new ResizeObserver(keep);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // A jump link's panel stays where it landed while the panels above it load.
+  useEffect(() => keepJumps(), []);
   return (
     <div className="min-h-dvh" style={{ background: 'var(--t-bg)' }}>
-      <header className="sticky top-0 z-30 border-b border-gold-500/10 bg-ink-950/90 backdrop-blur">
+      <header ref={header} className="sticky top-0 z-30 border-b border-gold-500/10 bg-ink-950/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4">
           <Logo size={30} />
           <span className="hidden whitespace-nowrap font-display text-sm font-bold tracking-[0.2em] jc-gold-text sm:inline">JC ROYAL</span>

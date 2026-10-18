@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ActionBar } from '../../game/ActionBar';
 import { TableScene, useBoxSize, useStackRoom, useTableLayout } from '../../game/TableScene';
+import { wonFrom } from '../../game/won';
 import { useAuth } from '../../lib/auth';
 import { HAND_PAGE, useBack } from '../../lib/back';
 import { useI18n, type MsgKey } from '../../lib/i18n';
@@ -108,7 +109,7 @@ function buildQuestion(q: PracticeQuestion, index: number, v: TableView, sc: Sce
     return { q, index, options: ids.map((id) => ({ id, label: t(`hand.${id}` as MsgKey) })), answer: key, picked: null };
   }
   if (q.kind === 'winner') {
-    const winners = v.hand!.result!.winners.map((w) => w.seatIndex);
+    const winners = wonFrom(v.hand!.result).map((w) => w.seatIndex);
     const answer = winners.length > 1 ? 'split' : winners[0] === sc.hero ? 'me' : 'opp';
     return { q, index, options: (['me', 'opp', 'split'] as const).map((id) => ({ id, label: tr(T[id]) })), answer, picked: null };
   }

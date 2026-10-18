@@ -683,7 +683,7 @@ export function ReportsPage() {
               {SORTS.map(([v, k]) => <option key={v} value={v}>{t(k)}</option>)}
             </select>
           </div>
-          <Feedback note={msg} />
+          <Feedback note={msg} pin />
           {error && <LoadError error={error} onRetry={reload} />}
           <Panel className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
             {data && data.items.length === 0 ? (

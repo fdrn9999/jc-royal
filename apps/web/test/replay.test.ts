@@ -34,6 +34,7 @@ function sidePotHand(): ReplayInput {
       { amount: 400, eligibleSeats: [2], winners: [{ seatIndex: 2, amount: 400 }], uncalled: false },
       { amount: 200, eligibleSeats: [2], winners: [{ seatIndex: 2, amount: 200 }], uncalled: true },
     ],
+    returned: { seatIndex: 2, amount: 200 },
     actions: [
       a(1, 'preflop', 'post-sb', 5),
       a(2, 'preflop', 'post-bb', 10),
@@ -192,6 +193,7 @@ describe('buildReplay', () => {
   });
 
   it('ends without a showdown when everyone else folds', () => {
+    // As the server sends it: the 20 of the raise nobody called is out of the pot the engine paid, as a pot of its own.
     const h: ReplayInput = {
       id: 'h2',
       tableName: 'T',
@@ -202,7 +204,11 @@ describe('buildReplay', () => {
       bigBlind: 10,
       maxSeats: 2,
       buttonSeat: 0,
-      pots: [{ amount: 40, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 40 }], uncalled: false }],
+      pots: [
+        { amount: 20, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 20 }], uncalled: false },
+        { amount: 20, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 20 }], uncalled: true },
+      ],
+      returned: { seatIndex: 0, amount: 20 },
       actions: [a(0, 'preflop', 'post-sb', 5), a(1, 'preflop', 'post-bb', 10), a(0, 'preflop', 'raise', 25), a(1, 'preflop', 'timeout-fold')],
       players: [player(0, { stackStart: 500, net: 10, won: 40, holeCards: null }), player(1, { stackStart: 500, net: -10, won: 0, holeCards: ['2c', '7d'] })],
     };
@@ -210,11 +216,12 @@ describe('buildReplay', () => {
     expect(steps.map((s) => s.kind)).toEqual(['deal', 'action', 'action', 'result']);
     expect(steps[2]!.view.seats[1]!.lastAction).toEqual({ type: 'fold', amount: 0 });
     const res = steps.at(-1)!.view;
-    expect(res.hand!.result).toEqual({ winners: [{ seatIndex: 0, amount: 40, potIds: ['pot-0'] }], showdown: [] });
+    // The 20 that came back to seat 0 is no win: it wins its own 10 called and the big blind's 10.
+    expect(res.hand!.result).toEqual({ winners: [{ seatIndex: 0, amount: 20, potIds: ['pot-0'] }], showdown: [] });
     expect(res.seats.map((s) => s.stack)).toEqual([510, 490]);
     expect(res.seats[0]!.holeCards).toBeNull();
     // A raise from the small blind reads as the total it reaches; a time-out as stored; no street, showdown or board.
-    expect(steps.map((s) => s.line)).toEqual([[{ kind: 'deal' }, act(0, 'post-sb', 5), act(1, 'post-bb', 10)], [act(0, 'raise', 30)], [act(1, 'timeout-fold')], [{ kind: 'wins', seat: 0, amount: 40 }]]);
+    expect(steps.map((s) => s.line)).toEqual([[{ kind: 'deal' }, act(0, 'post-sb', 5), act(1, 'post-bb', 10)], [act(0, 'raise', 30)], [act(1, 'timeout-fold')], [{ kind: 'wins', seat: 0, amount: 20 }]]);
     expect(replayParts(steps)).toEqual([
       { phase: 'preflop', first: 0, last: 2 },
       { phase: 'result', first: 3, last: 3 },
@@ -225,9 +232,46 @@ describe('buildReplay', () => {
     const h = { ...sidePotHand(), pots: null, buttonSeat: null };
     const res = buildReplay(h, 1).at(-1)!.view;
     expect(res.hand!.buttonSeat).toBe(-1);
+    // Seat 2's total of 600 holds the 200 nobody called, which the server says came back to it.
     expect(res.hand!.result!.winners).toEqual([
       { seatIndex: 0, amount: 300, potIds: [] },
-      { seatIndex: 2, amount: 600, potIds: [] },
+      { seatIndex: 2, amount: 400, potIds: [] },
     ]);
+  });
+});
+
+/** The pots and the chips handed back are the server's (apps/api lib/community.ts replaySettlement): the replay only reads them. */
+describe('settlement as the server sends it', () => {
+  const raiseFold = (): ReplayInput => ({
+    ...sidePotHand(),
+    board: [],
+    potTotal: 450,
+    pots: [
+      { amount: 250, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 250 }], uncalled: false },
+      { amount: 200, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 200 }], uncalled: true },
+    ],
+    returned: { seatIndex: 0, amount: 200 },
+    actions: [a(1, 'preflop', 'post-sb', 50), a(2, 'preflop', 'post-bb', 100), a(0, 'preflop', 'raise', 300), a(1, 'preflop', 'fold'), a(2, 'preflop', 'fold')],
+    players: [player(0, { stackStart: 10_000, net: 150, won: 450 }), player(1, { stackStart: 10_000, net: -50, won: 0 }), player(2, { stackStart: 10_000, net: -100, won: 0 })],
+  });
+
+  it('reads a raise everyone folded to as the server split it: the pot won, and the bet handed back on its own', () => {
+    const res = buildReplay(raiseFold(), 0).at(-1)!;
+    expect(res.view.hand!.result!.winners).toEqual([{ seatIndex: 0, amount: 250, potIds: ['pot-0'] }]);
+    expect(res.line).toEqual([{ kind: 'wins', seat: 0, amount: 250 }]);
+    // The stacks are the record's: nothing comes or goes.
+    expect(res.view.seats.slice(0, 3).map((s) => s.stack)).toEqual([10_150, 9_950, 9_900]);
+  });
+
+  it('shows the stored amounts as they are when the server sends no handed-back chips', () => {
+    // Before the hand's statistics are filled the server sends the one pot the engine paid, and nothing handed back.
+    const h = { ...raiseFold(), pots: [{ amount: 450, eligibleSeats: [0], winners: [{ seatIndex: 0, amount: 450 }], uncalled: false }], returned: null };
+    expect(buildReplay(h, 0).at(-1)!.view.hand!.result!.winners).toEqual([{ seatIndex: 0, amount: 450, potIds: ['pot-0'] }]);
+    expect(buildReplay({ ...h, pots: null }, 0).at(-1)!.view.hand!.result!.winners).toEqual([{ seatIndex: 0, amount: 450, potIds: [] }]);
+  });
+
+  it('takes the handed-back chips out of the per-player totals for hands recorded before pots were stored', () => {
+    const h = { ...raiseFold(), pots: null };
+    expect(buildReplay(h, 0).at(-1)!.view.hand!.result!.winners).toEqual([{ seatIndex: 0, amount: 250, potIds: [] }]);
   });
 });

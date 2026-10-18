@@ -5,7 +5,7 @@
  * Loaded on demand (the Me page, or the low-balance notes), so its text lives here rather than in the entry chunk.
  */
 import type { RefillClaimDto, RefillStatusDto } from '@jc/types';
-import { Button, createTranslator, cx, formatChips, formatDate, Panel } from '@jc/ui';
+import { Button, createTranslator, cx, Figure, formatChips, formatDate, Panel } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { api, ApiError } from '../lib/api';
@@ -251,23 +251,27 @@ export function RefillCard({ onClaimed }: { onClaimed?: (c: RefillClaimDto) => v
             <p className="text-sm text-ink-200" data-testid="refill-terms">
               {tr('terms', { below: formatChips(p!.below), amount: formatChips(p!.amount), wait: waitText(tr, p!.cooldownMs) })}
             </p>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-lg bg-ink-850/80 px-2 py-2">
-                <div className="text-[11px] text-ink-400">{tr('wallet')}</div>
-                <div className="font-mono text-sm font-semibold tabular-nums" data-testid="refill-wallet">
-                  {formatChips(s.wallet)}
+            {/* On a phone a row each, the name on the left and the amount on the right (a third of the card is too narrow
+                for a nine-digit wallet); three tiles from sm up. An amount too long even so wraps between digit groups. */}
+            <div className="grid gap-1.5 sm:grid-cols-3 sm:gap-2 sm:text-center">
+              <div className="flex items-baseline justify-between gap-3 rounded-lg bg-ink-850/80 px-3 py-2 sm:block sm:px-2">
+                <div className="shrink-0 text-[11px] text-ink-400">{tr('wallet')}</div>
+                <div className="min-w-0 text-right font-mono text-sm font-semibold tabular-nums sm:text-center" data-testid="refill-wallet">
+                  <Figure>{formatChips(s.wallet)}</Figure>
                 </div>
               </div>
-              <div className="rounded-lg bg-ink-850/80 px-2 py-2">
-                <div className="text-[11px] text-ink-400">{tr('tables')}</div>
-                <div className="font-mono text-sm font-semibold tabular-nums" data-testid="refill-tables">
-                  {s.tables === null ? <span className="font-sans text-xs font-normal text-ink-400">{tr('unchecked')}</span> : formatChips(s.tables)}
+              <div className="flex items-baseline justify-between gap-3 rounded-lg bg-ink-850/80 px-3 py-2 sm:block sm:px-2">
+                <div className="shrink-0 text-[11px] text-ink-400">{tr('tables')}</div>
+                <div className="min-w-0 text-right font-mono text-sm font-semibold tabular-nums sm:text-center" data-testid="refill-tables">
+                  {s.tables === null ? <span className="font-sans text-xs font-normal text-ink-400">{tr('unchecked')}</span> : <Figure>{formatChips(s.tables)}</Figure>}
                 </div>
               </div>
-              <div className="rounded-lg bg-ink-850/80 px-2 py-2">
-                <div className="text-[11px] text-ink-400">{tr('total')}</div>
-                <div className="font-mono text-sm font-semibold tabular-nums">{s.tables === null ? '—' : formatChips(s.wallet + s.tables)}</div>
-                <div className="text-[10px] text-ink-400">{tr('line', { below: formatChips(p!.below) })}</div>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 rounded-lg bg-ink-850/80 px-3 py-2 sm:block sm:px-2">
+                <div className="shrink-0 text-[11px] text-ink-400">{tr('total')}</div>
+                <div className="min-w-0 text-right font-mono text-sm font-semibold tabular-nums sm:text-center" data-testid="refill-total">
+                  {s.tables === null ? '—' : <Figure>{formatChips(s.wallet + s.tables)}</Figure>}
+                </div>
+                <div className="w-full text-right text-[10px] text-ink-400 sm:text-center">{tr('line', { below: formatChips(p!.below) })}</div>
               </div>
             </div>
             <div

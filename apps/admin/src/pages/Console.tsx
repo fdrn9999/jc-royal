@@ -21,7 +21,7 @@ import {
   userStatusLabel,
 } from '../labels';
 import { ApiError, canDo, errText, hasGrant, useAdmin, useData } from '../lib';
-import { dayStart, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
+import { dayStart, Feedback, JumpNav, jumpTarget, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 import { MemberSettingsPanel } from './MemberSettings';
 import { MemberReferralPanel } from './Referrals';
@@ -227,10 +227,10 @@ export function UsersPage() {
               <td className="w-8 px-2 py-2">
                 <input type="checkbox" className={checkbox} aria-label={t('selectUser', { name: u.nickname })} checked={selected.has(u.id)} onChange={(e) => toggle(u.id, e.target.checked)} />
               </td>
-              <td className="px-2 py-2 font-semibold">{u.nickname}</td>
+              <td className="px-2 py-2 font-semibold"><Link to={`/users/${u.id}`} className="inline-flex min-h-6 items-center text-gold-300 hover:underline">{u.nickname}</Link></td>
               <td className="px-2 py-2 text-ink-300">{u.email}</td>
               <td className="px-2 py-2"><LangBadge locale={u.locale} /></td>
-              <td className="px-2 py-2"><Badge tone={u.role === 'user' ? 'neutral' : 'gold'}>{roleLabel(t, u.role)}</Badge></td>
+              <td className="px-2 py-2"><Badge tone={u.role === 'user' ? 'neutral' : 'gold'} className="whitespace-nowrap">{roleLabel(t, u.role)}</Badge></td>
               <td className="px-2 py-2">
                 <Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge>
                 {u.online && <Badge tone="blue" className="ml-1">{t('online')}</Badge>}
@@ -579,7 +579,17 @@ export function UserDetailPage() {
           {on('reports') && <Link to={`/reports?status=all&userId=${u.id}`} className="text-sm text-gold-300 hover:underline" data-testid="user-reports">{t('reportsOfUser')} →</Link>}
         </span>
       </div>
-      <Feedback note={note} />
+      <JumpNav
+        testid="member-jump"
+        items={[
+          ...(on('chips') ? [['member-chips', t('adjustChips')] as [string, string]] : []),
+          ...(statusActions ? [['member-status', t('status')] as [string, string]] : []),
+          ['member-connections', t('connectionsTitle')],
+          ['member-history', t('historyTitle')],
+          ['member-ledger', t('ledger')],
+        ]}
+      />
+      <Feedback note={note} pin />
       {error && <LoadError error={error} onRetry={reload} />}
       {kick && <KickResult r={kick} />}
       {reset && <ResetLinkResult reset={reset} />}
@@ -613,7 +623,7 @@ export function UserDetailPage() {
       {(on('chips') || statusActions) && (
       <div className="grid gap-6 lg:grid-cols-2">
         {on('chips') && (
-        <Panel title={t('adjustChips')}>
+        <Panel title={t('adjustChips')} id="member-chips" className={jumpTarget}>
           <div ref={chipForm}>
           <form className="flex flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); askChips(); }}>
             <Field
@@ -632,7 +642,7 @@ export function UserDetailPage() {
         </Panel>
         )}
         {statusActions && (
-        <Panel title={t('status')}>
+        <Panel title={t('status')} id="member-status" className={jumpTarget}>
           <div className="flex flex-col gap-3">
             {!on('sanctions') ? null : u.status === 'active' && me?.user.id !== u.id ? (
               <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'suspend' }); }}>
@@ -656,7 +666,7 @@ export function UserDetailPage() {
         )}
       </div>
       )}
-      <Panel title={t('connectionsTitle')}>
+      <Panel title={t('connectionsTitle')} id="member-connections" className={jumpTarget}>
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-2 text-sm" data-testid="user-sessions">
             {(data.sessions ?? []).length === 0 ? (
@@ -765,7 +775,7 @@ export function UserDetailPage() {
       {on('refill') && <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />}
       {on('referral') && <MemberReferralPanel key={`referral${rev}`} userId={u.id} />}
       {on('settings') && <MemberSettingsPanel key={`settings${rev}`} userId={u.id} />}
-      <Panel title={t('ledger')}>
+      <Panel title={t('ledger')} id="member-ledger" className={jumpTarget}>
         {hidden.includes('ledger') && <p className="mb-2 text-xs text-ink-400" data-testid="ledger-hidden">{t('hiddenLedger')}</p>}
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
           {data.ledger.map((l) => (
@@ -956,7 +966,7 @@ export function TablesPage() {
           {shown.map((tb) => (
             <tr key={tb.id}>
               <td className="px-2 py-2 font-semibold">
-                {tb.name} {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}
+                <Link to={`/tables/${tb.id}`} className="inline-flex min-h-6 items-center text-gold-300 hover:underline">{tb.name}</Link> {tb.isPrivate && <Badge tone="red">{t('private')}</Badge>}
                 {tb.roomType === 'member' && <Badge tone="blue" className="ml-1">{t('memberRoom')} · {tb.hostNickname ?? '—'}</Badge>}
                 {tb.roomType === 'tournament' && <Badge tone="gold" className="ml-1">{t('tournamentRoom')}</Badge>}
               </td>
@@ -1097,13 +1107,13 @@ function TableBotsPanel({ tb, live, act }: { tb: TableRow; live: LiveStatus | nu
   const link = <Link to={`/bots?table=${encodeURIComponent(tb.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="table-bots-link">{t('botsNav')} →</Link>;
   if (tb.roomType !== 'official') {
     return (
-      <Panel title={t('botsPanel')}>
+      <Panel title={t('botsPanel')} id="table-bots" className={jumpTarget}>
         <p className="text-sm text-ink-400">{t('botsMemberRoomNote')}</p>
       </Panel>
     );
   }
   return (
-    <Panel title={t('botsPanel')} actions={link}>
+    <Panel title={t('botsPanel')} actions={link} id="table-bots" className={jumpTarget}>
       <form
         className="grid grid-cols-2 gap-3"
         data-testid="table-bots"
@@ -1171,7 +1181,7 @@ function TimerPanel({ id, live, issues, open, onDone }: { id: string; live: Live
     }
   };
   return (
-    <Panel title={t('tbTimerTitle')} actions={<Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline">{t('tbManage')} →</Link>}>
+    <Panel title={t('tbTimerTitle')} actions={<Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline">{t('tbManage')} →</Link>} id="table-timer" className={jumpTarget}>
       <div className="flex flex-col gap-3 text-sm" data-testid="table-timer" data-state={!tm ? 'idle' : unarmed ? 'unarmed' : late ? 'late' : 'ok'}>
         {!tm ? (
           <p className="text-ink-400">{t('tbNoTurn')}</p>
@@ -1229,6 +1239,12 @@ function TimerPanel({ id, live, issues, open, onDone }: { id: string; live: Live
       </Modal>
     </Panel>
   );
+}
+
+/** A header badge that jumps to the panel behind it (`to`: its id), or the badge alone. */
+function BadgeLink({ to, testid, children }: { to: string | null; testid?: string; children: ReactNode }) {
+  if (!to) return <>{children}</>;
+  return <a href={`#${to}`} className="inline-flex min-h-6 items-center rounded-full hover:brightness-125" data-testid={testid}>{children}</a>;
 }
 
 export function TableDetailPage() {
@@ -1303,16 +1319,27 @@ export function TableDetailPage() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-extrabold">{tb.name}</h1>
         <Badge tone={tableTone(tb.status)}>{t(tb.status as 'open')}</Badge>
-        {tb.handsPaused && <Badge tone="red">{t('pausedBadge')}</Badge>}
-        {tb.entryBlocked && <Badge tone="red">{t('entryBlockedShort')}</Badge>}
+        {/* A state the emergency controls set links to them; the last problem to the diagnosis that shows it in full. */}
+        {tb.handsPaused && <BadgeLink to={tnTable ? null : 'table-emergency'}><Badge tone="red">{t('pausedBadge')}</Badge></BadgeLink>}
+        {tb.entryBlocked && <BadgeLink to={tnTable ? null : 'table-emergency'}><Badge tone="red">{t('entryBlockedShort')}</Badge></BadgeLink>}
         {live?.maintenance?.active && <Badge tone="gold">{t('maintStateActive')}</Badge>}
-        {tb.lastIssue && <Badge tone="red">{t('lastIssue')}: <span className="font-mono">{tb.lastIssue}</span></Badge>}
+        {tb.lastIssue && <BadgeLink to="table-diagnosis" testid="last-issue-link"><Badge tone="red">{t('lastIssue')}</Badge></BadgeLink>}
         {tnTable && <Badge tone="gold">{t('tournamentRoom')}</Badge>}
       </div>
-      <Feedback note={note} />
+      <JumpNav
+        testid="table-jump"
+        items={[
+          ['table-live', t('live')],
+          [tnTable ? 'table-tournament' : 'table-emergency', tnTable ? t('tnTableTitle') : t('emergencyTitle')],
+          ...(live || tb.lastIssue ? [['table-diagnosis', t('diagnosisTitle')] as [string, string]] : []),
+          ...(live ? [['table-timer', t('tbTimerTitle')] as [string, string]] : []),
+          ...(tnTable ? [] : [['table-settings', t('blinds')], ['table-bots', t('botsPanel')]] as [string, string][]),
+        ]}
+      />
+      <Feedback note={note} pin />
       {error && <LoadError error={error} onRetry={reload} />}
       <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title={t('live')}>
+        <Panel title={t('live')} id="table-live" className={jumpTarget}>
           {!live ? <Empty>—</Empty> : (
             <div className="flex flex-col gap-2 text-sm">
               <div>{t('liveLine', { n: live.handNumber ?? 0, state: live.handInProgress ? stageLabel(t, live.stage) : t('idleState'), ws: live.connections ?? 0, chips: formatChips(live.chipsOnTable ?? 0) })}</div>
@@ -1339,7 +1366,7 @@ export function TableDetailPage() {
           )}
         </Panel>
         {tnTable ? (
-          <Panel title={t('tnTableTitle')}>
+          <Panel title={t('tnTableTitle')} id="table-tournament" className={jumpTarget}>
             <div className="flex flex-col gap-3 text-sm" data-testid="tn-table-panel">
               {tn && (
                 <p className="flex flex-wrap items-center gap-2">
@@ -1352,7 +1379,7 @@ export function TableDetailPage() {
             </div>
           </Panel>
         ) : (
-        <Panel title={t('emergencyTitle')}>
+        <Panel title={t('emergencyTitle')} id="table-emergency" className={jumpTarget}>
           <div className="flex flex-col gap-3" data-testid="emergency">
             <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={cReason} onChange={(e) => setCReason(e.target.value)} disabled={!controllable} data-testid="control-reason" />}</Field>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1373,10 +1400,10 @@ export function TableDetailPage() {
         </Panel>
         )}
       </div>
-      {live && (
-        <Panel title={t('diagnosisTitle')}>
+      {(live || tb.lastIssue) && (
+        <Panel title={t('diagnosisTitle')} id="table-diagnosis" className={jumpTarget}>
           <div className="flex flex-col gap-3 text-sm" data-testid="diagnosis">
-            {diag && diag.issues.length > 0 ? (
+            {live && (diag && diag.issues.length > 0 ? (
               <ul className="flex flex-col gap-1">
                 {diag.issues.map((x) => (
                   <li key={x} className="flex items-start gap-2 text-danger"><span aria-hidden>●</span><span>{tableIssueLabel(t, x)}</span></li>
@@ -1384,7 +1411,15 @@ export function TableDetailPage() {
               </ul>
             ) : (
               <p className="text-success">{t('noDiagIssues')}</p>
+            ))}
+            {/* The room's last failed operation as it recorded it (its time first), even while the room does not answer. */}
+            {tb.lastIssue && (
+              <div data-testid="last-issue">
+                <h3 className="text-xs font-semibold text-ink-300">{t('lastIssue')}</h3>
+                <p className="mt-1 break-all font-mono text-xs text-[#f0a0a2]">{tb.lastIssue}</p>
+              </div>
             )}
+            {live && (<>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
               <div className="sm:col-span-2 lg:col-span-4">
                 <dt className="sr-only">{t('colHand')}</dt>
@@ -1416,6 +1451,7 @@ export function TableDetailPage() {
               </div>
             )}
             <p className="text-xs text-ink-400">{t('diagBasis', { time: time(live.at) })} {t('diagCompare')}</p>
+            </>)}
           </div>
         </Panel>
       )}
@@ -1433,7 +1469,7 @@ export function TableDetailPage() {
       )}
       {!tnTable && (
       <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title={t('blinds')}>
+        <Panel title={t('blinds')} id="table-settings" className={jumpTarget}>
           <form key={blindsForm} data-testid="table-blinds" className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { ...edit, ifUpdatedAt: tb.updatedAt } })); }}>
             {(['smallBlind', 'bigBlind', 'minBuyIn', 'maxBuyIn'] as const).map((k) => (
               <Field key={k} label={t(k)}>{(fid) => <Input id={fid} inputMode="numeric" defaultValue={tb[k]} onChange={(e) => setEdit({ ...edit, [k]: Number(e.target.value) || undefined })} />}</Field>
