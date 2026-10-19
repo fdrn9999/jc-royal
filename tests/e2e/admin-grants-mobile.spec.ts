@@ -1,7 +1,7 @@
 import { expect, type Browser, type Page } from '@playwright/test';
 import { ADMIN, sql } from './analytics-helpers';
 import { PASSWORD, signUp, test, widerThanDevice } from './helpers';
-import { promoteSql } from '../support/grants';
+import { ALL_GRANTS, promoteSql } from '../support/grants';
 
 /** Opens the console on a phone as `email`; `home` is what the first page shows (the dashboard, or that it is off). */
 async function consoleOnPhone(browser: Browser, email: string, home: 'dashboard' | 'home-off') {
@@ -58,7 +58,8 @@ test('on a phone: a super admin turns features on for one administrator, who see
   await panel.getByTestId('grants-q').fill(op.nickname);
   await panel.getByTestId('grants-q').press('Enter');
   await expect(panel.getByTestId('grants-admin')).toHaveCount(1);
-  await expect(panel.getByTestId('grants-admin')).toContainText('1/23');
+  // Of every switch there is (the list grows with new pages, e.g. VIP), one is on.
+  await expect(panel.getByTestId('grants-admin')).toContainText(`1/${ALL_GRANTS.length}`);
   await panel.getByTestId('grants-admin').click();
   await expect(panel.getByTestId('grants-name')).toHaveText(op.nickname);
   await expect(panel.getByTestId('grant-members')).toBeChecked();
@@ -87,7 +88,7 @@ test('on a phone: a super admin turns features on for one administrator, who see
   await b.getByTestId('grants-save').click();
   await reauthIfAsked(b);
   await expect(panel.getByTestId('grants-msg')).toContainText('저장했습니다');
-  await expect(panel.getByTestId('grants-admin')).toContainText('3/23');
+  await expect(panel.getByTestId('grants-admin')).toContainText(`3/${ALL_GRANTS.length}`);
   await expect(panel.getByTestId('grants-history-item')).toHaveCount(1);
   await expect(panel.getByTestId('grants-history-item')).toContainText('E2E 원장 업무 배정');
   await expect(panel.getByTestId('grants-history-item')).toContainText('+');

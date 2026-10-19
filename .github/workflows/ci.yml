@@ -14,8 +14,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     # The same code (PR #6, 312 integration and 108 E2E tests) took 37.6 and 49.1 minutes on
-    # 2026-10-17 on the same runner image: runner speed varies by about a third.
-    timeout-minutes: 75
+    # 2026-10-17 on the same runner image: runner speed varies by about a third. PR #15 (381 integration and 123 E2E
+    # tests; a hand a member was dealt into now waits 1.5 s more before the next) took 66.7 and 61.6 minutes.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
