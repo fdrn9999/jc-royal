@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { SYNCED_PREF_KEYS } from '@jc/types';
 import { ADMIN, adminLogin, sql } from './analytics-helpers';
 import { PASSWORD, signUp, test } from './helpers';
 
@@ -138,7 +139,7 @@ test('admin settings reset: counts only, a preview with its scope, reason and re
   await admin.goto(`${ADMIN}/users/${mId}`);
   const panel = admin.getByTestId('member-settings');
   await expect(panel).toHaveAttribute('data-epoch', '0');
-  await expect(admin.getByTestId('member-settings-fields')).toHaveText('1 / 7');
+  await expect(admin.getByTestId('member-settings-fields')).toHaveText(`1 / ${SYNCED_PREF_KEYS.length}`);
   // How many, never which values.
   await expect(panel).not.toContainText(/emerald|에메랄드|e2e-lobby-fav/i);
   await expect(admin.getByTestId('member-settings-restore')).toHaveCount(0);
@@ -163,7 +164,7 @@ test('admin settings reset: counts only, a preview with its scope, reason and re
   await reauthIfAsked(admin);
   await expect(admin.getByTestId('member-settings-feedback')).toContainText(/초기화했습니다|Settings reset/);
   await expect(panel).toHaveAttribute('data-epoch', '1');
-  await expect(admin.getByTestId('member-settings-fields')).toHaveText('0 / 7');
+  await expect(admin.getByTestId('member-settings-fields')).toHaveText(`0 / ${SYNCED_PREF_KEYS.length}`);
   const afterReset = await serverSettings(m.page);
   expect(afterReset).toMatchObject({ epoch: 1, prefs: {}, fav: [] });
 
@@ -195,7 +196,7 @@ test('admin settings reset: counts only, a preview with its scope, reason and re
   await reauthIfAsked(admin);
   await expect(admin.getByTestId('member-settings-feedback')).toContainText(/되돌렸습니다|Reset undone/);
   await expect(panel).toHaveAttribute('data-epoch', '2');
-  await expect(admin.getByTestId('member-settings-fields')).toHaveText('1 / 7');
+  await expect(admin.getByTestId('member-settings-fields')).toHaveText(`1 / ${SYNCED_PREF_KEYS.length}`);
   await expect(admin.getByTestId('member-settings-restore')).toHaveCount(0);
   await m.page.reload();
   await expect(look(m.page)).toHaveAttribute('data-theme', 'emerald');
