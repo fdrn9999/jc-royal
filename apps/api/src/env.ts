@@ -5,6 +5,8 @@ export interface Env {
   DB: D1Database;
   /** TableRoom Durable Object namespace hosted by the game worker. */
   TABLES: DurableObjectNamespace;
+  /** PresenceHub Durable Object namespace hosted by the game worker (friends' status, in memory only). */
+  PRESENCE: DurableObjectNamespace;
   ASSETS?: Fetcher;
   ENVIRONMENT: 'development' | 'test' | 'production';
   /** Comma separated list of browser origins allowed to send state-changing requests. */
@@ -27,6 +29,13 @@ export interface Env {
   RATE_LIMIT_IP_SCALE?: string;
   /** Local tests only: members' empty rooms close after this many ms instead of MEMBER_IDLE_CLOSE_MS. */
   MEMBER_IDLE_CLOSE_MS?: string;
+  /** Web Push (VAPID, RFC 8292) key pair, base64url: the 65-byte public point and the 32-byte private scalar (secrets). Without both, no push is sent. */
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  /** The contact the push services see (an https URL of the site). */
+  VAPID_SUBJECT?: string;
+  /** Local tests only: pushes go to this http://127.0.0.1 address instead of the push service (ignored in production). */
+  PUSH_SINK_URL?: string;
 }
 
 export interface AuthUser {
@@ -39,6 +48,8 @@ export interface AuthUser {
   locale: 'ko' | 'en';
   balance: number;
   createdAt: number;
+  /** How the member shows to friends (packages/types/src/presence.ts). */
+  presenceMode: 'auto' | 'away' | 'invisible';
 }
 
 export interface AuthSession {
@@ -47,6 +58,8 @@ export interface AuthSession {
   reauthAt: number | null;
   createdAt: number;
   remember: boolean;
+  /** When the sign-in runs out, as read (a request that slides it moves this later in D1, not here). */
+  expiresAt: number;
 }
 
 export type AppEnv = {

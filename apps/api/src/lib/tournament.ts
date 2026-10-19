@@ -15,11 +15,14 @@ import {
   type TournamentStatus,
   type TournamentSummaryDto,
   type TournamentTimeBank,
+  isKstNight,
   TOURNAMENT_STATUSES,
 } from '@jc/types';
+import { outboxForEntries } from '@jc/db';
 import type { Env } from '../env';
 import { fail } from './http';
 import { notices } from './notices';
+import { queuePush } from './notify';
 import { roomCallEnv } from './room';
 import { currentMaintenance } from './service';
 
@@ -180,6 +183,8 @@ export interface StartOptions {
   auto: boolean;
   /** The version the operator was looking at: a change meanwhile is a conflict. */
   baseVersion?: number;
+  /** The request's, to send the start's pushes in the background (without it the minute cron sends them). */
+  ctx?: Pick<ExecutionContext, 'waitUntil'>;
 }
 
 export interface StartResult {
@@ -341,6 +346,12 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     // look again (a start that already happened is refused at the top).
     if (!res[0]?.meta.changes) continue;
     const live = await reloadRoom(env, tableId);
+    // After the start is saved, never with it: a push that can't be queued leaves the start as it is.
+    await queuePush(
+      env,
+      [outboxForEntries(db, { tournamentId: id, type: 'tournament_start', statuses: ['playing'], prefix: 'tournament_start', url: `/table/${tableId}`, guard: started, now, night: isKstNight(now) })],
+      opts.ctx,
+    );
     return { started: true, tableId, players: players.length, dropped, roomConfirmed: !!live };
   }
   if (opts.auto) return no('busy');

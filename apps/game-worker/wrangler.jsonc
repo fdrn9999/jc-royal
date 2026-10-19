@@ -14,9 +14,16 @@
     }
   ],
   "durable_objects": {
-    "bindings": [{ "name": "TABLES", "class_name": "TableRoom" }]
+    "bindings": [
+      { "name": "TABLES", "class_name": "TableRoom" },
+      { "name": "PRESENCE", "class_name": "PresenceHub" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TableRoom"] }],
+  // v2: the presence hub (friends' status, memory only; it never writes its storage).
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TableRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] }
+  ],
   "vars": { "ENVIRONMENT": "development" },
   "observability": { "enabled": true },
   "env": {
@@ -30,8 +37,16 @@
           "migrations_dir": "../../packages/db/migrations"
         }
       ],
-      "durable_objects": { "bindings": [{ "name": "TABLES", "class_name": "TableRoom" }] },
-      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TableRoom"] }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "TABLES", "class_name": "TableRoom" },
+          { "name": "PRESENCE", "class_name": "PresenceHub" }
+        ]
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["TableRoom"] },
+        { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] }
+      ],
       "vars": { "ENVIRONMENT": "production" }
     }
   }

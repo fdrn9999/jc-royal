@@ -247,7 +247,7 @@ describe('brand status', () => {
     expect(kinds).toEqual(expect.arrayContaining(['home', 'homeEn', 'register', 'table', 'privateTable']));
     expect(b.image).toMatchObject({ url: 'https://jc-royal.site/og-image.png', status: 200, contentType: 'image/png', width: 1200, height: 630, bytes: 1_054_620 });
     expect(b.pwa.manifest).toMatchObject({ name: expect.any(String), display: expect.any(String) });
-    expect(b.pwa.checks.find((c: { id: string }) => c.id === 'serviceWorker')).toMatchObject({ status: 'info', value: false });
+    expect(b.pwa.checks.find((c: { id: string }) => c.id === 'serviceWorker')).toMatchObject({ status: 'info', value: 'push-only' });
 
     // The private table sampled: the default preview only, never its name.
     const priv = b.pages.find((p: { kind: string }) => p.kind === 'privateTable');

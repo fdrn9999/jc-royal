@@ -1,0 +1,1 @@
+CREATE INDEX `notification_events_sent_idx` ON `notification_events` (`user_id`,`status`,`sent_at`);

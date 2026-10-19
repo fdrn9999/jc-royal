@@ -1,8 +1,9 @@
-import { schema } from '@jc/db';
+import { outboxOne, schema, type OutboxOne } from '@jc/db';
 import {
   DirectMessageSchema,
   DmReadSchema,
   FriendRequestSchema,
+  isKstNight,
   MAX_BLOCKS,
   MAX_FRIENDS,
   publicRole,
@@ -16,6 +17,9 @@ import {
   type FriendRequestDto,
   type FriendRequestResultDto,
   type FriendsDto,
+  type FriendsPresenceDto,
+  type PresenceMode,
+  type PresenceState,
   type PublicUserDto,
   type RelationDto,
   type SocialSettingsDto,
@@ -23,9 +27,11 @@ import {
 import { and, desc, eq, gt, isNull, lt, lte, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
-import { requireUser } from '../lib/auth';
+import { requireUser, requireUserQuiet } from '../lib/auth';
 import { badgesFor, type Badge } from '../lib/badges';
 import { fail, parseBody } from '../lib/http';
+import { queuePush } from '../lib/notify';
+import { applyMode, hubCall, type HubQuery } from '../lib/presence';
 import { rateLimit } from '../lib/rate-limit';
 
 const DM_PAGE = 50;
@@ -86,18 +92,67 @@ async function friendCount(c: Context<AppEnv>, uid: string): Promise<number> {
   return r?.n ?? 0;
 }
 
-/** Turns the pending request between the two into a friendship. False when there was none to accept. */
+/**
+ * Queues a push to `to` for an action already saved (lib/notify.ts): sent in the background, checked again when it goes
+ * out; a push that can't be queued is only logged.
+ */
+function pushTo(c: Context<AppEnv>, to: string, e: Omit<OutboxOne, 'userId' | 'now' | 'night'>): Promise<number> {
+  let ctx: Pick<ExecutionContext, 'waitUntil'> | undefined;
+  try {
+    ctx = c.executionCtx;
+  } catch {
+    ctx = undefined;
+  }
+  const now = Date.now();
+  return queuePush(c.env, [outboxOne(c.env.DB, { ...e, userId: to, now, night: isKstNight(now) })], ctx, to);
+}
+
+/** Turns the pending request between the two into a friendship (the one who asked is told). False when there was none to accept. */
 async function accept(c: Context<AppEnv>, me: string, other: string): Promise<boolean> {
   if ((await friendCount(c, me)) >= MAX_FRIENDS || (await friendCount(c, other)) >= MAX_FRIENDS) fail(409, 'friend_limit', `at most ${MAX_FRIENDS} friends`);
   const [a, b] = pairOf(me, other);
   const r = await c.env.DB.prepare(`UPDATE friendships SET status = 'accepted', accepted_at = ?3 WHERE user_a = ?1 AND user_b = ?2 AND status = 'pending' AND ${notBlocked('?1', '?2')}`)
     .bind(a, b, Date.now())
     .run();
-  return r.meta.changes > 0;
+  if (!r.meta.changes) return false;
+  await pushTo(c, other, { dedupeKey: `friend_accepted:${me}:${other}`, type: 'friend_accepted', url: `/friends/${me}`, coalesceKey: `fa:${me}` });
+  return true;
 }
 
 /** The same answer whether they blocked me or turned requests off, so a block is never revealed. */
 const requestUnavailable = (): never => fail(403, 'request_unavailable', 'this player is not taking friend requests from you');
+
+/**
+ * GET /api/friends/presence: my accepted friends' status, mounted before friendRoutes so a friends page polling it
+ * (PRESENCE_POLL_MS) checks the sign-in without sliding it. Takes no ids: the list is decided here, from D1, as the
+ * friends who are active members neither side has blocked, so a pending request, a block, an unfriending, a
+ * suspension or a withdrawal shows nothing (the member is simply absent, the same answer as never befriended). Only
+ * online / away / offline, never when someone was last seen.
+ */
+export const friendPresenceRoutes = new Hono<AppEnv>().get('/presence', requireUserQuiet, async (c) => {
+  const uid = c.var.user!.id;
+  const { results } = await c.env.DB.prepare(
+    `SELECT u.id, u.presence_mode AS mode
+       FROM friendships f
+       JOIN users u ON u.id = CASE WHEN f.user_a = ?1 THEN f.user_b ELSE f.user_a END
+      WHERE (f.user_a = ?1 OR f.user_b = ?1) AND f.status = 'accepted' AND u.status = 'active' AND u.is_bot = 0
+        AND ${notBlocked('?1', 'u.id')}
+      LIMIT ${MAX_FRIENDS}`,
+  )
+    .bind(uid)
+    .all<{ id: string; mode: PresenceMode }>();
+  // Invisible friends are offline whatever their devices do; the hub is not asked about them.
+  const ask = results.filter((r) => r.mode !== 'invisible').map((r) => r.id);
+  let live: Record<string, PresenceState> = {};
+  if (ask.length) {
+    const r = await hubCall<HubQuery>(c.env, 'query', { asker: uid, ids: ask });
+    if (r?.limited) fail(429, 'rate_limited', 'too many status requests; slow down');
+    live = r?.presence ?? {};
+  }
+  const presence: Record<string, PresenceState> = {};
+  for (const f of results) presence[f.id] = applyMode(f.mode, live[f.id] ?? 'offline');
+  return c.json({ presence } satisfies FriendsPresenceDto);
+});
 
 type FriendRow = { status: 'pending' | 'accepted'; requesterId: string; createdAt: number; acceptedAt: number | null; id: string; nickname: string; avatarUrl: string | null; role: string; unread: number; last: string | null };
 
@@ -162,7 +217,7 @@ export const friendRoutes = new Hono<AppEnv>()
     const [a, b] = pairOf(me, user.id);
     // Inserted only while neither side has blocked the other, in one statement, so a block that lands while this
     // request is in flight still wins (the block itself deletes any row written before it).
-    await c.env.DB.prepare(
+    const made = await c.env.DB.prepare(
       `INSERT OR IGNORE INTO friendships (user_a, user_b, requester_id, status, created_at) SELECT ?1, ?2, ?3, 'pending', ?4 WHERE ${notBlocked('?1', '?2')}`,
     )
       .bind(a, b, me, Date.now())
@@ -174,6 +229,9 @@ export const friendRoutes = new Hono<AppEnv>()
       if (!(await accept(c, me, user.id))) requestUnavailable();
       return c.json({ status: 'accepted', user } satisfies FriendRequestResultDto);
     }
+    // Told only when this made the request (the same request again within the outbox's week is not told twice).
+    if (made.meta.changes > 0 && row.requesterId === me && row.status === 'pending')
+      await pushTo(c, user.id, { dedupeKey: `friend_request:${me}:${user.id}`, type: 'friend_request', url: '/friends', coalesceKey: `fr:${me}` });
     return c.json({ status: row.status, user } satisfies FriendRequestResultDto, 201);
   })
   .get('/settings', async (c) => {
@@ -222,6 +280,8 @@ export const friendRoutes = new Hono<AppEnv>()
       .first<{ id: string; name: string }>();
     if (!t) fail(409, 'table_unavailable', 'this table is not open');
     const row = await insertDm(c, me, other, { body: t.name, kind: 'invite', tableId: t.id });
+    // The push opens the conversation; joining is checked by the table as always.
+    await pushTo(c, other, { dedupeKey: `invite:${row.id}`, type: 'invite', url: `/friends/${me}`, coalesceKey: `invite:${me}` });
     return c.json(toDm(me)(row), 201);
   })
   /** Declines a received request, cancels a sent one, or removes a friend. */
@@ -381,6 +441,7 @@ export const dmRoutes = new Hono<AppEnv>()
     if (!user) fail(404, 'user_not_found', 'no such player');
     await rateLimit(c, `dm:${me}`, 30, 60_000);
     const row = await insertDm(c, me, other, { body: body.text, kind: 'text', tableId: null });
+    await pushTo(c, other, { dedupeKey: `dm:${row.id}`, type: 'dm', url: `/friends/${me}`, coalesceKey: `dm:${me}` });
     return c.json(toDm(me)(row), 201);
   })
   /**

@@ -1,9 +1,11 @@
 export { TableRoom } from './room';
+export { PresenceHub } from './presence';
 
 /**
- * The game worker only hosts the TableRoom Durable Object. It has no public
- * routes: players reach a room exclusively through the API worker, which
- * authenticates the session and forwards the WebSocket upgrade.
+ * The game worker only hosts the TableRoom and PresenceHub Durable Objects. It
+ * has no public routes: players reach a room exclusively through the API
+ * worker, which authenticates the session and forwards the WebSocket upgrade
+ * (and calls the presence hub for friends' status).
  */
 export default {
   async fetch(): Promise<Response> {

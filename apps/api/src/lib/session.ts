@@ -94,8 +94,16 @@ export interface ResolvedSession {
   session: AuthSession;
 }
 
+export interface ResolveOptions {
+  /**
+   * Slide the expiry and mark the member active (default). False for the presence heartbeat: it comes every half
+   * minute from every open page, so it must never write to D1 (a page left open does not keep a sign-in alive either).
+   */
+  touch?: boolean;
+}
+
 /** Validates the session cookie against D1 and slides its expiry. */
-export async function resolveSession(c: Context<AppEnv>, kind: 'user' | 'admin'): Promise<ResolvedSession | null> {
+export async function resolveSession(c: Context<AppEnv>, kind: 'user' | 'admin', opts: ResolveOptions = {}): Promise<ResolvedSession | null> {
   const token = getCookie(c, cookieName(kind));
   if (!token || token.length > 100) return null;
   const now = Date.now();
@@ -117,16 +125,17 @@ export async function resolveSession(c: Context<AppEnv>, kind: 'user' | 'admin')
   }
   // Slide expiry at most once a minute to limit writes, and on a member's first request of a new day (Korean time),
   // which also marks the member active that day: one more write per member and day.
-  const newDay = kind === 'user' && statsDay(now) !== statsDay(row.s.lastSeenAt);
+  const touch = opts.touch !== false;
+  const newDay = touch && kind === 'user' && statsDay(now) !== statsDay(row.s.lastSeenAt);
   if (newDay) markActive(c, row.u.id, now);
-  if (now - row.s.lastSeenAt > 60_000 || newDay) {
+  if (touch && (now - row.s.lastSeenAt > 60_000 || newDay)) {
     const ttl = kind === 'admin' ? ADMIN_IDLE_TTL : userTtl(row.s.remember);
     c.executionCtx.waitUntil(
       c.var.db.update(schema.sessions).set({ lastSeenAt: now, expiresAt: now + ttl }).where(eq(schema.sessions.id, row.s.id)).then(() => undefined),
     );
   }
   return {
-    session: { id: row.s.id, kind: row.s.kind, reauthAt: row.s.reauthAt, createdAt: row.s.createdAt, remember: row.s.remember },
+    session: { id: row.s.id, kind: row.s.kind, reauthAt: row.s.reauthAt, createdAt: row.s.createdAt, remember: row.s.remember, expiresAt: row.s.expiresAt },
     user: {
       id: row.u.id,
       email: row.u.email,
@@ -137,12 +146,17 @@ export async function resolveSession(c: Context<AppEnv>, kind: 'user' | 'admin')
       locale: row.u.locale,
       balance: row.u.balance,
       createdAt: row.u.createdAt,
+      presenceMode: row.u.presenceMode,
     },
   };
 }
 
-export async function destroySession(c: Context<AppEnv>, kind: 'user' | 'admin') {
+/** Ends the sign-in this request carries. Returns it (null: there was none), for what must end with it. */
+export async function destroySession(c: Context<AppEnv>, kind: 'user' | 'admin'): Promise<{ id: string; userId: string } | null> {
   const token = getCookie(c, cookieName(kind));
-  if (token) await c.var.db.delete(schema.sessions).where(eq(schema.sessions.tokenHash, await sha256(token)));
+  const gone = token
+    ? await c.var.db.delete(schema.sessions).where(eq(schema.sessions.tokenHash, await sha256(token))).returning({ id: schema.sessions.id, userId: schema.sessions.userId })
+    : [];
   deleteCookie(c, cookieName(kind), { path: '/', secure: isSecure(c) });
+  return gone[0] ?? null;
 }

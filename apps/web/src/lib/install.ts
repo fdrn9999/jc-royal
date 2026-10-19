@@ -3,8 +3,9 @@ import { useSyncExternalStore } from 'react';
 /**
  * Installing JC ROYAL as an app from the browser (home screen icon, its own window, no address bar).
  *
- * There is no service worker: the browsers that install from a page (Chrome, Edge, Samsung Internet, Safari) do it
- * from the manifest alone, and nothing — games, sign-in, cards — is ever cached for offline use. Installing is never
+ * Installing needs no service worker: the browsers that install from a page (Chrome, Edge, Samsung Internet, Safari)
+ * do it from the manifest alone. The only one (public/sw.js) is for push notifications, installed when a member turns
+ * them on, and nothing — games, sign-in, cards — is ever cached for offline use. Installing is never
  * assumed to be possible: the lobby only offers it where a browser can do it, and the guide says menus differ.
  */
 

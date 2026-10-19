@@ -65,6 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     // Settings changed here and not saved yet go first, while the session is still this account's (at most 2 s).
     await flushSettings(2_000).catch(() => {});
+    // Pushes stop in this browser and what was shown goes (the server drops this sign-in's registration with it).
+    await Promise.race([import('./push').then((m) => m.pushSignOut()), new Promise((r) => setTimeout(r, 1_500))]).catch(() => {});
     await api('/api/auth/logout', { body: {} });
     setMe(null);
   }, []);

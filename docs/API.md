@@ -16,7 +16,7 @@
 | GET | `/signup-options` | `{emailVerification, privacyNoticeVersion}` — 가입 화면이 이메일 인증 단계를 보일지 결정 |
 | POST | `/email-verification/request` | `{email,locale?}` → `{ok, expiresInMinutes:10, resendAfterSeconds:60}`. 6자리 인증번호 메일(요청 `locale`, 기본 ko). 409 `email_taken`, 429 `resend_too_soon`(`details.retryAfterSeconds`)·IP당 20회/시간·이메일당 5회/시간, 502 `mail_failed`, 400 `verification_off`. 개발 환경에서만 `devCode` 반환 |
 | POST | `/email-verification/confirm` | `{email,code}` → `{verificationToken, expiresInMinutes:30}`. 400 `invalid_code`(`details.attemptsLeft`), `too_many_attempts`(5회 오입력 시 새 인증번호 필요), `code_expired` |
-| POST | `/register` | `{email,password,nickname,birthDate(YYYY-MM-DD),locale?,agreements:{age14:true,privacy:true},emailVerificationToken?,referralCode?}` → 201 MeDto + 세션. 비밀번호는 8자 이상 + 영문(대·소문자 무관)·숫자·특수문자. 만 14세 미만 400 `underage`. 이메일 인증이 켜져 있으면 해당 이메일의 유효한 `verificationToken` 필수(없거나 다르면 400 `email_not_verified`, 1회용). 생년월일·인증 시각·동의 버전/시각 저장, 가입 칩 지급(원장), 계정 언어로 환영 쪽지. 409 `email_taken`/`nickname_taken`. `referralCode`(40자까지, 공백·대소문자 무시)가 활동 중인 회원의 코드가 아니면 아무것도 쓰지 않고 400 `referral_invalid`. 맞으면 가입 칩 뒤에 추천을 그때 정책으로 기록하고 지금 줄 수 있으면 지급한다(아래 추천인 보상). 추천 기록·지급이 실패해도 가입은 성공한다 |
+| POST | `/register` | `{email,password,nickname,birthDate(YYYY-MM-DD),locale?,agreements:{age14:true,privacy:true},emailVerificationToken?,referralCode?,pushConsent?:{service,night}}` → 201 MeDto + 세션. 비밀번호는 8자 이상 + 영문(대·소문자 무관)·숫자·특수문자. 만 14세 미만 400 `underage`. 이메일 인증이 켜져 있으면 해당 이메일의 유효한 `verificationToken` 필수(없거나 다르면 400 `email_not_verified`, 1회용). 생년월일·인증 시각·동의 버전/시각 저장, 가입 칩 지급(원장), 계정 언어로 환영 쪽지. 409 `email_taken`/`nickname_taken`. `referralCode`(40자까지, 공백·대소문자 무시)가 활동 중인 회원의 코드가 아니면 아무것도 쓰지 않고 400 `referral_invalid`. 맞으면 가입 칩 뒤에 추천을 그때 정책으로 기록하고 지금 줄 수 있으면 지급한다(아래 추천인 보상). 추천 기록·지급이 실패해도 가입은 성공한다 |
 | GET | `/referral/:code` | 가입 화면의 추천 코드 확인 → `{valid, inviter(닉네임)\|null, reward{amount, minHands, paused}\|null}`. `reward`는 추천 보상이 꺼져 있으면 null(코드는 그래도 받는다). IP당 60초에 30회(429) |
 | POST | `/login` | `{email,password,remember?}` → MeDto + 세션. `remember:true`(자동 로그인)면 30일 쿠키와 30일 슬라이딩 만료, 기본값 `false`면 브라우저 세션 쿠키와 1일 슬라이딩 만료. 401 `invalid_credentials`, 403 `suspended`, 429 |
 | POST | `/logout` | 세션 폐기 |
@@ -159,6 +159,35 @@
 | DELETE | `/:userId` | 받은 요청 거절, 보낸 요청 취소, 친구 삭제 |
 
 친구 요청은 두 사람 사이에 차단이 없을 때만 저장하는 한 문장으로 기록합니다. 그래서 요청과 차단이 동시에 와도 차단이 이깁니다(차단이 먼저 쓴 요청도 지움).
+
+## 접속 상태 `/api/me/presence`, `/api/friends/presence` (로그인 필요)
+
+설계와 개인정보 규칙은 `docs/PRESENCE.md` 1절. 상태는 `'online'|'away'|'offline'`, 모드는 `'auto'|'away'|'invisible'`(`packages/types/src/presence.ts`).
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/me/presence/heartbeat` | `{conn(8–64자, 영문·숫자·`_`·`-`), idleMs(0–86,400,000), visible, view?('dm:<회원>' 등)}` → `{mode, state}`(친구에게 보이는 내 상태). 세션을 확인하되 연장하지 않는다(D1 쓰기 없음). API가 이 로그인의 만료·생성 시각을 허브에 함께 보내, 기기는 세션보다 오래 보이지 않고 로그아웃 직후 늦게 도착한 박동은 기록되지 않는다(`docs/PRESENCE.md` 1절). 회원당 분당 40회(허브, 429 `rate_limited`). 허브에 닿지 못하면 503 `presence_unavailable` |
+| POST | `/me/presence/leave` | `{conn}` → `{ok}`. 이 로그인의 이 기기를 바로 지운다(페이지를 닫을 때 `keepalive`). 세션 연장 없음 |
+| GET | `/me/presence` | `{mode, state}` |
+| PUT | `/me/presence` | `{mode}` → `{mode, state}`. 계정에 저장(모든 기기). 회원당 10분에 30회(429) |
+| GET | `/friends/presence` | `{presence: {회원ID: 상태}}`. 수락된 친구 중 활동 중이고 어느 쪽도 차단하지 않은 회원만 담긴다(요청 대기·차단·해제·정지·탈퇴는 키가 없음). 오프라인 표시 모드인 친구는 `offline`. 마지막 접속 시각은 없다. 세션 연장 없음. 회원당 분당 30회(허브, 429). 허브에 닿지 못하면 모두 `offline` |
+
+## 푸시 알림 `/api/me/notifications` (로그인 필요)
+
+설계는 `docs/PRESENCE.md` 2절. 타입은 `packages/types/src/notifications.ts`.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/settings` | NotificationSettingsDto `{service, night, types{dm, invite, friendRequest, friendAccepted, tournamentStart, tournamentCancel, tournamentResult}, version, serviceAt, nightAt, updatedAt, pushAvailable}`. 저장한 적 없으면 동의 둘 다 꺼짐·종류 모두 켜짐·`version` 0. `night`는 `service`가 켜져 있을 때만 참 |
+| PUT | `/settings` | `{expectedVersion, service?, night?, types?}` → 저장된 설정. 보낸 것만 바뀐다. `expectedVersion`이 지금 버전과 다르면 아무것도 바꾸지 않고 409 `stale_settings`(`error.details`에 지금 설정). 동의가 바뀌면 이력(`notification_consents`, 문구 버전 `NOTIFICATION_CONSENT_VERSION`, IP 없음)을 남기고, `service`를 끄면 모든 기기 등록을 지운다. 회원당 10분에 30회(429) |
+| GET | `/push-key` | `{publicKey}`(VAPID 공개 키, base64url). 키가 없으면 503 `push_unavailable` |
+| POST | `/subscriptions` | `{endpoint, keys{p256dh, auth}, expirationTime?, oldEndpoint?}` → 201(같은 등록이면 200) `{device, publicKey}`. 이 로그인의 이 브라우저. 허용된 푸시 서비스의 `https` 주소만(400 `push_endpoint_refused`), 키는 P-256 곡선 위의 점이어야 함(400 `invalid_push_keys`), 계정 동의 필요(409 `push_consent_required`), 키 없음 503 `push_unavailable`. 다른 계정이 등록했던 같은 주소는 이 회원의 것으로 바뀐다. 회원당 기기 10개(넘으면 가장 오래된 것을 지움). 같은 등록을 다시 보내면 읽기만 한다. 회원당 10분에 20회(429) |
+| POST | `/subscriptions/remove` | `{endpoint}` → `{ok}`. 이 브라우저의 등록을 지운다(주소는 그 브라우저만 안다). 10분에 20회 |
+| DELETE | `/subscriptions/:id` | 내 기기 하나를 목록에서 지운다. 남의 것·없는 것은 404 `push_device_not_found` |
+| GET | `/devices` | `{devices: [{id, label, createdAt, lastSuccessAt, lastFailureAt, current}]}`. `label`은 "Chrome · Android" 같은 대략의 이름, `current`는 이 로그인에서 등록한 것. 주소와 키는 내보내지 않는다 |
+| GET | `/recipient` | `{id}`. 서비스 워커가 푸시를 보이기 직전에 이 브라우저에서 그 회원이 아직 로그인해 있는지 확인한다. 세션 연장 없음. 로그인하지 않았으면 401 |
+
+가입(`POST /api/auth/register`)은 선택 항목 `pushConsent: {service, night}`(없으면 둘 다 꺼짐)를 받아, 회원을 만든 뒤 설정과 동의 이력을 쓴다. 이 저장이 실패하면 로그만 남고 가입은 성공하며 동의는 꺼진 채다(마이페이지에서 다시 줄 수 있다). 가입 화면은 브라우저 알림 권한을 묻지 않는다.
 
 ## 차단 `/api/blocks` (로그인 필요)
 

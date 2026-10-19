@@ -204,6 +204,20 @@
       "when": 1792209311578,
       "tag": "0028_social_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1792378005352,
+      "tag": "0029_presence_push",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1792390856090,
+      "tag": "0030_push_sent_idx",
+      "breakpoints": true
     }
   ]
 }

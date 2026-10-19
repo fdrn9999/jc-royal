@@ -191,11 +191,11 @@ export function ActionBar({
   if (legal.length === 0) return null;
   const isAllInAmount = commit?.type === 'allin';
   const btn = column
-    ? 'jc-tap flex h-12 min-w-0 flex-1 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
-    : 'jc-tap flex h-12 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12 sm:min-w-[7.5rem] sm:flex-none';
+    ? 'jc-tap jc-act flex h-12 min-w-0 flex-1 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
+    : 'jc-tap jc-act flex h-12 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12 sm:min-w-[7.5rem] sm:flex-none';
   const commitBtn = column
-    ? 'jc-tap flex h-11 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50'
-    : 'jc-tap flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12';
+    ? 'jc-tap jc-act flex h-11 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50'
+    : 'jc-tap jc-act flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12';
   /** A button's amount, under its name in the column; there, pressed once, the press-again line stands alone. */
   const amountOf = (key: ArmKey, sig: string, v: number) => !(column && isArmed(key, sig)) && <span className={cx('font-mono', column && 'text-[11px] font-semibold')}>{a.fmt(v, true)}</span>;
   const armedCls = 'ring-2 ring-ivory ring-offset-2 ring-offset-ink-950 animate-pulse';
@@ -250,7 +250,7 @@ export function ActionBar({
       disabled={busy || !commit}
       onClick={doCommit}
       className={cx(commitBtn, caption && 'pb-3.5', isArmed('commit', commitSig) && armedCls, sentCls('commit'))}
-      style={{ background: 'linear-gradient(180deg,#e6c56b,#b48e22)', color: '#0a0b0d' }}
+      style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }}
       aria-busy={busy && sent?.key === 'commit'}
       data-testid="action-commit"
     >
@@ -336,30 +336,30 @@ export function ActionBar({
           </p>
         )}
         {fold && (
-          <button disabled={busy} onClick={doFold} className={cx(btn, isArmed('fold', foldSig) && armedCls, sentCls('fold'))} style={{ background: 'linear-gradient(180deg,#c4474a,#962a2d)' }} aria-keyshortcuts="F" aria-busy={busy && sent?.key === 'fold'}>
+          <button disabled={busy} onClick={doFold} className={cx(btn, isArmed('fold', foldSig) && armedCls, sentCls('fold'))} style={{ background: 'linear-gradient(180deg,var(--act-fold-from),var(--act-fold-to))', color: 'var(--act-fold-fg)' }} aria-keyshortcuts="F" aria-busy={busy && sent?.key === 'fold'}>
             {pending('fold')}
             {label('fold', foldSig, t('action.fold'))}
           </button>
         )}
         {check && (
-          <button disabled={busy} onClick={doCheck} className={cx(btn, sentCls('check'))} style={{ background: 'linear-gradient(180deg,#3d4452,#2a2f39)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'check'}>
+          <button disabled={busy} onClick={doCheck} className={cx(btn, sentCls('check'))} style={{ background: 'linear-gradient(180deg,var(--act-check-from),var(--act-check-to))', color: 'var(--act-check-fg)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'check'}>
             {pending('check')}
             {t('action.check')}
           </button>
         )}
         {call && (
-          <button disabled={busy} onClick={doCall} className={cx(btn, isArmed('call', callSig) && armedCls, sentCls('call'))} style={{ background: 'linear-gradient(180deg,#2f8f59,#1f6b41)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'call'}>
+          <button disabled={busy} onClick={doCall} className={cx(btn, isArmed('call', callSig) && armedCls, sentCls('call'))} style={{ background: 'linear-gradient(180deg,var(--act-call-from),var(--act-call-to))', color: 'var(--act-call-fg)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'call'}>
             {pending('call')}
             {label('call', callSig, t('action.call'))} {amountOf('call', callSig, call.amount)}
           </button>
         )}
         {window_ && (
-          <button ref={toggle} disabled={busy} onClick={() => setOpen((o) => !o)} className={btn} style={{ background: 'linear-gradient(180deg,#e6c56b,#b48e22)', color: '#0a0b0d' }} aria-expanded={open} aria-keyshortcuts="R">
+          <button ref={toggle} disabled={busy} onClick={() => setOpen((o) => !o)} className={btn} style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }} aria-expanded={open} aria-keyshortcuts="R">
             {bet ? t('action.bet') : t('action.raise')}
           </button>
         )}
         {allin && !window_ && (
-          <button disabled={busy} onClick={doAllin} className={cx(btn, isArmed('allin', allinSig) && armedCls, sentCls('allin'))} style={{ background: 'linear-gradient(180deg,#e08227,#a8570f)' }} aria-busy={busy && sent?.key === 'allin'}>
+          <button disabled={busy} onClick={doAllin} className={cx(btn, isArmed('allin', allinSig) && armedCls, sentCls('allin'))} style={{ background: 'linear-gradient(180deg,var(--act-allin-from),var(--act-allin-to))', color: 'var(--act-allin-fg)' }} aria-busy={busy && sent?.key === 'allin'}>
             {pending('allin')}
             {label('allin', allinSig, t('action.allin'))} {amountOf('allin', allinSig, allin.amount)}
           </button>

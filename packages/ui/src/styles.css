@@ -32,9 +32,17 @@
   --color-gold-700: #8a6b17;
 
   --color-success: #3fa36b;
-  --color-danger: #c4474a;
+  /* Text on the dark panels (4.5:1 or more on ink-700 to ink-950). */
+  --color-danger: #e0625f;
+  /* A filled badge under white text (a count): 4.5:1 or more. */
+  --color-danger-strong: #c4474a;
   --color-warning: #d99a2b;
-  --color-info: #4f86c6;
+  --color-info: #5a90cf;
+
+  /* Friends' status: always drawn with a shape and a word as well (a dot, a moon, a ring), never by colour alone. */
+  --color-presence-online: #3fa36b;
+  --color-presence-away: #d99a2b;
+  --color-presence-offline: #8d929c;
 
   --radius-card: 0.875rem;
   --radius-pill: 999px;
@@ -258,8 +266,8 @@
   line-height: 1;
   font-size: calc(var(--card-w) * 0.34);
 }
-.jc-card .suit-red { color: #b3212b; }
-.jc-card .suit-black { color: #15171c; }
+.jc-card .suit-red { color: var(--suit-red); }
+.jc-card .suit-black { color: var(--suit-black); }
 .jc-card-back {
   position: absolute;
   inset: 0;
@@ -468,6 +476,114 @@
   }
 }
 
-/* Four-colour deck preference (diamonds blue, clubs green). */
-[data-four-color='1'] .jc-card[data-card$='d'] .jc-card-face { color: #1f5fbf; }
-[data-four-color='1'] .jc-card[data-card$='c'] .jc-card-face { color: #1d7a3e; }
+/* Four-colour deck preference (diamonds blue, clubs green; other hues in the colour vision modes below). */
+[data-four-color='1'] .jc-card[data-card$='d'] .jc-card-face { color: var(--suit-diamond); }
+[data-four-color='1'] .jc-card[data-card$='c'] .jc-card-face { color: var(--suit-club); }
+
+/* ---------------------------------------------------------- colour vision */
+/*
+ * The account's colour vision mode (data-cv on <html>, set from the synced settings) swaps these colours; nothing is
+ * filtered over the page. Every action button also says its name, every suit has its shape, every status its shape
+ * and word, so colour is never the only cue; the modes keep the pairs that matter far apart for that kind of colour
+ * vision (fold and call above all) and keep text at 4.5:1 or more (7:1 in high contrast). The pairs and thresholds
+ * are checked in apps/web/test/color-vision.test.ts against simulated colour vision (Machado 2009), not real users.
+ */
+:root {
+  --act-fold-from: #c4474a;
+  --act-fold-to: #962a2d;
+  --act-fold-fg: #ffffff;
+  --act-check-from: #3d4452;
+  --act-check-to: #2a2f39;
+  --act-check-fg: #ffffff;
+  --act-call-from: #29824f;
+  --act-call-to: #1f6b41;
+  --act-call-fg: #ffffff;
+  --act-raise-from: #e6c56b;
+  --act-raise-to: #b48e22;
+  --act-raise-fg: #0a0b0d;
+  --act-allin-from: #b5560f;
+  --act-allin-to: #87400b;
+  --act-allin-fg: #ffffff;
+  --suit-red: #b3212b;
+  --suit-black: #15171c;
+  --suit-diamond: #1f5fbf;
+  --suit-club: #1d7a3e;
+}
+
+/* Red-weak and green-weak: fold vermilion, call blue, all-in magenta; success blue, danger orange; online blue. */
+:root[data-cv='protan'] {
+  --act-fold-from: #b8400a;
+  --act-fold-to: #8a3008;
+  --act-call-from: #3a5fcd;
+  --act-call-to: #28449a;
+  --act-allin-from: #b0306a;
+  --act-allin-to: #80224c;
+  --suit-red: #a83a0c;
+  --suit-diamond: #5b3fbf;
+  --suit-club: #0d6b6b;
+  --color-success: #6cb4ff;
+  --color-danger: #f07f3c;
+  --color-danger-strong: #b8400a;
+  --color-presence-online: #6cb4ff;
+  --color-presence-away: #ffb000;
+  --color-presence-offline: #85807a;
+}
+:root[data-cv='deutan'] {
+  --act-fold-from: #b8400a;
+  --act-fold-to: #8a3008;
+  --act-call-from: #3a5fcd;
+  --act-call-to: #28449a;
+  --act-allin-from: #b0306a;
+  --act-allin-to: #80224c;
+  --suit-club: #0b6b5e;
+  --color-success: #6cb4ff;
+  --color-danger: #f07f3c;
+  --color-danger-strong: #b8400a;
+  --color-presence-online: #6cb4ff;
+  --color-presence-away: #ffb000;
+  --color-presence-offline: #85807a;
+}
+
+/* Blue-weak: all-in and diamonds violet (orange and blue are what it confuses); online cyan. */
+:root[data-cv='tritan'] {
+  --act-allin-from: #7a3fb0;
+  --act-allin-to: #582d80;
+  --suit-diamond: #6a2fa8;
+  --color-presence-online: #4cc3d9;
+}
+
+/* High contrast: darker buttons and suits, lighter text, an outline on every action button. */
+:root[data-cv='highContrast'] {
+  --act-fold-from: #a3262a;
+  --act-fold-to: #7a1a1d;
+  --act-check-from: #2a2f39;
+  --act-check-to: #1c1f25;
+  --act-call-from: #175a35;
+  --act-call-to: #0f4227;
+  --act-raise-from: #f3dd9b;
+  --act-raise-to: #e6c56b;
+  --act-allin-from: #854600;
+  --act-allin-to: #5c3100;
+  --suit-red: #8f1820;
+  --suit-black: #000000;
+  --suit-diamond: #173f8a;
+  --suit-club: #14552b;
+  --color-ink-300: #c4c8cf;
+  --color-ink-400: #aab0b9;
+  --color-success: #5fe39a;
+  --color-danger: #ff8a8a;
+  --color-danger-strong: #a3141c;
+  --color-warning: #ffd166;
+  --color-info: #8cc4ff;
+  --color-presence-online: #5fe39a;
+  --color-presence-away: #ffd166;
+  --color-presence-offline: #c4c8cf;
+}
+:root[data-cv='highContrast'] .jc-act {
+  outline: 2px solid rgba(244, 239, 227, 0.85);
+  outline-offset: -2px;
+}
+:root[data-cv='highContrast'] .jc-act:focus-visible {
+  outline: 3px solid var(--color-gold-300);
+  outline-offset: 2px;
+}

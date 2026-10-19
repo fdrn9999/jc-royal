@@ -16,6 +16,7 @@
  *   member and kind (sent again: still one).
  */
 import {
+  isKstNight,
   tournamentRecovery,
   tournamentStructureProblem,
   TournamentStructureSchema,
@@ -26,11 +27,13 @@ import {
   type TournamentStructure,
   type TournamentTemplateDto,
 } from '@jc/types';
+import { outboxForEntries } from '@jc/db';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { audit, searchAudit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
+import { queuePush } from '../lib/notify';
 import { roomCall } from '../lib/room';
 import {
   newTournamentId,
@@ -429,7 +432,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     // Reopened with every seat taken: a tournament that starts by itself starts now (as the last registration would have).
     let start = null;
     const t = await loadRow(c.env.DB, id);
-    if (to === 'registering' && t?.autoStart && t.registered >= t.capacity) start = await startTournament(c.env, id, { actorId: c.var.user!.id, auto: true }).catch(() => null);
+    if (to === 'registering' && t?.autoStart && t.registered >= t.capacity) start = await startTournament(c.env, id, { actorId: c.var.user!.id, auto: true, ctx: c.executionCtx }).catch(() => null);
     await audit(c, 'tournament.registration', { type: 'tournament', id }, { action, from, to, ...(start ? { autoStart: { started: start.started, reason: start.reason ?? null } } : {}) });
     return c.json({ ok: true, tournament: await loadRow(c.env.DB, id) });
   })
@@ -440,7 +443,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
   .post('/tournaments/:id/start', async (c) => {
     const id = tournamentId(c);
     const { baseVersion, reason } = await parseBody(c, VersionSchema);
-    const res = await startTournament(c.env, id, { actorId: c.var.user!.id, auto: false, baseVersion });
+    const res = await startTournament(c.env, id, { actorId: c.var.user!.id, auto: false, baseVersion, ctx: c.executionCtx });
     await audit(c, 'tournament.start', { type: 'tournament', id }, { reason: reason ?? null, players: res.players, tableId: res.tableId, dropped: res.dropped, roomConfirmed: res.roomConfirmed });
     return c.json({ ok: true, ...res, tournament: await loadRow(c.env.DB, id) });
   })
@@ -462,6 +465,11 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
       tournamentNotice(db, before, 'cancelled', ['registered'], `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`, now),
     ]);
     if (!r?.meta.changes) await refused(db, id, baseVersion);
+    await queuePush(
+      c.env,
+      [outboxForEntries(db, { tournamentId: id, type: 'tournament_cancel', statuses: ['registered'], prefix: 'tournament_cancel', url: `/tournaments/${id}`, guard: `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`, now, night: isKstNight(now) })],
+      c.executionCtx,
+    );
     await audit(c, 'tournament.cancel', { type: 'tournament', id }, { reason, from: before.status, registered: before.registered, notified: sent?.meta.changes ?? 0 });
     return c.json({ ok: true, notified: sent?.meta.changes ?? 0, tournament: await loadRow(db, id) });
   })
@@ -501,6 +509,12 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     ]);
     if (!r?.meta.changes) await refused(db, id, baseVersion);
     const live = await reloadRoom(c.env, before.tableId);
+    // Stopped is told as called off (the same switch as a cancel).
+    await queuePush(
+      c.env,
+      [outboxForEntries(db, { tournamentId: id, type: 'tournament_cancel', statuses: ['stopped', 'eliminated'], prefix: 'tournament_abort', url: `/tournaments/${id}`, guard: `tn.status = 'aborted' AND tn.aborted_at = ${now}`, now, night: isKstNight(now) })],
+      c.executionCtx,
+    );
     await audit(c, 'tournament.abort', { type: 'tournament', id }, {
       reason,
       playersLeft: before.playersLeft,

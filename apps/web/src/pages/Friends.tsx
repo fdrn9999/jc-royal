@@ -1,5 +1,6 @@
 import {
   INVITE_FRESH_MS,
+  SETTINGS_FRIEND_SORTS,
   type BlockedUserDto,
   type ConversationDto,
   type DirectMessageDto,
@@ -17,10 +18,13 @@ import { EmojiPicker } from '../components/EmojiPicker';
 import { JoinCodeModal } from '../components/JoinCode';
 import { isGone, LoadFailed, Loading } from '../components/Loading';
 import { MemberName } from '../components/MemberName';
+import { PresenceCorner, PresenceLabel } from '../components/Presence';
 import { Avatar, BlockConfirm, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { setPrefs, usePrefs } from '../lib/prefs';
+import { setPresenceView, sortFriends, useFriendsPresence } from '../lib/presence';
 import { blockUser, loadBlocks, unblockUser } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
 
@@ -165,6 +169,8 @@ export function FriendsPage() {
     void load();
   }, [load]);
   useVisiblePoll(() => void load(), 15_000);
+  const prefs = usePrefs();
+  const presence = useFriendsPresence(data?.friends.map((f) => f.id).join(','));
 
   async function act(fn: () => Promise<unknown>) {
     setNote(null);
@@ -222,18 +228,42 @@ export function FriendsPage() {
             </Panel>
           )}
 
-          <Panel title={t('friends.list', { n: data.friends.length })}>
+          <Panel
+            title={t('friends.list', { n: data.friends.length })}
+            actions={
+              data.friends.length > 1 && (
+                <div className="flex shrink-0 rounded-lg border border-white/10 p-0.5" role="radiogroup" aria-label={t('friends.sortBy')}>
+                  {SETTINGS_FRIEND_SORTS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      role="radio"
+                      aria-checked={prefs.friendSort === s}
+                      onClick={() => setPrefs({ friendSort: s })}
+                      className={cx('jc-tap min-h-9 rounded-md px-2.5 text-xs font-semibold', prefs.friendSort === s ? 'bg-gold-500/20 text-gold-300' : 'text-ink-300 hover:text-ivory')}
+                      data-testid={`friend-sort-${s}`}
+                    >
+                      {t(s === 'presence' ? 'friends.sortPresence' : 'friends.sortRecent')}
+                    </button>
+                  ))}
+                </div>
+              )
+            }
+          >
             {data.friends.length === 0 ? (
               <Empty>{t('friends.empty')}</Empty>
             ) : (
               <ul className="-mx-2 divide-y divide-white/5" data-testid="friend-list">
-                {data.friends.map((f) => (
+                {sortFriends(data.friends, prefs.friendSort === 'presence' ? presence : null).map((f) => (
                   <li key={f.id} className="flex items-center gap-1" data-testid="friend-item">
                     <Link to={`/friends/${f.id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-white/[0.03]" data-testid="friend-row">
-                      <Avatar user={f} />
+                      <PresenceCorner state={presence?.[f.id]}>
+                        <Avatar user={f} />
+                      </PresenceCorner>
                       <span className="min-w-0 flex-1">
-                        <span className="flex min-w-0">
+                        <span className="flex min-w-0 items-center gap-2">
                           <MemberName name={f.nickname} role={f.role} badge className="font-semibold text-ivory" />
+                          {presence?.[f.id] && <PresenceLabel state={presence[f.id]!} className="shrink-0" />}
                         </span>
                         <span className={cx('block truncate text-xs', f.unread ? 'font-semibold text-ink-100' : 'text-ink-400')}>
                           {f.lastMessage
@@ -243,7 +273,7 @@ export function FriendsPage() {
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-1">
                         {f.lastMessage && <span className="text-[11px] text-ink-400">{shortTime(f.lastMessage.at, locale)}</span>}
-                        {f.unread > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-danger px-1.5 text-[11px] font-bold leading-5 text-white" data-testid="friend-unread">{f.unread > 99 ? '99+' : f.unread}</span>}
+                        {f.unread > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-danger-strong px-1.5 text-[11px] font-bold leading-5 text-white" data-testid="friend-unread">{f.unread > 99 ? '99+' : f.unread}</span>}
                       </span>
                     </Link>
                     <Button
@@ -497,10 +527,35 @@ export function ConversationPage() {
   const current = useRef(userId);
   current.current = userId;
   const polling = useRef(false);
+  const presence = useFriendsPresence(userId);
+  // While this conversation is on screen the server skips a push of a message from them (lib/presence.ts).
+  useEffect(() => (/^[A-Za-z0-9_-]{1,64}$/.test(userId) ? setPresenceView(`dm:${userId}`) : undefined), [userId]);
 
-  /** Marks their messages read up to the newest one shown, so one that lands meanwhile stays unread. */
+  const onScreen = useRef(true);
+  useEffect(() => {
+    onScreen.current = true;
+    return () => {
+      onScreen.current = false;
+    };
+  }, []);
+
+  /**
+   * Marks their messages read up to the newest one shown, so one that lands meanwhile stays unread. Only once they can
+   * be seen: a conversation that opened in a window out of view (a tapped push, a background tab) waits until it is.
+   */
   const markRead = useCallback(
     async (upToSeq: number) => {
+      if (document.visibilityState !== 'visible') {
+        await new Promise<void>((resolve) => {
+          const shown = () => {
+            if (document.visibilityState !== 'visible') return;
+            document.removeEventListener('visibilitychange', shown);
+            resolve();
+          };
+          document.addEventListener('visibilitychange', shown);
+        });
+        if (!onScreen.current || current.current !== userId) return;
+      }
       await api(`/api/dm/${userId}/read`, { body: { upToSeq } }).catch(() => {});
       void refreshUnread();
     },
@@ -639,6 +694,7 @@ export function ConversationPage() {
 
   if (missing) return <Empty>{t('notFound')}</Empty>;
   if (!conv) return failed ? <LoadFailed onRetry={() => setAttempt((n) => n + 1)} /> : <Loading />;
+  const peerState = conv.isFriend && !conv.blocked ? presence?.[userId] : undefined;
   const lastMine = msgs.filter((m) => m.fromMe).at(-1);
   const timeFmt = new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', { timeStyle: 'short' });
   const dateFmt = new Intl.DateTimeFormat(locale === 'ko' ? 'ko-KR' : 'en-US', { dateStyle: 'medium' });
@@ -646,10 +702,15 @@ export function ConversationPage() {
     <div className="mx-auto flex h-[calc(100dvh-11.5rem)] min-h-[22rem] w-full max-w-3xl flex-col gap-3 sm:h-[calc(100dvh-8rem)]">
       <header className="flex shrink-0 items-center gap-3">
         <Link to="/friends" className="grid size-10 place-items-center rounded-full text-gold-300 hover:bg-white/5" aria-label={t('friends.title')}>←</Link>
-        <Avatar user={conv.user} />
-        <h1 className="flex min-w-0 flex-1 text-lg font-bold text-ivory" data-testid="dm-title">
-          <MemberName name={conv.user.nickname} role={conv.user.role} badge />
-        </h1>
+        <PresenceCorner state={peerState}>
+          <Avatar user={conv.user} />
+        </PresenceCorner>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <h1 className="flex min-w-0 text-lg font-bold text-ivory" data-testid="dm-title">
+            <MemberName name={conv.user.nickname} role={conv.user.role} badge />
+          </h1>
+          {peerState && <PresenceLabel state={peerState} className="-mt-0.5" />}
+        </div>
         {conv.isFriend && (
           <Button size="sm" variant="ghost" className="text-ink-300" onClick={unfriend} data-testid="unfriend">{t('friends.remove')}</Button>
         )}

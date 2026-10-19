@@ -10,3 +10,5 @@ export * from './service';
 export * from './settings';
 export * from './timebank';
 export * from './tournament';
+export * from './presence';
+export * from './notifications';

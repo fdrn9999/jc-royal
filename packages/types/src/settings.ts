@@ -9,6 +9,15 @@ import { z } from 'zod';
 /** Table looks: the same list as THEMES in @jc/ui (a web unit test keeps the two equal). */
 export const SETTINGS_THEMES = ['royal', 'emerald', 'crimson', 'sapphire'] as const;
 export const SETTINGS_AMOUNT_UNITS = ['chips', 'bb'] as const;
+/**
+ * Colour vision modes (packages/ui/src/styles.css `[data-cv]`): the meaning colours (success, danger, warning, info),
+ * the suits and the action buttons switch to colours told apart in that mode. Independent of the theme, the four-colour
+ * deck, the beginner aids and reduced motion.
+ */
+export const SETTINGS_COLOR_VISIONS = ['normal', 'protan', 'deutan', 'tritan', 'highContrast'] as const;
+export type ColorVision = (typeof SETTINGS_COLOR_VISIONS)[number];
+/** The friends list order: by status (online, away, offline) or by the newest message. */
+export const SETTINGS_FRIEND_SORTS = ['presence', 'recent'] as const;
 
 export const SyncedPrefsSchema = z.object({
   theme: z.enum(SETTINGS_THEMES),
@@ -22,12 +31,14 @@ export const SyncedPrefsSchema = z.object({
   amountUnit: z.enum(SETTINGS_AMOUNT_UNITS),
   /** Quick emoji reactions shown and sent. */
   reactions: z.boolean(),
+  colorVision: z.enum(SETTINGS_COLOR_VISIONS),
+  friendSort: z.enum(SETTINGS_FRIEND_SORTS),
 });
 export type SyncedPrefs = z.infer<typeof SyncedPrefsSchema>;
 export type SyncedPrefKey = keyof SyncedPrefs;
 export const SYNCED_PREF_KEYS = Object.keys(SyncedPrefsSchema.shape) as SyncedPrefKey[];
 /** What a device shows for a setting the account has no value for. */
-export const SYNCED_PREF_DEFAULTS: SyncedPrefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips', reactions: true };
+export const SYNCED_PREF_DEFAULTS: SyncedPrefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips', reactions: true, colorVision: 'normal', friendSort: 'presence' };
 
 /** Most favourite tables an account keeps (the newest win). */
 export const SETTINGS_FAV_MAX = 50;
@@ -79,6 +90,8 @@ export const SettingsSaveSchema = z
         autoMuck: change(z.boolean()),
         amountUnit: change(z.enum(SETTINGS_AMOUNT_UNITS)),
         reactions: change(z.boolean()),
+        colorVision: change(z.enum(SETTINGS_COLOR_VISIONS)),
+        friendSort: change(z.enum(SETTINGS_FRIEND_SORTS)),
       })
       .strict()
       .optional(),

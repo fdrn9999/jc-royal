@@ -5,7 +5,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AuthLayout } from '../components/AppShell';
 import { EmailVerify } from '../components/EmailVerify';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
-import { SignupConsent, type Agreements } from '../components/SignupConsent';
+import { NO_AGREEMENTS, SignupConsent, type Agreements } from '../components/SignupConsent';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
@@ -103,7 +103,7 @@ export function RegisterPage() {
   const [nickname, setNickname] = useState('');
   const [nickState, setNickState] = useState<'idle' | 'ok' | 'taken'>('idle');
   const [birthDate, setBirthDate] = useState('');
-  const [agreements, setAgreements] = useState<Agreements>({ age14: false, privacy: false });
+  const [agreements, setAgreements] = useState<Agreements>(NO_AGREEMENTS);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -138,7 +138,9 @@ export function RegisterPage() {
     try {
       done(
         await api<MeDto>('/api/auth/register', {
-          body: { email, password, nickname, birthDate, locale, agreements: { age14: true, privacy: true }, emailVerificationToken: verificationToken ?? undefined, referralCode: referralCode || undefined },
+          body: { email, password, nickname, birthDate, locale, agreements: { age14: true, privacy: true },
+            pushConsent: { service: agreements.pushService, night: agreements.pushService && agreements.pushNight },
+            emailVerificationToken: verificationToken ?? undefined, referralCode: referralCode || undefined },
         }),
       );
     } catch (x) {

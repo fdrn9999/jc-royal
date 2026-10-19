@@ -334,8 +334,10 @@ describe('blocking and receive settings', () => {
     for (let i = 0; i < 4; i++) {
       const x = await newUser();
       const y = await newUser();
-      const [req] = await Promise.all([y.client.post('/api/friends/requests', { userId: x.me.id }), x.client.req('PUT', `/api/blocks/${y.me.id}`)]);
+      const [req, block] = await Promise.all([y.client.post('/api/friends/requests', { userId: x.me.id }), x.client.req('PUT', `/api/blocks/${y.me.id}`)]);
       expect([201, 403]).toContain(req.status);
+      // (Checked too, so a failed block is told apart from a request that got past one.)
+      expect(block.status, JSON.stringify(block.body)).toBe(200);
       // Whichever landed first, nothing is left between them except the block.
       expect((await x.client.get('/api/friends')).body).toMatchObject({ friends: [], incoming: [], outgoing: [] });
       expect((await y.client.get('/api/friends')).body).toMatchObject({ friends: [], incoming: [], outgoing: [] });

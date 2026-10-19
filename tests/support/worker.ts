@@ -188,6 +188,17 @@ function killTree(child: ChildProcess) {
   }
 }
 
+/**
+ * A Web Push (VAPID) key pair made for this run, in memory only (never written to a file): the test worker sends pushes
+ * with it, and the tests subscribe with its public half. A new pair every time a worker starts.
+ */
+async function vapidKeys(): Promise<{ publicKey: string; privateKey: string }> {
+  const pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+  const raw = Buffer.from(await crypto.subtle.exportKey('raw', pair.publicKey)).toString('base64url');
+  const { d } = await crypto.subtle.exportKey('jwk', pair.privateKey);
+  return { publicKey: raw, privateKey: d! };
+}
+
 /** Local secrets come from .dev.vars (gitignored); create them from the examples when absent (e.g. CI). */
 export function ensureDevVars() {
   for (const app of ['apps/api', 'apps/game-worker']) {
@@ -201,6 +212,9 @@ export async function startWorker(port: number, state: string): Promise<RunningW
   const url = `http://127.0.0.1:${port}`;
   // A server left on the port would pass the health check below in place of this one.
   if (await answers(url)) throw new Error(`port ${port} is still served by an earlier worker`);
+  const vapid = await vapidKeys();
+  // Pushes go to the local stand-in global-setup started (tests/support/push-sink.ts), never to a push service.
+  const sink = process.env.TEST_PUSH_SINK;
   const child = spawn(
     process.execPath,
     [
@@ -215,6 +229,9 @@ export async function startWorker(port: number, state: string): Promise<RunningW
       '--var', 'ADMIN_BOOTSTRAP_TOKEN:test-bootstrap-token-0123456789',
       // Members' rooms with nobody seated close after 8 s here (10 min in production).
       '--var', 'MEMBER_IDLE_CLOSE_MS:8000',
+      '--var', `VAPID_PUBLIC_KEY:${vapid.publicKey}`,
+      '--var', `VAPID_PRIVATE_KEY:${vapid.privateKey}`,
+      ...(sink ? ['--var', `PUSH_SINK_URL:${sink}`] : []),
     ],
     {
       cwd: root,

@@ -26,10 +26,12 @@ import { DUMMY_HASH, hashPassword, randomToken, sha256, verifyPassword } from '.
 import { fail, parseBody } from '../lib/http';
 import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
 import { notices } from '../lib/notices';
+import { saveSignupConsent } from '../lib/notification-settings';
 import { clientIp, rateLimit } from '../lib/rate-limit';
 import { checkReferralCode, findReferrer, recordReferral, settleReferral } from '../lib/referral';
 import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
+import { signedOut } from '../lib/signout';
 
 export function toMe(u: AuthUser): MeDto {
   return {
@@ -192,6 +194,13 @@ export const authRoutes = new Hono<AppEnv>()
       if (isUniqueViolation(e, 'email')) fail(409, 'email_taken', 'email already registered');
       throw e;
     }
+    // The optional push consents. A failure leaves them off (no push is sent; My page can give them again), never the
+    // signup.
+    try {
+      await saveSignupConsent(c.env, id, body.pushConsent, Date.now());
+    } catch (e) {
+      console.error('signup push consent', e instanceof Error ? e.message : e);
+    }
     // The proof is single-use. It survives a failed insert (e.g. a nickname race) so the member can retry.
     if (body.emailVerificationToken) await db.delete(ev).where(eq(ev.email, body.email));
     const grant = Number(c.env.SIGNUP_GRANT);
@@ -239,7 +248,8 @@ export const authRoutes = new Hono<AppEnv>()
     return c.json(toMe(u));
   })
   .post('/logout', async (c) => {
-    await destroySession(c, 'user');
+    const gone = await destroySession(c, 'user');
+    if (gone) signedOut(c, { user: gone.userId, session: gone.id });
     return c.json({ ok: true });
   })
   .post('/password-reset/request', async (c) => {
@@ -280,6 +290,7 @@ export const authRoutes = new Hono<AppEnv>()
       db.update(schema.users).set({ passwordHash: newHash, updatedAt: Date.now() }).where(eq(schema.users.id, row.userId)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, row.userId)),
     ]);
+    signedOut(c, { user: row.userId });
     return c.json({ ok: true });
   })
   // ----- authenticated -----
@@ -332,6 +343,7 @@ export const authRoutes = new Hono<AppEnv>()
       // Sign out every other device.
       db.delete(schema.sessions).where(and(eq(schema.sessions.userId, me.id), ne(schema.sessions.id, c.var.session!.id))),
     ]);
+    signedOut(c, { user: me.id, except: c.var.session!.id });
     return c.json({ ok: true });
   })
   .get('/me/sessions', requireUser, async (c) => {
@@ -342,7 +354,11 @@ export const authRoutes = new Hono<AppEnv>()
     return c.json(rows.map((r) => ({ ...r, current: r.id === c.var.session!.id })));
   })
   .delete('/me/sessions/:id', requireUser, async (c) => {
-    await c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.id, c.req.param('id')), eq(schema.sessions.userId, c.var.user!.id)));
+    const gone = await c.var.db
+      .delete(schema.sessions)
+      .where(and(eq(schema.sessions.id, c.req.param('id')), eq(schema.sessions.userId, c.var.user!.id)))
+      .returning({ id: schema.sessions.id });
+    if (gone[0]) signedOut(c, { user: c.var.user!.id, session: gone[0].id });
     return c.json({ ok: true });
   })
   .post('/me/delete', requireUser, async (c) => {
@@ -381,6 +397,12 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.handNotes).where(eq(schema.handNotes.userId, me.id)),
       // Account settings and favourite tables, with what a reset kept to undo it.
       db.delete(schema.userSettings).where(eq(schema.userSettings.userId, me.id)),
+      // Push: the account's choices, every browser registered for it, and pushes not sent yet. The consent history
+      // (notification_consents: what was agreed or withdrawn, and when) stays under the pseudonymous id, as evidence of
+      // consent; how long it is kept is an open legal question (docs/PRIVACY_OPERATIONS.md).
+      db.delete(schema.notificationSettings).where(eq(schema.notificationSettings.userId, me.id)),
+      db.delete(schema.pushSubscriptions).where(eq(schema.pushSubscriptions.userId, me.id)),
+      db.delete(schema.notificationEvents).where(eq(schema.notificationEvents.userId, me.id)),
       db
         .update(schema.referrals)
         .set({
@@ -399,5 +421,6 @@ export const authRoutes = new Hono<AppEnv>()
       // a withdrawn member), and reports. See docs/PRIVACY_OPERATIONS.md.
     ]);
     await destroySession(c, 'user');
+    signedOut(c, { user: me.id });
     return c.json({ ok: true });
   });
