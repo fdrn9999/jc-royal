@@ -25,8 +25,11 @@ test('top-up: between hands it applies at once; during a hand it waits, can be c
   const b = await signUp(browser);
   await sitWith(b.page, 'e2e-topup', 100);
   await expect(a.page.getByText(/(핸드|Hand) #1 ·/).first()).toBeVisible({ timeout: 15_000 });
-  // Let B hold the turn so A's status bar (and its top-up button) is showing.
-  await expect.poll(async () => (await checkOrCall(a.page)) || (await a.page.getByTestId('topup-open').isVisible()), { timeout: 15_000 }).toBe(true);
+  // Let B hold the turn so A's status bar (and its top-up button) is showing. The bar ignores a press in its first
+  // moment (a stray tap as it appears), so A presses until the bar is gone, not just once.
+  await expect
+    .poll(async () => (await checkOrCall(a.page), !(await a.page.getByTestId('action-bar').isVisible()) && (await a.page.getByTestId('topup-open').isVisible())), { timeout: 15_000 })
+    .toBe(true);
   await expect(a.page.getByTestId('topup-open')).toBeVisible();
 
   await a.page.getByTestId('topup-open').click();

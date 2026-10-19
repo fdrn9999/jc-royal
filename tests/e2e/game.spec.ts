@@ -36,9 +36,14 @@ test('two browsers: join, buy in, play a hand to showdown, refresh, stand up wit
     (await checkOrCall(a.page)) || (await checkOrCall(b.page));
     await expect(a.page.getByText(/승리|Winner/).first()).toBeVisible({ timeout: 500 });
   }).toPass({ timeout: 60_000 });
-  // Five board cards and both hands revealed at showdown.
+  // Five board cards at showdown. Auto-muck always applies: a winning hand is turned over for the table, a losing one
+  // stays face down for the other player (its owner may still show it) — a split turns both over.
   await expect(a.page.locator('[data-testid=board] [data-card]')).toHaveCount(5);
-  await expect(a.page.locator('[data-testid=seat-1] [data-card]')).toHaveCount(2);
+  const won = async (seat: number) => (await a.page.getByTestId(`seat-${seat}`).getByText(/승리|Winner/).count()) > 0;
+  const [aWon, bWon] = [await won(0), await won(1)];
+  expect(aWon || bWon).toBe(true);
+  await expect(a.page.locator('[data-testid=seat-1] [data-card]')).toHaveCount(bWon ? 2 : 0);
+  await expect(b.page.locator('[data-testid=seat-0] [data-card]')).toHaveCount(aWon ? 2 : 0);
 
   // Table chips are conserved.
   const stack = async (page: typeof a.page, seat: number) => Number(((await page.getByTestId(`stack-${seat}`).textContent()) ?? '0').replace(/[^\d]/g, ''));
