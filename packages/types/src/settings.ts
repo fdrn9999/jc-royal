@@ -36,12 +36,14 @@ export const SyncedPrefsSchema = z.object({
   reactions: z.boolean(),
   colorVision: z.enum(SETTINGS_COLOR_VISIONS),
   friendSort: z.enum(SETTINGS_FRIEND_SORTS),
+  /** A short vibration when it becomes my turn to act (where the device can vibrate). */
+  turnVibrate: z.boolean(),
 });
 export type SyncedPrefs = z.infer<typeof SyncedPrefsSchema>;
 export type SyncedPrefKey = keyof SyncedPrefs;
 export const SYNCED_PREF_KEYS = Object.keys(SyncedPrefsSchema.shape) as SyncedPrefKey[];
 /** What a device shows for a setting the account has no value for. */
-export const SYNCED_PREF_DEFAULTS: SyncedPrefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips', reactions: true, colorVision: 'normal', friendSort: 'presence' };
+export const SYNCED_PREF_DEFAULTS: SyncedPrefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips', reactions: true, colorVision: 'normal', friendSort: 'presence', turnVibrate: false };
 
 /** Most favourite tables an account keeps (the newest win). */
 export const SETTINGS_FAV_MAX = 50;
@@ -95,6 +97,7 @@ export const SettingsSaveSchema = z
         reactions: change(z.boolean()),
         colorVision: change(z.enum(SETTINGS_COLOR_VISIONS)),
         friendSort: change(z.enum(SETTINGS_FRIEND_SORTS)),
+        turnVibrate: change(z.boolean()),
       })
       .strict()
       .optional(),

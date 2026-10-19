@@ -363,6 +363,15 @@
 .jc-winner {
   animation: jc-winner-glow 1.4s ease-in-out infinite;
 }
+/* My seat on my turn (web Seat): a gold ring outside the plate that breathes slowly; a still ring under reduced motion. */
+@keyframes jc-turn-glow {
+  0%, 100% { box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 10px rgba(230, 197, 107, 0.35); }
+  50% { box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 18px rgba(230, 197, 107, 0.7); }
+}
+.jc-turn {
+  box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 12px rgba(230, 197, 107, 0.45);
+  animation: jc-turn-glow 1.8s ease-in-out infinite;
+}
 
 /* Academy feedback: correct answers pop, wrong ones shake. */
 @keyframes jc-pop {
@@ -469,6 +478,7 @@
   .jc-deal-in,
   .jc-pulse-gold,
   .jc-winner,
+  .jc-turn,
   .jc-pop,
   .jc-shake,
   .jc-react {

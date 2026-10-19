@@ -522,6 +522,13 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
             </span>
             <input type="checkbox" checked={prefs.reactions} onChange={(e) => setPrefs({ reactions: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-reactions" />
           </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.turnVibrate')}
+              <span className="text-xs text-ink-300">{t('settings.turnVibrateHint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.turnVibrate} onChange={(e) => setPrefs({ turnVibrate: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-turn-vibrate" />
+          </label>
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="flex flex-col gap-0.5" id="amount-unit-label">
               {t('settings.amountUnit')}

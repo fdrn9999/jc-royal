@@ -56,8 +56,9 @@ export function ActionHelp({ s }: { s: TableView }) {
         </ul>
       )}
       <div className="flex items-center justify-between gap-2 rounded-full bg-gold-500/15 py-1 pl-3 pr-1 text-xs">
-        <span className="jc-pulse-gold min-w-0 truncate font-bold text-gold-300">
-          {t('table.yourTurn')} · {t('table.canDo')}: {types.map((k) => t(`action.${k}` as MsgKey)).join(' · ')}
+        {/* "Your turn" itself is the turn label's (TurnCue.tsx), shown beside it. */}
+        <span className="min-w-0 truncate font-bold text-gold-300">
+          {t('table.canDo')}: {types.map((k) => t(`action.${k}` as MsgKey)).join(' · ')}
         </span>
         <button onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('table.actionHelp')} className={cx('jc-tap grid size-9 shrink-0 place-items-center rounded-full border text-sm font-bold', open ? 'border-gold-400 bg-gold-500/25 text-gold-300' : 'border-white/15 text-ivory')} data-testid="action-help-toggle">
           ?

@@ -6,14 +6,18 @@
  */
 import { TIME_BANK_MIN_USE_MS, type TableView } from '@jc/types';
 import { cx } from '@jc/ui';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useI18n } from '../lib/i18n';
 
 /** Draw the eye to the button this long before the turn runs out. */
 const URGENT_MS = 8_000;
 
-/** `column`: in a short screen's column (short.ts) the pill takes its width and wraps instead of widening it. */
-export function TimeBankButton({ s, onUse, column = false }: { s: TableView; onUse: (handId: string, seq: number, seen: number) => Promise<void>; column?: boolean }) {
+/**
+ * `column`: in a short screen's column (short.ts) the pill takes its width and wraps instead of widening it. `turn`: a
+ * line shown above the bank's own (the column's turn label, so the column is no taller for it), the pill edged in gold.
+ * `fallback`: shown instead when this turn has no bank.
+ */
+export function TimeBankButton({ s, onUse, column = false, turn, fallback = null }: { s: TableView; onUse: (handId: string, seq: number, seen: number) => Promise<void>; column?: boolean; turn?: ReactNode; fallback?: ReactNode }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [urgent, setUrgent] = useState(false);
@@ -29,7 +33,7 @@ export function TimeBankButton({ s, onUse, column = false }: { s: TableView; onU
   const bank = s.you.timeBank;
   const rules = s.timeBank;
   // A closing table or a maintenance under way plays the hand out at its normal pace (the room refuses it too).
-  if (!hand || !bank || !rules || s.status === 'closing' || s.maintenance?.active) return null;
+  if (!hand || !bank || !rules || s.status === 'closing' || s.maintenance?.active) return <>{fallback}</>;
   const left = Math.floor(bank.ms / 1000);
   const add = Math.floor(Math.min(rules.unitMs, bank.ms) / 1000);
   const usable = bank.ms >= TIME_BANK_MIN_USE_MS;
@@ -48,13 +52,17 @@ export function TimeBankButton({ s, onUse, column = false }: { s: TableView; onU
   return (
     <div
       className={cx(
-        'pointer-events-auto flex items-center border border-white/10 bg-ink-950/85 pl-3 pr-1 text-xs backdrop-blur',
+        'pointer-events-auto flex items-center border bg-ink-950/85 pl-3 pr-1 text-xs backdrop-blur',
+        turn ? 'border-gold-400/60' : 'border-white/10',
         column ? 'flex-wrap gap-x-2 gap-y-1 rounded-2xl' : 'gap-2 rounded-full py-0.5 sm:self-end',
       )}
       data-testid="time-bank"
     >
-      <span className="text-ink-300">
-        {t('timeBank.label')} <b className="font-mono text-ivory tabular-nums" data-testid="time-bank-left">{t('timeBank.seconds', { n: left })}</b>
+      <span className="flex min-w-0 flex-col">
+        {turn}
+        <span className="text-ink-300">
+          {t('timeBank.label')} <b className="font-mono text-ivory tabular-nums" data-testid="time-bank-left">{t('timeBank.seconds', { n: left })}</b>
+        </span>
       </span>
       {added > 0 && (
         <span className="rounded-full bg-gold-500/15 px-2 py-0.5 font-mono text-[11px] text-gold-300 tabular-nums" data-testid="time-bank-added">

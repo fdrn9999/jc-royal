@@ -15,6 +15,7 @@ import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
 import { TimeBankButton } from '../game/TimeBank';
+import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { useReactionSender } from '../game/Reactions';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
@@ -240,13 +241,16 @@ export function TablePage() {
   // Short, the status line under the board goes to the column instead.
   const tableStatus = useTableStatus(s, nextIn, amt);
 
+  // My turn: a sound (and a buzz, if asked for) once per decision, and the tab's title while the page is hidden.
+  useTurnCue(myTurn && hand ? `${hand.id}:${hand.seq}` : null, { vibrate: prefs.turnVibrate, title: t('table.turnTitle') });
+
   // Timer warning beeps on my turn.
   const lastBeep = useRef(0);
   useEffect(() => {
     if (!myTurn || !hand?.deadline) return;
     const h = setInterval(() => {
       const left = hand.deadline! - Date.now();
-      if (left < 5_000 && left > 0 && Date.now() - lastBeep.current > 950) {
+      if (left < TURN_LOW_MS && left > 0 && Date.now() - lastBeep.current > 950) {
         lastBeep.current = Date.now();
         sound.play('timer');
       }
@@ -574,18 +578,17 @@ export function TablePage() {
             )}
             {s && myTurn && (
               <>
-                {prefs.beginner ? (
-                  <ActionHelp s={s} />
+                {prefs.beginner && <ActionHelp s={s} />}
+                {short ? (
+                  // The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen.
+                  <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
                 ) : (
-                  // On a phone (and in a short screen's column) the bar itself shows it; a screen reader still hears it.
-                  <div
-                    role="status"
-                    className={cx('sr-only rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold', !short && 'sm:not-sr-only sm:block sm:self-end')}
-                  >
-                    {t('table.yourTurn')}
+                  // Wider: one line beside the time bank, so the label costs the table no height when there is one.
+                  <div className="pointer-events-none flex max-w-full flex-wrap items-center justify-center gap-2 sm:justify-end" data-testid="turn-line">
+                    <TurnBanner deadline={hand!.deadline} />
+                    <TimeBankButton s={s} onUse={addBankTime} column={false} />
                   </div>
                 )}
-                <TimeBankButton s={s} onUse={addBankTime} column={short} />
                 <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={short} />
               </>
             )}

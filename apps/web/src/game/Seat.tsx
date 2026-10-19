@@ -312,6 +312,8 @@ export function Seat(p: SeatProps) {
             'relative flex items-center rounded-full border shadow-xl backdrop-blur-sm',
             z.plate,
             p.isActor ? 'border-gold-400/80' : 'border-[var(--t-seat-border)]',
+            // My turn: a gold ring that breathes (still under reduced motion), outside the plate so the seat keeps its size.
+            p.isActor && p.isMe && !winner && 'jc-turn',
             winner && 'jc-winner',
           )}
           style={{ background: 'var(--t-seat)' }}

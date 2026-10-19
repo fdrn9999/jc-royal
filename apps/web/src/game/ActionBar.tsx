@@ -325,7 +325,8 @@ export function ActionBar({
           )}
         </div>
       )}
-      <div className={cx('relative flex rounded-2xl border border-gold-500/15 bg-ink-950/85 backdrop-blur-md', column ? 'gap-1.5 p-1.5' : 'gap-2 p-2')}>
+      {/* Shown only on my turn: a gold edge says the buttons are live. */}
+      <div className={cx('relative flex rounded-2xl border border-gold-400/60 bg-ink-950/85 shadow-[0_0_14px_rgba(230,197,107,0.22)] backdrop-blur-md', column ? 'gap-1.5 p-1.5' : 'gap-2 p-2')}>
         {/* Over the bar, so the bar (and the table above it) does not move. */}
         <p role="status" aria-live="polite" className="sr-only" data-testid="action-sending">
           {busy && sent ? t('action.sending', { action: sent.text }) : ''}
