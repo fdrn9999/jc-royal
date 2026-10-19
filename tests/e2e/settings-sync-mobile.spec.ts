@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { SYNCED_PREF_KEYS } from '@jc/types';
 import { ADMIN, adminLogin, sql } from './analytics-helpers';
 import { signUp, test, widerThanDevice } from './helpers';
 
@@ -34,7 +35,7 @@ test('settings sync on a phone: the sync line and its retry in settings, and the
   await admin.goto(`${ADMIN}/users/${mId}`);
   const panel = admin.getByTestId('member-settings');
   await panel.scrollIntoViewIfNeeded();
-  await expect(admin.getByTestId('member-settings-fields')).toHaveText('1 / 7');
+  await expect(admin.getByTestId('member-settings-fields')).toHaveText(`1 / ${SYNCED_PREF_KEYS.length}`);
   expect(await widerThanDevice(admin)).toBe(false);
   await panel.screenshot({ path: 'test-results/admin-member-settings-mobile.png', animations: 'disabled' });
   await admin.getByTestId('member-settings-reset').click();
