@@ -164,7 +164,10 @@ export interface TablePlan {
   /** The centre of the pot row, where chips fly to and from. */
   pot: Point;
   felt: Rect;
-  /** Area (px²) still drawn over something else or outside the box: 0 when every part has its own room. */
+  /**
+   * Area (px²) still drawn over something else or outside the box, and where nothing fits, a bet's area for each bet
+   * nearer another seat than its own: 0 when every part has its own room.
+   */
   overlap: number;
 }
 
@@ -223,7 +226,8 @@ interface Parts {
   d: Dims;
   other: SeatBox;
   mine: SeatBox;
-  blk: { w: number; h: number; potRowH: number };
+  /** The pot, the board and the status line under them; the pot row's height and the pot's widest. */
+  blk: { w: number; h: number; potRowH: number; potW: number };
   bet: { w: number; h: number };
   tpl: number[][] | null;
   /** Rows: each row's height and their sum. */
@@ -234,10 +238,12 @@ interface Parts {
 function parts(p: PlanInput, way: Way): Parts {
   const d = DIMS[way.density];
   const potRowH = d.potChip + 16;
+  const potW = d.potChip + 18 + p.chars.pot * MONO;
   const blk = {
-    w: Math.max(5 * way.card + 4 * d.boardGap + 2 * d.boardPad, d.potChip + 18 + p.chars.pot * MONO),
+    w: Math.max(5 * way.card + 4 * d.boardGap + 2 * d.boardPad, potW),
     h: potRowH + 8 + 1.4 * way.card + 2 * d.boardPad + (p.footer ? 32 : 0),
     potRowH,
+    potW,
   };
   const other = seatBox(d, p, false);
   const mine = seatBox(d, p, true);
@@ -362,16 +368,49 @@ function seatCost(w: number, h: number, q: Placed) {
   return cost;
 }
 
+/** Whether a point is nearer this seat's box than any other seat's: a bet there reads as this seat's. */
+function nearest(x: number, y: number, mine: Box, seats: Box[]) {
+  const away = (b: Box) => Math.hypot(Math.max(b.l - x, 0, x - b.r), Math.max(b.t - y, 0, y - b.b));
+  const d = away(mine);
+  return seats.every((b) => b === mine || away(b) > d);
+}
+
 /**
- * Each bet on the way from its seat to the board, as near the seat as it has room (SPOTS). The order is the viewer's
- * first, then clockwise. With `quick`, gives up (cost Infinity) at the first bet with no free spot.
+ * Where the bets may lie: `strict`, each nearer its own seat (as drawn) than any other; `loose`, wherever it first has
+ * room. Both may lie in the pot's row beside the pot, over the board's ends (the row draws only the pot, in its middle);
+ * the replay (`kept`) keeps that whole row clear, as it always has.
  */
-function placeBets(w: number, h: number, p: PlanInput, q: Placed, bet: { w: number; h: number }, quick: boolean) {
+type Bets = 'strict' | 'loose' | 'kept';
+/**
+ * Where nothing fits (planTable's last resort), what a bet lying over the board's cards costs, times what it covers:
+ * the board comes before the bets, so a bet lies on a seat's room (its own first) rather than on the cards, and astray
+ * costs more yet. What fits costs nothing either way.
+ */
+const BOARD = 4;
+
+/**
+ * Each bet on the way from its seat to the board, as near the seat as it has room (SPOTS), where `mode` lets it. The
+ * order is the viewer's first, then clockwise. With `quick`, gives up (cost Infinity) at the first bet with no such spot.
+ */
+function placeBets(w: number, h: number, p: PlanInput, q: Placed, s: Parts, quick: boolean, mode: Bets) {
   const bets: Point[] = [];
   const taken: Box[] = [];
   let cost = 0;
-  const bx = (q.block.l + q.block.r) / 2;
-  const by = (q.block.t + q.block.b) / 2;
+  const { bet, blk } = s;
+  const k = q.block;
+  const bx = (k.l + k.r) / 2;
+  const by = (k.t + k.b) / 2;
+  // The board's cards apart from the rest of the room kept: the pot's row middle and the status line under the cards.
+  const top = k.t + blk.potRowH + 8;
+  const under = top + 1.4 * s.way.card + 2 * s.d.boardPad;
+  const cards: Box[] = mode === 'kept' ? [] : [{ ...k, t: top, b: Math.min(k.b, under) }];
+  const kept: Box[] =
+    mode === 'kept'
+      ? [k]
+      : [{ l: bx - blk.potW / 2, r: bx + blk.potW / 2, t: k.t, b: k.t + blk.potRowH }, ...(k.b > under ? [{ ...k, t: under }] : [])];
+  // The seats as drawn, without the room kept above their cards (the anchor is the centre of what is drawn).
+  const strict = mode === 'strict';
+  const drawn = strict ? q.rects.map((r, i) => ({ ...r, t: 2 * q.anchors[i]!.y - r.b })) : [];
   for (let k = 0; k < p.n; k++) {
     const seat = (p.anchor + k) % p.n;
     const r = q.rects[seat]!;
@@ -387,9 +426,13 @@ function placeBets(w: number, h: number, p: PlanInput, q: Placed, bet: { w: numb
       const x = sx + Math.cos(angle + a) * t;
       const y = sy + Math.sin(angle + a) * t;
       const c = { l: x - bet.w / 2, r: x + bet.w / 2, t: y - bet.h / 2, b: y + bet.h / 2 };
-      let o = outside(c, w, h) + hit(c, q.block);
+      let o = outside(c, w, h);
+      for (const z of kept) o += hit(c, z);
+      for (const z of cards) o += BOARD * hit(c, z);
       for (const z of q.rects) if (o < bestCost) o += hit(c, z);
       for (const z of taken) if (o < bestCost) o += hit(c, z);
+      // Nearer another seat than its own, the bet reads as that seat's: worse than lying on anything.
+      if (strict && o < bestCost && !nearest(x, y, drawn[seat]!, drawn)) o += (BOARD + 1) * bet.w * bet.h;
       if (o < bestCost) {
         bestCost = o;
         best = c;
@@ -413,12 +456,19 @@ function ways(n: number, densities: readonly Density[]): Way[] {
   return out;
 }
 
-/** The way laid out in a w×h box, or null when `quick` and something overlaps. */
-function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick: boolean): TablePlan | null {
+/**
+ * The way laid out in a w×h box, or null when `quick` and something overlaps (or, `strict`, a bet lies nearer another
+ * seat). `crowded` keeps the masks whose seats overlap at this size, whatever the bets: a later try skips them.
+ */
+function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick: boolean, mode: Bets, crowded?: Set<number>): TablePlan | null {
+  if (quick && crowded?.has(mask)) return null;
   const q = place(w, h, p, s, mask);
   const seats = seatCost(w, h, q);
-  if (quick && seats > 0) return null;
-  const { bets, cost } = placeBets(w, h, p, q, s.bet, quick);
+  if (quick && seats > 0) {
+    crowded?.add(mask);
+    return null;
+  }
+  const { bets, cost } = placeBets(w, h, p, q, s, quick, mode);
   if (quick && cost > 0) return null;
   const cx = w / 2;
   const cy = h / 2;
@@ -447,28 +497,67 @@ function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick
   };
 }
 
-/** The way laid out in a w×h box with nothing overlapping, trying the gap masks of a rows template; or null. */
-function fitBox(w: number, h: number, p: PlanInput, s: Parts) {
-  if (!s.tpl) return build(w, h, p, s, 0, true);
+/**
+ * The way laid out in a w×h box with nothing overlapping (and, `strict`, every bet nearer its own seat than any
+ * other), trying the gap masks of a rows template; or null.
+ */
+function fitBox(w: number, h: number, p: PlanInput, s: Parts, mode: Bets, crowded?: Set<number>) {
+  if (!s.tpl) return build(w, h, p, s, 0, true, mode, crowded);
   const need = s.bet.h + 2 * GAP;
   for (const m of masks(s.tpl.length)) {
     if (s.rowsH + popcount(m) * need > h) continue;
-    const t = build(w, h, p, s, m, true);
+    const t = build(w, h, p, s, m, true, mode, crowded);
     if (t) return t;
   }
   return null;
 }
 
-/** Lays the table out in a box of a given size: the first way, largest first, with nothing overlapping, else the one overlapping least. */
-export function planTable(w: number, h: number, p: PlanInput, densities: readonly Density[]): TablePlan {
+/**
+ * Lays the table out in a box of a given size: the first way, largest first, with nothing overlapping and every bet
+ * by its own seat; else, where it fits with some bet nearer another seat, that in a narrower box (down to `minW`, 8px at
+ * a time: what fits is not monotonic in the width, the rows and the ellipse change with it, so nine seats on a phone on
+ * its side may fit so in 600px but not in 608px), or that in the full box; else the one overlapping least.
+ */
+export function planTable(w: number, h: number, p: PlanInput, densities: readonly Density[], minW = w): TablePlan {
   const all = ways(p.n, densities).map((way) => parts(p, way));
-  for (const s of all) {
-    const t = fitBox(w, h, p, s);
+  // Where the seats overlap at a width they do for every way of placing the bets: each pass skips what one before found.
+  const crowded = new Map<string, Set<number>>();
+  const at = (x: number, i: number) => {
+    const key = `${x}:${i}`;
+    let c = crowded.get(key);
+    if (!c) crowded.set(key, (c = new Set()));
+    return c;
+  };
+  const first = (x: number, mode: Bets) => {
+    for (const [i, s] of all.entries()) {
+      const t = fitBox(x, h, p, s, mode, at(x, i));
+      if (t) return t;
+    }
+    return null;
+  };
+  const strict = first(w, 'strict');
+  if (strict) return strict;
+  const loose = first(w, 'loose');
+  // Narrower only where the seats and the bets fit in the full width, some bet astray (where they do not, a narrower box
+  // has seldom been found to hold them, and seeking it costs the most).
+  if (loose) {
+    for (let x = w - 8; x >= minW; x -= 8) {
+      const t = first(x, 'strict');
+      if (t) return t;
+    }
+    return loose;
+  }
+  // Else as it always fitted, the pot's whole row clear: a bet beside the pot may take the only room of one after it.
+  for (const [i, s] of all.entries()) {
+    const t = fitBox(w, h, p, s, 'kept', at(w, i));
     if (t) return t;
   }
+  // Else the least overlap, each bet by its own seat over its own room: one over the board's cards counts BOARD times,
+  // one by another seat more than that (where no spot is free, it may lie on its own seat, or not draw clear of a
+  // neighbour's, but not over the cards or across the table).
   let best: TablePlan | null = null;
   for (const s of all) {
-    const t = build(w, h, p, s, 0, false)!;
+    const t = build(w, h, p, s, 0, false, 'strict')!;
     if (!best || t.overlap < best.overlap) best = t;
   }
   return best!;
@@ -476,7 +565,8 @@ export function planTable(w: number, h: number, p: PlanInput, densities: readonl
 
 /** The least height (to 2px) at which this way leaves nothing overlapping, or Infinity. */
 function leastHeight(w: number, p: PlanInput, s: Parts, hi: number) {
-  const fits = (h: number, m: number) => build(w, h, p, s, m, true) !== null;
+  // The replay keeps the fit it had: every part in its own room, the pot's whole row clear (not yet each bet nearest its seat).
+  const fits = (h: number, m: number) => build(w, h, p, s, m, true, 'kept') !== null;
   if (!s.tpl) {
     for (let h = Math.ceil(s.blk.h + s.mine.h + s.mine.top); h <= hi; h += 8) {
       if (!fits(h, 0)) continue;
@@ -511,12 +601,12 @@ function leastHeight(w: number, p: PlanInput, s: Parts, hi: number) {
 export function planHeight(w: number, budget: number, cap: number, p: PlanInput, densities: readonly Density[]): TablePlan {
   const all = ways(p.n, densities).map((way) => parts(p, way));
   const target = Math.min(budget, cap);
-  const largest = all.find((s) => fitBox(w, budget, p, s));
+  const largest = all.find((s) => fitBox(w, budget, p, s, 'kept'));
   if (largest) {
     const floor = densities.indexOf(largest.way.density) + 1;
     for (const s of all) {
       if (densities.indexOf(s.way.density) > floor) break;
-      const t = fitBox(w, target, p, s);
+      const t = fitBox(w, target, p, s, 'kept');
       if (t) return t;
     }
     // Searched from the smallest seats so the bound tightens early; ties keep the larger.
@@ -525,7 +615,7 @@ export function planHeight(w: number, budget: number, cap: number, p: PlanInput,
       const h = leastHeight(w, p, s, short ? short.h : budget);
       if (h <= (short ? short.h : budget)) short = { s, h };
     }
-    if (short) return fitBox(w, short.h, p, short.s)!;
+    if (short) return fitBox(w, short.h, p, short.s, 'kept')!;
   }
   // Nothing fits: the shortest table, searched from the smallest seats so the bound tightens early; ties keep the larger.
   let best: { s: Parts | null; h: number } = { s: null, h: Math.max(600, budget, 2.4 * w) };
@@ -533,5 +623,5 @@ export function planHeight(w: number, budget: number, cap: number, p: PlanInput,
     const h = leastHeight(w, p, s, best.h);
     if (h <= best.h) best = { s, h };
   }
-  return (best.s && fitBox(w, best.h, p, best.s)) || planTable(w, Math.max(budget, cap), p, densities);
+  return (best.s && fitBox(w, best.h, p, best.s, 'kept')) || planTable(w, Math.max(budget, cap), p, densities);
 }

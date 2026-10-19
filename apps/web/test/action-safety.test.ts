@@ -33,6 +33,16 @@ describe('shortcutFor', () => {
     expect(shortcutFor(key('c', { target: null }), false)).toBe('checkCall');
   });
 
+  it('Escape closes the raise panel, from its amount field too, but not from another field or past a modal', () => {
+    expect(shortcutFor({ ...key('Escape'), code: 'Escape' }, false)).toBe('closePanel');
+    expect(shortcutFor({ ...key('Escape'), code: 'Escape', target: el('button') }, false)).toBe('closePanel');
+    expect(shortcutFor({ ...key('Escape'), code: 'Escape', target: el('input', '[data-raise-panel]') }, false)).toBe('closePanel');
+    expect(shortcutFor({ ...key('Escape'), code: 'Escape', target: el('input') }, false)).toBeNull();
+    expect(shortcutFor({ ...key('Escape'), code: 'Escape', target: el('[data-no-shortcuts]') }, false)).toBeNull();
+    expect(shortcutFor({ ...key('Escape'), code: 'Escape' }, true)).toBeNull();
+    expect(shortcutFor({ ...key('Escape'), code: 'Escape', repeat: true }, false)).toBeNull();
+  });
+
   it('uses the physical key when the layout gives no Latin letter (Korean IME on)', () => {
     expect(shortcutFor(key('ㄹ', { code: 'KeyF' }), false)).toBe('fold');
     expect(shortcutFor(key('ㅊ', { code: 'KeyC' }), false)).toBe('checkCall');

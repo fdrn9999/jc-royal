@@ -5,7 +5,7 @@
 import type { ActionType, LegalOption } from '@jc/types';
 
 export type ArmKey = 'fold' | 'call' | 'allin' | 'commit';
-export type Shortcut = 'fold' | 'checkCall' | 'raisePanel';
+export type Shortcut = 'fold' | 'checkCall' | 'raisePanel' | 'closePanel';
 
 /** A first press on a risky action. It confirms only the same action at the same amount, before `until`. */
 export interface Armed {
@@ -16,6 +16,8 @@ export interface Armed {
 
 /** Shortcuts never fire from these: typing, choosing, a dialog, or anything marked (the table chat). */
 const NO_SHORTCUTS = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [data-no-shortcuts]';
+/** The raise panel: Escape closes it from its own amount field too. */
+const RAISE_PANEL = '[data-raise-panel]';
 /** Physical keys, for keyboards whose layout or IME mode (Korean 한글) does not give Latin letters. */
 const BY_CODE: Record<string, string> = { KeyF: 'f', KeyC: 'c', KeyR: 'r' };
 
@@ -30,11 +32,16 @@ export interface KeyLike {
   target: unknown;
 }
 
-/** The shortcut a key press asks for, or null when it is held down, modified, typed into a field, or a modal is open. */
+/**
+ * The shortcut a key press asks for, or null when it is held down, modified, typed into a field, or a modal is open.
+ * Escape closes the raise panel (sending nothing), also from the panel's amount field but from no other field.
+ */
 export function shortcutFor(e: KeyLike, modalOpen: boolean): Shortcut | null {
   if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || modalOpen) return null;
   const el = e.target as { closest?: (selector: string) => unknown } | null;
-  if (typeof el?.closest === 'function' && el.closest(NO_SHORTCUTS)) return null;
+  const inside = (sel: string) => typeof el?.closest === 'function' && !!el.closest(sel);
+  if (e.key === 'Escape') return !inside(NO_SHORTCUTS) || inside(RAISE_PANEL) ? 'closePanel' : null;
+  if (inside(NO_SHORTCUTS)) return null;
   const k = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : BY_CODE[e.code ?? ''];
   return k === 'f' ? 'fold' : k === 'c' ? 'checkCall' : k === 'r' ? 'raisePanel' : null;
 }

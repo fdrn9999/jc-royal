@@ -25,6 +25,9 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       PLAY_URL: https://jc-royal.site
       ADMIN_URL: https://admin.jc-royal.site
+      # The same workers on the account's workers.dev subdomain (docs/DEPLOYMENT.md), outside the zone's security.
+      PLAY_DEV_URL: https://play.jcroyal.workers.dev
+      ADMIN_DEV_URL: https://admin.jcroyal.workers.dev
     steps:
       - name: Check Cloudflare credentials
         run: |
@@ -54,12 +57,36 @@ jobs:
         run: pnpm exec wrangler deploy --env production -c apps/api/wrangler.jsonc
       - name: Deploy admin console
         run: pnpm exec wrangler deploy --env production -c apps/admin/wrangler.jsonc
+      # The new workers must answer 200 on workers.dev (the health JSON ok, both sites' pages). The custom domains must
+      # answer too, but the zone's security has answered GitHub's runners 403 (main runs 39092482636, 39128959502, while
+      # the site answered elsewhere): a 403 Cloudflare marks as its challenge is a warning, any other answer but 200 a
+      # failure, with its headers shown.
       - name: Smoke check
         run: |
           for i in 1 2 3 4 5 6; do
-            if curl -fsS "$PLAY_URL/api/health" | grep -q '"ok":true'; then break; fi
-            [ "$i" = 6 ] && { echo "::error::$PLAY_URL/api/health did not return ok"; exit 1; }
+            if curl -fsS "$PLAY_DEV_URL/api/health" | grep -q '"ok":true'; then break; fi
+            [ "$i" = 6 ] && { echo "::error::$PLAY_DEV_URL/api/health did not return ok"; exit 1; }
             sleep 5
           done
-          curl -fsS -o /dev/null -w 'play %{http_code}\n' "$PLAY_URL/"
-          curl -fsS -o /dev/null -w 'admin %{http_code}\n' "$ADMIN_URL/"
+          for url in "$PLAY_DEV_URL/" "$ADMIN_DEV_URL/"; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url")
+            echo "$url $code"
+            [ "$code" = 200 ] || { echo "::error::$url answered $code"; exit 1; }
+          done
+          for url in "$PLAY_URL/api/health" "$PLAY_URL/" "$ADMIN_URL/"; do
+            head=$(curl -sS -o "$RUNNER_TEMP/smoke-body" -D - "$url" | tr -d '\r')
+            code=$(printf '%s\n' "$head" | awk 'NR == 1 { print $2 }')
+            echo "$url $code"
+            if [ "$code" = 200 ]; then
+              # The health JSON itself, not just any page the domain answers 200 with.
+              case "$url" in */api/health) grep -q '"ok":true' "$RUNNER_TEMP/smoke-body" || { echo "::error::$url answered 200 without ok"; exit 1; } ;; esac
+              continue
+            fi
+            if [ "$code" = 403 ] && printf '%s\n' "$head" | grep -qi '^cf-mitigated: *challenge'; then
+              echo "::warning::$url answered this runner with a Cloudflare challenge; the workers answered on workers.dev"
+              continue
+            fi
+            printf '%s\n' "$head" | grep -iE '^(HTTP|server|cf-ray|cf-mitigated|content-type|location)'
+            echo "::error::$url answered $code"
+            exit 1
+          done

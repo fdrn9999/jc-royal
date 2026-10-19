@@ -106,6 +106,14 @@ test('keyboard shortcuts: same two-press confirmation as a tap, no repeats, noth
   }).toPass({ timeout: 30_000 });
   await a.page.waitForTimeout(400);
   const n = aSent.length;
+  // R opens the bet panel; Escape closes it from its amount field, sending nothing, and the Bet button has the focus.
+  await a.page.keyboard.press('r');
+  const amountA = barA.getByTestId('action-amount');
+  await amountA.fill('300');
+  await amountA.press('Escape');
+  await expect(barA.getByTestId('action-commit')).toHaveCount(0);
+  await expect(barA.getByRole('button', { name: /^(벳|Bet)$/ })).toBeFocused();
+  expect(aSent.length).toBe(n);
   // F with a free check only arms the fold.
   await a.page.keyboard.press('f');
   await expect(barA.getByRole('button', { name: /폴드|Fold/ })).toHaveText(/^(한 번 더|Press again)/);

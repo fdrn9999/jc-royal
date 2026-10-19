@@ -130,6 +130,8 @@ export interface SeatProps {
   onPick?: () => void;
   /** My seat after a hand, with auto-muck on: a button over each card turns it face up for the table. */
   onShow?: (card: 0 | 1) => void;
+  /** Those buttons lie on the cards' lower half, clear of the plate, instead of above them (no room kept there). */
+  showOver?: boolean;
   /** The quick reaction this player sent, while it shows. */
   reaction?: SeatReaction | null;
   /** My seat at a real table, with reactions on: tapping the plate opens the reaction tray. */
@@ -212,8 +214,9 @@ export function Seat(p: SeatProps) {
   return (
     <div
       ref={root}
-      // Open, the tray goes above the bets, the board and the effects.
-      className={cx('absolute -translate-x-1/2 -translate-y-1/2', trayOpen ? 'z-40' : 'z-10')}
+      // Open, the tray goes above the bets, the board and the effects. My own seat is above the board and the bets: where
+      // a cramped table (a raise panel open on a small phone) cannot keep them apart, my cards stay in sight.
+      className={cx('absolute -translate-x-1/2 -translate-y-1/2', trayOpen ? 'z-40' : p.isMe ? 'z-[25]' : 'z-10')}
       style={p.style}
       data-testid={`seat-${s.seatIndex}`}
       data-state={s.state}
@@ -237,7 +240,7 @@ export function Seat(p: SeatProps) {
               />
             ))}
             {p.onShow && (
-              <div className="absolute bottom-full left-0 mb-1 flex gap-1" data-testid="show-cards">
+              <div className={cx('absolute left-0 flex gap-1', p.showOver ? 'bottom-2 z-10' : 'bottom-full mb-1')} data-testid="show-cards">
                 {cards.map((_, i) =>
                   isShown(i) ? (
                     <span

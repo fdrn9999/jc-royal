@@ -74,9 +74,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // it needs from the shorter ones), and below 360px the labels shrink with the width, to 11px at 304px, while the tabs
   // stay 44px tall. The English labels leave 12–15% of the row spare from 304 to 360px: Linux draws the same font up to
   // 8% wider than Windows does. Should they still not fit (a wide phone font, enlarged text), the row scrolls sideways
-  // instead of cutting off the last tab.
+  // instead of cutting off the last tab. The current tab says so by more than its colour: a bar along its top edge.
   const tab = ({ isActive }: { isActive: boolean }) =>
-    `relative flex-1 whitespace-nowrap px-[3px] py-3 text-center text-[length:clamp(11px,3.62vw,13px)] leading-5 font-semibold ${isActive ? 'text-gold-300' : 'text-ink-300'}`;
+    `relative flex-1 whitespace-nowrap px-[3px] py-3 text-center text-[length:clamp(11px,3.62vw,13px)] leading-5 font-semibold ${isActive ? "text-gold-300 after:absolute after:inset-x-[18%] after:top-0 after:h-0.5 after:rounded-full after:bg-gold-400 after:content-['']" : 'text-ink-300'}`;
   const link = ({ isActive }: { isActive: boolean }) =>
     `shrink-0 whitespace-nowrap px-2 py-2 text-sm font-semibold tracking-wide transition lg:px-3 ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
   return (

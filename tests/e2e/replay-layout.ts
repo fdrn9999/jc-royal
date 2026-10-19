@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 
 export interface LayoutIssue {
-  kind: 'clipped' | 'covered' | 'overlap' | 'offscreen' | 'truncated';
+  kind: 'clipped' | 'covered' | 'overlap' | 'offscreen' | 'truncated' | 'astray';
   item: string;
   by?: string;
   px?: number;

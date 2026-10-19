@@ -90,10 +90,18 @@ test('mobile: tournaments are a bottom tab of their own, whole on one line besid
       expect(await widerThanDevice(page)).toBe(false);
       if (w === 320) await page.screenshot({ path: test.info().outputPath(`nav-${locale}-320.png`) });
 
-      // One tap from anywhere opens the list, and the tab says it is the current page.
+      // One tap from anywhere opens the list, and the tab says it is the current page, to the eye by more than its
+      // colour (a bar along its top edge, which only the current tab has).
       await tab.tap();
       await expect(page).toHaveURL(/\/tournaments$/);
       await expect(tab).toHaveAttribute('aria-current', 'page');
+      const bars = await page.evaluate(() =>
+        Array.from(Array.from(document.querySelectorAll('nav')).find((n) => getComputedStyle(n).position === 'fixed')!.querySelectorAll('a')).map((a) => {
+          const s = getComputedStyle(a, '::after');
+          return s.content !== 'none' && parseFloat(s.height) >= 2 && s.backgroundColor !== 'rgba(0, 0, 0, 0)';
+        }),
+      );
+      expect(bars, `${locale} ${w}: only the current tab has its bar`).toEqual([false, true, false, false, false, false]);
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(locale === 'ko' ? '토너먼트' : 'Tournaments');
     }
   }

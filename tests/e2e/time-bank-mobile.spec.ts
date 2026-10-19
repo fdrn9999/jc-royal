@@ -81,7 +81,7 @@ test('mobile: the time bank on my turn (time left, one tap adds it, the clock gr
   await expect(a.page.getByTestId('time-bank-added')).toHaveCount(0);
   // A thumb-sized button inside the phone's width, above the action bar.
   const box = (await use.boundingBox())!;
-  expect(box.height).toBeGreaterThanOrEqual(36);
+  expect(box.height).toBeGreaterThanOrEqual(40);
   expect(box.x + box.width).toBeLessThanOrEqual(a.page.viewportSize()!.width);
   const bar = (await a.page.getByTestId('action-bar').boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(bar.y + 1);
