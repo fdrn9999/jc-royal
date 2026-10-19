@@ -91,10 +91,16 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
     toCall: z.number().int().nonnegative(),
     kind: z.enum(['check', 'checkFold', 'fold']).nullable(),
   }),
-  /** The seated player's auto-muck setting: a losing showdown hand stays face down where the rules allow it. */
+  /**
+   * The auto-muck setting pages before it was always on sent. Auto-muck now always applies (a losing showdown hand stays
+   * face down where the rules allow it): the room acknowledges this for a seated player and changes nothing.
+   */
   z.object({ t: z.literal('muck'), reqId: ReqId, on: z.boolean() }),
-  /** Shows one of the player's two cards (0 or 1) from the hand that just ended, until the next deal. Auto-muck on only. */
-  z.object({ t: z.literal('show'), reqId: ReqId, card: z.number().int().min(0).max(1) }),
+  /**
+   * Shows the player's first card (0), second (1) or both from the hand that just ended, until the next deal: any player
+   * dealt in whose cards the showdown did not turn over (folded, won uncontested, or a losing hand kept face down).
+   */
+  z.object({ t: z.literal('show'), reqId: ReqId, card: z.union([z.literal(0), z.literal(1), z.literal('both')]) }),
   /**
    * Adds time from the player's time bank to their current turn. `seq` and `seen` (HandView.seq and HandView.extraMs, 0
    * when absent) are what the player saw: a second tap sent before the first one's result was shown adds nothing.

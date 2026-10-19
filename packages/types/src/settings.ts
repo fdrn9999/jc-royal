@@ -26,7 +26,10 @@ export const SyncedPrefsSchema = z.object({
   confirmRisky: z.boolean(),
   /** Beginner aids at the table. */
   beginner: z.boolean(),
-  /** Keep a losing showdown hand face down where the rules allow; the tables the member sits at take it on. */
+  /**
+   * No longer used: auto-muck always applies at every table and the setting is gone from the page. Kept so a save from
+   * an older page (which still sends it) is accepted; nothing reads it.
+   */
   autoMuck: z.boolean(),
   amountUnit: z.enum(SETTINGS_AMOUNT_UNITS),
   /** Quick emoji reactions shown and sent. */

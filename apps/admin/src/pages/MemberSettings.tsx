@@ -16,8 +16,8 @@ import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
 import { Feedback, LoadError, Modal, PageState, type Note } from '../ui';
 
 type Kind = 'reset' | 'restore';
-type ResetPreview = { preview: true; settings: AdminSettingsDiagDto; seatedTables: number; restorableMs: number };
-type RestorePreview = { preview: true; settings: AdminSettingsDiagDto; restore: { fields: number; favourites: number }; seatedTables: number };
+type ResetPreview = { preview: true; settings: AdminSettingsDiagDto; restorableMs: number };
+type RestorePreview = { preview: true; settings: AdminSettingsDiagDto; restore: { fields: number; favourites: number } };
 type Preview = ResetPreview | RestorePreview;
 /** A refusal that means the settings moved on since the page loaded: the panel shows them as they are now. */
 const STALE = ['settings_changed', 'settings_already_reset', 'settings_not_restorable'];
@@ -154,12 +154,11 @@ export function MemberSettingsPanel({ userId }: { userId: string }) {
           ) : 'error' in pv ? (
             <Feedback note={{ ok: false, text: errText(pv.error, t) }} testid="settings-pv-error" />
           ) : (
-            <ul className="flex list-disc flex-col gap-1.5 pl-5 text-ink-200" data-testid="settings-pv-scope" data-fields={scope?.fields} data-favourites={scope?.favourites} data-seated={pv.data.seatedTables}>
+            <ul className="flex list-disc flex-col gap-1.5 pl-5 text-ink-200" data-testid="settings-pv-scope" data-fields={scope?.fields} data-favourites={scope?.favourites}>
               {act === 'reset' ? (
                 <>
                   <li>{scope && scope.fields + scope.favourites > 0 ? t('setPvReset', { f: scope.fields, n: scope.favourites }) : t('setPvResetEmpty')}</li>
                   <li>{t('setPvDevices')}</li>
-                  {pv.data.seatedTables > 0 && <li>{t('setPvSeatedReset', { n: pv.data.seatedTables })}</li>}
                   <li>
                     {scope && scope.fields + scope.favourites > 0
                       ? t('setPvUndo', { days: Math.round(('restorableMs' in pv.data ? pv.data.restorableMs : SETTINGS_RESTORE_MS) / DAY_MS) })
@@ -170,7 +169,6 @@ export function MemberSettingsPanel({ userId }: { userId: string }) {
                 <>
                   <li>{t('setPvRestore', { at: when(pv.data.settings.reset?.at ?? null), f: scope?.fields ?? 0, n: scope?.favourites ?? 0 })}</li>
                   <li>{t('setPvDevices')}</li>
-                  {pv.data.seatedTables > 0 && <li>{t('setPvSeatedRestore', { n: pv.data.seatedTables })}</li>}
                   <li>{t('setPvNoUndoAgain')}</li>
                 </>
               )}

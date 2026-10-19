@@ -104,10 +104,13 @@ describe('mergeSettings', () => {
     expect(m.fav.gone).toBeUndefined();
   });
 
-  it('reports the auto-muck the account ends with only when it changed', () => {
-    expect(mergeSettings(EMPTY_STATE, save({ prefs: { autoMuck: { v: true, ago: 0 } } }), NOW).muck).toBe(true);
-    expect(mergeSettings(EMPTY_STATE, save({ prefs: { autoMuck: { v: false, ago: 0 } } }), NOW).muck).toBeUndefined();
-    expect(mergeSettings(EMPTY_STATE, save({ prefs: { theme: { v: 'emerald', ago: 0 } } }), NOW).muck).toBeUndefined();
+  // Auto-muck always applies now (2026-10-19): an older page still sends the setting, which is kept like any other and
+  // goes nowhere else (it replaced a test that the tables were told of a change).
+  it('accepts the auto-muck an older page sends, and reports nothing for the tables', () => {
+    const m = mergeSettings(EMPTY_STATE, save({ prefs: { autoMuck: { v: true, ago: 0 } } }), NOW);
+    expect(m.changed).toBe(true);
+    expect(m.prefs.autoMuck?.[0]).toBe(true);
+    expect('muck' in m).toBe(false);
   });
 });
 

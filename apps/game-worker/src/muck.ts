@@ -1,27 +1,27 @@
 /**
- * The member's account auto-muck as the api pushes it to a seat (lib/room.ts pushMuckEverywhere). Each push carries the
- * settings revision it was saved as, which only grows; pushes run in the background, so two quick saves can arrive in the
- * other order. A push not newer than the last one this seat took is ignored: an older "off" arriving late must not turn
- * a losing hand's cards over at the next showdown. A push without a revision (an api from before revisions were sent)
- * applies as it always did. The player's own 'muck' command does not move the revision.
- *
- * Returns what the room does: 'none' (an older push, or nothing changed), 'save' (only the revision moved) or 'show'
- * (the value changed: save it and send the player's view).
+ * What happens to the players' cards once a hand ends (room.ts). Auto-muck always applies: a losing showdown hand stays
+ * face down where the rules allow it, while winning and all-in hands are turned over (packages/poker-engine hand.ts
+ * revealedHands). Until the next deal, a player dealt in whose cards the showdown did not turn over (folded, won
+ * uncontested, or lost and kept them face down) may show their first card, their second or both: a card once shown
+ * stays shown.
  */
-export function takePushedMuck(seat: { autoMuck?: boolean; muckRev?: number }, on: boolean, rev: number | null): 'none' | 'save' | 'show' {
-  if (rev !== null) {
-    if (seat.muckRev !== undefined && rev <= seat.muckRev) return 'none';
-    seat.muckRev = rev;
-  }
-  if (!!seat.autoMuck !== on) {
-    seat.autoMuck = on;
-    return 'show';
-  }
-  return rev !== null ? 'save' : 'none';
+
+/** What the `show` command asks for: the first card, the second, or both. */
+export type ShowChoice = 0 | 1 | 'both';
+
+/**
+ * The card positions shown once `choice` is added to those already shown (`shown`, ascending). The same array when it
+ * adds nothing, so a repeated request changes nothing.
+ */
+export function addShown(shown: readonly number[], choice: ShowChoice): readonly number[] {
+  const add = (choice === 'both' ? [0, 1] : [choice]).filter((i) => !shown.includes(i));
+  return add.length ? [...shown, ...add].sort((x, y) => x - y) : shown;
 }
 
-/** The revision from the internal route's query: a whole number, or null when absent or malformed. */
-export function muckRevParam(raw: string | null): number | null {
-  if (raw === null || !/^\d{1,15}$/.test(raw)) return null;
-  return Number(raw);
-}
+/** From a hand settling to the next deal. */
+export const BETWEEN_HANDS_MS = 4_000;
+/** Added after a hand a member was dealt in: time to decide whether to show their cards. Table bots never show. */
+export const SHOW_DECISION_MS = 1_500;
+
+/** How long after a hand settles the next one is dealt. */
+export const afterHandMs = (memberDealtIn: boolean) => BETWEEN_HANDS_MS + (memberDealtIn ? SHOW_DECISION_MS : 0);

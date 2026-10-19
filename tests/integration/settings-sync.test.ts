@@ -1,6 +1,6 @@
 // Account settings sync (GET/PUT /api/me/settings) and its administration (routes/admin-settings.ts): the newest change
 // wins one setting or favourite at a time, a device's settings from before sync only fill what the account has nothing
-// for, another account's changes are refused, auto-muck reaches the table the member sits at, and an administrator's
+// for, another account's changes are refused, the auto-muck an older device still saves is kept and reaches no table, and an administrator's
 // reset (preview, password, reason, audit, one message in the member's language) stops old devices uploading again and
 // can be undone for a week while the member changes nothing.
 import { SETTINGS_FAV_MAX, SETTINGS_RESTORE_MS, type AdminSettingsDiagDto, type SettingsDto, type SettingsSave, type SettingsSaveResult } from '@jc/types';
@@ -62,7 +62,7 @@ async function done(kind: 'reset' | 'restore', id: string, rev: number, c: Clien
   await reauth(c);
   const r = await act(kind, id, { reason: `${kind} for a sync problem`, rev }, c);
   expect(r.status, JSON.stringify(r.body)).toBe(200);
-  return r.body as { ok: true; settings: AdminSettingsDiagDto; muck: { tables: number; reached: number } | null };
+  return r.body as { ok: true; settings: AdminSettingsDiagDto };
 }
 
 type Audit = { action: string; outcome: string; actor: string; detail: string | null };
@@ -176,39 +176,43 @@ describe('member settings', () => {
     expect(await moved(read)).toEqual({ ss_client_fail: 3 });
   });
 
-  it('gives the tables the member sits at the auto-muck saved from any device', async () => {
+  // Auto-muck always applies now (2026-10-19): an older device still saves the setting, which the account keeps like any
+  // other (and an administrator's reset and restore take and give back); no table is told, and none reports it. These
+  // replaced the tests that the tables were given the saved value.
+  it('keeps the auto-muck an older device saves, and tells the table the member sits at nothing', async () => {
     const u = await newUser();
     const ws = await TableSocket.open(u.client, 'it-set-0');
     open.push(ws);
     expect(await ws.request({ t: 'sit', seatIndex: 0, buyIn: 1000 })).toMatchObject({ t: 'ack' });
-    expect(ws.state!.you.autoMuck).toBe(false);
+    expect('autoMuck' in ws.state!.you).toBe(false);
     const on = await saved(u, { epoch: 0, base: 0, prefs: { autoMuck: { v: true, ago: 0 } } });
-    await ws.waitState((s) => s.you.autoMuck === true, 10_000, 'auto-muck on');
-    await saved(u, { epoch: 0, base: on.settings.rev, prefs: { autoMuck: { v: false, ago: 0 } } });
-    await ws.waitState((s) => s.you.autoMuck === false, 10_000, 'auto-muck off');
-    const again = await saved(u, { epoch: 0, base: on.settings.rev + 1, prefs: { autoMuck: { v: true, ago: 0 } } });
-    await ws.waitState((s) => s.you.autoMuck === true, 10_000, 'auto-muck on again');
+    expect(on).toEqual({ settings: expect.objectContaining({ rev: 1, prefs: { autoMuck: true } }), kept: [] });
+    const off = await saved(u, { epoch: 0, base: on.settings.rev, prefs: { autoMuck: { v: false, ago: 0 } } });
+    expect(off.settings.prefs).toEqual({ autoMuck: false });
+    const again = await saved(u, { epoch: 0, base: off.settings.rev, prefs: { autoMuck: { v: true, ago: 0 } } });
 
-    // An administrator's reset puts it back to the default (off) at the table too; the preview names the table.
+    // An administrator's reset takes it with the rest and its undo gives it back; neither names a table any more.
     const pv = await act('reset', u.me.id, { preview: true, rev: again.settings.rev });
     expect(pv.status, JSON.stringify(pv.body)).toBe(200);
-    expect(pv.body).toMatchObject({ preview: true, seatedTables: 1 });
+    expect(pv.body).toMatchObject({ preview: true, settings: { fields: 1 } });
+    expect(pv.body).not.toHaveProperty('seatedTables');
     const r = await done('reset', u.me.id, again.settings.rev);
-    expect(r.muck).toEqual({ tables: 1, reached: 1 });
-    await ws.waitState((s) => s.you.autoMuck === false, 10_000, 'auto-muck reset');
-    // Undone: back on.
+    expect(r).not.toHaveProperty('muck');
+    expect((await load(u)).prefs).toEqual({});
     const back = await done('restore', u.me.id, r.settings.rev);
-    expect(back.muck).toEqual({ tables: 1, reached: 1 });
-    await ws.waitState((s) => s.you.autoMuck === true, 10_000, 'auto-muck restored');
+    expect(back).not.toHaveProperty('muck');
+    expect((await load(u)).prefs).toEqual({ autoMuck: true });
+
+    // The table reports no setting through all of it.
+    await new Promise((res) => setTimeout(res, 1000));
+    for (const m of ws.messages) if (m.t === 'state') expect(JSON.stringify(m.state)).not.toContain('autoMuck');
   });
 
-  it('keeps the newest auto-muck at the table when saves follow each other faster than they reach it', async () => {
+  it('keeps the newest of saves that follow each other quickly, one revision each', async () => {
     const u = await newUser();
     const ws = await TableSocket.open(u.client, 'it-set-1');
     open.push(ws);
     expect(await ws.request({ t: 'sit', seatIndex: 0, buyIn: 1000 })).toMatchObject({ t: 'ack' });
-    // Each save answers before its push reaches the room (the push runs after the answer), so these pushes overlap and
-    // may land in any order; the room keeps the value of the highest revision (on).
     let rev = 0;
     for (const v of [true, false, true, false, true, false, true]) {
       const r = await saved(u, { epoch: 0, base: rev, prefs: { autoMuck: { v, ago: 0 } } });
@@ -216,10 +220,9 @@ describe('member settings', () => {
       rev = r.settings.rev;
     }
     expect(rev).toBe(7);
-    await ws.waitState((s) => s.you.autoMuck === true, 10_000, 'auto-muck on');
-    // No late push turns it back.
-    await new Promise((r) => setTimeout(r, 1500));
-    expect(ws.state!.you.autoMuck).toBe(true);
+    expect((await load(u)).prefs).toEqual({ autoMuck: true });
+    // Seated all along, and still nothing about it at the table.
+    expect('autoMuck' in ws.state!.you).toBe(false);
   });
 });
 
@@ -248,7 +251,7 @@ describe('administrator reset and restore', () => {
     // The preview names the scope without the password and changes nothing.
     const pv = await act('reset', u.me.id, { preview: true, rev: 1 }, staff.c);
     expect(pv.status, JSON.stringify(pv.body)).toBe(200);
-    expect(pv.body).toMatchObject({ preview: true, settings: { rev: 1, fields: 1, favourites: 1 }, seatedTables: 0, restorableMs: SETTINGS_RESTORE_MS });
+    expect(pv.body).toMatchObject({ preview: true, settings: { rev: 1, fields: 1, favourites: 1 }, restorableMs: SETTINGS_RESTORE_MS });
     expect((await diag(u.me.id)).rev).toBe(1);
     // The change needs the password, a reason and the revision looked at.
     const cold = await act('reset', u.me.id, { reason: 'theme loop on login', rev: 1 }, staff.c);
@@ -264,7 +267,7 @@ describe('administrator reset and restore', () => {
     const t0 = Date.now();
     const r = await act('reset', u.me.id, { reason: 'theme loop on login', rev: 1 }, staff.c);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.body).toMatchObject({ ok: true, muck: null, settings: { exists: true, rev: 2, epoch: 1, fields: 0, favourites: 0, reset: { by: { id: staff.me.id }, restoredAt: null } } });
+    expect(r.body).toMatchObject({ ok: true, settings: { exists: true, rev: 2, epoch: 1, fields: 0, favourites: 0, reset: { by: { id: staff.me.id }, restoredAt: null } } });
     expect(r.body.settings.reset.restorableUntil).toBeGreaterThanOrEqual(t0 + SETTINGS_RESTORE_MS - 1_000);
     expect(await load(u)).toMatchObject({ epoch: 1, rev: 2, prefs: {}, fav: [] });
 
@@ -294,7 +297,6 @@ describe('administrator reset and restore', () => {
       before: { rev: 1, epoch: 0, fields: 1, favourites: 1 },
       after: { rev: 2, epoch: 1, fields: 0, favourites: 0 },
       restorable: true,
-      muck: null,
     });
     expect(ok[0]!.detail).not.toContain('crimson');
     expect(rows.filter((x) => x.action === 'settings.reset.failed').length).toBeGreaterThanOrEqual(2);
@@ -319,7 +321,7 @@ describe('administrator reset and restore', () => {
     const before = await counters();
     const pv = await act('restore', u.me.id, { preview: true, rev: reset.settings.rev });
     expect(pv.status, JSON.stringify(pv.body)).toBe(200);
-    expect(pv.body).toMatchObject({ preview: true, restore: { fields: 2, favourites: 2 }, seatedTables: 0 });
+    expect(pv.body).toMatchObject({ preview: true, restore: { fields: 2, favourites: 2 } });
     expect((await act('restore', u.me.id, { reason: 'wrong member', rev: reset.settings.rev - 1 })).body.error.code).toBe('settings_changed');
 
     const r = await done('restore', u.me.id, reset.settings.rev);
@@ -338,7 +340,6 @@ describe('administrator reset and restore', () => {
       reason: 'restore for a sync problem',
       before: { rev: reset.settings.rev, epoch: 1, fields: 0, favourites: 0 },
       after: { rev: r.settings.rev, epoch: 2, fields: 2, favourites: 2 },
-      muck: null,
     });
     expect(row.detail).not.toContain('crimson');
     expect(await moved(before)).toEqual({ ss_restore: 1, ss_epoch: 1 });

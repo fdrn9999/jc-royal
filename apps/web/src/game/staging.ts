@@ -81,7 +81,7 @@ const HOLD = 250; // the result before the chips move
 const PAY = 400; // a payout to its winner
 const PAY_GAP = 130; // between payouts
 const BACK = 280; // chips nobody called, back to their seat
-/** Everything is over well before the next hand, 4 s after the result. */
+/** Everything is over well before the next hand, at least 4 s after the result (5.5 s when members played it). */
 export const BUDGET = 3300;
 /** More cues than that at once (a reconnect, a tab that slept): the scene jumps to the state. */
 export const MAX_CUES = 30;

@@ -51,8 +51,7 @@ export interface TableSocketApi {
       | { t: 'chat'; text: string }
       | { t: 'sync' }
       | { t: 'cancelTopUp' }
-      | { t: 'muck'; on: boolean }
-      | { t: 'show'; card: 0 | 1 }
+      | { t: 'show'; card: 0 | 1 | 'both' }
       | { t: 'react'; reaction: ReactionId },
   ) => void;
   act: (type: ActionType, amount?: number) => boolean;

@@ -15,7 +15,6 @@ import {
   SETTINGS_MAX_AGO_MS,
   SETTINGS_RESTORE_MS,
   SETTINGS_SCHEMA_VERSION,
-  SYNCED_PREF_DEFAULTS,
   SYNCED_PREF_KEYS,
   SyncedPrefsSchema,
   type AdminSettingsDiagDto,
@@ -116,8 +115,6 @@ export function toDto(s: SettingsState): SettingsDto {
   return { epoch: s.epoch, rev: s.rev, prefs, fav: favList(s.fav), updatedAt: s.updatedAt };
 }
 
-const effectiveMuck = (p: StoredPrefs) => (p.autoMuck ? p.autoMuck[0] === true : SYNCED_PREF_DEFAULTS.autoMuck);
-
 export interface Merge {
   prefs: StoredPrefs;
   fav: StoredFav;
@@ -129,8 +126,6 @@ export interface Merge {
   conflict: boolean;
   /** The device's settings from before sync filled something. */
   legacy: boolean;
-  /** The account's auto-muck after the save, when the save changed it (the tables the member sits at take it on). */
-  muck?: boolean;
 }
 
 /**
@@ -204,8 +199,7 @@ export function mergeSettings(cur: SettingsState, input: SettingsSave, now: numb
     if (i >= SETTINGS_FAV_TOMBSTONES || c[1] < now - SETTINGS_MAX_AGO_MS) delete fav[id];
   });
 
-  const muck = effectiveMuck(prefs);
-  return { prefs, fav, changed, kept, conflict, legacy, ...(muck !== effectiveMuck(cur.prefs) ? { muck } : {}) };
+  return { prefs, fav, changed, kept, conflict, legacy };
 }
 
 const ROW_SELECT = 'SELECT prefs, fav, rev, epoch, schema_version, updated_at, synced_at, reset_at, reset_by, reset_rev, prev, restored_at FROM user_settings WHERE user_id = ?1';
@@ -225,7 +219,6 @@ export interface SettingsSaved {
   settings: SettingsDto;
   kept: string[];
   metrics: Partial<Record<SettingsMetric, number>>;
-  muck?: boolean;
   /** A row exists whose synced_at should be marked (nothing was written). */
   mark: boolean;
 }
@@ -264,7 +257,7 @@ export async function saveSettings(db: D1Database, userId: string, input: Settin
       metrics.ss_save = 1;
       if (m.legacy) metrics.ss_legacy = 1;
       const settings = toDto({ prefs: m.prefs, fav: m.fav, rev: up.rev, epoch: cur.epoch, updatedAt: now });
-      return { settings, kept: m.kept, metrics, mark: false, ...(m.muck !== undefined ? { muck: m.muck } : {}) };
+      return { settings, kept: m.kept, metrics, mark: false };
     }
   }
   return fail(409, 'settings_busy', 'the settings changed while saving; try again');

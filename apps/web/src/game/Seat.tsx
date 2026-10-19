@@ -38,6 +38,10 @@ function TimerRing({ deadline, totalMs }: { deadline: number; totalMs: number })
   );
 }
 
+/** A show-card button on my cards after a hand; dimmed while its request is on the way. */
+const SHOW_BTN =
+  'jc-tap grid h-6 shrink-0 place-items-center rounded-full border border-gold-500/60 bg-ink-950/85 text-[10px] font-bold text-gold-200 hover:bg-gold-500/20 focus-visible:outline-2 focus-visible:outline-gold-400 disabled:cursor-wait disabled:opacity-60';
+
 function initials(name?: string) {
   return (name ?? '?').slice(0, 2).toUpperCase();
 }
@@ -128,8 +132,11 @@ export interface SeatProps {
   onSit: () => void;
   /** Opens this player's card (other occupied seats only). */
   onPick?: () => void;
-  /** My seat after a hand, with auto-muck on: a button over each card turns it face up for the table. */
-  onShow?: (card: 0 | 1) => void;
+  /**
+   * My seat after a hand whose showdown left my cards face down (folded, won uncontested or lost): a button over each
+   * card, and one for both, turns them face up for the table until the next deal.
+   */
+  onShow?: (card: 0 | 1 | 'both') => void;
   /** Those buttons lie on the cards' lower half, clear of the plate, instead of above them (no room kept there). */
   showOver?: boolean;
   /** The quick reaction this player sent, while it shows. */
@@ -151,6 +158,16 @@ export function Seat(p: SeatProps) {
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const trayOpen = tray && !!p.react;
+  // Cards asked to be shown, until the room's answer shows them (a second tap sends nothing): cleared when what is
+  // shown changes, at the next hand, or after a while when the answer never came (the request was refused).
+  const [showing, setShowing] = useState<readonly number[]>([]);
+  const shownKey = (s.shown ?? []).map((c) => (c ? 1 : 0)).join('');
+  useEffect(() => setShowing([]), [shownKey, p.newHandKey]);
+  useEffect(() => {
+    if (!showing.length) return;
+    const id = setTimeout(() => setShowing([]), 5_000);
+    return () => clearTimeout(id);
+  }, [showing]);
   // My turn needs the space above my seat (and my attention): the tray gives way.
   useEffect(() => {
     if (p.isActor) setTray(false);
@@ -199,6 +216,10 @@ export function Seat(p: SeatProps) {
   // Cards shown after the hand: face up where chosen, the other one face down (its owner sees both in holeCards).
   const shown = s.shown?.length ? s.shown : null;
   const isShown = (i: number) => !!shown?.[i];
+  const show = (choice: 0 | 1 | 'both') => {
+    setShowing(choice === 'both' ? [0, 1] : [...showing, choice]);
+    p.onShow?.(choice);
+  };
   const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0) || !!shown;
   const cards = s.holeCards && s.holeCards.length ? s.holeCards : (shown ?? (showCards ? [null, null] : []));
   const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${p.amounts.fmt(s.lastAction.amount, true)}` : ''}` : null;
@@ -255,8 +276,10 @@ export function Seat(p: SeatProps) {
                     <button
                       key={i}
                       type="button"
-                      onClick={() => p.onShow!(i === 0 ? 0 : 1)}
-                      className="jc-tap grid h-6 place-items-center rounded-full border border-gold-500/60 bg-ink-950/85 text-[10px] font-bold text-gold-200 hover:bg-gold-500/20 focus-visible:outline-2 focus-visible:outline-gold-400"
+                      onClick={() => show(i === 0 ? 0 : 1)}
+                      disabled={showing.includes(i)}
+                      aria-busy={showing.includes(i) || undefined}
+                      className={SHOW_BTN}
                       style={{ width: cardSize }}
                       aria-label={t('table.showCardAria', { n: i + 1 })}
                       data-testid={`show-card-${i}`}
@@ -264,6 +287,19 @@ export function Seat(p: SeatProps) {
                       {t('table.showCard')}
                     </button>
                   ),
+                )}
+                {cards.length === 2 && !isShown(0) && !isShown(1) && (
+                  <button
+                    type="button"
+                    onClick={() => show('both')}
+                    disabled={showing.length === 2}
+                    aria-busy={showing.length === 2 || undefined}
+                    className={cx(SHOW_BTN, 'px-2')}
+                    aria-label={t('table.showBothAria')}
+                    data-testid="show-card-both"
+                  >
+                    {t('table.showBoth')}
+                  </button>
                 )}
               </div>
             )}

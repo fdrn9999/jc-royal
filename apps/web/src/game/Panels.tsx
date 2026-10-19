@@ -517,13 +517,6 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="flex flex-col gap-0.5">
-              {t('settings.autoMuck')}
-              <span className="text-xs text-ink-300">{t('settings.autoMuckHint')}</span>
-            </span>
-            <input type="checkbox" checked={prefs.autoMuck} onChange={(e) => setPrefs({ autoMuck: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-automuck" />
-          </label>
-          <label className="flex items-center justify-between gap-3 text-sm">
-            <span className="flex flex-col gap-0.5">
               {t('settings.reactions')}
               <span className="text-xs text-ink-300">{t('settings.reactionsHint')}</span>
             </span>

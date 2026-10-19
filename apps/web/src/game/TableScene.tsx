@@ -205,8 +205,8 @@ export function TableScene({
   onSit: (seatIndex: number) => void;
   /** Tapping another player's plate (the real table only). */
   onSeatClick?: (seat: SeatView) => void;
-  /** Shows one of my cards after the hand (the real table only; offered while `you.canShow`). */
-  onShow?: (card: 0 | 1) => void;
+  /** Shows my first card, my second or both after the hand (the real table only; offered while `you.canShow`). */
+  onShow?: (card: 0 | 1 | 'both') => void;
   /** The show-card buttons lie on my cards instead of above them (a short screen keeps no room there: short.ts). */
   showOnCards?: boolean;
   /** Quick reactions showing now (the real table only), each at its sender's seat while that player still sits there. */

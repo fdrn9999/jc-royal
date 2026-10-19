@@ -7,9 +7,9 @@ interface Settled {
   shown: number[];
 }
 
-/** Commands the page sent, the room's auto-muck setting for it, and the hands it saw settle. */
+/** Commands the page sent, whether the room reported an auto-muck setting to it, and the hands it saw settle. */
 function watch(page: Page) {
-  const w = { sent: [] as { t: string; on?: boolean }[], autoMuck: null as boolean | null, mySeat: null as number | null, settled: [] as Settled[] };
+  const w = { sent: [] as { t: string; on?: boolean }[], reported: false, mySeat: null as number | null, settled: [] as Settled[] };
   page.on('websocket', (ws) => {
     ws.on('framesent', ({ payload }) => {
       if (typeof payload === 'string') w.sent.push(JSON.parse(payload) as { t: string });
@@ -24,7 +24,7 @@ function watch(page: Page) {
         };
       };
       if (m.t !== 'state') return;
-      w.autoMuck = m.state!.you.autoMuck ?? null;
+      if ('autoMuck' in m.state!.you) w.reported = true;
       if (m.state!.you.seatIndex !== null) w.mySeat = m.state!.you.seatIndex;
       const h = m.state!.hand;
       if (h?.stage === 'settled' && h.result && !w.settled.some((x) => x.handId === h.id)) {
@@ -35,7 +35,9 @@ function watch(page: Page) {
   return w;
 }
 
-test('mobile: auto-muck set in the table settings keeps a losing showdown hand face down for the other player only', async ({ browser }) => {
+// Auto-muck always applies (2026-10-19, at the owner's request): there is no setting, and the page sends the room nothing
+// about it.
+test('mobile: a losing showdown hand stays face down for the other player only, with no setting to turn on', async ({ browser }) => {
   // Hands take about 15 s each and A loses a given one about half the time, so the loop below may need several: the
   // test's own limit must outlast the loop's 150 s (at the default 90 s, a sixth hand failed the test).
   test.setTimeout(200_000);
@@ -45,27 +47,16 @@ test('mobile: auto-muck set in the table settings keeps a losing showdown hand f
   const wb = watch(b.page);
   await a.page.goto('/table/e2e-muck?sit=1');
   await a.page.getByTestId('buyin-confirm').tap();
-  await expect.poll(() => wa.autoMuck).toBe(false);
+  await expect.poll(() => wa.mySeat).not.toBeNull();
 
-  // The setting is in the table's settings dialog, with what it does and does not hide.
+  // The table's settings have no auto-muck any more.
   await a.page.getByRole('button', { name: /^(설정|Settings)$/ }).tap();
-  const box = a.page.getByTestId('settings-automuck');
-  await box.scrollIntoViewIfNeeded();
-  await expect(a.page.getByText(/이긴 패와 올인한 패는 항상 공개|Winning and all-in hands are always shown/)).toBeVisible();
+  await expect(a.page.getByRole('dialog')).toBeVisible();
+  await expect(a.page.getByTestId('settings-automuck')).toHaveCount(0);
+  await expect(a.page.getByText(/자동 머크|auto-muck/i)).toHaveCount(0);
   expect(await widerThanDevice(a.page)).toBe(false);
-  await box.tap();
-  await expect(box).toBeChecked();
-  await a.page.screenshot({ path: test.info().outputPath('muck-setting.png') });
-  await expect.poll(() => wa.autoMuck).toBe(true);
-  expect(wa.sent.filter((m) => m.t === 'muck')).toEqual([expect.objectContaining({ t: 'muck', on: true })]);
   await a.page.getByRole('dialog').getByRole('button', { name: 'close' }).tap();
   await expect(a.page.getByRole('dialog')).toHaveCount(0);
-
-  // A reload keeps the setting (the account's), and the room already has it: nothing is sent again.
-  await a.page.reload();
-  await expect.poll(() => wa.autoMuck).toBe(true);
-  await a.page.waitForTimeout(800);
-  expect(wa.sent.filter((m) => m.t === 'muck')).toHaveLength(1);
 
   await b.page.goto('/table/e2e-muck?sit=1');
   await b.page.getByTestId('buyin-confirm').click();
@@ -101,4 +92,7 @@ test('mobile: auto-muck set in the table settings keeps a losing showdown hand f
   expect(wb.settled.find((y) => y.handId === hand.handId)!.shown).toEqual(hand.winners);
   // On screen: B sees A's cards face down, A sees them face up.
   expect(seen[0]).toEqual({ handId: hand.handId, onA: { board: 5, seat: 2 }, onB: { board: 5, seat: 0 } });
+  // The page never sent a setting, and the room never reported one.
+  expect(wa.sent.filter((m) => m.t === 'muck')).toEqual([]);
+  expect(wa.reported || wb.reported).toBe(false);
 });

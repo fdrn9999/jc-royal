@@ -176,9 +176,11 @@ export interface TableView {
     autoRebuy: { amount: number; cap: number; spent: number } | null;
     /** The viewer's own pre-action for this street (nobody else is ever shown it). Absent from older rooms. */
     preAction?: PreActionKind | null;
-    /** The seated viewer's auto-muck setting as the room holds it; null when not seated. Absent from older rooms. */
-    autoMuck?: boolean | null;
-    /** The seated viewer may show cards from the hand that just ended (auto-muck on, dealt in, not shown at showdown). */
+    /**
+     * The seated viewer may show cards from the hand that just ended (dealt in at this seat, not turned over at showdown;
+     * still true once both are shown). Auto-muck always applies, so the room no longer reports a setting (`autoMuck`,
+     * which older pages compared with theirs: absent, they send nothing).
+     */
     canShow?: boolean;
     /**
      * The seated viewer's own time bank: ms left, and hands dealt in since the last refill. Null before their first hand

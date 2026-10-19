@@ -59,7 +59,9 @@ function showButtonLayout(page: Page, mySeat: number) {
   }, mySeat);
 }
 
-test('mobile: after folding, a player with auto-muck on taps Show on one card and the other player sees that card only', async ({ browser }) => {
+// Auto-muck always applies (2026-10-19): no setting to turn on first. The room deals the next hand 5.5 s after a hand
+// members played (4 s, and 1.5 s to decide whether to show).
+test('mobile: after folding, a player taps Show on one card and the other player sees that card only', async ({ browser }) => {
   const a = await signUp(browser, { mobile: true });
   await a.page.setViewportSize({ width: 360, height: 740 });
   const b = await signUp(browser);
@@ -68,26 +70,13 @@ test('mobile: after folding, a player with auto-muck on taps Show on one card an
   await a.page.getByTestId('buyin-confirm').tap();
   await expect.poll(() => wa.mySeat).not.toBeNull();
 
-  // The setting now says what it hides and what it lets you show.
-  await a.page.getByRole('button', { name: /^(설정|Settings)$/ }).tap();
-  const box = a.page.getByTestId('settings-automuck');
-  await box.scrollIntoViewIfNeeded();
-  await expect(a.page.getByText('쇼다운에서 진 패 숨기기 (자동 머크)')).toBeVisible();
-  await expect(a.page.getByText(/보이기 버튼으로 보여 주고 싶은 카드만 공개/)).toBeVisible();
-  expect(await widerThanDevice(a.page)).toBe(false);
-  await box.tap();
-  await expect(box).toBeChecked();
-  await a.page.screenshot({ path: test.info().outputPath('show-setting.png') });
-  await a.page.getByRole('dialog').getByRole('button', { name: 'close' }).tap();
-  await expect(a.page.getByRole('dialog')).toHaveCount(0);
-
   await b.page.goto('/table/e2e-show?sit=1');
   await b.page.getByTestId('buyin-confirm').click();
   // No buttons while a hand is being played.
   await expect.poll(() => wa.stage, { timeout: 20_000 }).toBe('preflop');
   await expect(a.page.getByTestId('show-cards')).toHaveCount(0);
 
-  // Play until A folds a hand, then show its second card in the gap before the next deal (4 s).
+  // Play until A folds a hand, then show its second card in the gap before the next deal.
   let done: { handId: string; layout: Awaited<ReturnType<typeof showButtonLayout>>; card: string } | null = null;
   await expect(async () => {
     if (!(wa.stage === 'settled' && wa.folded && wa.canShow)) {
@@ -102,6 +91,8 @@ test('mobile: after folding, a player with auto-muck on taps Show on one card an
     await a.page.getByTestId('show-card-1').tap();
     await expect(a.page.getByTestId('shown-card-1')).toBeVisible({ timeout: 1_500 });
     await expect(a.page.getByTestId('show-card-0')).toBeVisible();
+    // With one card shown, only the other is left to show: no Both.
+    await expect(a.page.getByTestId('show-card-both')).toHaveCount(0);
     // B sees exactly that card face up on A's seat; the other stays face down.
     const onB = b.page.locator(`[data-testid=seat-${seat}] [data-card]`);
     await expect(onB).toHaveCount(1, { timeout: 1_500 });
@@ -119,6 +110,7 @@ test('mobile: after folding, a player with auto-muck on taps Show on one card an
   expect(layout).toEqual([
     { id: 'show-card-0', h: 24, inside: true, onTop: true, clear: true },
     { id: 'show-card-1', h: 24, inside: true, onTop: true, clear: true },
+    { id: 'show-card-both', h: 24, inside: true, onTop: true, clear: true },
   ]);
   expect(await widerThanDevice(a.page)).toBe(false);
 

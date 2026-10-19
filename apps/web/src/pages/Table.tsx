@@ -26,7 +26,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { rememberVisit } from '../lib/lobby';
 import { lobbyHref } from '../lib/lobbyReturn';
 import { siteUrl } from '../lib/share';
-import { hasPendingMuck, pullSettings, usePrefs, useSettingsSync } from '../lib/prefs';
+import { pullSettings, usePrefs } from '../lib/prefs';
 import { useAmounts } from '../lib/amount';
 import { when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
@@ -208,40 +208,9 @@ export function TablePage() {
     setParams(params, { replace: true });
   }, [s, params, setParams, sock]);
 
-  // Opening a table reads the account's settings again unless they were a moment ago (auto-muck may have changed elsewhere).
+  // Opening a table reads the account's settings again unless they were a moment ago (the table look and aids may have
+  // changed on another device).
   useEffect(() => pullSettings(), []);
-
-  // Auto-muck is the account's setting, which the room applies to my seat: tell the room this device's value when the
-  // two differ (on taking a seat, after a change here, and on reconnect, since a command sent offline is not kept), once
-  // the account's settings have been read. When the room's changed by itself while I sat (another device or an
-  // administrator changed the account's setting, and the server told my tables), this device's value is the older one:
-  // the settings are read again instead (once), unless it was changed here and is not saved yet. A room that predates
-  // muck reports no setting and is not asked.
-  const roomMuck = s?.you.seatIndex != null ? s.you.autoMuck : undefined;
-  const { send, status } = sock;
-  const sync = useSettingsSync();
-  const muck = useRef({ room: undefined as boolean | null | undefined, mine: prefs.autoMuck, sent: null as boolean | null, elsewhere: false, pulled: false });
-  useEffect(() => {
-    const m = muck.current;
-    // A command sent while the connection was down is not kept: send again once it is back.
-    if (status !== 'open') m.sent = null;
-    if (typeof m.room === 'boolean' && typeof roomMuck === 'boolean' && roomMuck !== m.room && roomMuck !== m.sent) m.elsewhere = true;
-    if (roomMuck === m.sent) m.sent = null;
-    // Changed here, or read again: this device's value is the account's now.
-    if (prefs.autoMuck !== m.mine || roomMuck === prefs.autoMuck) m.elsewhere = m.pulled = false;
-    m.room = roomMuck;
-    m.mine = prefs.autoMuck;
-    if (status !== 'open' || typeof roomMuck !== 'boolean' || roomMuck === prefs.autoMuck) return;
-    if (m.elsewhere && !hasPendingMuck()) {
-      if (!m.pulled) pullSettings(true);
-      m.pulled = true;
-      return;
-    }
-    // Read first; and once sent, the room's answer is awaited rather than sending the same again.
-    if (sync.state === 'loading' || m.sent === prefs.autoMuck) return;
-    m.sent = prefs.autoMuck;
-    send({ t: 'muck', on: prefs.autoMuck });
-  }, [roomMuck, prefs.autoMuck, send, status, sync.state]);
 
   // The lobby lists tables I opened under "recent".
   const opened = !!s;

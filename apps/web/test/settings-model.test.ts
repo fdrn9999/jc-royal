@@ -2,7 +2,7 @@ import { SETTINGS_AMOUNT_UNITS, SETTINGS_FAV_MAX, SETTINGS_THEMES, SYNCED_PREF_D
 import { THEMES } from '@jc/ui';
 import { describe, expect, it } from 'vitest';
 import { AMOUNT_UNITS } from '../src/lib/prefs';
-import { EMPTY_ACCOUNT, hasChanges, legacyPrefs, parseAccount, pendingMuck, viewOf, withFavourite, withPrefs, type AccountSettings } from '../src/lib/settings-model';
+import { EMPTY_ACCOUNT, hasChanges, legacyPrefs, parseAccount, viewOf, withFavourite, withPrefs, type AccountSettings } from '../src/lib/settings-model';
 import { afterLoad, afterReset, afterSave, FAV_CHANGES_MAX, saveBody } from '../src/lib/settings-save';
 
 const NOW = 1_800_000_000_000;
@@ -116,11 +116,11 @@ describe('settings on this device', () => {
 
   it('drops what was not saved when the account’s epoch moved on (an administrator reset or restored it)', () => {
     const a = account({ server: dto({ rev: 3 }), pending: { prefs: { autoMuck: { v: true, at: NOW } }, fav: {} }, legacy: { fav: ['old'] } });
-    expect(pendingMuck(a)).toBe(true);
+    expect(hasChanges(a)).toBe(true);
     const reset = afterLoad(a, dto({ epoch: 1, rev: 4 }));
     expect(reset.pending).toEqual({ prefs: {}, fav: {} });
     expect(reset.legacy).toBeNull();
-    expect(pendingMuck(reset)).toBe(false);
+    expect(hasChanges(reset)).toBe(false);
     expect(afterReset(dto({ epoch: 2, rev: 9 }))).toEqual({ ...EMPTY_ACCOUNT, server: dto({ epoch: 2, rev: 9 }) });
     // The first read on this device keeps changes made before it, but the old settings only while the epoch is 0.
     const first = account({ pending: { prefs: { beginner: { v: true, at: NOW } }, fav: {} }, legacy: { prefs: { fourColor: true } } });
