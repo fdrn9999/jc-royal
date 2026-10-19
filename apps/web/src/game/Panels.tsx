@@ -512,6 +512,13 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
             <input type="checkbox" checked={prefs.beginner} onChange={(e) => setPrefs({ beginner: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-beginner" />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.showHand')}
+              <span className="text-xs text-ink-300">{t('settings.showHandHint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.showHand} onChange={(e) => setPrefs({ showHand: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-show-hand" />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
             {t('settings.confirmRisky')}
             <input type="checkbox" checked={prefs.confirmRisky} onChange={(e) => setPrefs({ confirmRisky: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" />
           </label>

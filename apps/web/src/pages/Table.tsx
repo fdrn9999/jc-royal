@@ -224,7 +224,7 @@ export function TablePage() {
   // A phone on its side: the controls go to a column at the right and the seats get the height (short.ts).
   const short = useShortScreen();
   const academy = useProgress(me?.id);
-  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
+  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${prefs.showHand}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
   // Seated, my seat is at the bottom, with room above my cards for the show-card buttons unless the screen is short.
   // The raise panel open (my turn, so no cards to show), that room goes to the table too.
   const tableOpts = realTableOptions(short);
@@ -520,7 +520,7 @@ export function TablePage() {
           <div
             ref={room.stackRef}
             className={cx(
-              'pointer-events-none absolute z-40 flex flex-col',
+              'group/stack pointer-events-none absolute z-40 flex flex-col',
               // Short: a column of one width at the right edge, every line as wide as it, scrolled rather than cut if a
               // beginner's notes make it taller than the screen.
               short
@@ -557,8 +557,13 @@ export function TablePage() {
               <div className="flex flex-col items-center gap-1.5 sm:items-end">
                 {/* A notice takes the street note's place (the header names the street), so the stack stays below my seat. */}
                 {!notice && <StageNote s={s} />}
-                {seated && <CurrentHandPill s={s} />}
+                {seated && prefs.showHand && <CurrentHandPill s={s} />}
               </div>
+            )}
+            {s && !prefs.beginner && prefs.showHand && hand && seated && (
+              // With the raise panel open the screen has no line to spare (a small phone upright, any phone sideways): the
+              // hand steps aside while it is, and the table keeps the room it had without the line (useStackRoom).
+              <CurrentHandPill s={s} compact className="group-has-[[data-raise-open]]/stack:hidden" />
             )}
             {tip && (
               <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-info/40 bg-ink-950/90 p-2.5 text-xs text-ivory backdrop-blur sm:w-[26rem]" role="status" data-testid="coach-tip">

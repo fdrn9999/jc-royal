@@ -260,7 +260,7 @@ export function ActionBar({
   );
 
   return (
-    <div className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1.5' : 'gap-2 sm:w-auto')} data-testid="action-bar">
+    <div className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1.5' : 'gap-2 sm:w-auto')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
       {open && window_ && (
         // Open for a moment: the table makes way for it while it is open, then takes the room back (useStackRoom).
         // In the bar's own row three lines (steps and slider, presets, the amount beside the confirm button), so a phone

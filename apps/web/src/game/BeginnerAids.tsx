@@ -7,20 +7,32 @@ import type { MsgKey } from '../lib/i18n';
 import type { TableView } from '@jc/types';
 import { cx } from '@jc/ui';
 import { useState } from 'react';
-import { currentHand, describeHand } from '../academy/content';
+import { describeCurrent } from '../academy/content';
 import { useI18n } from '../lib/i18n';
 
-export function CurrentHandPill({ s }: { s: TableView }) {
+/**
+ * My current hand (the "show my current hand" setting): the starting hand's name before the flop, the made hand after,
+ * from my own cards and the board shown (describeCurrent). `compact`, without the beginner aids: one line.
+ */
+export function CurrentHandPill({ s, compact = false, className }: { s: TableView; compact?: boolean; className?: string }) {
   const { t, locale } = useI18n();
   const mine = s.seats.find((x) => x.seatIndex === s.you.seatIndex);
   const hand = s.hand;
   if (!hand || !mine?.holeCards || mine.state === 'folded') return null;
-  const ev = currentHand(mine.holeCards, hand.board);
-  if (!ev) return null;
+  const name = describeCurrent(mine.holeCards, hand.board, locale, t);
+  if (!name) return null;
+  if (compact) {
+    return (
+      <div className={cx('pointer-events-auto max-w-full truncate rounded-full border border-gold-500/30 bg-ink-950/85 px-3 py-1 text-xs backdrop-blur', className)} title={t('table.currentHandNote')} data-testid="current-hand">
+        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{name}</span>{' '}
+        <span className="text-[10px] text-ink-400">· {t('table.currentHandTiny')}</span>
+      </div>
+    );
+  }
   return (
     <div className="pointer-events-auto flex max-w-full flex-col items-center rounded-2xl border border-gold-500/30 bg-ink-950/85 px-3 py-1 text-xs backdrop-blur" title={t('table.currentHandNote')} data-testid="current-hand">
       <span>
-        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{describeHand(ev, locale, t)}</span>
+        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{name}</span>
       </span>
       {/* A made hand is not a win: say so on screen, not only in a tooltip. */}
       <span className="text-[10px] text-ink-400">{t('table.currentHandShort')}</span>

@@ -148,6 +148,14 @@ test('real table: hand chart opens without dropping the game; beginner mode show
     await expect(a.page.getByTestId('board').locator('[data-card]')).toHaveCount(3, { timeout: 500 });
   }).toPass({ timeout: 40_000 });
   await expect(a.page.getByTestId('current-hand')).toBeVisible();
-  // Player B (beginner mode off) sees none of it.
+  // Player B (beginner mode off) sees none of the beginner aids, only their own hand ("show my current hand", on unless
+  // turned off), once.
+  await expect(b.page.getByTestId('stage-note')).toHaveCount(0);
+  await expect(b.page.getByTestId('current-hand')).toHaveCount(1);
+  // Turned off, it goes.
+  await b.page.getByRole('button', { name: /^(설정|Settings)$/ }).click();
+  await b.page.getByTestId('settings-show-hand').uncheck();
+  await b.page.keyboard.press('Escape');
   await expect(b.page.getByTestId('current-hand')).toHaveCount(0);
+  await expect(a.page.getByTestId('current-hand')).toHaveCount(1);
 });
