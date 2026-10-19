@@ -44,7 +44,7 @@ interface Preview { gained: string[]; lost: string[]; version: number; actions: 
 
 /** The switches grouped as the console's menus are. A switch the API adds later lands in the last group. */
 const GROUPS: [Key, string[]][] = [
-  ['grantGroupMembers', ['members', 'sanctions', 'disconnect', 'chips', 'resetLinks', 'settings']],
+  ['grantGroupMembers', ['members', 'sanctions', 'disconnect', 'chips', 'resetLinks', 'settings', 'vip']],
   ['grantGroupCommunity', ['reports', 'board', 'notices', 'messages']],
   ['grantGroupGame', ['tables', 'tableControl', 'hands', 'tournaments', 'bots']],
   ['grantGroupEconomy', ['ledger', 'economy', 'refill', 'reconcile', 'referral']],
@@ -54,7 +54,7 @@ const GROUPS: [Key, string[]][] = [
  * Switches whose actions are reached from another feature's page: member actions from the member page (members), table
  * emergency control from the table page (tables). The server does not tie them together; the editor says so.
  */
-const NEEDS: Record<string, string> = { sanctions: 'members', disconnect: 'members', chips: 'members', resetLinks: 'members', settings: 'members', tableControl: 'tables' };
+const NEEDS: Record<string, string> = { sanctions: 'members', disconnect: 'members', chips: 'members', resetLinks: 'members', settings: 'members', vip: 'members', tableControl: 'tables' };
 const PAGE = 20;
 const selectCls = 'h-11 rounded-lg border border-white/10 bg-ink-850 px-3 text-sm';
 const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((g) => b.includes(g));

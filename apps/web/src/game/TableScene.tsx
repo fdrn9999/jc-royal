@@ -4,8 +4,8 @@
  * animate the same; it only renders the TableView it is given.
  */
 import { handLabelKey, type Card, type SeatView, type TableView } from '@jc/types';
-import { ChipStack, Logo, PlayingCard } from '@jc/ui';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { ChipStack, cx, Logo, PlayingCard } from '@jc/ui';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts, type AmountUnit } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { Flights, useCueStaging } from './CueLayer';
@@ -42,6 +42,7 @@ export function useBoxSize<T extends HTMLElement>() {
  * of that width whatever it holds, so the table keeps one size through the turns and with the raise panel open.
  *
  * `open`: such a panel is open (the table may drop what only matters off the turn, such as room for the show-card buttons).
+ * `narrow`: the column is a phone's width, where the stack spans it and every line of it costs the table its height.
  */
 export function useStackRoom(mode: string, side = false) {
   const [colRef, col] = useBoxSize<HTMLDivElement>();
@@ -79,7 +80,7 @@ export function useStackRoom(mode: string, side = false) {
     const beside = 24 + w + 8;
     style = fit(col.w - 24 - beside, col.h - 48) > fit(col.w - 48, col.h - 24 - below) ? { marginBottom: 24, marginRight: beside } : { marginBottom: below };
   }
-  return { colRef, stackRef, style, open: room.key === key && room.open !== null };
+  return { colRef, stackRef, style, open: room.key === key && room.open !== null, narrow: col.w < 640 };
 }
 
 /**
@@ -197,6 +198,8 @@ export function TableScene({
   reducedMotion,
   amounts = CHIPS,
   onResultShown,
+  turnNote,
+  handNote,
 }: {
   s: TableView;
   layout: TableLayout;
@@ -205,7 +208,7 @@ export function TableScene({
   onSit: (seatIndex: number) => void;
   /** Tapping another player's plate (the real table only). */
   onSeatClick?: (seat: SeatView) => void;
-  /** Shows one of my cards after the hand (the real table only; offered while `you.canShow`). */
+  /** Shows my first card, my second or both after the hand (the real table only; offered while `you.canShow`). */
   onShow?: (card: 0 | 1) => void;
   /** The show-card buttons lie on my cards instead of above them (a short screen keeps no room there: short.ts). */
   showOnCards?: boolean;
@@ -221,6 +224,11 @@ export function TableScene({
   amounts?: Amounts;
   /** Told whether the hand's result shows yet: it waits for the hands to turn, so a page can hold its own word on it. */
   onResultShown?: (shown: boolean) => void;
+  /** Said in my seat's status line while it is my turn (the real table on a phone upright: the turn label). */
+  turnNote?: ReactNode;
+  /** Said in the status line under the board while it has nothing else to say but the side pots (the real table on a
+   * phone upright: my current hand). */
+  handNote?: ReactNode;
 }) {
   const { t } = useI18n();
   const { portrait, density, box, geometry, plan } = layout;
@@ -282,16 +290,28 @@ export function TableScene({
             );
           })}
         </div>
-        {/* Fixed-height status slot: text changes never move the board. Side pots take two short lines at most. */}
+        {/* Fixed-height status slot: text changes never move the board. Side pots take two short lines at most, one beside
+            a hand note. */}
         {layout.footer && (
-          <div className="flex h-6 w-full shrink-0 items-center justify-center text-center text-ink-200/80" data-testid="table-status" aria-live="polite">
+          // As wide as what it says (up to the block's width), so nothing round it counts as drawn.
+          <div className="flex h-6 max-w-full shrink-0 flex-col items-center justify-center text-center text-ink-200/80" data-testid="table-status" aria-live="polite">
             {status ? (
               <span className="text-xs tracking-[0.06em]">{status}</span>
-            ) : sidePots ? (
-              <span className="line-clamp-2 rounded-md bg-black/45 px-2 text-[10px] leading-3 text-ink-200" title={sidePots} data-testid="side-pots">
-                {sidePots}
-              </span>
-            ) : null}
+            ) : (
+              <>
+                {/* Read where it is, not announced street by street. */}
+                {handNote && (
+                  <div className="flex max-w-full" aria-live="off">
+                    {handNote}
+                  </div>
+                )}
+                {sidePots && (
+                  <span className={cx('rounded-md bg-black/45 px-2 text-[10px] leading-3 text-ink-200', handNote ? 'line-clamp-1' : 'line-clamp-2')} title={sidePots} data-testid="side-pots">
+                    {sidePots}
+                  </span>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -312,6 +332,7 @@ export function TableScene({
               seat={shownSeat}
               isMe={seat.seatIndex === mySeat}
               isActor={!!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled'}
+              turnNote={seat.seatIndex === mySeat && hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled' ? turnNote : undefined}
               deadline={hand?.deadline ?? null}
               turnMs={s.table.turnSeconds * 1000 + (hand?.extraMs ?? 0)}
               isDealer={hand?.buttonSeat === seat.seatIndex}

@@ -1,15 +1,15 @@
 import { SETTINGS_AMOUNT_UNITS, type SyncedPrefs } from '@jc/types';
 import { useSyncExternalStore } from 'react';
 import { takeLegacyFavourites } from './lobby';
-import { EMPTY_ACCOUNT, hasChanges, legacyPrefs, parseAccount, pendingMuck, viewOf, withFavourite, withPrefs, type AccountSettings, type SettingsView } from './settings-model';
+import { EMPTY_ACCOUNT, hasChanges, legacyPrefs, parseAccount, viewOf, withFavourite, withPrefs, type AccountSettings, type SettingsView } from './settings-model';
 
 /** How table amounts read (see amount.ts). Kept here so loading the preferences needs nothing else. */
 export const AMOUNT_UNITS = SETTINGS_AMOUNT_UNITS;
 export type AmountUnit = (typeof AMOUNT_UNITS)[number];
 
 /**
- * The table look and aids (theme, four-colour deck, beginner mode, confirming risky actions, auto-muck, amount unit,
- * reactions) and the favourite tables. Signed in, they are the account's (settings-sync.ts keeps them in step with the
+ * The table look and aids (theme, four-colour deck, beginner mode, confirming risky actions, amount unit, reactions,
+ * colour vision) and the favourite tables. Signed in, they are the account's (settings-sync.ts keeps them in step with the
  * server, settings-model.ts says how): every device signed in to the account shows them, a change made here shows at
  * once and is saved in the background, and a failed save keeps it on this device until it goes through. Signed out,
  * the defaults show (or what this device had before settings were kept on the account, until an account takes it).
@@ -217,8 +217,6 @@ export function useSettingsSync(): SyncStatus {
 export const pullSettings = (force = false) => hooks?.pull(force);
 /** Sends what is not saved yet and waits for it, at most `ms` (before signing out). */
 export const flushSettings = (ms: number) => hooks?.flush(ms) ?? Promise.resolve();
-/** Whether auto-muck was changed on this device and is not saved yet (the table takes this device's value then). */
-export const hasPendingMuck = () => pendingMuck(account);
 
 /** The first paint: the look of the account last signed in on this device, or of the device. */
 export function applyInitialTheme() {

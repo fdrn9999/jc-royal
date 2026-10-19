@@ -16,6 +16,7 @@ import {
   type TournamentSummaryDto,
   type TournamentTimeBank,
   isKstNight,
+  shownVip,
   TOURNAMENT_STATUSES,
 } from '@jc/types';
 import { outboxForEntries } from '@jc/db';
@@ -75,12 +76,14 @@ export const SUMMARY_COLUMNS = `tn.id, tn.name, tn.status, tn.capacity, tn.min_p
   tn.min_hands AS minHands, tn.require_verified AS requireVerified, tn.table_id AS tableId, tn.created_at AS createdAt,
   tn.started_at AS startedAt, COALESCE(tn.finished_at, tn.aborted_at, tn.cancelled_at) AS endedAt,
   (SELECT COUNT(*) FROM tournament_entries e WHERE e.tournament_id = tn.id AND e.status NOT IN ('unregistered', 'dropped')) AS registered,
-  w.nickname AS winner, me.status AS meStatus, me.place AS mePlace`;
+  w.nickname AS winner, w.role AS winnerRole, w.status AS winnerStatus, w.is_bot AS winnerBot, w.vip_color AS winnerVipColor,
+  me.status AS meStatus, me.place AS mePlace`;
 export const SUMMARY_FROM = `tournaments tn LEFT JOIN users w ON w.id = tn.winner_id
   LEFT JOIN tournament_entries me ON me.tournament_id = tn.id AND me.user_id = ?1`;
 
 export function summaryOf(r: Record<string, unknown>): TournamentSummaryDto {
   const levels = parseLevels(r.levels);
+  const winnerVip = r.winner ? shownVip({ role: r.winnerRole as string, status: r.winnerStatus as string, isBot: Number(r.winnerBot), vipColor: r.winnerVipColor as string | null }) : undefined;
   return {
     id: String(r.id),
     name: String(r.name),
@@ -104,6 +107,7 @@ export function summaryOf(r: Record<string, unknown>): TournamentSummaryDto {
     startedAt: (r.startedAt as number | null) ?? null,
     endedAt: (r.endedAt as number | null) ?? null,
     winner: (r.winner as string | null) ?? null,
+    ...(winnerVip ? { winnerVip } : {}),
     me: r.meStatus ? { status: r.meStatus as EntryStatus, place: (r.mePlace as number | null) ?? null } : null,
   };
 }

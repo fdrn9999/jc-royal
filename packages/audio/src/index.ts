@@ -29,6 +29,8 @@ export type SoundId =
   | 'allin'
   | 'fold'
   | 'timer'
+  // My turn to act: once per decision
+  | 'turn'
   | 'showdown'
   | 'win'
   // Academy feedback
@@ -326,6 +328,11 @@ class SoundEngine {
       case 'timer':
         this.tone({ type: 'sine', freq: 880, duration: 0.09, volume: 0.1 });
         this.tone({ type: 'sine', freq: 880, duration: 0.09, volume: 0.08, start: 0.14 });
+        return;
+      case 'turn':
+        // Softer and rounder than the timer, which still warns once the clock runs low.
+        this.tone({ type: 'triangle', freq: 659.25, duration: 0.16, volume: 0.09 });
+        this.tone({ type: 'triangle', freq: 880, duration: 0.24, volume: 0.09, start: 0.12 });
         return;
       case 'showdown':
         this.tone({ type: 'triangle', freq: 392, duration: 0.25, volume: 0.09 });

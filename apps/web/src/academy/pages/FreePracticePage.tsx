@@ -175,7 +175,7 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
         <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
           {fault && (
             <div className="jc-panel pointer-events-auto flex w-full max-w-md flex-col gap-2 border-danger/50 p-4" role="alert" data-testid="practice-fault">
-              <p className="text-sm text-[#f3c3c4]">{tr(T.fault)}</p>
+              <p className="text-sm text-danger-soft">{tr(T.fault)}</p>
               <Button onClick={onRestart}>{tr(T.restart)}</Button>
             </div>
           )}

@@ -8,7 +8,17 @@
  * whose time is up. The level is fixed at the deal, so a hand in progress keeps its blinds.
  */
 import { outboxForEntries } from '@jc/db';
-import { advanceLevel, isKstNight, rankBusts, TOURNAMENT_FINISH_LINGER_MS, type BlindLevel, type TournamentStatus, type TournamentTimeBank } from '@jc/types';
+import {
+  advanceLevel,
+  isKstNight,
+  isVipColor,
+  rankBusts,
+  TOURNAMENT_FINISH_LINGER_MS,
+  type BlindLevel,
+  type TournamentStatus,
+  type TournamentTimeBank,
+  type VipColor,
+} from '@jc/types';
 import { maintenanceQuery, toMaintenance, type Maintenance } from './settlement';
 
 export interface TournamentEntryRow {
@@ -20,6 +30,8 @@ export interface TournamentEntryRow {
   nickname: string;
   avatarUrl: string | null;
   role: string;
+  /** The VIP name color the seat shows (only an active ordinary member's: see shownVip). */
+  vip?: VipColor;
 }
 
 /** The tournament a table plays, as D1 has it (read with the table: TOURNAMENT_JSON). */
@@ -48,7 +60,8 @@ export const TOURNAMENT_JSON = `SELECT json_object('id', tn.id, 'name', tn.name,
     'refillHands', tn.tb_refill_hands, 'refillMs', tn.tb_refill_ms),
   'level', tn.level, 'levelEndsAt', tn.level_ends_at, 'levelLeftMs', tn.level_left_ms, 'pausedAt', tn.paused_at, 'hands', tn.hands,
   'entries', json((SELECT json_group_array(json_object('userId', e.user_id, 'seat', e.seat_index, 'stack', e.stack, 'status', e.status,
-      'place', e.place, 'nickname', u.nickname, 'avatarUrl', u.avatar_url, 'role', u.role))
+      'place', e.place, 'nickname', u.nickname, 'avatarUrl', u.avatar_url, 'role', u.role,
+      'vip', CASE WHEN u.role = 'user' AND u.is_bot = 0 AND u.status = 'active' THEN u.vip_color END))
     FROM tournament_entries e JOIN users u ON u.id = e.user_id
     WHERE e.tournament_id = tn.id AND e.status IN ('playing', 'eliminated', 'won', 'stopped'))))
   FROM tournaments tn WHERE tn.table_id = tables.id`;
@@ -86,6 +99,7 @@ export function toTournamentRow(raw: unknown): TournamentRow | null {
               nickname: String(e.nickname ?? ''),
               avatarUrl: typeof e.avatarUrl === 'string' ? e.avatarUrl : null,
               role: String(e.role ?? 'user'),
+              ...(isVipColor(e.vip) ? { vip: e.vip } : {}),
             },
           ]
         : [],

@@ -27,6 +27,7 @@ export const ALL_GRANTS = [
   'settings',
   'resetLinks',
   'maintenance',
+  'vip',
 ] as const;
 
 /** SQL that switches features on for the accounts matching `where` (an SQL condition on users), replacing what they had. */

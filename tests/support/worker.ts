@@ -59,7 +59,7 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-topup-drain-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 9000, max: 9900 })),
   // Pre-actions: three players, so one can choose while another is to act. Long turns keep the clock out of it.
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-pre-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
-  // Showdown muck: heads-up, so a checked-down hand has one covered loser.
+  // Showdown muck (always on): heads-up, so a checked-down hand has one covered loser.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-muck-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Showing cards after a hand: six seats, so a third player can sit down during a hand without being dealt in.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-show-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
@@ -83,6 +83,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-perm-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Staff marks: a member whose role changes while seated, heads-up so one fold ends a hand for the history.
   { id: 'it-role-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // VIP members: a member made VIP, recolored and ended while seated in a hand, heads-up with long turns.
+  { id: 'it-vip-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Reports and blocks against staff: members report players they share this table with.
   { id: 'it-staff-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
   // Link previews: a public table no other file closes (admin.test.ts closes it-admin-0, and the files run in any order).
@@ -103,8 +105,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-bot-fund', maxSeats: 2, sb: 50, bb: 100, min: 10000, max: 10000, turnSeconds: 60, bots: {} },
   // Referral rewards: a new member plays the hand the policy asks for, heads-up so one fold ends it.
   { id: 'it-ref-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
-  // Account settings: auto-muck saved from a device, and an administrator's reset, reach the table the member sits at;
-  // quick saves whose pushes overlap.
+  // Account settings: the auto-muck an older device still saves, and an administrator's reset, while the member sits
+  // here (the table is told of neither); quick saves one after another.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-set-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Time bank: heads-up with long turns, so only the bank moves a deadline; and a short turn that still runs out.
   ...Array.from({ length: 5 }, (_, i) => ({ id: `it-tb-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),

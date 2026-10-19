@@ -357,10 +357,10 @@ export function ChatPanel({
           <div key={m.id} className={cx('break-words', m.role && 'jc-role-line')} data-role={m.role} data-testid="chat-line">
             {onPick && m.userId !== myId ? (
               <button type="button" className="max-w-full align-bottom font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">
-                <MemberName name={m.nickname} role={m.role} />
+                <MemberName name={m.nickname} role={m.role} vip={m.vip} />
               </button>
             ) : (
-              <MemberName name={m.nickname} role={m.role} className="font-semibold text-gold-300" />
+              <MemberName name={m.nickname} role={m.role} vip={m.vip} className="font-semibold text-gold-300" />
             )}
             {m.role && <RoleBadge role={m.role} className="ml-1 align-[1px]" />}{' '}
             <span className="text-ink-100">{m.text}</span>
@@ -512,15 +512,15 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
             <input type="checkbox" checked={prefs.beginner} onChange={(e) => setPrefs({ beginner: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-beginner" />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
-            {t('settings.confirmRisky')}
-            <input type="checkbox" checked={prefs.confirmRisky} onChange={(e) => setPrefs({ confirmRisky: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" />
+            <span className="flex flex-col gap-0.5">
+              {t('settings.showHand')}
+              <span className="text-xs text-ink-300">{t('settings.showHandHint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.showHand} onChange={(e) => setPrefs({ showHand: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-show-hand" />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
-            <span className="flex flex-col gap-0.5">
-              {t('settings.autoMuck')}
-              <span className="text-xs text-ink-300">{t('settings.autoMuckHint')}</span>
-            </span>
-            <input type="checkbox" checked={prefs.autoMuck} onChange={(e) => setPrefs({ autoMuck: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-automuck" />
+            {t('settings.confirmRisky')}
+            <input type="checkbox" checked={prefs.confirmRisky} onChange={(e) => setPrefs({ confirmRisky: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="flex flex-col gap-0.5">
@@ -528,6 +528,13 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
               <span className="text-xs text-ink-300">{t('settings.reactionsHint')}</span>
             </span>
             <input type="checkbox" checked={prefs.reactions} onChange={(e) => setPrefs({ reactions: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-reactions" />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.turnVibrate')}
+              <span className="text-xs text-ink-300">{t('settings.turnVibrateHint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.turnVibrate} onChange={(e) => setPrefs({ turnVibrate: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-turn-vibrate" />
           </label>
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="flex flex-col gap-0.5" id="amount-unit-label">

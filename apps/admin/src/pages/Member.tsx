@@ -3,7 +3,7 @@
  * period, and the administrators' history of the account with internal notes.
  */
 import { Badge, Button, Empty, formatChips, formatDate, Panel, Stat } from '@jc/ui';
-import type { ReportReason, ReportStatus } from '@jc/types';
+import { isVipColor, type ReportReason, type ReportStatus, type VipColor } from '@jc/types';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { useT } from '../i18n';
@@ -11,6 +11,7 @@ import { auditActionLabel, roleLabel, userStatusLabel, type Tr } from '../labels
 import { ApiError, errText, useAdmin, useData } from '../lib';
 import { jumpTarget, LoadError, Modal } from '../ui';
 import { Table } from './Console';
+import { vipColorLabel } from './MemberVip';
 import { REASON, STATUS } from './Reports';
 
 export interface RecentTable {
@@ -186,6 +187,11 @@ function describe(t: Tr, it: TimelineItem): string[] {
   const out: string[] = [];
   if (it.action === 'note') return it.body ? [it.body] : [];
   if (it.action === 'user.role' && str('from') && str('to')) out.push(t('histChange', { from: roleLabel(t, str('from')), to: roleLabel(t, str('to')) }));
+  if (it.action === 'user.vip') {
+    const color = (k: string) => (isVipColor(d[k]) ? (d[k] as VipColor) : null);
+    if (color('from') !== color('to')) out.push(t('histChange', { from: vipColorLabel(t, color('from')), to: vipColorLabel(t, color('to')) }));
+    if (str('cause') === 'role') out.push(t('histVipCause'));
+  }
   if ((it.action === 'user.suspend' || it.action === 'user.unsuspend') && str('from') && str('to') && str('from') !== str('to')) {
     out.push(t('histChange', { from: userStatusLabel(t, str('from')), to: userStatusLabel(t, str('to')) }));
   }
@@ -214,6 +220,7 @@ const SANCTION_TONE: Record<string, 'red' | 'green' | 'gold' | 'blue' | 'neutral
   'user.unsuspend': 'green',
   'user.disconnect': 'red',
   'user.role': 'gold',
+  'user.vip': 'gold',
   'user.chips': 'blue',
   'user.reconcile': 'gold',
   note: 'neutral',

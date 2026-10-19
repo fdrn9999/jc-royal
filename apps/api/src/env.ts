@@ -1,5 +1,5 @@
 import type { Db } from '@jc/db';
-import type { Role } from '@jc/types';
+import type { Role, VipColor } from '@jc/types';
 
 export interface Env {
   DB: D1Database;
@@ -50,6 +50,8 @@ export interface AuthUser {
   createdAt: number;
   /** How the member shows to friends (packages/types/src/presence.ts). */
   presenceMode: 'auto' | 'away' | 'invisible';
+  /** The VIP name color others see (shownVip); never read by game or economy code. */
+  vip?: VipColor;
 }
 
 export interface AuthSession {

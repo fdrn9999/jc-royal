@@ -174,7 +174,7 @@ export function CardButton({ card, size = 'clamp(3.2rem,15vw,4.6rem)', mark, onC
       aria-pressed={mark === 'selected' ? true : undefined}
       data-pick={card}
       className={cx(
-        'jc-tap select-none rounded-[0.7rem] p-1 transition outline-offset-4',
+        'jc-tap relative select-none rounded-[0.7rem] p-1 transition outline-offset-4',
         mark === 'correct' && 'jc-pop bg-success/25 ring-2 ring-success',
         mark === 'wrong' && 'jc-shake bg-danger/20 ring-2 ring-danger',
         mark === 'selected' && 'bg-gold-500/20 ring-2 ring-gold-400',
@@ -183,6 +183,8 @@ export function CardButton({ card, size = 'clamp(3.2rem,15vw,4.6rem)', mark, onC
       style={{ WebkitTouchCallout: 'none' }}
     >
       <PlayingCard card={card} size={size} dim={dim} />
+      {/* A shape as well as the ring colour (the answer is also read out below). */}
+      {(mark === 'correct' || mark === 'wrong') && <ResultMark ok={mark === 'correct'} className="absolute -right-1.5 -top-1.5" />}
     </button>
   );
 }
@@ -202,6 +204,15 @@ export function CardRow({ cards, size, main = [], second = [], reveal = false }:
   );
 }
 
+/** ✓ or ✗ in a disc, so a right or wrong answer never rests on red and green alone. */
+export function ResultMark({ ok, className }: { ok: boolean; className?: string }) {
+  return (
+    <span aria-hidden className={cx('grid size-6 shrink-0 place-items-center rounded-full text-xs font-black text-ink-950 shadow ring-2 ring-ink-950', ok ? 'bg-success' : 'bg-danger', className)} data-mark={ok ? 'correct' : 'wrong'}>
+      {ok ? '✓' : '✗'}
+    </span>
+  );
+}
+
 // ------------------------------------------------------------------ feedback
 
 function Feedback({ state, explain, why, onNext, nextLabel }: { state: 'correct' | 'wrong'; explain: L; why?: L | null; onNext?: () => void; nextLabel?: L }) {
@@ -211,7 +222,7 @@ function Feedback({ state, explain, why, onNext, nextLabel }: { state: 'correct'
       role="status"
       aria-live="polite"
       data-testid={state === 'correct' ? 'feedback-correct' : 'feedback-wrong'}
-      className={cx('flex flex-col gap-2 rounded-xl border p-3 text-sm', state === 'correct' ? 'jc-pop border-success/40 bg-success/10 text-[#bfe9d0]' : 'jc-shake border-danger/40 bg-danger/10 text-[#f3c3c4]')}
+      className={cx('flex flex-col gap-2 rounded-xl border p-3 text-sm', state === 'correct' ? 'jc-pop border-success/40 bg-success/10 text-success-soft' : 'jc-shake border-danger/40 bg-danger/10 text-danger-soft')}
     >
       <div className="font-bold">{state === 'correct' ? `✓ ${tr(UI.correct)}` : `✗ ${tr(UI.wrong)}`}</div>
       {state === 'wrong' && why && <p>{tr(why)}</p>}
@@ -291,11 +302,12 @@ function ChoiceView({ q, onSolved }: { q: ChoiceQuestion; onSolved: () => void }
               answer(ok);
             }}
             className={cx(
-              'jc-tap min-h-12 rounded-xl border px-4 py-3 text-left text-sm font-semibold transition',
-              picked?.id === o.id ? (picked.ok ? 'jc-pop border-success bg-success/15 text-[#bfe9d0]' : 'jc-shake border-danger bg-danger/10 text-[#f3c3c4]') : 'border-white/10 bg-ink-850 text-ivory hover:border-gold-500/50',
+              'jc-tap flex min-h-12 items-center gap-2 rounded-xl border px-4 py-3 text-left text-sm font-semibold transition',
+              picked?.id === o.id ? (picked.ok ? 'jc-pop border-success bg-success/15 text-success-soft' : 'jc-shake border-danger bg-danger/10 text-danger-soft') : 'border-white/10 bg-ink-850 text-ivory hover:border-gold-500/50',
             )}
           >
-            {tr(o.label)}
+            {picked?.id === o.id && <ResultMark ok={picked.ok} />}
+            <span>{tr(o.label)}</span>
           </button>
         ))}
       </div>
@@ -510,11 +522,12 @@ function CompareView({ q, onSolved }: { q: CompareQuestion; onSolved: () => void
               answer(ok);
             }}
             className={cx(
-              'jc-tap min-h-12 rounded-xl border px-2 py-2 text-sm font-bold transition disabled:opacity-60',
+              'jc-tap flex min-h-12 items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-sm font-bold transition disabled:opacity-60',
               picked?.id === id ? (picked.ok ? 'jc-pop border-success bg-success/15' : 'jc-shake border-danger bg-danger/10') : 'border-white/10 bg-ink-850 hover:border-gold-500/50',
             )}
           >
-            {id === 'split' ? tr(UI.split) : `${tr(UI[id])} ${tr(l('승리', 'wins'))}`}
+            {picked?.id === id && <ResultMark ok={picked.ok} />}
+            <span>{id === 'split' ? tr(UI.split) : `${tr(UI[id])} ${tr(l('승리', 'wins'))}`}</span>
           </button>
         ))}
       </div>

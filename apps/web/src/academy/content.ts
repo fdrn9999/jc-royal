@@ -102,4 +102,26 @@ export function currentHand(hole: readonly Card[] | null | undefined, board: rea
   return evaluateKnown([...hole, ...board]);
 }
 
+const POCKET_EN: Record<string, string> = { A: 'Aces', K: 'Kings', Q: 'Queens', J: 'Jacks', T: 'Tens', '9': 'Nines', '8': 'Eights', '7': 'Sevens', '6': 'Sixes', '5': 'Fives', '4': 'Fours', '3': 'Threes', '2': 'Twos' };
+
+/**
+ * A starting hand by its usual name, before the flop: "포켓 에이스" / "Pocket Aces", "A-K 수딧" / "A-K suited",
+ * "A-K 오프수딧" / "A-K offsuit" (the higher card first). Null without two cards.
+ */
+export function startingHandName(hole: readonly Card[] | null | undefined, locale: 'ko' | 'en'): string | null {
+  if (!hole || hole.length !== 2) return null;
+  const [x, y] = [...hole].sort((a, b) => rankValue(b) - rankValue(a)) as [Card, Card];
+  if (x[0] === y[0]) return locale === 'ko' ? `포켓 ${SPOKEN[x[0]!]?.ko ?? rankLabel(x)}` : `Pocket ${POCKET_EN[x[0]!]}`;
+  const pair = `${rankLabel(x)}-${rankLabel(y)}`;
+  const suited = x[1] === y[1];
+  return locale === 'ko' ? `${pair} ${suited ? '수딧' : '오프수딧'}` : `${pair} ${suited ? 'suited' : 'offsuit'}`;
+}
+
+/** What the hand HUD says: the starting hand's name before the flop, the made hand after (describeHand). */
+export function describeCurrent(hole: readonly Card[] | null | undefined, board: readonly Card[], locale: 'ko' | 'en', t: (k: MsgKey) => string): string | null {
+  if (board.length === 0) return startingHandName(hole, locale);
+  const ev = currentHand(hole, board);
+  return ev ? describeHand(ev, locale, t) : null;
+}
+
 export { rankValue };

@@ -1,6 +1,7 @@
 import type { Card, HandRankClass } from './cards';
 import type { ReactionRules } from './protocol';
 import type { PublicRole } from './social';
+import type { VipColor } from './vip';
 import type { TimeBankRules } from './timebank';
 import type { TournamentTableView } from './tournament';
 
@@ -49,6 +50,11 @@ export interface SeatView {
    * the social policy hides that role's badge.
    */
   role?: PublicRole;
+  /**
+   * A VIP member's name color (see shownVip): refreshed like `role`, when the player connects and when an administrator
+   * changes it, without touching the hand. Never on a staff or bot seat.
+   */
+  vip?: VipColor;
   /**
    * A table bot of this level, not a member: it has no profile, and cannot be befriended, messaged or reported. `true`
    * in the replay of a past hand, which records that a seat was a bot but not how well it played.
@@ -176,9 +182,16 @@ export interface TableView {
     autoRebuy: { amount: number; cap: number; spent: number } | null;
     /** The viewer's own pre-action for this street (nobody else is ever shown it). Absent from older rooms. */
     preAction?: PreActionKind | null;
-    /** The seated viewer's auto-muck setting as the room holds it; null when not seated. Absent from older rooms. */
+    /**
+     * Only from a room older than auto-muck always applying: the seated viewer's auto-muck setting as that room holds it
+     * (null when not seated). Such a room turns a losing showdown hand over unless it is on, so the page turns it on
+     * (Table.tsx). Rooms now never report it (older pages compared it with theirs: absent, they send nothing).
+     */
     autoMuck?: boolean | null;
-    /** The seated viewer may show cards from the hand that just ended (auto-muck on, dealt in, not shown at showdown). */
+    /**
+     * The seated viewer may show cards from the hand that just ended (dealt in at this seat, not turned over at showdown;
+     * still true once both are shown).
+     */
     canShow?: boolean;
     /**
      * The seated viewer's own time bank: ms left, and hands dealt in since the last refill. Null before their first hand

@@ -1,9 +1,11 @@
 /**
  * How a member's name looks to other players. Staff (`role` from the server, never chosen by the client) get their
  * own color and mark: a crown for the super admin, a shield for an admin, and where there is room the SUPER ADMIN /
- * ADMIN badge. Ordinary members look exactly as before. The crown is drawn, so it never reads as the 👑 host mark.
+ * ADMIN badge. A VIP member (`vip`, a palette key from the server, members only) gets the color an administrator chose
+ * and always the VIP mark with it: the VIP pill where there is room, a small gold diamond where there is not. Other
+ * members look exactly as before. The crown is drawn, so it never reads as the 👑 host mark.
  */
-import type { BotLevel, PublicRole } from '@jc/types';
+import type { BotLevel, PublicRole, VipColor } from '@jc/types';
 import { cx } from '@jc/ui';
 import { useI18n } from '../lib/i18n';
 
@@ -57,20 +59,52 @@ export function RoleBadge({ role, className }: { role?: PublicRole; className?: 
   );
 }
 
+const DIAMOND = 'M5 .6 9.4 4 5 9.4.6 4Z';
+
+/** The VIP pill (the same word in Korean and English): gold on near-black, a thin gold rim and a small diamond. */
+export function VipBadge({ className }: { className?: string }) {
+  const { t } = useI18n();
+  return (
+    <span className={cx('jc-vip-badge', className)} title={t('vip.label')} data-testid="vip-badge">
+      <svg viewBox="0 0 10 10" aria-hidden className="size-[0.85em] shrink-0">
+        <path d={DIAMOND} fill="currentColor" />
+      </svg>
+      <span aria-hidden>VIP</span>
+      <span className="sr-only">{t('vip.label')}</span>
+    </span>
+  );
+}
+
+/** The VIP mark where the pill has no room (a seat, a lobby host): the gold diamond alone, read out as "VIP member". */
+export function VipIcon({ className }: { className?: string }) {
+  const { t } = useI18n();
+  const label = t('vip.label');
+  return (
+    <svg viewBox="0 0 10 10" role="img" aria-label={label} className={cx('jc-vip-icon shrink-0', className)} data-testid="vip-icon">
+      <title>{label}</title>
+      <path d={DIAMOND} fill="currentColor" />
+    </svg>
+  );
+}
+
+/** A VIP color only for a member: staff keep their own (the server never sends both; this is the client's guard). */
+export const vipOf = (role: PublicRole | undefined, vip: VipColor | undefined) => (role ? undefined : vip);
+
 /**
- * "Host {name}" on a lobby room: 👤 for a member, the staff mark and color for staff. The sentence comes from the
- * translation, so only the name inside it is colored.
+ * "Host {name}" on a lobby room: 👤 for a member, the staff mark and color for staff, the VIP color and diamond for a
+ * VIP member. The sentence comes from the translation, so only the name inside it is colored.
  */
-export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole } }) {
+export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole; vip?: VipColor } }) {
   const { t } = useI18n();
   const MARK = '\u0000';
   const [before = '', after = ''] = t('room.hostedBy', { name: MARK }).split(MARK);
+  const vip = vipOf(host.role, host.vip);
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
-      {host.role ? <RoleIcon role={host.role} className="size-3" /> : <span aria-hidden>👤</span>}
+      {host.role ? <RoleIcon role={host.role} className="size-3" /> : vip ? <VipIcon className="size-3" /> : <span aria-hidden>👤</span>}
       <span className="min-w-0 truncate">
         {before}
-        <span className={host.role && 'jc-role-name'} data-role={host.role}>
+        <span className={cx(host.role && 'jc-role-name', vip && 'jc-vip-name') || undefined} data-role={host.role} data-vip={vip}>
           {host.nickname}
         </span>
         {after}
@@ -81,17 +115,30 @@ export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole
 
 /**
  * A member's name: for staff, the mark and their color (over whatever color `className` gives other members), and the
- * badge with `badge`. A table bot (`bot`) always carries the BOT pill. Long names are cut with an ellipsis; the mark and
- * the badges always stay whole.
+ * badge with `badge`; for a VIP member, their color with the diamond in front, or the VIP pill after it with `badge`.
+ * `badge="wide"` (a row that also holds a status, a time or buttons): the badges from the sm width up, and below it the
+ * marks alone (the diamond; staff keep the crown or shield either way), so a phone's narrow row still shows the name.
+ * A table bot (`bot`) always carries the BOT pill. Long names are cut with an ellipsis; the marks and the badges always
+ * stay whole, so a seat keeps its size and a long name gives way to them.
  */
-export function MemberName({ name, role, bot, badge, className }: { name: string; role?: PublicRole; bot?: BotLevel | true; badge?: boolean; className?: string }) {
+export function MemberName({ name, role, vip: given, bot, badge, className }: { name: string; role?: PublicRole; vip?: VipColor; bot?: BotLevel | true; badge?: boolean | 'wide'; className?: string }) {
+  const vip = vipOf(role, given);
+  const pills =
+    badge && (role || vip) ? (
+      <>
+        <RoleBadge role={role} />
+        {vip && <VipBadge />}
+      </>
+    ) : null;
   return (
     <span className={cx('inline-flex min-w-0 max-w-full items-center gap-1 align-bottom', className)} data-testid="member-name">
       <RoleIcon role={role} className="size-[1.05em]" />
-      <span className={cx('min-w-0 truncate', role && 'jc-role-name')} data-role={role}>
+      {vip && badge !== true && <VipIcon className={cx('size-[0.85em]', badge === 'wide' && 'sm:hidden')} />}
+      <span className={cx('min-w-0 truncate', role && 'jc-role-name', vip && 'jc-vip-name')} data-role={role} data-vip={vip}>
         {name}
       </span>
-      {badge && <RoleBadge role={role} />}
+      {/* Hidden by a wrapper: the pills' own (unlayered) display would win over a utility on them. */}
+      {badge === 'wide' && pills ? <span className="contents max-sm:hidden">{pills}</span> : pills}
       {bot && <BotBadge level={bot} />}
     </span>
   );

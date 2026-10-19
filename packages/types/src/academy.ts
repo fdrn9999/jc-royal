@@ -28,6 +28,20 @@ export interface AcademyProgressDto {
   badges: BadgeDto[];
 }
 
+/**
+ * The Advanced GTO Academy's PUT body: the beginner course's, plus `base`, the updatedAt of the server copy the client
+ * last merged with (null when the server had none). With it the write lands only over that copy and only with a later
+ * updatedAt, else 409 and the client merges the newer copy and tries again; without it the newer updatedAt wins.
+ */
+export const GtoProgressPutSchema = AcademyProgressPutSchema.extend({ base: z.number().int().nonnegative().nullable().optional() });
+
+/** The Advanced GTO Academy's progress, stored apart from the beginner course's (PUT body GtoProgressPutSchema). It earns no badges. */
+export interface GtoProgressDto {
+  data: Record<string, unknown> | null;
+  version: number | null;
+  updatedAt: number | null;
+}
+
 const ItemId = z.string().regex(/^[A-Za-z0-9:_-]{1,48}$/);
 export const AcademyEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('question'), id: ItemId, correct: z.boolean() }),

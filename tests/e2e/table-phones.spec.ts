@@ -85,6 +85,9 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
       turn = await look('turn');
     }).toPass({ timeout: 180_000 });
     const before = turn!;
+    // The turn label and its countdown, on screen with the bar (measured above with the stack's other lines).
+    await expect(p.getByTestId('turn-banner')).toBeInViewport();
+    await expect(p.getByTestId('turn-left')).toHaveText(/^(⚠ )?\d+(초|s)$/);
     expect(before.issues, `${sc.name} turn`).toEqual([]);
     expect(await smallTargets(p), `${sc.name} turn: small targets`).toEqual([]);
 

@@ -133,5 +133,3 @@ export function withFavourite(a: AccountSettings, id: string, on: boolean, now: 
 
 export const hasChanges = (a: AccountSettings) => Object.keys(a.pending.prefs).length > 0 || Object.keys(a.pending.fav).length > 0 || legacyOn(a);
 
-/** Whether the pending changes include auto-muck (made on this device and not saved yet). */
-export const pendingMuck = (a: AccountSettings | null) => !!a?.pending.prefs.autoMuck;

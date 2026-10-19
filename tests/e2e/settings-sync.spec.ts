@@ -157,7 +157,8 @@ test('admin settings reset: counts only, a preview with its scope, reason and re
   const scope = admin.getByTestId('settings-pv-scope');
   await expect(scope).toHaveAttribute('data-fields', '1');
   await expect(scope).toHaveAttribute('data-favourites', '1');
-  await expect(scope).toHaveAttribute('data-seated', '0');
+  // Auto-muck always applies now, so the preview no longer counts the tables the member sits at.
+  await expect(scope).not.toHaveAttribute('data-seated');
   await expect(admin.getByTestId('settings-act-confirm')).toBeDisabled();
   await admin.getByTestId('settings-act-reason').fill('E2E 설정 초기화 사유');
   await admin.getByTestId('settings-act-confirm').click();

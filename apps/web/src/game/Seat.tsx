@@ -5,10 +5,11 @@
  */
 import type { SeatView } from '@jc/types';
 import { cx, PlayingCard } from '@jc/ui';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import type { Density } from './layout';
+import { cardsToShow } from './olderRooms';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { ReactionBubble, ReactionTray, type ReactionSender, type SeatReaction } from './Reactions';
 
@@ -37,6 +38,10 @@ function TimerRing({ deadline, totalMs }: { deadline: number; totalMs: number })
     />
   );
 }
+
+/** A show-card button on my cards after a hand; dimmed while its request is on the way. */
+const SHOW_BTN =
+  'jc-tap grid h-6 shrink-0 place-items-center rounded-full border border-gold-500/60 bg-ink-950/85 text-[10px] font-bold text-gold-200 hover:bg-gold-500/20 focus-visible:outline-2 focus-visible:outline-gold-400 disabled:cursor-wait disabled:opacity-60';
 
 function initials(name?: string) {
   return (name ?? '?').slice(0, 2).toUpperCase();
@@ -128,7 +133,10 @@ export interface SeatProps {
   onSit: () => void;
   /** Opens this player's card (other occupied seats only). */
   onPick?: () => void;
-  /** My seat after a hand, with auto-muck on: a button over each card turns it face up for the table. */
+  /**
+   * My seat after a hand whose showdown left my cards face down (folded, won uncontested or lost): a button over each
+   * card, and one for both, turns them face up for the table until the next deal.
+   */
   onShow?: (card: 0 | 1) => void;
   /** Those buttons lie on the cards' lower half, clear of the plate, instead of above them (no room kept there). */
   showOver?: boolean;
@@ -136,6 +144,8 @@ export interface SeatProps {
   reaction?: SeatReaction | null;
   /** My seat at a real table, with reactions on: tapping the plate opens the reaction tray. */
   react?: ReactionSender;
+  /** Said in the status line in place of the rest (my turn's label on a phone upright, where the stack keeps no line). */
+  turnNote?: ReactNode;
   density: Density;
   amounts: Amounts;
   style: CSSProperties;
@@ -151,6 +161,16 @@ export function Seat(p: SeatProps) {
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const trayOpen = tray && !!p.react;
+  // Cards asked to be shown, until the room's answer shows them (a second tap sends nothing): cleared when what is
+  // shown changes, at the next hand, or after a while when the answer never came (the request was refused).
+  const [showing, setShowing] = useState<readonly number[]>([]);
+  const shownKey = (s.shown ?? []).map((c) => (c ? 1 : 0)).join('');
+  useEffect(() => setShowing([]), [shownKey, p.newHandKey]);
+  useEffect(() => {
+    if (!showing.length) return;
+    const id = setTimeout(() => setShowing([]), 5_000);
+    return () => clearTimeout(id);
+  }, [showing]);
   // My turn needs the space above my seat (and my attention): the tray gives way.
   useEffect(() => {
     if (p.isActor) setTray(false);
@@ -199,17 +219,23 @@ export function Seat(p: SeatProps) {
   // Cards shown after the hand: face up where chosen, the other one face down (its owner sees both in holeCards).
   const shown = s.shown?.length ? s.shown : null;
   const isShown = (i: number) => !!shown?.[i];
+  const show = (choice: 0 | 1 | 'both') => {
+    const todo = cardsToShow(choice, showing, isShown);
+    setShowing([...showing, ...todo]);
+    for (const i of todo) p.onShow?.(i);
+  };
   const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0) || !!shown;
   const cards = s.holeCards && s.holeCards.length ? s.holeCards : (shown ?? (showCards ? [null, null] : []));
   const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${p.amounts.fmt(s.lastAction.amount, true)}` : ''}` : null;
+  // The colour vision modes swap these (styles.css); the label always says the action too.
   const actionTone =
     s.lastAction?.type === 'fold'
-      ? 'text-[#f0a0a2]'
+      ? 'text-[color:var(--act-fold-text)]'
       : s.lastAction?.type === 'raise' || s.lastAction?.type === 'bet'
         ? 'text-gold-300'
         : s.lastAction?.type === 'allin'
-          ? 'text-[#f5a860]'
-          : 'text-[#9fd8b6]';
+          ? 'text-[color:var(--act-allin-text)]'
+          : 'text-[color:var(--act-call-text)]';
 
   return (
     <div
@@ -255,8 +281,10 @@ export function Seat(p: SeatProps) {
                     <button
                       key={i}
                       type="button"
-                      onClick={() => p.onShow!(i === 0 ? 0 : 1)}
-                      className="jc-tap grid h-6 place-items-center rounded-full border border-gold-500/60 bg-ink-950/85 text-[10px] font-bold text-gold-200 hover:bg-gold-500/20 focus-visible:outline-2 focus-visible:outline-gold-400"
+                      onClick={() => show(i === 0 ? 0 : 1)}
+                      disabled={showing.includes(i)}
+                      aria-busy={showing.includes(i) || undefined}
+                      className={SHOW_BTN}
                       style={{ width: cardSize }}
                       aria-label={t('table.showCardAria', { n: i + 1 })}
                       data-testid={`show-card-${i}`}
@@ -264,6 +292,19 @@ export function Seat(p: SeatProps) {
                       {t('table.showCard')}
                     </button>
                   ),
+                )}
+                {cards.length === 2 && !isShown(0) && !isShown(1) && (
+                  <button
+                    type="button"
+                    onClick={() => show('both')}
+                    disabled={showing.length === 2}
+                    aria-busy={showing.length === 2 || undefined}
+                    className={cx(SHOW_BTN, 'px-2')}
+                    aria-label={t('table.showBothAria')}
+                    data-testid="show-card-both"
+                  >
+                    {t('table.showBoth')}
+                  </button>
                 )}
               </div>
             )}
@@ -275,6 +316,8 @@ export function Seat(p: SeatProps) {
             'relative flex items-center rounded-full border shadow-xl backdrop-blur-sm',
             z.plate,
             p.isActor ? 'border-gold-400/80' : 'border-[var(--t-seat-border)]',
+            // My turn: a gold ring that breathes (still under reduced motion), outside the plate so the seat keeps its size.
+            p.isActor && p.isMe && !winner && 'jc-turn',
             winner && 'jc-winner',
           )}
           style={{ background: 'var(--t-seat)' }}
@@ -295,7 +338,7 @@ export function Seat(p: SeatProps) {
           <span className="flex min-w-0 flex-col leading-tight">
             {/* The width cap sits on a wrapper: MemberName's own max-w-full comes later in the stylesheet and would win. */}
             <span className={cx('flex min-w-0', z.name)}>
-              <MemberName name={s.nickname ?? ''} role={s.role} bot={s.bot} className={cx('font-semibold', z.nameText, p.isMe ? 'text-gold-300' : 'text-ivory')} />
+              <MemberName name={s.nickname ?? ''} role={s.role} vip={s.bot ? undefined : s.vip} bot={s.bot} className={cx('font-semibold', z.nameText, p.isMe ? 'text-gold-300' : 'text-ivory')} />
             </span>
             <span className={cx('font-mono font-semibold text-[#9fd8b6] tabular-nums', z.stack)} data-testid={`stack-${s.seatIndex}`}>
               {p.amounts.fmt(s.stack, compact)}
@@ -340,14 +383,16 @@ export function Seat(p: SeatProps) {
         </div>
         {/* status line: no wider than the seat (layout.ts); what does not fit is cut short, whole in its title */}
         <div className={cx('flex items-center gap-1 overflow-hidden whitespace-nowrap font-bold tracking-wide [&>span]:min-w-0 [&>span]:truncate', z.status)} data-testid={`seat-status-${s.seatIndex}`}>
-          {winner ? (
+          {p.turnNote ? (
+            p.turnNote
+          ) : winner ? (
             <span className="text-[var(--t-winner)]" title={`${t('table.winner')} ${won}`}>
               {/* The smallest seats keep the word for screen readers only: the plate already glows. */}
               <span className={cx(p.density === 'dense' && 'sr-only')}>{t('table.winner')} </span>
               {won}
             </span>
           ) : allIn ? (
-            <span className="rounded-full bg-[#e08227]/20 px-1.5 text-[#f5a860]">{t('table.allin')}</span>
+            <span className="rounded-full bg-[#e08227]/20 px-1.5 text-[color:var(--act-allin-text)]">{t('table.allin')}</span>
           ) : s.state === 'sittingOut' ? (
             <span className="text-ink-400">{t('table.sittingOut')}</span>
           ) : !s.connected ? (

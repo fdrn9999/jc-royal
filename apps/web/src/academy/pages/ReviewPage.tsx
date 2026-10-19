@@ -72,7 +72,7 @@ export function ReviewPage() {
                   const info = TOPIC_INFO[topic];
                   return (
                     <li key={topic} className="flex items-center gap-3 rounded-xl border border-danger/30 bg-danger/5 p-3 text-sm" data-topic={topic}>
-                      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/20 font-mono text-xs font-bold text-[#f3c3c4]">{count}</span>
+                      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/20 font-mono text-xs font-bold text-danger-soft">{count}</span>
                       <span className="min-w-0 flex-1 font-semibold text-ivory">{tr(info.name)}</span>
                       <Link to={`${LESSONS[info.lesson].to}?step=${info.step}`} className="jc-tap shrink-0 rounded-lg px-2 py-2 text-xs font-semibold text-gold-300 hover:underline">
                         {tr(T.goLesson)} →

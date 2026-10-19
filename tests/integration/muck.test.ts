@@ -58,23 +58,18 @@ function paidOut(h: HandDetailDto) {
   for (const pl of h.players) expect(pots.flatMap((p) => p.winners).filter((w) => w.seatIndex === pl.seatIndex).reduce((x, w) => x + w.amount, 0)).toBe(pl.won);
 }
 
-const muckOn = async (p: Player, on = true) => {
-  expect(await p.ws.request({ t: 'muck', on })).toMatchObject({ t: 'ack' });
-  await p.ws.waitState((s) => s.you.autoMuck === on);
-};
-
+// Auto-muck always applies (2026-10-19, at the owner's request): there is no setting to turn on first, the room reports
+// none, and the `muck` command older pages send is acknowledged and changes nothing.
 describe('showdown muck', () => {
   it('a losing covered hand stays face down for the table and in others’ history; its owner keeps it', async () => {
     const [a, b] = [await player('it-muck-0'), await player('it-muck-0')];
     const spec = await player('it-muck-0');
-    // Not seated: nothing to set.
-    expect(spec.ws.state!.you.autoMuck ?? null).toBeNull();
+    // Not seated: an older page's setting is refused.
     expect(await spec.ws.request({ t: 'muck', on: true })).toMatchObject({ t: 'error', code: 'forbidden' });
     expect(await a.ws.request({ t: 'sit', seatIndex: 0, buyIn: 1000 })).toMatchObject({ t: 'ack' });
     expect(await b.ws.request({ t: 'sit', seatIndex: 1, buyIn: 1000 })).toMatchObject({ t: 'ack' });
-    expect(a.ws.state!.you.autoMuck).toBe(false);
-    await muckOn(a);
-    await muckOn(b);
+    // No setting reported: an older page compares nothing and sends nothing.
+    expect('autoMuck' in a.ws.state!.you).toBe(false);
     // A split pot shows both hands (both won chips): play on until one hand has a single winner.
     let views: TableView[] = [];
     for (let n = 0; n < 5; n++) {
@@ -102,9 +97,8 @@ describe('showdown muck', () => {
     expect(sv.hand!.result!.showdown.map((x) => x.seatIndex)).toEqual([ws]);
     expect(vw.seats.reduce((x, s) => x + s.stack, 0)).toBe(2000);
 
-    // Turning muck off after the hand settled does not turn the cards over.
+    // An older page turning its setting off after the hand settled is acknowledged and turns nothing over.
     expect(await loser.ws.request({ t: 'muck', on: false })).toMatchObject({ t: 'ack' });
-    await loser.ws.waitState((s) => s.you.autoMuck === false);
     const sync = winner.ws.waitNext((m) => m.t === 'state');
     winner.ws.send({ t: 'sync' });
     const after = ((await sync) as Extract<ServerMessage, { t: 'state' }>).state;
@@ -112,8 +106,8 @@ describe('showdown muck', () => {
       expect(after.seats[ls]!.holeCards ?? null).toBeNull();
       expect(after.hand.result!.showdown.map((x) => x.seatIndex)).toEqual([ws]);
     }
-    // Nobody else is shown a player's setting: it is only ever in the viewer's own `you`.
-    for (const p of [winner, spec]) for (const m of p.ws.messages) if (m.t === 'state') expect(JSON.stringify(m.state.seats)).not.toContain('autoMuck');
+    // No view carries a setting any more, not even the viewer's own.
+    for (const p of [winner, loser, spec]) for (const m of p.ws.messages) if (m.t === 'state') expect(JSON.stringify(m.state)).not.toContain('autoMuck');
 
     // History: the loser's cards and rank are withheld from the winner; the loser still has them.
     const handId = va.hand!.id;
@@ -163,12 +157,10 @@ describe('showdown muck', () => {
     expect((await recorded(winner, handId)).players.find((p) => p.userId === loser.me.id)!.holeCards).toEqual(mine.holeCards);
   });
 
-  it('when the betting ended all in, every hand is shown whatever the settings', async () => {
+  it('when the betting ended all in, every hand is shown although auto-muck applies', async () => {
     const [a, b] = [await player('it-muck-1'), await player('it-muck-1')];
     expect(await a.ws.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
     expect(await b.ws.request({ t: 'sit', seatIndex: 1, buyIn: 1000 })).toMatchObject({ t: 'ack' });
-    await muckOn(a);
-    await muckOn(b);
     for (const p of [a, b]) await p.ws.waitState(live, 20_000, 'hand start');
     // Taken now: a player who busts stands up once the hand is settled.
     const seats = [seatOf(a), seatOf(b)].sort();

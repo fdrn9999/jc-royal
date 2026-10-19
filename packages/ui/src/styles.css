@@ -38,11 +38,15 @@
   --color-danger-strong: #c4474a;
   --color-warning: #d99a2b;
   --color-info: #5a90cf;
+  /* Light text inside a success or danger box (a quiz answer): 4.5:1 or more on the panels. Always with a ✓ or ✗ too. */
+  --color-success-soft: #bfe9d0;
+  --color-danger-soft: #f3c3c4;
 
-  /* Friends' status: always drawn with a shape and a word as well (a dot, a moon, a ring), never by colour alone. */
-  --color-presence-online: #3fa36b;
-  --color-presence-away: #d99a2b;
-  --color-presence-offline: #8d929c;
+  /* Friends' status: always drawn with a shape and a word as well (a dot, a moon, a ring), never by colour alone.
+   * Mid-tones kept apart from every VIP name colour (the bright text beside them), in each colour vision mode too. */
+  --color-presence-online: #2d9a60;
+  --color-presence-away: #cf8517;
+  --color-presence-offline: #8d919a;
 
   --radius-card: 0.875rem;
   --radius-pill: 999px;
@@ -360,6 +364,15 @@
 .jc-winner {
   animation: jc-winner-glow 1.4s ease-in-out infinite;
 }
+/* My seat on my turn (web Seat): a gold ring outside the plate that breathes slowly; a still ring under reduced motion. */
+@keyframes jc-turn-glow {
+  0%, 100% { box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 10px rgba(230, 197, 107, 0.35); }
+  50% { box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 18px rgba(230, 197, 107, 0.7); }
+}
+.jc-turn {
+  box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 12px rgba(230, 197, 107, 0.45);
+  animation: jc-turn-glow 1.8s ease-in-out infinite;
+}
 
 /* Academy feedback: correct answers pop, wrong ones shake. */
 @keyframes jc-pop {
@@ -461,11 +474,43 @@
   border-left-color: rgba(90, 170, 255, 0.6);
 }
 
+/*
+ * VIP members (web MemberName): the name in the colour an administrator chose from a fixed palette (a key the server
+ * checked, never a CSS value), always with the VIP mark beside it: the gold-rimmed VIP pill where there is room, the
+ * small gold diamond where there is not (a seat). The colours are tokens (--vip-*) the colour vision modes adjust.
+ */
+.jc-vip-name[data-vip='gold'] { color: var(--vip-gold); }
+.jc-vip-name[data-vip='rose'] { color: var(--vip-rose); }
+.jc-vip-name[data-vip='sapphire'] { color: var(--vip-sapphire); }
+.jc-vip-name[data-vip='amethyst'] { color: var(--vip-amethyst); }
+.jc-vip-name[data-vip='emerald'] { color: var(--vip-emerald); }
+.jc-vip-name[data-vip='cyan'] { color: var(--vip-cyan); }
+.jc-vip-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.2rem;
+  border: 1px solid var(--vip-rim);
+  border-radius: 0.3rem;
+  padding: 0 0.35rem;
+  background: var(--vip-badge-bg);
+  color: var(--vip-badge-fg);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 15px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.jc-vip-icon {
+  color: var(--vip-badge-fg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .jc-flip-in,
   .jc-deal-in,
   .jc-pulse-gold,
   .jc-winner,
+  .jc-turn,
   .jc-pop,
   .jc-shake,
   .jc-react {
@@ -508,9 +553,43 @@
   --suit-black: #15171c;
   --suit-diamond: #1f5fbf;
   --suit-club: #1d7a3e;
+  /* The last action under a seat (its word is always there too). */
+  --act-fold-text: #f0a0a2;
+  --act-call-text: #9fd8b6;
+  --act-allin-text: #f5a860;
+  /* Chip denominations, low to high (0, 5, 25, 100, 500, 1K, 5K, 25K, 100K); a stack's amount is written beside it. */
+  --chip-t0-base: #2f5c8f;
+  --chip-t0-face: #4176b0;
+  --chip-t1-base: #8f2622;
+  --chip-t1-face: #b23a35;
+  --chip-t2-base: #155a37;
+  --chip-t2-face: #1f7a4b;
+  --chip-t3-base: #202026;
+  --chip-t3-face: #383842;
+  --chip-t4-base: #6e2050;
+  --chip-t4-face: #8d2f69;
+  --chip-t5-base: #9c7414;
+  --chip-t5-face: #c9a227;
+  --chip-t6-base: #5b2f78;
+  --chip-t6-face: #7b45a0;
+  --chip-t7-base: #1f4f6b;
+  --chip-t7-face: #2c6f93;
+  --chip-t8-base: #1d1d22;
+  --chip-t8-face: #3a3a44;
+  /* VIP names (the palette's keys, packages/types VIP_COLORS) and the VIP mark: gold on near-black with a thin gold rim. */
+  --vip-gold: #f2c14e;
+  --vip-rose: #ff8fb3;
+  --vip-sapphire: #82a8ff;
+  --vip-amethyst: #c39bff;
+  --vip-emerald: #4fd6a0;
+  --vip-cyan: #5ad7ec;
+  --vip-badge-bg: #17130a;
+  --vip-badge-fg: #f3d27a;
+  --vip-rim: #c9a54a;
 }
 
-/* Red-weak and green-weak: fold vermilion, call blue, all-in magenta; success blue, danger orange; online blue. */
+/* Red-weak and green-weak: fold vermilion, call blue, all-in magenta; success blue, danger orange; online blue; the chips that
+ * read as one colour there (5 and 25, 100 and 500, 5K and 25K) move to orange, teal, pink, violet and light blue. */
 :root[data-cv='protan'] {
   --act-fold-from: #b8400a;
   --act-fold-to: #8a3008;
@@ -524,9 +603,24 @@
   --color-success: #6cb4ff;
   --color-danger: #f07f3c;
   --color-danger-strong: #b8400a;
-  --color-presence-online: #6cb4ff;
-  --color-presence-away: #ffb000;
-  --color-presence-offline: #85807a;
+  --color-presence-online: #2875bd;
+  --color-presence-away: #cc8100;
+  --color-presence-offline: #707070;
+  --act-fold-text: #e8743c;
+  --act-call-text: #a9c8ff;
+  --act-allin-text: #f25aa0;
+  --color-success-soft: #cfe3ff;
+  --color-danger-soft: #ffd0b0;
+  --chip-t1-base: #905012;
+  --chip-t1-face: #c8641a;
+  --chip-t2-base: #1e7167;
+  --chip-t2-face: #2a9d8f;
+  --chip-t4-base: #8c4170;
+  --chip-t4-face: #c25b9b;
+  --chip-t6-base: #4c2d73;
+  --chip-t6-face: #6a3fa0;
+  --chip-t7-base: #5b85a1;
+  --chip-t7-face: #7fb8e0;
 }
 :root[data-cv='deutan'] {
   --act-fold-from: #b8400a;
@@ -539,17 +633,35 @@
   --color-success: #6cb4ff;
   --color-danger: #f07f3c;
   --color-danger-strong: #b8400a;
-  --color-presence-online: #6cb4ff;
-  --color-presence-away: #ffb000;
-  --color-presence-offline: #85807a;
+  --color-presence-online: #117dd4;
+  --color-presence-away: #b88100;
+  --color-presence-offline: #808080;
+  --act-fold-text: #e8743c;
+  --act-call-text: #a9c8ff;
+  --act-allin-text: #f25aa0;
+  --color-success-soft: #cfe3ff;
+  --color-danger-soft: #ffd0b0;
+  --chip-t1-base: #905012;
+  --chip-t1-face: #c8641a;
+  --chip-t2-base: #1e7167;
+  --chip-t2-face: #2a9d8f;
+  --chip-t4-base: #8c4170;
+  --chip-t4-face: #c25b9b;
+  --chip-t6-base: #4c2d73;
+  --chip-t6-face: #6a3fa0;
+  --chip-t7-base: #5b85a1;
+  --chip-t7-face: #7fb8e0;
 }
 
-/* Blue-weak: all-in and diamonds violet (orange and blue are what it confuses); online cyan. */
+/* Blue-weak: all-in and diamonds violet (orange and blue are what it confuses); online teal. */
 :root[data-cv='tritan'] {
   --act-allin-from: #7a3fb0;
   --act-allin-to: #582d80;
   --suit-diamond: #6a2fa8;
-  --color-presence-online: #4cc3d9;
+  --color-presence-online: #328085;
+  --color-presence-away: #a57912;
+  --color-presence-offline: #898a90;
+  --act-allin-text: #b4a0ff;
 }
 
 /* High contrast: darker buttons and suits, lighter text, an outline on every action button. */
@@ -575,9 +687,9 @@
   --color-danger-strong: #a3141c;
   --color-warning: #ffd166;
   --color-info: #8cc4ff;
-  --color-presence-online: #5fe39a;
-  --color-presence-away: #ffd166;
-  --color-presence-offline: #c4c8cf;
+  --color-presence-online: #6bfb5b;
+  --color-presence-away: #ff8c00;
+  --color-presence-offline: #c1c6cd;
 }
 :root[data-cv='highContrast'] .jc-act {
   outline: 2px solid rgba(244, 239, 227, 0.85);

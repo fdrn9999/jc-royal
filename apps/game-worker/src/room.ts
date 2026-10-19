@@ -18,6 +18,7 @@ import {
   blindsAt,
   type BotLevel,
   ClientMessageSchema,
+  isVipColor,
   MEMBER_IDLE_CLOSE_MS,
   PLAYER_REPORT_WINDOW_MS,
   publicRole,
@@ -44,6 +45,7 @@ import {
   type TableView,
   type TimeBankRules,
   type TournamentTableView,
+  type VipColor,
 } from '@jc/types';
 import {
   buyIn,
@@ -61,7 +63,7 @@ import {
   type TableRow,
 } from './settlement';
 import { botBuyIn, botEvent, pickBot, type BotEventKind } from './bots';
-import { muckRevParam, takePushedMuck } from './muck';
+import { addShown, afterHandMs } from './muck';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
@@ -75,6 +77,11 @@ interface Identity {
   nickname: string;
   avatarUrl: string | null;
   role: string;
+  /**
+   * The VIP name color the api read from D1 for this connection (shownVip), absent when the member has none. Only a
+   * look: no rule of the table reads it.
+   */
+  vip?: string;
   /** Join code hash of the ticket this connection brought (verified by the api), or null. */
   codeHash: string | null;
   /** When the api verified the session this connection opened with (absent from older api builds). */
@@ -94,6 +101,8 @@ interface SeatState {
   avatarUrl: string | null;
   /** Staff only: set at sit, then brought up to date by `refreshRole`. */
   role?: PublicRole;
+  /** VIP members only: set at sit, then brought up to date at each handshake and by `refreshVip`. Shown, never played on. */
+  vip?: VipColor;
   stack: number;
   tableSessionId: string;
   /** 'pending' while the buy-in is being committed to D1; 'cashing' while cashing out. */
@@ -120,10 +129,6 @@ interface SeatState {
   preAction?: { handId: string; stage: HandStage; kind: PreActionKind; toCall: number } | null;
   /** Ids of the player's recent pre-action requests: one sent again is answered, not applied again. */
   preReqs?: string[];
-  /** The player's setting: a losing showdown hand stays face down when the rules allow it (see HandEngine.handView). */
-  autoMuck?: boolean;
-  /** The settings revision of the last account auto-muck the api pushed to this seat (muck.ts takePushedMuck). */
-  muckRev?: number;
   /**
    * A table bot of this level (bots.ts), not a member. It acts on its turn from what its seat sees (`playBotTurn`), never
    * times out or sits out, and leaves through `leaveAfterHand` like a member — but plays the hand out first.
@@ -155,8 +160,9 @@ interface RoomState {
   /** Last hand whose result was applied to seats and recorded (idempotent finalisation). */
   settledHandId: string | null;
   /**
-   * Players of the settled hand who had auto-muck on when it settled. Fixed then, with the record, so the result shown
-   * and the hand history agree and a setting changed afterwards does not turn cards over.
+   * Players of the settled hand whose losing showdown hand stays face down where the rules allow it (HandEngine.handView):
+   * everyone dealt in, since auto-muck always applies (a hand settled before then keeps those who had the old setting
+   * on). Fixed when it settled, with the record, so the result shown and the hand history agree.
    */
   muck?: { handId: string; ids: string[] } | null;
   /**
@@ -201,7 +207,6 @@ interface RoomState {
   tourney?: TourneyState | null;
 }
 
-const BETWEEN_HANDS_MS = 4_000;
 const FIRST_HAND_DELAY_MS = 2_500;
 const RESERVATION_MS = 30_000;
 const SIT_OUT_STAND_UP_MS = 10 * 60_000;
@@ -581,8 +586,9 @@ export class TableRoom extends DurableObject<Env> {
       return this.run(async () => {
         await this.ensureLoaded(tableId);
         if (this.room.closed) return new Response('table closed', { status: 410 });
-        // The api read the role from D1 for this handshake: a seat taken under an older role shows the current one.
-        if (this.setSeatRole(identity.userId, identity.role)) await this.save();
+        // The api read the role and VIP color from D1 for this handshake: a seat taken under older ones shows the current.
+        const roleChanged = this.setSeatRole(identity.userId, identity.role);
+        if (this.setSeatVip(identity.userId, identity.vip) || roleChanged) await this.save();
         return this.openSocket(identity, retry);
       });
     }
@@ -654,12 +660,12 @@ export class TableRoom extends DurableObject<Env> {
           case 'role':
             // An admin changed this member's role (the api passes the stored value).
             return Response.json({ ok: true, seated: await this.refreshRole(url.searchParams.get('user') ?? '', url.searchParams.get('role') ?? 'user') });
+          case 'vip':
+            // An admin made this member VIP, changed their color or ended it (the api passes what others see; empty: none).
+            return Response.json({ ok: true, seated: await this.refreshVip(url.searchParams.get('user') ?? '', url.searchParams.get('vip') ?? '') });
           case 'muck':
-            // The member's account auto-muck changed (their save on another device, or an admin's settings reset).
-            return Response.json({
-              ok: true,
-              seated: await this.setAutoMuck(url.searchParams.get('user') ?? '', url.searchParams.get('on') === '1', muckRevParam(url.searchParams.get('rev'))),
-            });
+            // An api from before auto-muck always applied pushing a member's setting: there is none to change now.
+            return Response.json({ ok: true, seated: this.seatIndexOf(url.searchParams.get('user') ?? '') !== null });
           default:
             return new Response('not found', { status: 404 });
         }
@@ -807,7 +813,9 @@ export class TableRoom extends DurableObject<Env> {
         const isSeated = this.seatIndexOf(a.userId) !== null;
         if (!isSeated && !t.allowSpectators) throw new CommandError('forbidden', 'spectator chat is disabled');
         const role = publicRole(a.role);
-        const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, ...(role ? { role } : {}), text: msg.text, at: now };
+        // The line keeps the VIP color it was posted with (like its role).
+        const vip = !role && isVipColor(a.vip) ? a.vip : undefined;
+        const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, ...(role ? { role } : {}), ...(vip ? { vip } : {}), text: msg.text, at: now };
         this.chat = [...this.chat, line].slice(-CHAT_HISTORY);
         await this.ctx.storage.put('chat', this.chat);
         const shown = this.shownLine(line);
@@ -908,28 +916,27 @@ export class TableRoom extends DurableObject<Env> {
         await this.useTimeBank(ws, a.userId, msg);
         return;
       case 'muck': {
-        // Setting a flag: a copy sent again changes nothing. Only the player's own view shows it.
-        const i = this.seatIndexOf(a.userId);
-        if (i === null) throw new CommandError('forbidden', 'not seated');
-        this.room.seats[i]!.autoMuck = msg.on;
-        await this.save();
-        this.ack(ws, msg.reqId);
-        this.sendView(a.userId);
-        return;
+        // A page from before auto-muck always applied sending its setting: acknowledged, and nothing changes.
+        if (this.seatIndexOf(a.userId) === null) throw new CommandError('forbidden', 'not seated');
+        return this.ack(ws, msg.reqId);
       }
       case 'show': {
-        // A card of the hand that just ended, turned over for the table until the next deal. Only for players with
-        // auto-muck on (the setting describes it); a card already shown, or a hand the showdown showed, changes nothing.
+        // The first card, the second or both of the hand that just ended (settled, the next not dealt), turned over for
+        // the table until the next deal: by a player dealt in at the seat they hold, whether they folded, won uncontested
+        // or lost and kept their hand face down. A card already shown, or a hand the showdown showed, changes nothing.
+        // Only what is shown changes: the result, the stacks, the record and the ledger were settled before.
         const i = this.seatIndexOf(a.userId);
         if (i === null) throw new CommandError('forbidden', 'not seated');
         const h = this.hand;
         if (!h || !h.isSettled || this.room.settledHandId !== h.handId) throw new CommandError('conflict', 'no finished hand to show');
-        if (!h.holeCardsOf(a.userId)) throw new CommandError('forbidden', 'not dealt in');
-        if (!this.room.seats[i]!.autoMuck) throw new CommandError('forbidden', 'auto-muck is off');
+        if (!h.holeCardsOf(a.userId) || h.startingSeats.find((p) => p.playerId === a.userId)?.seatIndex !== i) {
+          throw new CommandError('forbidden', 'not dealt in');
+        }
         const prev = this.room.shown?.handId === h.handId ? this.room.shown.cards : {};
         const mine = prev[a.userId] ?? [];
-        if (!this.revealedSeats(h).has(i) && !mine.includes(msg.card)) {
-          this.room.shown = { handId: h.handId, cards: { ...prev, [a.userId]: [...mine, msg.card].sort((x, y) => x - y) } };
+        const next = addShown(mine, msg.card);
+        if (!this.revealedSeats(h).has(i) && next !== mine) {
+          this.room.shown = { handId: h.handId, cards: { ...prev, [a.userId]: [...next] } };
           await this.save();
           this.broadcast();
         }
@@ -1017,11 +1024,13 @@ export class TableRoom extends DurableObject<Env> {
 
     const tableSessionId = crypto.randomUUID();
     const role = publicRole(a.role);
+    const vip = !role && isVipColor(a.vip) ? a.vip : undefined;
     const seat: SeatState = {
       userId: a.userId,
       nickname: a.nickname,
       avatarUrl: a.avatarUrl,
       ...(role ? { role } : {}),
+      ...(vip ? { vip } : {}),
       stack: amount,
       tableSessionId,
       phase: 'pending',
@@ -1485,8 +1494,8 @@ export class TableRoom extends DurableObject<Env> {
       const stacks = h.finalStacks();
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
-      this.room.nextHandAt = now + BETWEEN_HANDS_MS;
-      this.room.muck = { handId: h.handId, ids: this.room.seats.filter((s) => s?.autoMuck && stacks.has(s.userId)).map((s) => s!.userId) };
+      this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
+      this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
       // A tournament hand is not recorded (no hand history, statistics or replay): its result is the tournament's —
       // places for those who lost their last chip, the winner once one player is left — written to D1 below.
       this.refillTimeBanks(h);
@@ -1498,8 +1507,8 @@ export class TableRoom extends DurableObject<Env> {
       const stacks = h.finalStacks();
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
-      this.room.nextHandAt = now + BETWEEN_HANDS_MS;
-      this.room.muck = { handId: h.handId, ids: this.room.seats.filter((s) => s?.autoMuck && stacks.has(s.userId)).map((s) => s!.userId) };
+      this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
+      this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
       // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
       const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
       const bots = h.startingSeats.filter((p) => this.botSeat(p.playerId)).length;
@@ -1690,6 +1699,7 @@ export class TableRoom extends DurableObject<Env> {
             nickname: e.nickname,
             avatarUrl: e.avatarUrl,
             ...(role ? { role } : {}),
+            ...(!role && e.vip ? { vip: e.vip } : {}),
             stack,
             // Not a table session: nothing of this seat is in the ledger.
             tableSessionId: `tny:${row.id}:${e.userId}`,
@@ -2220,7 +2230,6 @@ export class TableRoom extends DurableObject<Env> {
           leaveAfterHand: false,
           timeouts: 0,
           joinedAt: Date.now(),
-          autoMuck: true,
           bot: t.bots.level,
         };
         this.room.seats[seatIndex] = seat;
@@ -2638,8 +2647,9 @@ export class TableRoom extends DurableObject<Env> {
       // Only the chosen positions carry a card: the other one stays unknown to everybody but its owner.
       const picked = !revealed.has(i) ? shown[s.userId] : undefined;
       const dealt = picked?.length ? h!.holeCardsOf(s.userId) : null;
-      // A staff badge the social policy hides is left out; the seat keeps the role.
+      // A staff badge the social policy hides is left out; the seat keeps the role. Staff and bots never show VIP.
       const role = shownRole(s.role, t.social);
+      const vip = !s.role && !s.bot ? s.vip : undefined;
       return {
         seatIndex: i,
         state,
@@ -2647,6 +2657,7 @@ export class TableRoom extends DurableObject<Env> {
         nickname: s.nickname,
         avatarUrl: s.avatarUrl,
         ...(role ? { role } : {}),
+        ...(vip ? { vip } : {}),
         // Once the hand is settled the seat holds its final stack plus any top-up made since.
         stack: hi && !h!.isSettled ? hi.stack : s.stack,
         streetBet: hi?.streetBet ?? 0,
@@ -2718,14 +2729,13 @@ export class TableRoom extends DurableObject<Env> {
         topUpQueued: isSeated && this.room.seats[mySeat]!.topUp?.state === 'queued' ? this.room.seats[mySeat]!.topUp!.amount : null,
         autoRebuy: isSeated ? (this.room.seats[mySeat]!.autoRebuy ?? null) : null,
         preAction: myPre && h && !h.isSettled && myPre.handId === h.handId && myPre.stage === h.stage ? myPre.kind : null,
-        autoMuck: isSeated ? !!this.room.seats[mySeat]!.autoMuck : null,
-        // The same conditions as the `show` command.
+        // The same conditions as the `show` command (still true once both are shown, so the page marks them shown).
         canShow:
           isSeated &&
           !!hv?.result &&
           this.room.settledHandId === h!.handId &&
-          !!this.room.seats[mySeat]!.autoMuck &&
           !!h!.holeCardsOf(a.userId) &&
+          h!.startingSeats.find((p) => p.playerId === a.userId)?.seatIndex === mySeat &&
           !revealed.has(mySeat),
         // Only the viewer's own bank, never anyone else's.
         timeBank: isSeated ? this.bankOf(a.userId) : null,
@@ -2766,7 +2776,41 @@ export class TableRoom extends DurableObject<Env> {
     if (!seat || seat.role === next) return false;
     if (next) seat.role = next;
     else delete seat.role;
+    // Staff never carry VIP (the api ends it with the promotion).
+    if (next) delete seat.vip;
     return true;
+  }
+
+  /** Puts the VIP color others see (or none: anything not in the palette) on the member's seat. True when it changed. */
+  private setSeatVip(userId: string, shown: string | undefined): boolean {
+    const i = this.seatIndexOf(userId);
+    const seat = i === null ? null : this.room.seats[i]!;
+    const next = isVipColor(shown) && !seat?.role && !seat?.bot ? shown : undefined;
+    if (!seat || seat.vip === next) return false;
+    if (next) seat.vip = next;
+    else delete seat.vip;
+    return true;
+  }
+
+  /**
+   * An admin changed a member's VIP state: the identity of their open connections (their next chat lines carry it) and
+   * their seat, shown to everyone with one view at once. Nothing else moves: no hand, turn, stack or connection is
+   * touched, and lines already posted keep the color they were posted with. Returns whether the member holds a seat.
+   */
+  private async refreshVip(userId: string, shown: string): Promise<boolean> {
+    if (!userId) return false;
+    const vip = isVipColor(shown) ? shown : undefined;
+    for (const ws of this.sockets()) {
+      const a = this.att(ws);
+      if (a.userId !== userId || a.vip === vip) continue;
+      const { vip: _old, ...rest } = a;
+      ws.serializeAttachment(vip ? { ...rest, vip } : rest);
+    }
+    if (this.setSeatVip(userId, vip)) {
+      await this.save();
+      this.broadcast();
+    }
+    return this.seatIndexOf(userId) !== null;
   }
 
   /**
@@ -2778,27 +2822,16 @@ export class TableRoom extends DurableObject<Env> {
     if (!userId) return false;
     for (const ws of this.sockets()) {
       const a = this.att(ws);
-      if (a.userId === userId && a.role !== stored) ws.serializeAttachment({ ...a, role: stored });
+      if (a.userId !== userId || a.role === stored) continue;
+      const { vip: _vip, ...rest } = a;
+      // A promotion to staff ends VIP; going back to member does not bring it back (the api cleared it).
+      ws.serializeAttachment(publicRole(stored) ? { ...rest, role: stored } : { ...a, role: stored });
     }
     if (this.setSeatRole(userId, stored)) {
       await this.save();
       this.broadcast();
     }
     return this.seatIndexOf(userId) !== null;
-  }
-
-  /**
-   * The member's account auto-muck, pushed by the api when it changed: their seat takes it on for the next showdown, the
-   * same as their own 'muck' command (a hand already settled keeps what it was settled with). Only their view shows it.
-   * A push older than the last one the seat took (`rev`) changes nothing. Returns whether the member holds a seat here.
-   */
-  private async setAutoMuck(userId: string, on: boolean, rev: number | null): Promise<boolean> {
-    const i = userId ? this.seatIndexOf(userId) : null;
-    if (i === null) return false;
-    const next = takePushedMuck(this.room.seats[i]!, on, rev);
-    if (next !== 'none') await this.save();
-    if (next === 'show') this.sendView(userId);
-    return true;
   }
 
   /** Seats whose cards the showdown of the settled hand `h` turned over for everybody. */

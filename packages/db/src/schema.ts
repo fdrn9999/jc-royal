@@ -40,6 +40,15 @@ export const users = sqliteTable(
      * activity), away (never online), invisible (always offline). Written only when the member changes it.
      */
     presenceMode: text('presence_mode', { enum: ['auto', 'away', 'invisible'] }).notNull().default('auto'),
+    /**
+     * VIP (packages/types/src/vip.ts): the name color an administrator chose, a VIP_COLORS key; null for a member who
+     * is not VIP. A look only: no game, chip or permission code reads it. Changed only by PATCH /api/admin/users/:id/vip,
+     * which raises vip_version each time (a second administrator's stale change is refused) and audits it.
+     */
+    vipColor: text('vip_color'),
+    vipVersion: integer('vip_version').notNull().default(0),
+    vipChangedAt: integer('vip_changed_at'),
+    vipChangedBy: text('vip_changed_by'),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -50,6 +59,8 @@ export const users = sqliteTable(
     index('users_staff_idx').on(t.role, t.status).where(sql`role != 'user'`),
     // Bot accounts only, for a room picking an idle one.
     index('users_bot_idx').on(t.status).where(sql`is_bot = 1`),
+    // VIP members only, for the console's VIP filter.
+    index('users_vip_idx').on(t.status).where(sql`vip_color IS NOT NULL`),
   ],
 );
 
@@ -463,6 +474,18 @@ export const messages = sqliteTable(
 
 /** Academy learning progress (client-side model, versioned JSON). One row per user. */
 export const academyProgress = sqliteTable('academy_progress', {
+  userId: text('user_id').primaryKey().references(() => users.id),
+  data: text('data').notNull(),
+  version: integer('version').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/**
+ * Advanced GTO Academy progress, kept apart from the beginner course's row: an older client reading academy_progress
+ * would drop fields it does not know, so the two never share one JSON. Same shape and rules (versioned client JSON,
+ * last write wins by updated_at); no badges, chips or ledger.
+ */
+export const academyGtoProgress = sqliteTable('academy_gto_progress', {
   userId: text('user_id').primaryKey().references(() => users.id),
   data: text('data').notNull(),
   version: integer('version').notNull(),

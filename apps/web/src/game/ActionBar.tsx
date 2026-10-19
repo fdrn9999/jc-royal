@@ -260,7 +260,7 @@ export function ActionBar({
   );
 
   return (
-    <div className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1.5' : 'gap-2 sm:w-auto')} data-testid="action-bar">
+    <div className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1.5' : 'gap-2 sm:w-auto')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
       {open && window_ && (
         // Open for a moment: the table makes way for it while it is open, then takes the room back (useStackRoom).
         // In the bar's own row three lines (steps and slider, presets, the amount beside the confirm button), so a phone
@@ -325,7 +325,8 @@ export function ActionBar({
           )}
         </div>
       )}
-      <div className={cx('relative flex rounded-2xl border border-gold-500/15 bg-ink-950/85 backdrop-blur-md', column ? 'gap-1.5 p-1.5' : 'gap-2 p-2')}>
+      {/* Shown only on my turn: a gold edge says the buttons are live. */}
+      <div className={cx('relative flex rounded-2xl border border-gold-400/60 bg-ink-950/85 shadow-[0_0_14px_rgba(230,197,107,0.22)] backdrop-blur-md', column ? 'gap-1.5 p-1.5' : 'gap-2 p-2')}>
         {/* Over the bar, so the bar (and the table above it) does not move. */}
         <p role="status" aria-live="polite" className="sr-only" data-testid="action-sending">
           {busy && sent ? t('action.sending', { action: sent.text }) : ''}

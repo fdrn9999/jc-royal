@@ -3,12 +3,22 @@
  * statistics. Nothing here touches wallets, the chip ledger or game history.
  */
 import { schema, statsDay, statsIncrements, type AcademyMetric } from '@jc/db';
-import { AcademyEventsSchema, AcademyProgressPutSchema, BADGES, plausibleBadges, type AcademyProgressDto, type BadgeDto, type BadgeId } from '@jc/types';
+import {
+  AcademyEventsSchema,
+  AcademyProgressPutSchema,
+  BADGES,
+  GtoProgressPutSchema,
+  plausibleBadges,
+  type AcademyProgressDto,
+  type BadgeDto,
+  type BadgeId,
+  type GtoProgressDto,
+} from '@jc/types';
 import { eq } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
-import { parseBody } from '../lib/http';
+import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
 
 const DAY_METRIC = {
@@ -65,6 +75,40 @@ export const academyRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, badges: await badgesOf(c, uid) });
   })
   .get('/badges', async (c) => c.json(await badgesOf(c, c.var.user!.id)))
+  /** The Advanced GTO Academy's progress: its own row (academy_gto_progress), no badges. */
+  .get('/gto/progress', async (c) => {
+    const row = await c.var.db.query.academyGtoProgress.findFirst({ where: eq(schema.academyGtoProgress.userId, c.var.user!.id) });
+    const out: GtoProgressDto = {
+      data: row ? (JSON.parse(row.data) as Record<string, unknown>) : null,
+      version: row?.version ?? null,
+      updatedAt: row?.updatedAt ?? null,
+    };
+    return c.json(out);
+  })
+  /**
+   * With `base` the write is compare-and-set: it lands only over the copy the client merged with (none there, for
+   * null) and only with a later updatedAt, so two devices writing from the same copy cannot drop each other's records:
+   * the second gets 409, merges the newer copy and writes again. Without `base` the newer updatedAt wins.
+   */
+  .put('/gto/progress', async (c) => {
+    const uid = c.var.user!.id;
+    await rateLimit(c, `academy-gto-put:${uid}`, 60, 60_000);
+    const body = await parseBody(c, GtoProgressPutSchema);
+    const insert = 'INSERT INTO academy_gto_progress (user_id, data, version, updated_at) VALUES (?1, ?2, ?3, ?4)';
+    const sql =
+      body.base === undefined
+        ? `${insert} ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, version = excluded.version, updated_at = excluded.updated_at
+           WHERE excluded.updated_at >= academy_gto_progress.updated_at`
+        : body.base === null
+          ? `${insert} ON CONFLICT(user_id) DO NOTHING`
+          : 'UPDATE academy_gto_progress SET data = ?2, version = ?3, updated_at = ?4 WHERE user_id = ?1 AND updated_at = ?5 AND ?4 > ?5';
+    const args = [uid, JSON.stringify(body.data), body.version, body.updatedAt, ...(typeof body.base === 'number' ? [body.base] : [])];
+    const r = await c.env.DB.prepare(sql)
+      .bind(...args)
+      .run();
+    if (body.base !== undefined && !r.meta.changes) fail(409, 'conflict', 'the progress changed on another device');
+    return c.json({ ok: true });
+  })
   /**
    * Anonymous counters: academy_stats never holds a user id. The id appears only in this request's rate-limit key,
    * a rate_limits row that the daily housekeeping deletes once its window is long over. The same events are added to

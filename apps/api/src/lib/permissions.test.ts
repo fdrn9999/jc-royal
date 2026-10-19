@@ -61,6 +61,7 @@ describe('admin permission table', () => {
         'POST /users/:id/settings/restore',
         'POST /users/:id/suspend',
         'POST /users/:id/unsuspend',
+        'PATCH /users/:id/vip',
         'POST /users/export',
         'PUT /security/admins/:id/grants',
       ].sort(),
@@ -88,7 +89,7 @@ describe('admin permission table', () => {
     // A preview skips only the password, so only routes that answer a preview and write nothing are marked.
     const previews = Object.entries(ROUTE_RULES).filter(([, r]) => r.preview).map(([k]) => k);
     expect(previews.sort()).toEqual(
-      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/settings/reset', 'POST /users/:id/settings/restore', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend', 'PUT /time-bank/policy', 'PUT /social/policy', 'POST /tournaments', 'POST /tournament-templates', 'PUT /tournament-templates/:id', 'PUT /security/admins/:id/grants'].sort(),
+      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/settings/reset', 'POST /users/:id/settings/restore', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend', 'PATCH /users/:id/vip', 'PUT /time-bank/policy', 'PUT /social/policy', 'POST /tournaments', 'POST /tournament-templates', 'PUT /tournament-templates/:id', 'PUT /security/admins/:id/grants'].sort(),
     );
     // Deciding a report and opening a tournament ask for no password, so their previews skip nothing; every other preview
     // stands before one.

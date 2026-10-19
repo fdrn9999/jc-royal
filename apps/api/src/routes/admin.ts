@@ -26,6 +26,7 @@ import { adminSocialRoutes } from './admin-social';
 import { adminBrandRoutes } from './admin-brand';
 import { adminRefillRoutes } from './admin-refill';
 import { adminTimeBankRoutes } from './admin-timebank';
+import { adminVipRoutes } from './admin-vip';
 import { adminTournamentRoutes } from './admin-tournaments';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
@@ -50,7 +51,7 @@ const RoleSchema = z.object({ role: z.enum(['user', 'admin', 'super_admin']), re
 /** Audit actions on a member shown on their timeline (views, lists and the note.create twin of each note are left out). */
 const SANCTION_ACTIONS = ['user.suspend', 'user.unsuspend', 'user.disconnect'];
 const CHIP_ACTIONS = ['user.chips', 'user.reconcile'];
-const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', ...CHIP_ACTIONS, 'user.reset_link', 'note.delete'];
+const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', 'user.vip', ...CHIP_ACTIONS, 'user.reset_link', 'note.delete'];
 
 
 /** Emergency table controls: `pause` lets the running hand finish and deals no new one until `resume`. */
@@ -365,6 +366,8 @@ const admin = new Hono<AppEnv>()
     const locale = c.req.query('locale');
     const onlineOnly = c.req.query('online') === '1';
     const role = c.req.query('role');
+    // `vip=vip`: VIP members; `vip=regular`: ordinary members who are not.
+    const vip = c.req.query('vip') === 'vip' || c.req.query('vip') === 'regular' ? c.req.query('vip')! : null;
     // Table bots are listed only when asked for (`bots=1`), and then alone.
     const bots = c.req.query('bots') === '1';
     const sortKey = c.req.query('sort') ?? 'created';
@@ -378,6 +381,7 @@ const admin = new Hono<AppEnv>()
       status === 'active' || status === 'suspended' || status === 'deleted' ? eq(U.status, status) : undefined,
       locale === 'ko' || locale === 'en' ? eq(U.locale, locale) : undefined,
       role === 'user' || role === 'admin' || role === 'super_admin' ? eq(U.role, role) : undefined,
+      vip === 'vip' ? isNotNull(U.vipColor) : vip === 'regular' ? and(eq(U.role, 'user'), isNull(U.vipColor)) : undefined,
       onlineOnly ? online : undefined,
       eq(U.isBot, bots),
     );
@@ -395,6 +399,7 @@ const admin = new Hono<AppEnv>()
         balance: U.balance,
         createdAt: U.createdAt,
         lastLoginAt: U.lastLoginAt,
+        vipColor: U.vipColor,
         online,
       })
       .from(U)
@@ -403,7 +408,7 @@ const admin = new Hono<AppEnv>()
       .limit(limit)
       .offset(offset);
     // The list shows email addresses, so every look is recorded (search terms and how many members it showed).
-    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, role: role ?? null, online: onlineOnly, ...(bots ? { bots } : {}), sort: sortKey, offset, count: rows.length });
+    await audit(c, 'user.list', undefined, { q, status: status ?? null, locale: locale ?? null, role: role ?? null, ...(vip ? { vip } : {}), online: onlineOnly, ...(bots ? { bots } : {}), sort: sortKey, offset, count: rows.length });
     const items = rows.map((r) => ({ ...r, online: !!r.online }));
     // `paged=1` adds the number of matching members for page controls; without it the plain array, as before.
     if (c.req.query('paged') !== '1') return c.json(items);
@@ -757,16 +762,31 @@ const admin = new Hono<AppEnv>()
         capabilities: { gained: after.filter((k) => !before.includes(k)), lost: before.filter((k) => !after.includes(k)) },
         // The feature switches turned off by the change ([] when none were on); a new plain administrator has none.
         grantsCleared: cleared,
+        // A VIP member made staff stops being VIP (staff never are): the color it ends, else null.
+        vipCleared: body.role !== 'user' ? (target.vipColor ?? null) : null,
       });
     }
     // Role changes take effect immediately: drop existing admin sessions of the target, and the switches with the role.
-    await c.var.db.batch([
-      c.var.db.update(schema.users).set({ role: body.role, updatedAt: Date.now() }).where(eq(schema.users.id, id)),
-      c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin'))),
-      c.var.db.delete(schema.adminPermissions).where(eq(schema.adminPermissions.userId, id)),
-    ]);
+    // Staff are never VIP, so a VIP member made staff loses it (and does not get it back with the role). The VIP state is
+    // read and ended in the same transaction as the role, so a grant saved after `target` was read is ended too, and the
+    // record names the color that was actually there.
+    const now = Date.now();
+    const staff = body.role !== 'user';
+    const vipNow = c.var.db.select({ color: schema.users.vipColor, version: schema.users.vipVersion }).from(schema.users).where(eq(schema.users.id, id));
+    const setRole = c.var.db.update(schema.users).set({ role: body.role, updatedAt: now }).where(eq(schema.users.id, id));
+    const endVip = c.var.db
+      .update(schema.users)
+      .set({ vipColor: null, vipVersion: sql`${schema.users.vipVersion} + 1`, vipChangedAt: now, vipChangedBy: c.var.user!.id })
+      .where(and(eq(schema.users.id, id), isNotNull(schema.users.vipColor)));
+    const dropSessions = c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
+    const dropSwitches = c.var.db.delete(schema.adminPermissions).where(eq(schema.adminPermissions.userId, id));
+    const [vipBefore] = staff
+      ? await c.var.db.batch([vipNow, endVip, setRole, dropSessions, dropSwitches])
+      : await c.var.db.batch([vipNow, setRole, dropSessions, dropSwitches]);
+    const vipEnded = staff && vipBefore[0]?.color ? vipBefore[0] : null;
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
+    if (vipEnded) await audit(c, 'user.vip', { type: 'user', id }, { from: vipEnded.color, to: null, reason: body.reason, cause: 'role', role: body.role, version: vipEnded.version + 1 });
     // The staff badge other players see at the tables where the member sits.
     const tables = await refreshRoleEverywhere(c.env, id, body.role);
     return c.json({ ok: true, tables });
@@ -1379,4 +1399,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes).route('/', adminVipRoutes));

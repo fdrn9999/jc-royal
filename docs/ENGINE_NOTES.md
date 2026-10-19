@@ -56,7 +56,7 @@ JC ROYAL은 `poker-engine-ts@0.1.3`(MIT)을 게임 규칙의 **유일한 판단 
 - 테이블 정원: 엔진 `maxSeats` 타입에 따라 **2·6·9석**. 지시서의 10인 테이블은 지원하지 않는다(`INTEGRATION_ANALYSIS.md` §3.1).
 - 쇼다운 공개 정책:
   - 쇼다운에 참여한 핸드는 기본적으로 모두 공개한다.
-  - 승자는 항상 공개한다. 패자의 자동 머크는 `autoMuck` 집합으로 선택할 수 있다(엔진 `partitionShowdownByVisibility`).
+  - 승자는 항상 공개한다. 패자의 자동 머크는 `autoMuck` 집합으로 선택할 수 있다(엔진 `partitionShowdownByVisibility`). 룸은 2026-10-19부터 그 핸드에 카드를 받은 모든 플레이어를 넘겨 항상 머크한다(엔진은 그대로, `docs/WEBSOCKET_PROTOCOL.md` '쇼다운 머크').
 - 홀수 칩: 엔진 정산 규칙을 따른다(스플릿 25 → 12/13, 결정적).
 - 숏 올인 재오픈 제한: 엔진 규칙 그대로 적용한다(이미 행동한 플레이어는 콜/폴드만 가능).
 

@@ -7,20 +7,41 @@ import type { MsgKey } from '../lib/i18n';
 import type { TableView } from '@jc/types';
 import { cx } from '@jc/ui';
 import { useState } from 'react';
-import { currentHand, describeHand } from '../academy/content';
+import { describeCurrent } from '../academy/content';
 import { useI18n } from '../lib/i18n';
 
-export function CurrentHandPill({ s }: { s: TableView }) {
+/**
+ * My current hand (the "show my current hand" setting): the starting hand's name before the flop, the made hand after,
+ * from my own cards and the board shown (describeCurrent). `compact`, without the beginner aids: one line. `inline`: the
+ * same line at the status line's size under the board (a phone upright, where the stack has no line to spare for it).
+ */
+export function CurrentHandPill({ s, compact = false, inline = false, className }: { s: TableView; compact?: boolean; inline?: boolean; className?: string }) {
   const { t, locale } = useI18n();
   const mine = s.seats.find((x) => x.seatIndex === s.you.seatIndex);
   const hand = s.hand;
   if (!hand || !mine?.holeCards || mine.state === 'folded') return null;
-  const ev = currentHand(mine.holeCards, hand.board);
-  if (!ev) return null;
+  const name = describeCurrent(mine.holeCards, hand.board, locale, t);
+  if (!name) return null;
+  if (inline) {
+    return (
+      <div className={cx('max-w-full truncate rounded-full bg-black/45 px-2 text-[10px] leading-3', className)} title={t('table.currentHandNote')} data-testid="current-hand">
+        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{name}</span>{' '}
+        <span className="text-ink-400">· {t('table.currentHandTiny')}</span>
+      </div>
+    );
+  }
+  if (compact) {
+    return (
+      <div className={cx('pointer-events-auto max-w-full truncate rounded-full border border-gold-500/30 bg-ink-950/85 px-3 py-1 text-xs backdrop-blur', className)} title={t('table.currentHandNote')} data-testid="current-hand">
+        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{name}</span>{' '}
+        <span className="text-[10px] text-ink-400">· {t('table.currentHandTiny')}</span>
+      </div>
+    );
+  }
   return (
     <div className="pointer-events-auto flex max-w-full flex-col items-center rounded-2xl border border-gold-500/30 bg-ink-950/85 px-3 py-1 text-xs backdrop-blur" title={t('table.currentHandNote')} data-testid="current-hand">
       <span>
-        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{describeHand(ev, locale, t)}</span>
+        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{name}</span>
       </span>
       {/* A made hand is not a win: say so on screen, not only in a tooltip. */}
       <span className="text-[10px] text-ink-400">{t('table.currentHandShort')}</span>
@@ -56,8 +77,9 @@ export function ActionHelp({ s }: { s: TableView }) {
         </ul>
       )}
       <div className="flex items-center justify-between gap-2 rounded-full bg-gold-500/15 py-1 pl-3 pr-1 text-xs">
-        <span className="jc-pulse-gold min-w-0 truncate font-bold text-gold-300">
-          {t('table.yourTurn')} · {t('table.canDo')}: {types.map((k) => t(`action.${k}` as MsgKey)).join(' · ')}
+        {/* "Your turn" itself is the turn label's (TurnCue.tsx), shown beside it. */}
+        <span className="min-w-0 truncate font-bold text-gold-300">
+          {t('table.canDo')}: {types.map((k) => t(`action.${k}` as MsgKey)).join(' · ')}
         </span>
         <button onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('table.actionHelp')} className={cx('jc-tap grid size-9 shrink-0 place-items-center rounded-full border text-sm font-bold', open ? 'border-gold-400 bg-gold-500/25 text-gold-300' : 'border-white/15 text-ivory')} data-testid="action-help-toggle">
           ?

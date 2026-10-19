@@ -22,7 +22,6 @@ import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
 import { notices } from '../lib/notices';
 import { can } from '../lib/permissions';
-import { pushMuckEverywhere } from '../lib/room';
 import { countSettings, diagnose, favList, parseFav, parsePrefs, resetInfo, toState, type SettingsRow } from '../lib/settings';
 
 const ReasonSchema = z.string().trim().min(2).max(200);
@@ -71,12 +70,6 @@ function guard(c: Context<AppEnv>, id: string, member: Member) {
   if (member.role !== 'user' && !can(c.var.user!.role, 'admins.manage')) fail(403, 'forbidden', 'only a super admin can reset or restore the settings of administrators');
 }
 
-/** The member's auto-muck as their tables have it from the account (the default when not set). */
-const muckOf = (row: SettingsRow | null) => toState(row).prefs.autoMuck?.[0] === true;
-
-const seatedTables = async (c: Context<AppEnv>, id: string) =>
-  (await c.env.DB.prepare(`SELECT COUNT(DISTINCT table_id) AS n FROM table_sessions WHERE user_id = ?1 AND status = 'seated'`).bind(id).first<{ n: number }>())?.n ?? 0;
-
 /** The message to the member, written only when the change it tells of was (the row carries this request's marks). */
 function noticeStatement(db: D1Database, id: string, kind: 'settingsReset' | 'settingsRestored', sender: string, at: number, mark: string) {
   const ko = notices('ko')[kind]();
@@ -105,8 +98,7 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     guard(c, id, member);
     if (row && row.reset_rev !== null && row.reset_rev === row.rev) fail(409, 'settings_already_reset', 'these settings were reset and have not changed since', { settings: diag });
     if (body.rev !== diag.rev) fail(409, 'settings_changed', 'the settings changed since they were opened', { settings: diag });
-    const tables = await seatedTables(c, id);
-    if (preview) return c.json({ preview: true, settings: diag, seatedTables: tables, restorableMs: SETTINGS_RESTORE_MS });
+    if (preview) return c.json({ preview: true, settings: diag, restorableMs: SETTINGS_RESTORE_MS });
     const { reason } = ActionSchema.parse(body);
     const admin = c.var.user!.id;
     const s = toState(row);
@@ -130,16 +122,13 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     const done = (up!.results as { rev: number; epoch: number }[])[0];
     if (!done) fail(409, 'settings_changed', 'the settings changed while resetting', { settings: (await load(c, id)).diag });
     await countSettings(db, { ss_reset: 1 }, now);
-    // The tables the member sits at take on the default auto-muck (off) when theirs was on.
-    const muck = muckOf(row) ? await pushMuckEverywhere(c.env, id, false, done.rev) : null;
     await audit(c, 'settings.reset', { type: 'user', id }, {
       reason,
       before: { rev: s.rev, epoch: s.epoch, fields: diag.fields, favourites: diag.favourites },
       after: { rev: done.rev, epoch: done.epoch, fields: 0, favourites: 0 },
       restorable: kept !== null,
-      muck,
     });
-    return c.json({ ok: true, settings: (await load(c, id)).diag, muck });
+    return c.json({ ok: true, settings: (await load(c, id)).diag });
   })
   /**
    * Undoes the last reset: the settings and favourite tables from before it come back, under a new epoch. Only within
@@ -158,7 +147,7 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     const prefs = parsePrefs(JSON.stringify(snap.prefs ?? {}));
     const fav = parseFav(JSON.stringify(snap.fav ?? {}));
     const scope = { fields: Object.keys(prefs).length, favourites: favList(fav).length };
-    if (preview) return c.json({ preview: true, settings: diag, restore: scope, seatedTables: await seatedTables(c, id) });
+    if (preview) return c.json({ preview: true, settings: diag, restore: scope });
     const { reason } = ActionSchema.parse(body);
     const admin = c.var.user!.id;
     const db = c.env.DB;
@@ -176,14 +165,11 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     const done = (up!.results as { rev: number; epoch: number }[])[0];
     if (!done) fail(409, 'settings_changed', 'the settings changed while restoring', { settings: (await load(c, id)).diag });
     await countSettings(db, { ss_restore: 1 }, now);
-    const on = prefs.autoMuck?.[0] === true;
-    const muck = on !== muckOf(row) ? await pushMuckEverywhere(c.env, id, on, done.rev) : null;
     await audit(c, 'settings.restore', { type: 'user', id }, {
       reason,
       resetAt: info.at,
       before: { rev: row.rev, epoch: row.epoch, fields: 0, favourites: 0 },
       after: { rev: done.rev, epoch: done.epoch, ...scope },
-      muck,
     });
-    return c.json({ ok: true, settings: (await load(c, id)).diag, muck });
+    return c.json({ ok: true, settings: (await load(c, id)).diag });
   });

@@ -38,7 +38,9 @@ describe('mixer', () => {
     let admitted = 0;
     for (let i = 0; i < 3000; i++) {
       seed = (seed * 1103515245 + 12345) % 2147483648;
-      const id = ids[seed % ids.length]!;
+      // From the high bits: the product passes 2^53, so the low ones come out as zeros (with 16 sounds, every pick was
+      // the first sound).
+      const id = ids[(seed >>> 16) % ids.length]!;
       // A burst: a sound every 7 ms, now and then a quiet moment.
       const now = i * 7 + Math.floor(i / 200) * 1000;
       if (m.admit(id, now)) admitted++;

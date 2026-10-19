@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { PublicRole } from './social';
+import type { VipColor } from './vip';
 import { PushConsentSchema } from './notifications';
 import { BOT_LEVELS, SUPPORTED_MAX_SEATS, type BotLevel } from './table';
 
@@ -223,6 +224,8 @@ export interface MeDto {
   nickname: string;
   avatarUrl: string | null;
   role: Role;
+  /** My VIP name color, as other players see it (absent when I am not VIP, or while suspended). */
+  vip?: VipColor;
   balance: number;
   locale: 'ko' | 'en';
   createdAt: number;
@@ -235,7 +238,7 @@ export interface LobbyTableDto {
   name: string;
   roomType: RoomType;
   /** The member who opened a member room. */
-  host: { id: string; nickname: string; role?: PublicRole } | null;
+  host: { id: string; nickname: string; role?: PublicRole; vip?: VipColor } | null;
   maxSeats: number;
   smallBlind: number;
   bigBlind: number;

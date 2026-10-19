@@ -15,6 +15,8 @@ import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
 import { TimeBankButton } from '../game/TimeBank';
+import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
+import { legacyMuckStep } from '../game/olderRooms';
 import { useReactionSender } from '../game/Reactions';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
@@ -26,7 +28,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { rememberVisit } from '../lib/lobby';
 import { lobbyHref } from '../lib/lobbyReturn';
 import { siteUrl } from '../lib/share';
-import { hasPendingMuck, pullSettings, usePrefs, useSettingsSync } from '../lib/prefs';
+import { pullSettings, usePrefs } from '../lib/prefs';
 import { useAmounts } from '../lib/amount';
 import { when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
@@ -208,40 +210,19 @@ export function TablePage() {
     setParams(params, { replace: true });
   }, [s, params, setParams, sock]);
 
-  // Opening a table reads the account's settings again unless they were a moment ago (auto-muck may have changed elsewhere).
+  // Opening a table reads the account's settings again unless they were a moment ago (the table look and aids may have
+  // changed on another device).
   useEffect(() => pullSettings(), []);
 
-  // Auto-muck is the account's setting, which the room applies to my seat: tell the room this device's value when the
-  // two differ (on taking a seat, after a change here, and on reconnect, since a command sent offline is not kept), once
-  // the account's settings have been read. When the room's changed by itself while I sat (another device or an
-  // administrator changed the account's setting, and the server told my tables), this device's value is the older one:
-  // the settings are read again instead (once), unless it was changed here and is not saved yet. A room that predates
-  // muck reports no setting and is not asked.
-  const roomMuck = s?.you.seatIndex != null ? s.you.autoMuck : undefined;
+  // Auto-muck always applies; a room from an older game worker still has to be told so for my seat (olderRooms.ts).
+  const legacyMuck = s?.you.seatIndex != null ? s.you.autoMuck : undefined;
   const { send, status } = sock;
-  const sync = useSettingsSync();
-  const muck = useRef({ room: undefined as boolean | null | undefined, mine: prefs.autoMuck, sent: null as boolean | null, elsewhere: false, pulled: false });
+  const muckSent = useRef(false);
   useEffect(() => {
-    const m = muck.current;
-    // A command sent while the connection was down is not kept: send again once it is back.
-    if (status !== 'open') m.sent = null;
-    if (typeof m.room === 'boolean' && typeof roomMuck === 'boolean' && roomMuck !== m.room && roomMuck !== m.sent) m.elsewhere = true;
-    if (roomMuck === m.sent) m.sent = null;
-    // Changed here, or read again: this device's value is the account's now.
-    if (prefs.autoMuck !== m.mine || roomMuck === prefs.autoMuck) m.elsewhere = m.pulled = false;
-    m.room = roomMuck;
-    m.mine = prefs.autoMuck;
-    if (status !== 'open' || typeof roomMuck !== 'boolean' || roomMuck === prefs.autoMuck) return;
-    if (m.elsewhere && !hasPendingMuck()) {
-      if (!m.pulled) pullSettings(true);
-      m.pulled = true;
-      return;
-    }
-    // Read first; and once sent, the room's answer is awaited rather than sending the same again.
-    if (sync.state === 'loading' || m.sent === prefs.autoMuck) return;
-    m.sent = prefs.autoMuck;
-    send({ t: 'muck', on: prefs.autoMuck });
-  }, [roomMuck, prefs.autoMuck, send, status, sync.state]);
+    const step = legacyMuckStep(muckSent.current, status === 'open', legacyMuck);
+    muckSent.current = step.sent;
+    if (step.send) send({ t: 'muck', on: true });
+  }, [legacyMuck, send, status]);
 
   // The lobby lists tables I opened under "recent".
   const opened = !!s;
@@ -254,7 +235,7 @@ export function TablePage() {
   // A phone on its side: the controls go to a column at the right and the seats get the height (short.ts).
   const short = useShortScreen();
   const academy = useProgress(me?.id);
-  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
+  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${prefs.showHand}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
   // Seated, my seat is at the bottom, with room above my cards for the show-card buttons unless the screen is short.
   // The raise panel open (my turn, so no cards to show), that room goes to the table too.
   const tableOpts = realTableOptions(short);
@@ -267,9 +248,16 @@ export function TablePage() {
 
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
+  // A phone upright: every line of the stack costs the table its height (nine seats at 375×667 have none to spare), so
+  // the turn label goes to my seat's status line, right above the bar, and my hand to the status line under the board,
+  // both kept by the layout whatever they hold. Wider, and in a short screen's column, they are lines of the stack.
+  const inTable = !short && room.narrow;
   const nextIn = useCountdown(s?.nextHandAt ?? null);
   // Short, the status line under the board goes to the column instead.
   const tableStatus = useTableStatus(s, nextIn, amt);
+
+  // My turn: a sound (and a buzz, if asked for) once per decision, and the tab's title while the page is hidden.
+  useTurnCue(myTurn && hand ? `${hand.id}:${hand.seq}` : null, { vibrate: prefs.turnVibrate, title: t('table.turnTitle') });
 
   // Timer warning beeps on my turn.
   const lastBeep = useRef(0);
@@ -277,7 +265,7 @@ export function TablePage() {
     if (!myTurn || !hand?.deadline) return;
     const h = setInterval(() => {
       const left = hand.deadline! - Date.now();
-      if (left < 5_000 && left > 0 && Date.now() - lastBeep.current > 950) {
+      if (left < TURN_LOW_MS && left > 0 && Date.now() - lastBeep.current > 950) {
         lastBeep.current = Date.now();
         sound.play('timer');
       }
@@ -528,7 +516,7 @@ export function TablePage() {
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
                 onSeatClick={(seat) =>
-                  seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}) })
+                  seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}), ...(seat.vip ? { vip: seat.vip } : {}) })
                 }
                 onShow={(card) => sock.send({ t: 'show', card })}
                 showOnCards={short}
@@ -539,6 +527,9 @@ export function TablePage() {
                 consumeCues={sock.consumeCues}
                 reducedMotion={reducedMotion}
                 amounts={amt}
+                turnNote={inTable && myTurn ? <TurnBanner deadline={hand!.deadline} inSeat /> : undefined}
+                // Steps aside while the raise panel is open, as the stack's line does: the table has no room to spare then.
+                handNote={inTable && !room.open && !prefs.beginner && prefs.showHand && seated ? <CurrentHandPill s={s} inline /> : undefined}
               />
             )}
           </div>
@@ -547,7 +538,7 @@ export function TablePage() {
           <div
             ref={room.stackRef}
             className={cx(
-              'pointer-events-none absolute z-40 flex flex-col',
+              'group/stack pointer-events-none absolute z-40 flex flex-col',
               // Short: a column of one width at the right edge, every line as wide as it, scrolled rather than cut if a
               // beginner's notes make it taller than the screen.
               short
@@ -584,8 +575,13 @@ export function TablePage() {
               <div className="flex flex-col items-center gap-1.5 sm:items-end">
                 {/* A notice takes the street note's place (the header names the street), so the stack stays below my seat. */}
                 {!notice && <StageNote s={s} />}
-                {seated && <CurrentHandPill s={s} />}
+                {seated && prefs.showHand && <CurrentHandPill s={s} />}
               </div>
+            )}
+            {s && !prefs.beginner && prefs.showHand && hand && seated && !inTable && (
+              // With the raise panel open the screen may have no line to spare (a phone sideways): the hand steps aside while
+              // it is, and the table keeps the room it had without the line (useStackRoom). Upright it is under the board.
+              <CurrentHandPill s={s} compact className="group-has-[[data-raise-open]]/stack:hidden" />
             )}
             {tip && (
               <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-info/40 bg-ink-950/90 p-2.5 text-xs text-ivory backdrop-blur sm:w-[26rem]" role="status" data-testid="coach-tip">
@@ -605,18 +601,20 @@ export function TablePage() {
             )}
             {s && myTurn && (
               <>
-                {prefs.beginner ? (
-                  <ActionHelp s={s} />
+                {prefs.beginner && <ActionHelp s={s} />}
+                {short ? (
+                  // The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen.
+                  <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
+                ) : inTable ? (
+                  // The label is in my seat (above): only the time bank, when there is one, is a line here, as before.
+                  <TimeBankButton s={s} onUse={addBankTime} column={false} />
                 ) : (
-                  // On a phone (and in a short screen's column) the bar itself shows it; a screen reader still hears it.
-                  <div
-                    role="status"
-                    className={cx('sr-only rounded-full bg-gold-500/15 px-3 py-1 text-xs font-bold tracking-wider text-gold-300 jc-pulse-gold', !short && 'sm:not-sr-only sm:block sm:self-end')}
-                  >
-                    {t('table.yourTurn')}
+                  // Wider: one line beside the time bank, so the label costs the table no height when there is one.
+                  <div className="pointer-events-none flex max-w-full flex-wrap items-center justify-center gap-2 sm:justify-end" data-testid="turn-line">
+                    <TurnBanner deadline={hand!.deadline} />
+                    <TimeBankButton s={s} onUse={addBankTime} column={false} />
                   </div>
                 )}
-                <TimeBankButton s={s} onUse={addBankTime} column={short} />
                 <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={short} />
               </>
             )}
@@ -701,10 +699,11 @@ export function TablePage() {
               myId={me?.id}
               hidden={hiddenChat}
               onPick={(m) => {
-                // A seated author shows their role now; otherwise the one the line was posted with.
+                // A seated author shows their role and VIP color now; otherwise the ones the line was posted with.
                 const seat = s?.seats.find((x) => x.userId === m.userId);
                 const role = seat ? seat.role : m.role;
-                setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: seat?.avatarUrl ?? null, ...(role ? { role } : {}) });
+                const vip = seat ? seat.vip : m.vip;
+                setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: seat?.avatarUrl ?? null, ...(role ? { role } : {}), ...(vip ? { vip } : {}) });
               }}
             />
           </div>

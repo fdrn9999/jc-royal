@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { HandReview } from '../components/HandReview';
 import { isGone, LoadFailed, Loading } from '../components/Loading';
-import { MemberName, RoleBadge } from '../components/MemberName';
+import { MemberName, RoleBadge, VipBadge, vipOf } from '../components/MemberName';
 import { MaintenanceNote } from '../components/MaintenanceNote';
 import { PlayerCard, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
@@ -30,15 +30,16 @@ function AuthorName({ a, onPick }: { a: PostListItemDto['author']; onPick?: (a: 
   if (a.withdrawn) return <span className="font-normal italic text-ink-400" data-testid="author-withdrawn">{t('board.withdrawn')}</span>;
   const name = onPick && a.id !== me?.id ? (
     <button type="button" className="min-w-0 font-semibold text-ink-100 hover:text-gold-300 hover:underline" onClick={() => onPick(a)} data-testid="author-name">
-      <MemberName name={a.nickname} role={a.role} />
+      <MemberName name={a.nickname} role={a.role} vip={a.vip} />
     </button>
   ) : (
-    <MemberName name={a.nickname} role={a.role} />
+    <MemberName name={a.nickname} role={a.role} vip={a.vip} />
   );
   return (
     <span className="inline-flex min-w-0 max-w-full items-center gap-1">
       {name}
       <RoleBadge role={a.role} />
+      {vipOf(a.role, a.vip) && <VipBadge />}
     </span>
   );
 }

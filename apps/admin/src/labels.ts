@@ -168,6 +168,7 @@ const auditNames = labeler({
   'user.suspend': 'auditUserSuspend',
   'user.unsuspend': 'auditUserUnsuspend',
   'user.view': 'auditUserView',
+  'user.vip': 'auditUserVip',
 });
 /**
  * An audit action's name. A refused or failed attempt is `<action>.failed` (the API's permission table names it); it
@@ -234,6 +235,7 @@ export const featureLabel = labeler({
   chips: 'featChips',
   resetLinks: 'featResetLinks',
   roles: 'featRoles',
+  vip: 'featVip',
   tables: 'tables',
   tableControl: 'featTableControl',
   hands: 'hands',

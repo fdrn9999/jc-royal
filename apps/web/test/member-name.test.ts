@@ -72,6 +72,60 @@ describe('MemberName', () => {
   });
 });
 
+describe('VIP name', () => {
+  it('colors a VIP member and always marks them: the diamond in a tight spot, the VIP pill where there is room', () => {
+    const tight = html(h(MemberName, { name: 'Rosa', vip: 'rose', className: 'text-ivory' }));
+    expect(tight).toMatch(/class="min-w-0 truncate jc-vip-name" data-vip="rose">Rosa</);
+    expect(tight).toMatch(/role="img" aria-label="VIP 회원"[^>]*data-testid="vip-icon"/);
+    expect(tight).not.toContain('vip-badge');
+    const roomy = html(h(MemberName, { name: 'Rosa', vip: 'rose', badge: true }));
+    expect(roomy).toMatch(/data-testid="vip-badge">.*<span aria-hidden="true">VIP<\/span><span class="sr-only">VIP 회원<\/span>/);
+    expect(roomy).not.toContain('vip-icon');
+  });
+
+  it('goes back to the plain name when the color is gone', () => {
+    const out = html(h(MemberName, { name: 'Rosa', badge: true, className: 'text-ivory' }));
+    expect(out).toBe(html(h(MemberName, { name: 'Rosa', badge: true, className: 'text-ivory' })));
+    expect(out).not.toMatch(/jc-vip|data-vip|vip-badge|vip-icon/);
+  });
+
+  it('never colors staff with a VIP color: their own mark and color stay', () => {
+    const out = html(h(MemberName, { name: 'Royal', role: 'super_admin', vip: 'gold', badge: true }));
+    expect(out).toContain('jc-role-name');
+    expect(out).not.toMatch(/jc-vip|vip-badge|vip-icon/);
+  });
+
+  it('keeps the marks outside the part a long name is cut from, so a long VIP name gives way to them', () => {
+    const long = 'n'.repeat(16);
+    const out = html(h(MemberName, { name: long, vip: 'sapphire', badge: true, bot: undefined }));
+    const name = out.indexOf('min-w-0 truncate');
+    expect(out.indexOf('vip-badge')).toBeGreaterThan(out.indexOf(long));
+    expect(name).toBeGreaterThan(-1);
+    const seat = html(h(MemberName, { name: long, vip: 'sapphire' }));
+    expect(seat.indexOf('vip-icon')).toBeLessThan(seat.indexOf('min-w-0 truncate'));
+  });
+
+  it('badge="wide" (a narrow row with a status, a time or buttons): the diamond below sm, the pills from sm up', () => {
+    const vip = html(h(MemberName, { name: 'Rosa', vip: 'rose', badge: 'wide' }));
+    expect(vip).toMatch(/class="jc-vip-icon shrink-0 size-\[0\.85em\] sm:hidden"[^>]*data-testid="vip-icon"/);
+    // The pills' own classes would win over a utility on them, so a wrapper is what a phone hides.
+    expect(vip).toMatch(/<span class="contents max-sm:hidden"><span class="jc-vip-badge"[^>]*data-testid="vip-badge">/);
+    const staff = html(h(MemberName, { name: 'Royal', role: 'super_admin', vip: 'gold', badge: 'wide' }));
+    expect(staff).toContain('data-testid="role-icon"');
+    expect(staff).toMatch(/<span class="contents max-sm:hidden"><span class="jc-role-badge"/);
+    expect(staff).not.toMatch(/jc-vip|vip-badge|vip-icon/);
+    // A member with no badge to give gets no wrapper at all: exactly the plain name.
+    expect(html(h(MemberName, { name: 'Joe', badge: 'wide' }))).toBe(html(h(MemberName, { name: 'Joe', badge: true })));
+  });
+
+  it('shows a VIP host with the diamond instead of the member mark', () => {
+    const out = html(h(HostedBy, { host: { nickname: 'Rosa', vip: 'emerald' } }));
+    expect(out).toContain('vip-icon');
+    expect(out).not.toContain('👤');
+    expect(out).toMatch(/방장 <span class="jc-vip-name" data-vip="emerald">Rosa<\/span>/);
+  });
+});
+
 describe('HostedBy', () => {
   it('colors only the name inside the translated sentence', () => {
     expect(html(h(HostedBy, { host: { nickname: 'Royal', role: 'super_admin' } }))).toMatch(/방장 <span class="jc-role-name" data-role="super_admin">Royal<\/span>/);

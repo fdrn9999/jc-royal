@@ -174,11 +174,15 @@ describe('who gets one', () => {
     const a = await member();
     const day = await member({ pushConsent: { service: true, night: false } });
     await befriend(a, day);
-    expect((await a.client.post(`/api/dm/${day.me.id}`, { text: 'x' })).status).toBe(201);
-    const [ev] = await settled(day.me.id, 1, 'dm');
     // The suite runs at any hour: what is right depends on the hour in Korea now (the boundaries are unit tests).
-    if (isKstNight(Date.now())) expect(ev).toMatchObject({ status: 'skipped', reason: 'night' });
-    else expect(ev).toMatchObject({ status: 'sent' });
+    const night = isKstNight(Date.now());
+    expect((await a.client.post(`/api/dm/${day.me.id}`, { text: 'x' })).status).toBe(201);
+    if (night) {
+      // At night nothing is even queued without night consent (packages/db/src/notify.ts), so consent given later never reaches back.
+      await sleep(1500);
+      expect(await events(day.me.id, 'dm')).toEqual([]);
+      expect(await got(day.sub, 'dm')).toEqual([]);
+    } else expect((await settled(day.me.id, 1, 'dm'))[0]).toMatchObject({ status: 'sent' });
     // Made at 22:00 in Korea last night, still within its lifetime: dropped, whatever the time is now.
     const kstMidnight = Math.floor((Date.now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000;
     const id = await queueRaw(day.me.id, 'tournament_result', { url: '/tournaments/x', createdAt: kstMidnight - 2 * 3_600_000, expiresAt: Date.now() + 3_600_000 });

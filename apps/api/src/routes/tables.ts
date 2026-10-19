@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import { NEWCOMER_HANDS, publicRole, QuickPlaySchema, TableAccessSchema, type LobbyTableDto, type QuickPlayDto } from '@jc/types';
+import { NEWCOMER_HANDS, publicRole, QuickPlaySchema, shownVip, TableAccessSchema, type LobbyTableDto, type QuickPlayDto } from '@jc/types';
 import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import { Hono, type Context, type Handler } from 'hono';
 import type { AppEnv } from '../env';
@@ -21,11 +21,12 @@ const QUICK_PLAY_CHECKS = 5;
 /** `badge` (badgesFor): the host's staff badge, when the social policy shows it. */
 export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null, badge: Badge = publicRole): LobbyTableDto {
   const role = badge(hostUser?.role);
+  const vip = hostUser ? shownVip(hostUser) : undefined;
   return {
     id: t.id,
     name: t.name,
     roomType: t.roomType,
-    host: t.roomType === 'member' && t.createdBy ? { id: t.createdBy, nickname: hostUser?.nickname ?? '', ...(role ? { role } : {}) } : null,
+    host: t.roomType === 'member' && t.createdBy ? { id: t.createdBy, nickname: hostUser?.nickname ?? '', ...(role ? { role } : {}), ...(vip ? { vip } : {}) } : null,
     maxSeats: t.maxSeats,
     smallBlind: t.smallBlind,
     bigBlind: t.bigBlind,
@@ -54,6 +55,8 @@ export interface RoomIdentity {
   nickname: string;
   avatarUrl: string | null;
   role: string;
+  /** The VIP name color others see (shownVip), when the member has one: the room shows it on their seat and chat lines. */
+  vip?: string;
   /**
    * The join code hash this connection holds a valid ticket for, or null. The room compares it with the table's current
    * hash, so a later code change takes the right away from connections that are already open.
@@ -63,13 +66,16 @@ export interface RoomIdentity {
   authAt: number;
 }
 
-/** The member who opened a table: nickname and role (for the staff badge). */
-type HostUser = { nickname: string; role: string };
+/** The member who opened a table: nickname, role (for the staff badge) and what decides their VIP color. */
+type HostUser = { nickname: string; role: string; status: string; isBot: boolean; vipColor: string | null };
 
-/** Tables with the member who opened them. */
+/** Tables with the member who opened them (the same join gives the host's VIP color: no query per table). */
 const withHost = (c: Context<AppEnv>) =>
   c.var.db
-    .select({ t: schema.tables, host: { nickname: schema.users.nickname, role: schema.users.role } })
+    .select({
+      t: schema.tables,
+      host: { nickname: schema.users.nickname, role: schema.users.role, status: schema.users.status, isBot: schema.users.isBot, vipColor: schema.users.vipColor },
+    })
     .from(schema.tables)
     .leftJoin(schema.users, eq(schema.users.id, schema.tables.createdBy));
 
@@ -194,6 +200,7 @@ export const tableSocket: Handler<AppEnv> = async (c) => {
     nickname: resolved.user.nickname,
     avatarUrl: resolved.user.avatarUrl,
     role: resolved.user.role,
+    ...(resolved.user.vip ? { vip: resolved.user.vip } : {}),
     codeHash: ticket ? t.joinCodeHash : null,
     authAt,
   };
