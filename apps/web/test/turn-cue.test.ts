@@ -181,6 +181,26 @@ describe('TurnBanner', () => {
     expect(low).toContain('시간이 얼마 남지 않았습니다');
   });
 
+  it('inSeat (in my seat’s status line on a phone upright): the short label at the line’s own size, low on time all the same', () => {
+    const seat = (deadline: number) => renderToStaticMarkup(h(I18nProvider, null, h(TurnBanner, { deadline, inSeat: true })));
+    const out = seat(1_000_000 + 24_000);
+    expect(out).toContain('data-testid="turn-banner"');
+    expect(out).toContain('role="status"');
+    expect(out).toMatch(/>내 차례<\/span>/);
+    expect(out).toMatch(/data-testid="turn-left">24초</);
+    expect(out).toContain('pointer-events-none');
+    // No box, ring or size of its own: the seat's plate already wears the gold ring, and the line sets the size.
+    expect(out).not.toContain('rounded-full');
+    expect(out).not.toContain('border');
+    expect(out).not.toContain('jc-pulse-gold');
+    expect(out).not.toContain('text-xs');
+    const low = seat(1_000_000 + 4_000);
+    expect(low).toContain('data-low=""');
+    expect(low).toMatch(/data-testid="turn-left">⚠ 4초</);
+    expect(low).toContain('시간이 얼마 남지 않았습니다');
+    expect(low).toContain('text-danger-soft');
+  });
+
   it('never counts below zero, and shows no clock without a deadline', () => {
     expect(html(1_000_000 - 3_000)).toMatch(/data-testid="turn-left">⚠ 0초</);
     const none = html(null);

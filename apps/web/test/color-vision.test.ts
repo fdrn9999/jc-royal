@@ -217,6 +217,13 @@ describe.each(SETTINGS_COLOR_VISIONS)('colour vision mode %s', (mode) => {
     }
   });
 
+  it('a friend’s status never reads as a VIP name colour, nor a VIP name as a status (§33): every pair apart', () => {
+    // The names are the bright text; the status icons are mid-tones beside them, so a green or gold name is not "online" or "away".
+    for (const k of VIP_COLORS)
+      for (const s of ['online', 'away', 'offline'])
+        expect(apart(c(`--vip-${k}`), c(`--color-presence-${s}`), vision), `${k}/${s}`).toBeGreaterThanOrEqual(SHOULD_DIFFER);
+  });
+
   it('secondary text reads on the panels', () => {
     for (const bg of panels) expect(contrast(c('--color-ink-300'), bg), bg).toBeGreaterThanOrEqual(mode === 'highContrast' ? 7 : 4.5);
     if (mode === 'highContrast') for (const bg of panels) expect(contrast(c('--color-ink-400'), bg), bg).toBeGreaterThanOrEqual(7);

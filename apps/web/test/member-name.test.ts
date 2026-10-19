@@ -105,6 +105,19 @@ describe('VIP name', () => {
     expect(seat.indexOf('vip-icon')).toBeLessThan(seat.indexOf('min-w-0 truncate'));
   });
 
+  it('badge="wide" (a narrow row with a status, a time or buttons): the diamond below sm, the pills from sm up', () => {
+    const vip = html(h(MemberName, { name: 'Rosa', vip: 'rose', badge: 'wide' }));
+    expect(vip).toMatch(/class="jc-vip-icon shrink-0 size-\[0\.85em\] sm:hidden"[^>]*data-testid="vip-icon"/);
+    // The pills' own classes would win over a utility on them, so a wrapper is what a phone hides.
+    expect(vip).toMatch(/<span class="contents max-sm:hidden"><span class="jc-vip-badge"[^>]*data-testid="vip-badge">/);
+    const staff = html(h(MemberName, { name: 'Royal', role: 'super_admin', vip: 'gold', badge: 'wide' }));
+    expect(staff).toContain('data-testid="role-icon"');
+    expect(staff).toMatch(/<span class="contents max-sm:hidden"><span class="jc-role-badge"/);
+    expect(staff).not.toMatch(/jc-vip|vip-badge|vip-icon/);
+    // A member with no badge to give gets no wrapper at all: exactly the plain name.
+    expect(html(h(MemberName, { name: 'Joe', badge: 'wide' }))).toBe(html(h(MemberName, { name: 'Joe', badge: true })));
+  });
+
   it('shows a VIP host with the diamond instead of the member mark', () => {
     const out = html(h(HostedBy, { host: { nickname: 'Rosa', vip: 'emerald' } }));
     expect(out).toContain('vip-icon');

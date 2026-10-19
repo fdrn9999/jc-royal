@@ -1,8 +1,9 @@
-import type { Card } from '@jc/types';
+import type { Card, TableView } from '@jc/types';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { describeCurrent, startingHandName } from '../src/academy/content';
+import { CurrentHandPill } from '../src/game/BeginnerAids';
 import { I18nProvider, useI18n, type MsgKey } from '../src/lib/i18n';
 import { en } from '../src/lib/i18n-en';
 
@@ -69,5 +70,27 @@ describe('the hand HUD after the flop: the made hand, all ten categories', () =>
     expect(ko('As Ad', 'Ah 7c 2d')).toBe('A 트리플');
     expect(english('As Ad', 'Ah 7c 2d 9h')).toBe('Three As');
     expect(english('Ac 2d', '3h 4s 5d Kc 9h')).toBe('Straight to 5');
+  });
+});
+
+describe('the hand HUD under the board (inline, a phone upright)', () => {
+  /** Only what the pill reads: my seat, my own cards and the board shown. */
+  const view = (state = 'active') =>
+    ({ you: { seatIndex: 0 }, seats: [{ seatIndex: 0, holeCards: ['Kc', 'Ah'], state }], hand: { board: ['Kd', '7c', '2h'] } }) as unknown as TableView;
+  const pill = (s: TableView) => renderToStaticMarkup(h(I18nProvider, null, h(CurrentHandPill, { s, inline: true })));
+
+  it('is one line at the status line’s size, saying it is read from the cards shown', () => {
+    const out = pill(view());
+    expect(out).toContain('data-testid="current-hand"');
+    expect(out).toContain('K 원페어');
+    expect(out).toContain('공개 카드 기준');
+    expect(out).toContain('truncate');
+    expect(out).toContain('leading-3');
+    // Not a control: nothing in it takes a tap.
+    expect(out).not.toContain('pointer-events-auto');
+  });
+
+  it('says nothing once I have folded', () => {
+    expect(pill(view('folded'))).toBe('');
   });
 });

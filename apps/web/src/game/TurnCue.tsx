@@ -111,29 +111,32 @@ export function useSecondsLeft(deadline: number | null): number | null {
 }
 
 /**
- * "Your turn" with the time left, at the action bar (above it on a phone; in a short screen's column, `compact` in the
- * time bank's pill, so the column is no taller for it). Takes no taps and lays nothing over the table: it is a line of the
- * stack under it. Low on time it turns to the warning colour with a ⚠ and says so to a screen reader once (the seconds
- * themselves are not read out).
+ * "Your turn" with the time left, at the action bar (above it on a wider screen; in a short screen's column, `compact`
+ * in the time bank's pill, so the column is no taller for it; on a phone upright, `inSeat` in my seat's status line, right
+ * above the bar, so the table keeps the height a line of its own would take). Takes no taps and lays nothing over the
+ * table. Low on time it turns to the warning colour with a ⚠ and says so to a screen reader once (the seconds themselves
+ * are not read out).
  */
-export function TurnBanner({ deadline, compact = false, className }: { deadline: number | null; compact?: boolean; className?: string }) {
+export function TurnBanner({ deadline, compact = false, inSeat = false, className }: { deadline: number | null; compact?: boolean; inSeat?: boolean; className?: string }) {
   const { t } = useI18n();
   const left = useSecondsLeft(deadline);
   const low = left !== null && left * 1000 <= TURN_LOW_MS;
+  const short = compact || inSeat;
   return (
     <div
       role="status"
       className={cx(
-        'pointer-events-none flex items-center text-xs font-bold whitespace-nowrap',
-        compact ? 'gap-1.5' : 'justify-center gap-2 rounded-full border px-3 py-1 tracking-wider',
+        'pointer-events-none flex items-center font-bold whitespace-nowrap',
+        // In the seat: the status line's own size, with nothing round it (the plate's gold ring already marks the seat).
+        inSeat ? 'min-w-0 gap-1 tracking-normal' : compact ? 'gap-1.5 text-xs' : 'justify-center gap-2 rounded-full border px-3 py-1 text-xs tracking-wider',
         low ? 'text-danger-soft' : 'text-gold-300',
-        !compact && (low ? 'border-danger/70 bg-danger/15' : 'jc-pulse-gold border-gold-400/70 bg-gold-500/15'),
+        !short && (low ? 'border-danger/70 bg-danger/15' : 'jc-pulse-gold border-gold-400/70 bg-gold-500/15'),
         className,
       )}
       data-testid="turn-banner"
       data-low={low ? '' : undefined}
     >
-      <span className="uppercase">{t(compact ? 'table.turnTitle' : 'table.yourTurn')}</span>
+      <span className="uppercase">{t(short ? 'table.turnTitle' : 'table.yourTurn')}</span>
       {left !== null && (
         <span className="font-mono tabular-nums" aria-hidden data-testid="turn-left">
           {low && '⚠ '}

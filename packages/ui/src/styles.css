@@ -42,10 +42,11 @@
   --color-success-soft: #bfe9d0;
   --color-danger-soft: #f3c3c4;
 
-  /* Friends' status: always drawn with a shape and a word as well (a dot, a moon, a ring), never by colour alone. */
-  --color-presence-online: #3fa36b;
-  --color-presence-away: #d99a2b;
-  --color-presence-offline: #8d929c;
+  /* Friends' status: always drawn with a shape and a word as well (a dot, a moon, a ring), never by colour alone.
+   * Mid-tones kept apart from every VIP name colour (the bright text beside them), in each colour vision mode too. */
+  --color-presence-online: #2d9a60;
+  --color-presence-away: #cf8517;
+  --color-presence-offline: #8d919a;
 
   --radius-card: 0.875rem;
   --radius-pill: 999px;
@@ -602,9 +603,9 @@
   --color-success: #6cb4ff;
   --color-danger: #f07f3c;
   --color-danger-strong: #b8400a;
-  --color-presence-online: #6cb4ff;
-  --color-presence-away: #ffb000;
-  --color-presence-offline: #85807a;
+  --color-presence-online: #2875bd;
+  --color-presence-away: #cc8100;
+  --color-presence-offline: #707070;
   --act-fold-text: #e8743c;
   --act-call-text: #a9c8ff;
   --act-allin-text: #f25aa0;
@@ -632,9 +633,9 @@
   --color-success: #6cb4ff;
   --color-danger: #f07f3c;
   --color-danger-strong: #b8400a;
-  --color-presence-online: #6cb4ff;
-  --color-presence-away: #ffb000;
-  --color-presence-offline: #85807a;
+  --color-presence-online: #117dd4;
+  --color-presence-away: #b88100;
+  --color-presence-offline: #808080;
   --act-fold-text: #e8743c;
   --act-call-text: #a9c8ff;
   --act-allin-text: #f25aa0;
@@ -652,12 +653,14 @@
   --chip-t7-face: #7fb8e0;
 }
 
-/* Blue-weak: all-in and diamonds violet (orange and blue are what it confuses); online cyan. */
+/* Blue-weak: all-in and diamonds violet (orange and blue are what it confuses); online teal. */
 :root[data-cv='tritan'] {
   --act-allin-from: #7a3fb0;
   --act-allin-to: #582d80;
   --suit-diamond: #6a2fa8;
-  --color-presence-online: #4cc3d9;
+  --color-presence-online: #328085;
+  --color-presence-away: #a57912;
+  --color-presence-offline: #898a90;
   --act-allin-text: #b4a0ff;
 }
 
@@ -684,9 +687,9 @@
   --color-danger-strong: #a3141c;
   --color-warning: #ffd166;
   --color-info: #8cc4ff;
-  --color-presence-online: #5fe39a;
-  --color-presence-away: #ffd166;
-  --color-presence-offline: #c4c8cf;
+  --color-presence-online: #6bfb5b;
+  --color-presence-away: #ff8c00;
+  --color-presence-offline: #c1c6cd;
 }
 :root[data-cv='highContrast'] .jc-act {
   outline: 2px solid rgba(244, 239, 227, 0.85);

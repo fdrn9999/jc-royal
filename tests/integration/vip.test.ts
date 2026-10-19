@@ -320,6 +320,18 @@ describe('VIP management', () => {
     expect(await ledgerRows(m.me.id)).toBe(ledger);
     expect((await m.client.get('/api/auth/me')).body).toMatchObject({ role: 'user', balance, vip: 'gold' });
   });
+
+  it('changes nothing about notifications: no push queued for giving or ending it, the settings as they were', async () => {
+    const m = await newUser();
+    const settings = (await m.client.get('/api/me/notifications/settings')).body;
+    const queued = async () => Number((await d1<{ n: number }>(`SELECT COUNT(*) AS n FROM notification_events WHERE user_id = '${m.me.id}'`))[0]!.n);
+    expect(await queued()).toBe(0);
+    await makeVip(m.me.id, 'rose');
+    await makeVip(m.me.id, 'cyan');
+    expect((await setVip(m.me.id, { enabled: false })).status).toBe(200);
+    expect(await queued()).toBe(0);
+    expect((await m.client.get('/api/me/notifications/settings')).body).toEqual(settings);
+  });
 });
 
 describe('what other players see', () => {

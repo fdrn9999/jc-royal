@@ -64,6 +64,29 @@ describe('academy progress sync', () => {
     expect((await new Client().get('/api/academy/gto/progress')).status).toBe(401);
     expect((await new Client().req('PUT', '/api/academy/gto/progress', { version: 1, updatedAt: 1, data: {} })).status).toBe(401);
   });
+
+  it('a GTO write that names the copy it merged with lands only over that copy: the second of two devices gets 409', async () => {
+    const a = await newUser();
+    const gtoPut = (body: unknown) => a.client.req('PUT', '/api/academy/gto/progress', body);
+    const row = async () => (await a.client.get('/api/academy/gto/progress')).body;
+    const g = (updatedAt: number, quiz: string[]) => ({ v: 1, updatedAt, quiz: Object.fromEntries(quiz.map((q) => [q, { correct: 1, wrong: 0, last: true, at: updatedAt }])) });
+    // Nothing there yet: base null creates it; a second "nothing there" write is refused.
+    expect((await gtoPut({ version: 1, updatedAt: 100, data: g(100, ['f1']), base: null })).status).toBe(200);
+    const late = await gtoPut({ version: 1, updatedAt: 110, data: g(110, ['f9']), base: null });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('conflict');
+    // Two devices from the copy at 100: the first lands, the second is refused and the first one's record stays.
+    expect((await gtoPut({ version: 1, updatedAt: 200, data: g(200, ['f1', 'f2']), base: 100 })).status).toBe(200);
+    expect((await gtoPut({ version: 1, updatedAt: 250, data: g(250, ['f1', 'f3']), base: 100 })).status).toBe(409);
+    expect(await row()).toEqual({ data: g(200, ['f1', 'f2']), version: 1, updatedAt: 200 });
+    // Merged with it, the second writes again over the copy at 200.
+    expect((await gtoPut({ version: 1, updatedAt: 250, data: g(250, ['f1', 'f2', 'f3']), base: 200 })).status).toBe(200);
+    expect((await row()).data).toEqual(g(250, ['f1', 'f2', 'f3']));
+    // Over the right copy but not later than it: refused, so updatedAt keeps naming one copy.
+    expect((await gtoPut({ version: 1, updatedAt: 250, data: g(250, []), base: 250 })).status).toBe(409);
+    expect((await gtoPut({ version: 1, updatedAt: 260, data: g(260, []), base: -1 })).status).toBe(400);
+    expect((await row()).updatedAt).toBe(250);
+  });
 });
 
 const ALL_BADGES = ['academy-graduate', 'card-reader', 'first-step', 'hand-expert', 'practice-graduate', 'rule-keeper', 'sharp-eye'];

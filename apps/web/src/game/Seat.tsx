@@ -5,10 +5,11 @@
  */
 import type { SeatView } from '@jc/types';
 import { cx, PlayingCard } from '@jc/ui';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import type { Density } from './layout';
+import { cardsToShow } from './olderRooms';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { ReactionBubble, ReactionTray, type ReactionSender, type SeatReaction } from './Reactions';
 
@@ -136,13 +137,15 @@ export interface SeatProps {
    * My seat after a hand whose showdown left my cards face down (folded, won uncontested or lost): a button over each
    * card, and one for both, turns them face up for the table until the next deal.
    */
-  onShow?: (card: 0 | 1 | 'both') => void;
+  onShow?: (card: 0 | 1) => void;
   /** Those buttons lie on the cards' lower half, clear of the plate, instead of above them (no room kept there). */
   showOver?: boolean;
   /** The quick reaction this player sent, while it shows. */
   reaction?: SeatReaction | null;
   /** My seat at a real table, with reactions on: tapping the plate opens the reaction tray. */
   react?: ReactionSender;
+  /** Said in the status line in place of the rest (my turn's label on a phone upright, where the stack keeps no line). */
+  turnNote?: ReactNode;
   density: Density;
   amounts: Amounts;
   style: CSSProperties;
@@ -217,8 +220,9 @@ export function Seat(p: SeatProps) {
   const shown = s.shown?.length ? s.shown : null;
   const isShown = (i: number) => !!shown?.[i];
   const show = (choice: 0 | 1 | 'both') => {
-    setShowing(choice === 'both' ? [0, 1] : [...showing, choice]);
-    p.onShow?.(choice);
+    const todo = cardsToShow(choice, showing, isShown);
+    setShowing([...showing, ...todo]);
+    for (const i of todo) p.onShow?.(i);
   };
   const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0) || !!shown;
   const cards = s.holeCards && s.holeCards.length ? s.holeCards : (shown ?? (showCards ? [null, null] : []));
@@ -379,7 +383,9 @@ export function Seat(p: SeatProps) {
         </div>
         {/* status line: no wider than the seat (layout.ts); what does not fit is cut short, whole in its title */}
         <div className={cx('flex items-center gap-1 overflow-hidden whitespace-nowrap font-bold tracking-wide [&>span]:min-w-0 [&>span]:truncate', z.status)} data-testid={`seat-status-${s.seatIndex}`}>
-          {winner ? (
+          {p.turnNote ? (
+            p.turnNote
+          ) : winner ? (
             <span className="text-[var(--t-winner)]" title={`${t('table.winner')} ${won}`}>
               {/* The smallest seats keep the word for screen readers only: the plate already glows. */}
               <span className={cx(p.density === 'dense' && 'sr-only')}>{t('table.winner')} </span>

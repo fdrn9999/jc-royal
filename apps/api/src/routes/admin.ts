@@ -767,24 +767,26 @@ const admin = new Hono<AppEnv>()
       });
     }
     // Role changes take effect immediately: drop existing admin sessions of the target, and the switches with the role.
-    // Staff are never VIP, so a VIP member made staff loses it (and does not get it back with the role).
+    // Staff are never VIP, so a VIP member made staff loses it (and does not get it back with the role). The VIP state is
+    // read and ended in the same transaction as the role, so a grant saved after `target` was read is ended too, and the
+    // record names the color that was actually there.
     const now = Date.now();
-    const vipEnds = body.role !== 'user' && target.vipColor !== null;
-    await c.var.db.batch([
-      c.var.db
-        .update(schema.users)
-        .set({
-          role: body.role,
-          updatedAt: now,
-          ...(vipEnds ? { vipColor: null, vipVersion: sql`${schema.users.vipVersion} + 1`, vipChangedAt: now, vipChangedBy: c.var.user!.id } : {}),
-        })
-        .where(eq(schema.users.id, id)),
-      c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin'))),
-      c.var.db.delete(schema.adminPermissions).where(eq(schema.adminPermissions.userId, id)),
-    ]);
+    const staff = body.role !== 'user';
+    const vipNow = c.var.db.select({ color: schema.users.vipColor, version: schema.users.vipVersion }).from(schema.users).where(eq(schema.users.id, id));
+    const setRole = c.var.db.update(schema.users).set({ role: body.role, updatedAt: now }).where(eq(schema.users.id, id));
+    const endVip = c.var.db
+      .update(schema.users)
+      .set({ vipColor: null, vipVersion: sql`${schema.users.vipVersion} + 1`, vipChangedAt: now, vipChangedBy: c.var.user!.id })
+      .where(and(eq(schema.users.id, id), isNotNull(schema.users.vipColor)));
+    const dropSessions = c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
+    const dropSwitches = c.var.db.delete(schema.adminPermissions).where(eq(schema.adminPermissions.userId, id));
+    const [vipBefore] = staff
+      ? await c.var.db.batch([vipNow, endVip, setRole, dropSessions, dropSwitches])
+      : await c.var.db.batch([vipNow, setRole, dropSessions, dropSwitches]);
+    const vipEnded = staff && vipBefore[0]?.color ? vipBefore[0] : null;
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
-    if (vipEnds) await audit(c, 'user.vip', { type: 'user', id }, { from: target.vipColor, to: null, reason: body.reason, cause: 'role', role: body.role, version: target.vipVersion + 1 });
+    if (vipEnded) await audit(c, 'user.vip', { type: 'user', id }, { from: vipEnded.color, to: null, reason: body.reason, cause: 'role', role: body.role, version: vipEnded.version + 1 });
     // The staff badge other players see at the tables where the member sits.
     const tables = await refreshRoleEverywhere(c.env, id, body.role);
     return c.json({ ok: true, tables });

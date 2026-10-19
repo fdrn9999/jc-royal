@@ -16,6 +16,7 @@ import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels
 import { PreActions } from '../game/PreActions';
 import { TimeBankButton } from '../game/TimeBank';
 import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
+import { legacyMuckStep } from '../game/olderRooms';
 import { useReactionSender } from '../game/Reactions';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
@@ -213,6 +214,16 @@ export function TablePage() {
   // changed on another device).
   useEffect(() => pullSettings(), []);
 
+  // Auto-muck always applies; a room from an older game worker still has to be told so for my seat (olderRooms.ts).
+  const legacyMuck = s?.you.seatIndex != null ? s.you.autoMuck : undefined;
+  const { send, status } = sock;
+  const muckSent = useRef(false);
+  useEffect(() => {
+    const step = legacyMuckStep(muckSent.current, status === 'open', legacyMuck);
+    muckSent.current = step.sent;
+    if (step.send) send({ t: 'muck', on: true });
+  }, [legacyMuck, send, status]);
+
   // The lobby lists tables I opened under "recent".
   const opened = !!s;
   const myId = me?.id;
@@ -237,6 +248,10 @@ export function TablePage() {
 
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
+  // A phone upright: every line of the stack costs the table its height (nine seats at 375×667 have none to spare), so
+  // the turn label goes to my seat's status line, right above the bar, and my hand to the status line under the board,
+  // both kept by the layout whatever they hold. Wider, and in a short screen's column, they are lines of the stack.
+  const inTable = !short && room.narrow;
   const nextIn = useCountdown(s?.nextHandAt ?? null);
   // Short, the status line under the board goes to the column instead.
   const tableStatus = useTableStatus(s, nextIn, amt);
@@ -512,6 +527,9 @@ export function TablePage() {
                 consumeCues={sock.consumeCues}
                 reducedMotion={reducedMotion}
                 amounts={amt}
+                turnNote={inTable && myTurn ? <TurnBanner deadline={hand!.deadline} inSeat /> : undefined}
+                // Steps aside while the raise panel is open, as the stack's line does: the table has no room to spare then.
+                handNote={inTable && !room.open && !prefs.beginner && prefs.showHand && seated ? <CurrentHandPill s={s} inline /> : undefined}
               />
             )}
           </div>
@@ -560,9 +578,9 @@ export function TablePage() {
                 {seated && prefs.showHand && <CurrentHandPill s={s} />}
               </div>
             )}
-            {s && !prefs.beginner && prefs.showHand && hand && seated && (
-              // With the raise panel open the screen has no line to spare (a small phone upright, any phone sideways): the
-              // hand steps aside while it is, and the table keeps the room it had without the line (useStackRoom).
+            {s && !prefs.beginner && prefs.showHand && hand && seated && !inTable && (
+              // With the raise panel open the screen may have no line to spare (a phone sideways): the hand steps aside while
+              // it is, and the table keeps the room it had without the line (useStackRoom). Upright it is under the board.
               <CurrentHandPill s={s} compact className="group-has-[[data-raise-open]]/stack:hidden" />
             )}
             {tip && (
@@ -587,6 +605,9 @@ export function TablePage() {
                 {short ? (
                   // The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen.
                   <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
+                ) : inTable ? (
+                  // The label is in my seat (above): only the time bank, when there is one, is a line here, as before.
+                  <TimeBankButton s={s} onUse={addBankTime} column={false} />
                 ) : (
                   // Wider: one line beside the time bank, so the label costs the table no height when there is one.
                   <div className="pointer-events-none flex max-w-full flex-wrap items-center justify-center gap-2 sm:justify-end" data-testid="turn-line">

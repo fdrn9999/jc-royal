@@ -116,20 +116,29 @@ export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole
 /**
  * A member's name: for staff, the mark and their color (over whatever color `className` gives other members), and the
  * badge with `badge`; for a VIP member, their color with the diamond in front, or the VIP pill after it with `badge`.
+ * `badge="wide"` (a row that also holds a status, a time or buttons): the badges from the sm width up, and below it the
+ * marks alone (the diamond; staff keep the crown or shield either way), so a phone's narrow row still shows the name.
  * A table bot (`bot`) always carries the BOT pill. Long names are cut with an ellipsis; the marks and the badges always
  * stay whole, so a seat keeps its size and a long name gives way to them.
  */
-export function MemberName({ name, role, vip: given, bot, badge, className }: { name: string; role?: PublicRole; vip?: VipColor; bot?: BotLevel | true; badge?: boolean; className?: string }) {
+export function MemberName({ name, role, vip: given, bot, badge, className }: { name: string; role?: PublicRole; vip?: VipColor; bot?: BotLevel | true; badge?: boolean | 'wide'; className?: string }) {
   const vip = vipOf(role, given);
+  const pills =
+    badge && (role || vip) ? (
+      <>
+        <RoleBadge role={role} />
+        {vip && <VipBadge />}
+      </>
+    ) : null;
   return (
     <span className={cx('inline-flex min-w-0 max-w-full items-center gap-1 align-bottom', className)} data-testid="member-name">
       <RoleIcon role={role} className="size-[1.05em]" />
-      {vip && !badge && <VipIcon className="size-[0.85em]" />}
+      {vip && badge !== true && <VipIcon className={cx('size-[0.85em]', badge === 'wide' && 'sm:hidden')} />}
       <span className={cx('min-w-0 truncate', role && 'jc-role-name', vip && 'jc-vip-name')} data-role={role} data-vip={vip}>
         {name}
       </span>
-      {badge && <RoleBadge role={role} />}
-      {badge && vip && <VipBadge />}
+      {/* Hidden by a wrapper: the pills' own (unlayered) display would win over a utility on them. */}
+      {badge === 'wide' && pills ? <span className="contents max-sm:hidden">{pills}</span> : pills}
       {bot && <BotBadge level={bot} />}
     </span>
   );

@@ -86,6 +86,17 @@ export function potBetsToAllIn(pot: number, stack: number): number {
 }
 
 /**
+ * A bet of `pct`% of the pot (to one decimal), which the effective stack caps: what was asked for, what is bet, whether
+ * the stack capped it (`capped`: less than asked) or all of it goes in (`allIn`), and the share of the pot really bet.
+ */
+export function sizedBet(pot: number, pct: number, stack: number): { asked: number; bet: number; capped: boolean; allIn: boolean; of: number } {
+  if (!finite(pot, pct, stack)) return { asked: 0, bet: 0, capped: false, allIn: false, of: 0 };
+  const asked = Math.round(((pot * pct) / 100) * 10) / 10;
+  const bet = Math.min(stack, asked);
+  return { asked, bet, capped: bet < asked, allIn: bet > 0 && bet >= stack, of: pot > 0 ? bet / pot : 0 };
+}
+
+/**
  * Bluffs that keep a river bluff-catcher indifferent, given the value combos: value · bet / (pot + bet), so that bluffs
  * are bet / (pot + 2·bet) of the betting range. Value : bluff is then (pot + bet) : bet.
  */

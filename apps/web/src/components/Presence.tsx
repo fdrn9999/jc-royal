@@ -31,13 +31,13 @@ export function PresenceIcon({ state, className = 'size-2.5' }: { state: Presenc
   );
 }
 
-/** A status in words, with its shape. */
+/** A status in words, with its shape. Squeezed (`min-w-0` from the row), the words end in an ellipsis; the shape stays. */
 export function PresenceLabel({ state, className }: { state: PresenceState; className?: string }) {
   const { t } = useI18n();
   return (
     <span className={cx('inline-flex items-center gap-1.5 whitespace-nowrap text-xs', state === 'offline' ? 'text-ink-300' : 'text-ink-200', className)} data-presence={state}>
       <PresenceIcon state={state} />
-      {t(`presence.${state}` as MsgKey)}
+      <span className="truncate">{t(`presence.${state}` as MsgKey)}</span>
     </span>
   );
 }

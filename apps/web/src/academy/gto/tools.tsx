@@ -31,6 +31,7 @@ import {
   rangeCombos,
   share,
   signed,
+  sizedBet,
   spr,
   texture,
   TOTAL_COMBOS,
@@ -462,15 +463,21 @@ function SizingTool() {
   const [pot, setPot] = useState(100);
   const [pctPot, setPctPot] = useState(66);
   const [stack, setStack] = useState(400);
-  const bet = Math.min(stack, Math.round((pot * pctPot) / 100 * 10) / 10);
+  const sized = sizedBet(pot, pctPot, stack);
+  const bet = sized.bet;
   const after = spr(pot + 2 * bet, Math.max(0, stack - bet));
+  // The stack caps the bet: the slider and the working say what was asked for and what is really bet.
+  const sliderText = (v: number) => {
+    const b = sizedBet(pot, v, stack);
+    return b.capped ? tr(l('{p}% → 올인 {b} (팟의 {a})', '{p}% → all-in {b} ({a} of the pot)'), { p: v, b: num(b.bet), a: share(b.of) }) : `${v}% = ${num(b.bet)}`;
+  };
   return (
     <ToolBox title={l('베팅 사이즈 슬라이더', 'Bet size slider')} testid="tool-sizing">
       <div className="grid grid-cols-2 gap-2">
         <Num label={tr(T.pot)} value={pot} onChange={setPot} min={1} testid="sz-pot" />
         <Num label={tr(T.stack)} value={stack} onChange={setStack} min={0} testid="sz-stack" />
       </div>
-      <Slider label={tr(l('베팅 크기 (팟 대비)', 'Bet size (of the pot)'))} value={pctPot} onChange={setPctPot} min={10} max={200} step={1} format={(v) => `${v}% = ${num(Math.min(stack, (pot * v) / 100))}`} testid="sz-pct" />
+      <Slider label={tr(l('베팅 크기 (팟 대비)', 'Bet size (of the pot)'))} value={pctPot} onChange={setPctPot} min={10} max={200} step={1} format={sliderText} testid="sz-pct" />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Out label={tr(l('콜하는 쪽 필요 에퀴티', 'Caller needs'))} value={share(potOdds(pot, bet))} strong testid="sz-need" />
         <Out label="MDF" value={share(mdf(pot, bet))} />
@@ -483,7 +490,12 @@ function SizingTool() {
       </div>
       <Steps
         lines={[
-          l(`베팅 = 팟 ${num(pot)} × ${pctPot}% = ${num(bet)}${bet >= stack ? ' (스택 전부)' : ''}`, `Bet = pot ${num(pot)} × ${pctPot}% = ${num(bet)}${bet >= stack ? ' (the whole stack)' : ''}`),
+          sized.capped
+            ? l(
+                `베팅 = 팟 ${num(pot)} × ${pctPot}% = ${num(sized.asked)}이지만 스택이 ${num(stack)}뿐이라 ${num(bet)} 올인 (실제로는 팟의 ${share(sized.of)})`,
+                `Bet = pot ${num(pot)} × ${pctPot}% = ${num(sized.asked)}, but the stack is only ${num(stack)}: all-in for ${num(bet)} (really ${share(sized.of)} of the pot)`,
+              )
+            : l(`베팅 = 팟 ${num(pot)} × ${pctPot}% = ${num(bet)}${sized.allIn ? ' (스택 전부)' : ''}`, `Bet = pot ${num(pot)} × ${pctPot}% = ${num(bet)}${sized.allIn ? ' (the whole stack)' : ''}`),
           l(`필요 에퀴티 = B ÷ (P + 2B) = ${share(potOdds(pot, bet))}, MDF = P ÷ (P + B) = ${share(mdf(pot, bet))}`, `Required equity = B ÷ (P + 2B) = ${share(potOdds(pot, bet))}, MDF = P ÷ (P + B) = ${share(mdf(pot, bet))}`),
           l('베팅이 커질수록 콜하는 쪽은 더 높은 에퀴티가 필요하고(덜 방어해도 되고), 베팅하는 쪽은 블러프를 더 섞을 수 있습니다.', 'The bigger the bet, the more equity the caller needs (and the less they must defend), and the more bluffs the bettor can mix in.'),
         ]}

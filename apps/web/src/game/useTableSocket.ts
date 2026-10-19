@@ -51,7 +51,10 @@ export interface TableSocketApi {
       | { t: 'chat'; text: string }
       | { t: 'sync' }
       | { t: 'cancelTopUp' }
-      | { t: 'show'; card: 0 | 1 | 'both' }
+      // Only to a room from an older game worker (olderRooms.ts); current rooms acknowledge it and change nothing.
+      | { t: 'muck'; on: boolean }
+      // One card at a time, which every room understands ("both" goes as two).
+      | { t: 'show'; card: 0 | 1 }
       | { t: 'react'; reaction: ReactionId },
   ) => void;
   act: (type: ActionType, amount?: number) => boolean;

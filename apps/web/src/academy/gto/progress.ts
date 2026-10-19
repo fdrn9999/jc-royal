@@ -107,15 +107,40 @@ function mergeAnswers(a: Record<string, GtoAnswer>, b: Record<string, GtoAnswer>
 }
 
 /**
+ * A copy that has not seen a reset (made elsewhere at `resetAt`), cut down to what it recorded after it: modules
+ * started since (or, started before, finished since: from that finish), and answers given since, each counted as
+ * just that latest answer, since the counters before it cannot be told apart.
+ */
+function sinceReset(p: GtoProgress, resetAt: number): GtoProgress {
+  if (p.resetAt >= resetAt) return p;
+  const modules: GtoProgress['modules'] = {};
+  for (const id of GTO_MODULES) {
+    const m = p.modules[id];
+    if (!m) continue;
+    if (m.startedAt >= resetAt) modules[id] = m;
+    else if (m.completedAt !== null && m.completedAt >= resetAt) modules[id] = { ...m, startedAt: m.completedAt };
+  }
+  const latest = (rec: Record<string, GtoAnswer>) => {
+    const out: Record<string, GtoAnswer> = {};
+    for (const [id, x] of Object.entries(rec)) if (x.at >= resetAt) out[id] = { correct: x.last ? 1 : 0, wrong: x.last ? 0 : 1, last: x.last, at: x.at };
+    return out;
+  };
+  return { ...p, resetAt, modules, quiz: latest(p.quiz), hands: latest(p.hands) };
+}
+
+/**
  * Combines two copies of the same account's progress: modules keep the earliest start and completion and the
  * furthest step, answers keep the larger counters and the later latest answer, and the newer copy decides where
- * "continue" goes. A reset on one side discards everything the other side recorded before it.
+ * "continue" goes. A reset on one side discards everything the other side recorded before it, record by record, so a
+ * device that missed the reset and kept studying brings only what it did after the reset.
  */
 export function mergeGto(a: GtoProgress, b: GtoProgress): GtoProgress {
   const resetAt = Math.max(a.resetAt, b.resetAt);
   const alive = (p: GtoProgress) => p.updatedAt >= resetAt;
-  if (!alive(a)) return b.updatedAt >= resetAt ? { ...b, resetAt } : { ...emptyGtoProgress(), resetAt, updatedAt: resetAt };
-  if (!alive(b)) return { ...a, resetAt };
+  if (!alive(a)) return b.updatedAt >= resetAt ? sinceReset(b, resetAt) : { ...emptyGtoProgress(), resetAt, updatedAt: resetAt };
+  if (!alive(b)) return sinceReset(a, resetAt);
+  a = sinceReset(a, resetAt);
+  b = sinceReset(b, resetAt);
   const newer = a.updatedAt >= b.updatedAt ? a : b;
   const out: GtoProgress = { ...newer, resetAt, updatedAt: Math.max(a.updatedAt, b.updatedAt), modules: {} };
   for (const id of GTO_MODULES) {

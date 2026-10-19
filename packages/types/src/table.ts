@@ -183,9 +183,14 @@ export interface TableView {
     /** The viewer's own pre-action for this street (nobody else is ever shown it). Absent from older rooms. */
     preAction?: PreActionKind | null;
     /**
+     * Only from a room older than auto-muck always applying: the seated viewer's auto-muck setting as that room holds it
+     * (null when not seated). Such a room turns a losing showdown hand over unless it is on, so the page turns it on
+     * (Table.tsx). Rooms now never report it (older pages compared it with theirs: absent, they send nothing).
+     */
+    autoMuck?: boolean | null;
+    /**
      * The seated viewer may show cards from the hand that just ended (dealt in at this seat, not turned over at showdown;
-     * still true once both are shown). Auto-muck always applies, so the room no longer reports a setting (`autoMuck`,
-     * which older pages compared with theirs: absent, they send nothing).
+     * still true once both are shown).
      */
     canShow?: boolean;
     /**

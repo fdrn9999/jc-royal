@@ -12,15 +12,24 @@ import { useI18n } from '../lib/i18n';
 
 /**
  * My current hand (the "show my current hand" setting): the starting hand's name before the flop, the made hand after,
- * from my own cards and the board shown (describeCurrent). `compact`, without the beginner aids: one line.
+ * from my own cards and the board shown (describeCurrent). `compact`, without the beginner aids: one line. `inline`: the
+ * same line at the status line's size under the board (a phone upright, where the stack has no line to spare for it).
  */
-export function CurrentHandPill({ s, compact = false, className }: { s: TableView; compact?: boolean; className?: string }) {
+export function CurrentHandPill({ s, compact = false, inline = false, className }: { s: TableView; compact?: boolean; inline?: boolean; className?: string }) {
   const { t, locale } = useI18n();
   const mine = s.seats.find((x) => x.seatIndex === s.you.seatIndex);
   const hand = s.hand;
   if (!hand || !mine?.holeCards || mine.state === 'folded') return null;
   const name = describeCurrent(mine.holeCards, hand.board, locale, t);
   if (!name) return null;
+  if (inline) {
+    return (
+      <div className={cx('max-w-full truncate rounded-full bg-black/45 px-2 text-[10px] leading-3', className)} title={t('table.currentHandNote')} data-testid="current-hand">
+        <span className="text-ink-300">{t('table.currentHand')}</span> <span className="font-bold text-gold-300">{name}</span>{' '}
+        <span className="text-ink-400">· {t('table.currentHandTiny')}</span>
+      </div>
+    );
+  }
   if (compact) {
     return (
       <div className={cx('pointer-events-auto max-w-full truncate rounded-full border border-gold-500/30 bg-ink-950/85 px-3 py-1 text-xs backdrop-blur', className)} title={t('table.currentHandNote')} data-testid="current-hand">

@@ -167,6 +167,16 @@ describe('GTO academy maths', () => {
     expect(M.geometric(10, 100, 0)).toBe(0);
   });
 
+  it('a sized bet the stack caps says so: what was asked for, the all-in, and the share of the pot really bet', () => {
+    expect(M.sizedBet(100, 50, 200)).toEqual({ asked: 50, bet: 50, capped: false, allIn: false, of: 0.5 });
+    expect(M.sizedBet(100, 50, 50)).toEqual({ asked: 50, bet: 50, capped: false, allIn: true, of: 0.5 }); // exactly the stack
+    const c = M.sizedBet(100, 200, 50);
+    expect(c).toEqual({ asked: 200, bet: 50, capped: true, allIn: true, of: 0.5 });
+    expect(M.share(c.of)).toBe('50%');
+    expect(M.sizedBet(12.3, 33, 100).asked).toBe(4.1);
+    expect(M.sizedBet(100, 50, Number.NaN)).toEqual({ asked: 0, bet: 0, capped: false, allIn: false, of: 0 });
+  });
+
   it('balanced bluffs leave the bluff-catcher indifferent', () => {
     const b = M.balancedBluffs(100, 100, 20);
     expect(b).toBeCloseTo(10);
@@ -332,6 +342,28 @@ describe('GTO academy progress (§32): its own store, migrated, merged and reset
     expect(P.mergeGto(reset, m)).toEqual(reset);
     const after = { ...P.visitStep(P.emptyGtoProgress(), 'mdf', 1, 400), updatedAt: 400 };
     expect(P.mergeGto(reset, after).modules).toEqual(after.modules);
+  });
+
+  it('a device that missed the reset and kept studying brings only what it did after the reset', () => {
+    // Before the reset (made elsewhere at 300): math done, ranges begun, q1 twice and q2 once.
+    let stale = P.completeModule(P.emptyGtoProgress(), 'math', 50);
+    stale = P.visitStep(stale, 'ranges', 2, 90);
+    stale = P.answerQuiz(P.answerQuiz(stale, 'q1', true, 60), 'q1', false, 70);
+    stale = P.answerQuiz(stale, 'q2', true, 80);
+    // After it, still offline: q1 once more, ranges finished, mdf begun.
+    stale = P.answerQuiz(stale, 'q1', true, 400);
+    stale = P.completeModule(stale, 'ranges', 410);
+    stale = { ...P.visitStep(stale, 'mdf', 1, 420), updatedAt: 420 };
+    const reset = { ...P.emptyGtoProgress(), resetAt: 300, updatedAt: 300 };
+    const m = P.mergeGto(reset, stale);
+    expect(P.mergeGto(stale, reset)).toEqual(m);
+    expect(m.modules).toEqual({ ranges: { startedAt: 410, completedAt: 410, step: 2 }, mdf: { startedAt: 420, completedAt: null, step: 1 } });
+    expect(P.moduleDone(m, 'math')).toBe(false);
+    expect(m.quiz).toEqual({ q1: { correct: 1, wrong: 0, last: true, at: 400 } });
+    expect(m).toMatchObject({ resetAt: 300, updatedAt: 420, last: { module: 'mdf', step: 1 } });
+    // Merged again (the next sync), nothing changes; a copy that saw the reset is kept as it is.
+    expect(P.mergeGto(m, stale)).toEqual(m);
+    expect(P.mergeGto(m, reset)).toEqual(m);
   });
 
   it('stores under its own key, apart from the beginner course', () => {
