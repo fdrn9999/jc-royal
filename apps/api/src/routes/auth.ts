@@ -12,6 +12,7 @@ import {
   RegisterSchema,
   ResetConfirmSchema,
   ResetRequestSchema,
+  shownVip,
   UpdateProfileSchema,
   type EmailVerificationSentDto,
   type MeDto,
@@ -33,13 +34,16 @@ import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
 import { signedOut } from '../lib/signout';
 
-export function toMe(u: AuthUser): MeDto {
+/** `u`: the signed-in member, or their row read from D1 (which carries the stored VIP color instead). */
+export function toMe(u: AuthUser & { vipColor?: string | null; isBot?: boolean }): MeDto {
+  const vip = u.vip ?? shownVip(u);
   return {
     id: u.id,
     email: u.email,
     nickname: u.nickname,
     avatarUrl: u.avatarUrl,
     role: u.role,
+    ...(vip ? { vip } : {}),
     balance: u.balance,
     locale: u.locale,
     createdAt: u.createdAt,
@@ -373,7 +377,8 @@ export const authRoutes = new Hono<AppEnv>()
     await db.batch([
       db
         .update(schema.users)
-        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, lastLoginAt: null, updatedAt: Date.now() })
+        // A VIP name color goes too (the audit log keeps who gave it).
+        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, lastLoginAt: null, vipColor: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
       // Friends, pending requests and blocks (made by or against the account) go with it.

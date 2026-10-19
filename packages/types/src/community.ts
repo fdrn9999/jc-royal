@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { HandNoteDto } from './api';
 import type { PublicRole } from './social';
+import type { VipColor } from './vip';
 
 export const PostInputSchema = z.object({
   title: z.string().trim().min(2).max(100),
@@ -31,6 +32,8 @@ export interface AuthorDto {
   isAdmin: boolean;
   /** Staff only (see PublicRole). */
   role?: PublicRole;
+  /** A VIP member's name color (see shownVip). */
+  vip?: VipColor;
   /** The author deleted their account: the post stays, shown as "withdrawn member" with no nickname or avatar. */
   withdrawn?: true;
 }

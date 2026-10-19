@@ -218,6 +218,13 @@
       "when": 1792390856090,
       "tag": "0030_push_sent_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1792400814428,
+      "tag": "0031_vip",
+      "breakpoints": true
     }
   ]
 }

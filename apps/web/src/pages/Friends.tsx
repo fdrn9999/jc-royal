@@ -68,7 +68,7 @@ function RequestRow({ r, children }: { r: FriendRequestDto; children: React.Reac
       <Avatar user={r} />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0">
-          <MemberName name={r.nickname} role={r.role} badge className="font-semibold text-ivory" />
+          <MemberName name={r.nickname} role={r.role} vip={r.vip} badge className="font-semibold text-ivory" />
         </span>
         <span className="text-xs text-ink-400">{shortTime(r.at, locale)}</span>
       </span>
@@ -262,7 +262,7 @@ export function FriendsPage() {
                       </PresenceCorner>
                       <span className="min-w-0 flex-1">
                         <span className="flex min-w-0 items-center gap-2">
-                          <MemberName name={f.nickname} role={f.role} badge className="font-semibold text-ivory" />
+                          <MemberName name={f.nickname} role={f.role} vip={f.vip} badge className="font-semibold text-ivory" />
                           {presence?.[f.id] && <PresenceLabel state={presence[f.id]!} className="shrink-0" />}
                         </span>
                         <span className={cx('block truncate text-xs', f.unread ? 'font-semibold text-ink-100' : 'text-ink-400')}>
@@ -415,7 +415,7 @@ export function FriendSettingsPage() {
                 <Avatar user={u} />
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0">
-                    <MemberName name={u.nickname} role={u.role} badge className="font-semibold text-ivory" />
+                    <MemberName name={u.nickname} role={u.role} vip={u.vip} badge className="font-semibold text-ivory" />
                   </span>
                   <span className="text-xs text-ink-400">{shortTime(u.at, locale)}</span>
                 </span>
@@ -707,7 +707,7 @@ export function ConversationPage() {
         </PresenceCorner>
         <div className="flex min-w-0 flex-1 flex-col">
           <h1 className="flex min-w-0 text-lg font-bold text-ivory" data-testid="dm-title">
-            <MemberName name={conv.user.nickname} role={conv.user.role} badge />
+            <MemberName name={conv.user.nickname} role={conv.user.role} vip={conv.user.vip} badge />
           </h1>
           {peerState && <PresenceLabel state={peerState} className="-mt-0.5" />}
         </div>

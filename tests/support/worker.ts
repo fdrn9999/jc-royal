@@ -83,6 +83,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-perm-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Staff marks: a member whose role changes while seated, heads-up so one fold ends a hand for the history.
   { id: 'it-role-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // VIP members: a member made VIP, recolored and ended while seated in a hand, heads-up with long turns.
+  { id: 'it-vip-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Reports and blocks against staff: members report players they share this table with.
   { id: 'it-staff-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000 },
   // Link previews: a public table no other file closes (admin.test.ts closes it-admin-0, and the files run in any order).

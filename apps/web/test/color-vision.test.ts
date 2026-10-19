@@ -5,7 +5,7 @@
 // here that a person with that colour vision has checked it.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { SETTINGS_COLOR_VISIONS, type ColorVision } from '@jc/types';
+import { SETTINGS_COLOR_VISIONS, VIP_COLORS, type ColorVision } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 
 const css = readFileSync(fileURLToPath(new URL('../../../packages/ui/src/styles.css', import.meta.url)), 'utf8');
@@ -202,6 +202,21 @@ describe.each(SETTINGS_COLOR_VISIONS)('colour vision mode %s', (mode) => {
     for (const k of ['--color-success', '--color-danger']) expect(contrast(c(k), c('--color-ink-950')), k).toBeGreaterThanOrEqual(TEXT(mode));
   });
 
+  it('a VIP name reads on every panel in each palette colour, as this colour vision sees it; the VIP mark too', () => {
+    // Seen: both colours through the simulation, so a rose that reads dark to red-weak eyes is caught.
+    const seen = (a: string, b: string) => {
+      const lum = (x: Rgb) => 0.2126 * x[0] + 0.7152 * x[1] + 0.0722 * x[2];
+      const [hi, lo] = [lum(simulate(a, vision)), lum(simulate(b, vision))].sort((x, y) => y - x) as [number, number];
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    for (const k of VIP_COLORS) for (const bg of panels) expect(seen(c(`--vip-${k}`), bg), `${k} on ${bg}`).toBeGreaterThanOrEqual(TEXT(mode));
+    expect(seen(c('--vip-badge-fg'), c('--vip-badge-bg')), 'VIP on its pill').toBeGreaterThanOrEqual(TEXT(mode));
+    for (const bg of panels) {
+      expect(seen(c('--vip-badge-fg'), bg), `the diamond on ${bg}`).toBeGreaterThanOrEqual(NON_TEXT);
+      expect(seen(c('--vip-rim'), bg), `the pill's rim on ${bg}`).toBeGreaterThanOrEqual(NON_TEXT);
+    }
+  });
+
   it('secondary text reads on the panels', () => {
     for (const bg of panels) expect(contrast(c('--color-ink-300'), bg), bg).toBeGreaterThanOrEqual(mode === 'highContrast' ? 7 : 4.5);
     if (mode === 'highContrast') for (const bg of panels) expect(contrast(c('--color-ink-400'), bg), bg).toBeGreaterThanOrEqual(7);
@@ -233,6 +248,14 @@ describe('where the colours are used', () => {
     // The picked card, choice and comparison each show the mark (the practice table's options too).
     expect(academyUi.match(/<ResultMark /g)).toHaveLength(3);
     expect(QUIZ_PAGES[1]).toContain('<ResultMark ok={o.id === asked.answer} />');
+  });
+
+  it('a VIP name takes its colour from the tokens by a palette key: no colour value reaches the page from the server', () => {
+    for (const k of VIP_COLORS) expect(css).toContain(`.jc-vip-name[data-vip='${k}'] { color: var(--vip-${k}); }`);
+    expect(css.match(/\.jc-vip-name\[data-vip='\w+'\]/g)).toHaveLength(VIP_COLORS.length);
+    const memberName = src('../src/components/MemberName.tsx');
+    expect(memberName).toContain('data-vip={vip}');
+    expect(memberName).not.toMatch(/style=\{\{[^}]*color/);
   });
 
   it('high contrast outlines every action button, with a focus ring of its own', () => {

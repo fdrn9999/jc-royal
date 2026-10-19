@@ -127,7 +127,15 @@ export function MePage() {
           {me.avatarUrl ? <img src={me.avatarUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" /> : me.nickname.slice(0, 2)}
         </div>
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-bold">{me.nickname}</h1>
+          <h1 className="flex min-w-0 text-2xl font-bold">
+            <MemberName name={me.nickname} vip={me.role === 'user' ? me.vip : undefined} badge />
+          </h1>
+          {me.role === 'user' && me.vip && (
+            <div className="mt-0.5 text-xs" data-testid="me-vip" data-vip={me.vip}>
+              <span className="font-semibold text-ink-100">{t('vip.me', { color: t(`vip.color.${me.vip}`) })}</span>
+              <span className="block text-ink-400">{t('vip.meHint')}</span>
+            </div>
+          )}
           <div className="text-sm text-ink-300">{me.email}</div>
           <div className="text-xs text-ink-400">{t('me.memberSince', { date: formatDate(me.createdAt, locale) })}</div>
           {mine && <PresenceLabel state={mine.state} className="mt-1" />}

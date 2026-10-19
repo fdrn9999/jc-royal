@@ -7,7 +7,7 @@
  * again is the same one row. The registration that takes the last seat of a tournament that starts by itself starts it
  * (lib/tournament.ts startTournament, which an operator's start shares).
  */
-import type { EntryStatus, TournamentDetailDto, TournamentEntryView } from '@jc/types';
+import { shownVip, type EntryStatus, type TournamentDetailDto, type TournamentEntryView } from '@jc/types';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
@@ -94,20 +94,35 @@ export const tournamentRoutes = new Hono<AppEnv>()
     const played = s.status === 'running' || s.status === 'finished' || s.status === 'aborted';
     const { results } = await db
       .prepare(
-        `SELECT e.user_id AS userId, u.nickname, e.status, e.place, e.stack FROM tournament_entries e JOIN users u ON u.id = e.user_id
+        `SELECT e.user_id AS userId, u.nickname, u.role, u.status AS userStatus, u.is_bot AS isBot, u.vip_color AS vipColor, e.status, e.place, e.stack
+           FROM tournament_entries e JOIN users u ON u.id = e.user_id
           WHERE e.tournament_id = ?1 AND e.status IN ${played ? PLAYED : `('registered')`}
           ORDER BY CASE e.status WHEN 'won' THEN 0 WHEN 'playing' THEN 1 WHEN 'stopped' THEN 2 ELSE 3 END, e.place, e.stack DESC, e.registered_at
           LIMIT 12`,
       )
       .bind(id)
-      .all<{ userId: string; nickname: string; status: EntryStatus; place: number | null; stack: number | null }>();
-    const entries: TournamentEntryView[] = results.map((e) => ({
-      nickname: e.nickname,
-      status: e.status,
-      place: e.place,
-      stack: played ? e.stack : null,
-      ...(e.userId === me ? { me: true } : {}),
-    }));
+      .all<{
+        userId: string;
+        nickname: string;
+        role: string;
+        userStatus: string;
+        isBot: number;
+        vipColor: string | null;
+        status: EntryStatus;
+        place: number | null;
+        stack: number | null;
+      }>();
+    const entries: TournamentEntryView[] = results.map((e) => {
+      const vip = shownVip({ role: e.role, status: e.userStatus, isBot: e.isBot, vipColor: e.vipColor });
+      return {
+        nickname: e.nickname,
+        ...(vip ? { vip } : {}),
+        status: e.status,
+        place: e.place,
+        stack: played ? e.stack : null,
+        ...(e.userId === me ? { me: true } : {}),
+      };
+    });
     const holding = s.me?.status === 'registered' || s.me?.status === 'playing';
     const dto: TournamentDetailDto = {
       ...s,

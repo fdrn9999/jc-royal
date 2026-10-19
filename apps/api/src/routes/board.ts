@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import { CommentCreateSchema, CommentInputSchema, PostInputSchema, publicRole, type AuthorDto, type CommentDto, type MyCommentDto, type PostDetailDto, type PostListItemDto, type PostPageDto } from '@jc/types';
+import { CommentCreateSchema, CommentInputSchema, PostInputSchema, publicRole, shownVip, type AuthorDto, type CommentDto, type MyCommentDto, type PostDetailDto, type PostListItemDto, type PostPageDto } from '@jc/types';
 import { and, count, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { Hono, type Context } from 'hono';
@@ -19,17 +19,21 @@ const author = {
   avatarUrl: schema.users.avatarUrl,
   role: schema.users.role,
   status: schema.users.status,
+  isBot: schema.users.isBot,
+  vipColor: schema.users.vipColor,
 };
 
-type AuthorRow = { id: string; nickname: string; avatarUrl: string | null; role: string; status: string };
+type AuthorRow = { id: string; nickname: string; avatarUrl: string | null; role: string; status: string; isBot: boolean; vipColor: string | null };
 /**
  * Posts and comments outlive a deleted account; its tombstone nickname is not shown, only "withdrawn member". The staff
- * badge (and `isAdmin`, which older web builds show as one) only where the social policy shows it (`badge`).
+ * badge (and `isAdmin`, which older web builds show as one) only where the social policy shows it (`badge`); the VIP
+ * color (shownVip) comes from the same join.
  */
 const toAuthor = (a: AuthorRow, badge: Badge): AuthorDto => {
   if (a.status === 'deleted') return { id: a.id, nickname: '', avatarUrl: null, isAdmin: false, withdrawn: true };
   const role = badge(a.role);
-  return { id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: !!role, ...(role ? { role } : {}) };
+  const vip = shownVip(a);
+  return { id: a.id, nickname: a.nickname, avatarUrl: a.avatarUrl, isAdmin: !!role, ...(role ? { role } : {}), ...(vip ? { vip } : {}) };
 };
 
 /** `staffView`: the admin console's list, which shows every author's role whatever the social policy hides. */

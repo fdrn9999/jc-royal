@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DEFAULT_REACTION_RULES, type ReactionRules } from './protocol';
+import type { VipColor } from './vip';
 
 // ------------------------------------------------------------------ public role
 
@@ -87,6 +88,8 @@ export interface PublicUserDto {
   avatarUrl: string | null;
   /** Staff only (see PublicRole). */
   role?: PublicRole;
+  /** A VIP member's name color (see shownVip): never with a role. */
+  vip?: VipColor;
 }
 
 export interface FriendDto extends PublicUserDto {

@@ -4,10 +4,11 @@
  * The server decides everything (eligibility, seats, the start); these pages only show its answers and refresh while
  * the tournament can still change.
  */
-import { blindsAt, type EntryStatus, type TournamentDetailDto, type TournamentStatus, type TournamentSummaryDto } from '@jc/types';
+import { blindsAt, type EntryStatus, type TournamentDetailDto, type TournamentStatus, type TournamentSummaryDto, type VipColor } from '@jc/types';
 import { Badge, Button, cx, Empty, formatChips, Panel, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { MemberName } from '../components/MemberName';
 import { api, ApiError } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { when } from '../lib/service';
@@ -108,6 +109,19 @@ function MyBadge({ me }: { me: TournamentSummaryDto['me'] }) {
   );
 }
 
+/** "🏆 Won by {name}", with the winner's VIP color and mark on the name only (the sentence comes from the translation). */
+function WonBy({ tr, name, vip, className }: { tr: Tn; name: string; vip?: VipColor; className?: string }) {
+  const MARK = '\u0000';
+  const [before = '', after = ''] = tr('wonBy', { name: MARK }).split(MARK);
+  return (
+    <p className={cx('flex min-w-0 items-center', className)} data-testid="tn-winner">
+      <span className="shrink-0 whitespace-pre">🏆 {before}</span>
+      <MemberName name={name} vip={vip} />
+      {after && <span className="shrink-0 whitespace-pre">{after}</span>}
+    </p>
+  );
+}
+
 function SummaryCard({ s, highlight }: { s: TournamentSummaryDto; highlight?: boolean }) {
   const { t, locale } = useI18n();
   const tr = useTn();
@@ -161,7 +175,7 @@ function SummaryCard({ s, highlight }: { s: TournamentSummaryDto; highlight?: bo
               : tr('createdAt', { at: when(s.createdAt, locale) })}
         </span>
       </p>
-      {s.status === 'finished' && s.winner && <p className="text-xs text-gold-300">🏆 {tr('wonBy', { name: s.winner })}</p>}
+      {s.status === 'finished' && s.winner && <WonBy tr={tr} name={s.winner} vip={s.winnerVip} className="text-xs text-gold-300" />}
     </Link>
   );
 }
@@ -485,7 +499,7 @@ export function TournamentPage() {
           </div>
         )}
         {d.status === 'running' && d.paused && <p className="text-sm text-gold-300" data-testid="tn-paused">{t('tn.paused')}</p>}
-        {d.status === 'finished' && d.winner && <p className="text-base font-bold text-gold-300">🏆 {tr('wonBy', { name: d.winner })}</p>}
+        {d.status === 'finished' && d.winner && <WonBy tr={tr} name={d.winner} vip={d.winnerVip} className="text-base font-bold text-gold-300" />}
         {d.status === 'cancelled' && <p className="text-sm text-ink-200">{tr('cancelledNote')}</p>}
         {d.status === 'aborted' && <p className="text-sm text-ink-200" data-testid="tn-aborted">{tr('abortedNote')}</p>}
         {msg && (
@@ -507,9 +521,9 @@ export function TournamentPage() {
               {d.entries.map((e, i) => (
                 <li key={`${e.nickname}-${i}`} className={cx('flex items-center gap-3 py-2 text-sm', e.me && 'text-gold-300')} data-testid="tn-entry" data-status={e.status}>
                   <span className="w-10 shrink-0 font-mono text-xs tabular-nums text-ink-400">{e.place !== null ? tr('place', { n: e.place }) : ''}</span>
-                  <span className="min-w-0 flex-1 truncate font-semibold">
-                    {e.nickname}
-                    {e.me && <span className="ml-1 text-xs font-normal">({tr('you')})</span>}
+                  <span className="flex min-w-0 flex-1 items-center font-semibold">
+                    <MemberName name={e.nickname} vip={e.vip} />
+                    {e.me && <span className="ml-1 shrink-0 text-xs font-normal">({tr('you')})</span>}
                   </span>
                   {e.stack !== null && e.status === 'playing' && <span className="shrink-0 font-mono text-xs tabular-nums text-ink-200">{formatChips(e.stack)}</span>}
                   <Badge tone={ENTRY_TONE[e.status] ?? 'neutral'}>{tr(`entry.${e.status}` as TnKey)}</Badge>

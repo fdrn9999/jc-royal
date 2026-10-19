@@ -3,7 +3,7 @@ import type { AppEnv, Env } from '../env';
 import { INTERNAL_HEADER } from '../routes/tables';
 import { fail } from './http';
 
-type RoomAction = 'status' | 'reload' | 'close' | 'seat-check' | 'kick' | 'role' | 'holdings' | 'timer-recover';
+type RoomAction = 'status' | 'reload' | 'close' | 'seat-check' | 'kick' | 'role' | 'vip' | 'holdings' | 'timer-recover';
 
 /** Calls a table room's internal endpoint with the worker's bindings (also from the cron handler). Null when unreachable. */
 export async function roomCallEnv(env: Env, tableId: string, action: RoomAction, query: Record<string, string> = {}): Promise<Record<string, unknown> | null> {
@@ -107,6 +107,19 @@ export async function refreshRoleEverywhere(env: Env, userId: string, role: stri
     .bind(userId)
     .all<{ id: string }>();
   const answers = await Promise.all(results.map(({ id }) => roomCallEnv(env, id, 'role', { user: userId, role })));
+  return { tables: results.length, reached: answers.filter(Boolean).length };
+}
+
+/**
+ * After an administrator changes a member's VIP (color, or none): the same, for the name color and mark on their
+ * seats. The room only redraws the name (nobody is disconnected and the hand is not touched); a room that does not
+ * answer, a tournament table and a spectating connection catch up at the member's next handshake.
+ */
+export async function refreshVipEverywhere(env: Env, userId: string, vip: string | null): Promise<{ tables: number; reached: number }> {
+  const { results } = await env.DB.prepare(`SELECT DISTINCT table_id AS id FROM table_sessions WHERE user_id = ?1 AND status = 'seated'`)
+    .bind(userId)
+    .all<{ id: string }>();
+  const answers = await Promise.all(results.map(({ id }) => roomCallEnv(env, id, 'vip', { user: userId, vip: vip ?? '' })));
   return { tables: results.length, reached: answers.filter(Boolean).length };
 }
 

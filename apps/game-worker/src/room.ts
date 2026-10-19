@@ -18,6 +18,7 @@ import {
   blindsAt,
   type BotLevel,
   ClientMessageSchema,
+  isVipColor,
   MEMBER_IDLE_CLOSE_MS,
   PLAYER_REPORT_WINDOW_MS,
   publicRole,
@@ -44,6 +45,7 @@ import {
   type TableView,
   type TimeBankRules,
   type TournamentTableView,
+  type VipColor,
 } from '@jc/types';
 import {
   buyIn,
@@ -75,6 +77,11 @@ interface Identity {
   nickname: string;
   avatarUrl: string | null;
   role: string;
+  /**
+   * The VIP name color the api read from D1 for this connection (shownVip), absent when the member has none. Only a
+   * look: no rule of the table reads it.
+   */
+  vip?: string;
   /** Join code hash of the ticket this connection brought (verified by the api), or null. */
   codeHash: string | null;
   /** When the api verified the session this connection opened with (absent from older api builds). */
@@ -94,6 +101,8 @@ interface SeatState {
   avatarUrl: string | null;
   /** Staff only: set at sit, then brought up to date by `refreshRole`. */
   role?: PublicRole;
+  /** VIP members only: set at sit, then brought up to date at each handshake and by `refreshVip`. Shown, never played on. */
+  vip?: VipColor;
   stack: number;
   tableSessionId: string;
   /** 'pending' while the buy-in is being committed to D1; 'cashing' while cashing out. */
@@ -577,8 +586,9 @@ export class TableRoom extends DurableObject<Env> {
       return this.run(async () => {
         await this.ensureLoaded(tableId);
         if (this.room.closed) return new Response('table closed', { status: 410 });
-        // The api read the role from D1 for this handshake: a seat taken under an older role shows the current one.
-        if (this.setSeatRole(identity.userId, identity.role)) await this.save();
+        // The api read the role and VIP color from D1 for this handshake: a seat taken under older ones shows the current.
+        const roleChanged = this.setSeatRole(identity.userId, identity.role);
+        if (this.setSeatVip(identity.userId, identity.vip) || roleChanged) await this.save();
         return this.openSocket(identity, retry);
       });
     }
@@ -650,6 +660,9 @@ export class TableRoom extends DurableObject<Env> {
           case 'role':
             // An admin changed this member's role (the api passes the stored value).
             return Response.json({ ok: true, seated: await this.refreshRole(url.searchParams.get('user') ?? '', url.searchParams.get('role') ?? 'user') });
+          case 'vip':
+            // An admin made this member VIP, changed their color or ended it (the api passes what others see; empty: none).
+            return Response.json({ ok: true, seated: await this.refreshVip(url.searchParams.get('user') ?? '', url.searchParams.get('vip') ?? '') });
           case 'muck':
             // An api from before auto-muck always applied pushing a member's setting: there is none to change now.
             return Response.json({ ok: true, seated: this.seatIndexOf(url.searchParams.get('user') ?? '') !== null });
@@ -800,7 +813,9 @@ export class TableRoom extends DurableObject<Env> {
         const isSeated = this.seatIndexOf(a.userId) !== null;
         if (!isSeated && !t.allowSpectators) throw new CommandError('forbidden', 'spectator chat is disabled');
         const role = publicRole(a.role);
-        const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, ...(role ? { role } : {}), text: msg.text, at: now };
+        // The line keeps the VIP color it was posted with (like its role).
+        const vip = !role && isVipColor(a.vip) ? a.vip : undefined;
+        const line: ChatMessage = { id, userId: a.userId, nickname: a.nickname, ...(role ? { role } : {}), ...(vip ? { vip } : {}), text: msg.text, at: now };
         this.chat = [...this.chat, line].slice(-CHAT_HISTORY);
         await this.ctx.storage.put('chat', this.chat);
         const shown = this.shownLine(line);
@@ -1009,11 +1024,13 @@ export class TableRoom extends DurableObject<Env> {
 
     const tableSessionId = crypto.randomUUID();
     const role = publicRole(a.role);
+    const vip = !role && isVipColor(a.vip) ? a.vip : undefined;
     const seat: SeatState = {
       userId: a.userId,
       nickname: a.nickname,
       avatarUrl: a.avatarUrl,
       ...(role ? { role } : {}),
+      ...(vip ? { vip } : {}),
       stack: amount,
       tableSessionId,
       phase: 'pending',
@@ -1682,6 +1699,7 @@ export class TableRoom extends DurableObject<Env> {
             nickname: e.nickname,
             avatarUrl: e.avatarUrl,
             ...(role ? { role } : {}),
+            ...(!role && e.vip ? { vip: e.vip } : {}),
             stack,
             // Not a table session: nothing of this seat is in the ledger.
             tableSessionId: `tny:${row.id}:${e.userId}`,
@@ -2629,8 +2647,9 @@ export class TableRoom extends DurableObject<Env> {
       // Only the chosen positions carry a card: the other one stays unknown to everybody but its owner.
       const picked = !revealed.has(i) ? shown[s.userId] : undefined;
       const dealt = picked?.length ? h!.holeCardsOf(s.userId) : null;
-      // A staff badge the social policy hides is left out; the seat keeps the role.
+      // A staff badge the social policy hides is left out; the seat keeps the role. Staff and bots never show VIP.
       const role = shownRole(s.role, t.social);
+      const vip = !s.role && !s.bot ? s.vip : undefined;
       return {
         seatIndex: i,
         state,
@@ -2638,6 +2657,7 @@ export class TableRoom extends DurableObject<Env> {
         nickname: s.nickname,
         avatarUrl: s.avatarUrl,
         ...(role ? { role } : {}),
+        ...(vip ? { vip } : {}),
         // Once the hand is settled the seat holds its final stack plus any top-up made since.
         stack: hi && !h!.isSettled ? hi.stack : s.stack,
         streetBet: hi?.streetBet ?? 0,
@@ -2756,7 +2776,41 @@ export class TableRoom extends DurableObject<Env> {
     if (!seat || seat.role === next) return false;
     if (next) seat.role = next;
     else delete seat.role;
+    // Staff never carry VIP (the api ends it with the promotion).
+    if (next) delete seat.vip;
     return true;
+  }
+
+  /** Puts the VIP color others see (or none: anything not in the palette) on the member's seat. True when it changed. */
+  private setSeatVip(userId: string, shown: string | undefined): boolean {
+    const i = this.seatIndexOf(userId);
+    const seat = i === null ? null : this.room.seats[i]!;
+    const next = isVipColor(shown) && !seat?.role && !seat?.bot ? shown : undefined;
+    if (!seat || seat.vip === next) return false;
+    if (next) seat.vip = next;
+    else delete seat.vip;
+    return true;
+  }
+
+  /**
+   * An admin changed a member's VIP state: the identity of their open connections (their next chat lines carry it) and
+   * their seat, shown to everyone with one view at once. Nothing else moves: no hand, turn, stack or connection is
+   * touched, and lines already posted keep the color they were posted with. Returns whether the member holds a seat.
+   */
+  private async refreshVip(userId: string, shown: string): Promise<boolean> {
+    if (!userId) return false;
+    const vip = isVipColor(shown) ? shown : undefined;
+    for (const ws of this.sockets()) {
+      const a = this.att(ws);
+      if (a.userId !== userId || a.vip === vip) continue;
+      const { vip: _old, ...rest } = a;
+      ws.serializeAttachment(vip ? { ...rest, vip } : rest);
+    }
+    if (this.setSeatVip(userId, vip)) {
+      await this.save();
+      this.broadcast();
+    }
+    return this.seatIndexOf(userId) !== null;
   }
 
   /**
@@ -2768,7 +2822,10 @@ export class TableRoom extends DurableObject<Env> {
     if (!userId) return false;
     for (const ws of this.sockets()) {
       const a = this.att(ws);
-      if (a.userId === userId && a.role !== stored) ws.serializeAttachment({ ...a, role: stored });
+      if (a.userId !== userId || a.role === stored) continue;
+      const { vip: _vip, ...rest } = a;
+      // A promotion to staff ends VIP; going back to member does not bring it back (the api cleared it).
+      ws.serializeAttachment(publicRole(stored) ? { ...rest, role: stored } : { ...a, role: stored });
     }
     if (this.setSeatRole(userId, stored)) {
       await this.save();

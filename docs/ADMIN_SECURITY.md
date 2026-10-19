@@ -35,6 +35,7 @@
 - 추천 보상 정책 변경(켜기·양쪽 보상액·하루/누적 한도·필요 핸드 수·검토 기준, 최고 관리자만)과 지급 일시중지(기능 `referral`이 있는 관리자)·재개(최고 관리자만), 검토 대기 추천의 승인, 대기·검토 추천의 거절. 모두 사유가 필요하고 `referral.policy`(변경 전후)·`referral.pause`·`referral.resume`·`referral.approve`·`referral.reject`로 남는다. 다시 정산(`referral.settle`)은 재확인 없이 감사 기록만 남는다(한쪽에 한 번 넘게 지급하지 않음). 감사 기록에는 추천 상태·실패 코드·지급액만 담고 이메일·네트워크 같은 회원 정보는 담지 않는다. 거절은 이미 지급한 칩을 회수하지 않으며, 회수는 회원 칩 조정(`refLedgerId`)으로 한다
 - 서비스 점검 예약·변경·지금 종료·취소(사유 필수, `maintenance.*` 감사 기록에 사유와 룸 반영 결과). 공지 작성·수정·내리기·삭제는 재확인 없이 감사 기록만 남는다(`service.notice.*`)
 - 회원 계정 설정 초기화·복구(기능 `settings`, 아래 "계정 설정 동기화 관리")
+- VIP 회원 지정·색 변경·해제(기능 `vip`, 아래 "VIP 회원 관리")
 - 시간 은행 정책 변경(최고 관리자만)과 테이블 타이머 복구(기능 `tableControl`). 둘 다 사유가 필요하고 `timebank.policy`(변경 전후, 적용 경계, 반영한 룸 수)·`table.timer_recover`로 남는다(아래 "시간 은행 관리")
 - 소셜 정책 변경(빠른 반응 켜기·간격·횟수, 운영진 표시, 최고 관리자만). 사유가 필요하고 `social.policy`(변경 전후, 회원에게 바뀌는 것, 반영한 룸 수)로 남는다(아래 "소셜 운영")
 
@@ -80,6 +81,18 @@
 - **감사 기록**: `social.policy` `{from, to, reason, effects{reactions, limits, badgesShown, badgesHidden}, appliesFrom, rooms{tables, reached, more}}`. 거절(409·400·403)은 `social.policy.failed`. 조회(`GET /social`)는 회원 정보가 없어 남기지 않는다.
 - **권한**: 조회는 기능 `social`(스위치 `tables`, 테이블 업무), 변경은 능력 `social.policy`(최고 관리자, 스위치로 넘겨줄 수 없음).
 
+## VIP 회원 관리
+
+`apps/api/src/routes/admin-vip.ts`, 콘솔은 회원 상세의 "VIP 회원 관리" 패널(`apps/admin/src/pages/MemberVip.tsx`)과 회원 목록의 VIP 열·필터. 메뉴는 새로 만들지 않았다.
+
+- **무엇인가**: 일반 회원의 이름 색과 VIP 표시(`users.vip_color`, 팔레트 6색 `gold`·`rose`·`sapphire`·`amethyst`·`emerald`·`cyan`)뿐이다. `users.role`이 아니고, 서버의 어떤 권한 검사·칩·원장·좌석·대기·토너먼트·게임 규칙·푸시에도 쓰이지 않는다. 만료가 없고, 바꿀 때마다 `vip_version`이 오르며 바꾼 사람·시각(`vip_changed_by`·`vip_changed_at`)을 남긴다(마이그레이션 0031).
+- **권한**: 기능 `vip`. 최고 관리자는 항상, 관리자는 최고 관리자가 스위치를 켰을 때만(꺼져 있으면 조회·미리보기·변경 모두 403 `permission_off`, `user.vip_view.failed`·`user.vip.failed`). 회원은 관리자 콘솔에 들어올 수 없고, 회원 API(`PATCH /api/auth/me` 등)는 VIP 필드를 읽지 않는다. 콘솔이 버튼을 숨기는 것과 관계없이 서버가 판정한다.
+- **대상**: 활동 중이거나 정지된 일반 회원만. 테이블 봇 409 `bot_account`, 관리자·최고 관리자 409 `vip_staff`(자기 자신 포함), 탈퇴 409 `vip_deleted`. 이런 계정에 남은 색은 해제할 수 있다. 정지된 회원은 색을 유지하되 정지가 풀릴 때까지 다른 회원에게 보이지 않고, 탈퇴하면 색이 지워진다. 회원을 관리자로 바꾸면 VIP가 끝나고(역할 변경 미리보기에 `vipCleared`, 감사 `user.vip` `cause: 'role'`), 다시 회원으로 바꿔도 돌아오지 않는다.
+- **미리보기·재확인·사유·동시 수정**: 지정(색을 고르지 않으면 금색)·색 변경·해제 모두 먼저 서버 미리보기(전 → 후 색, 이름이 다시 그려질 테이블 수)를 보이고, 저장은 비밀번호 재확인과 사유(2–200자)를 받는다. 요청은 패널이 보던 `expectedVersion`을 담고, 그 사이 다른 관리자가 바꿨으면 409 `vip_conflict`(지금 상태를 `details.vip`로)로 거절해 패널이 지금 상태를 다시 보여 준다. 쓰기는 "버전이 그대로일 때만" 바꾸는 한 문장이라 동시에 눌러도 하나만 된다. 이미 그 상태인 요청은 아무것도 바꾸지 않고 `changed: false`로 답한다.
+- **반영**: 회원이 보는 응답은 다음 요청부터(이름과 같은 JOIN에서 읽어 목록 길이만큼 쿼리가 늘지 않는다). 그 회원이 앉아 있는 테이블의 룸은 저장 직후 좌석 표시만 바꿔 다시 보낸다: 연결을 끊거나 핸드·차례·마감·스택을 건드리지 않는다. 같은 회원의 다른 기기는 다음 내 정보 요청·테이블 연결·목록 새로고침에서 받는다(새 푸시나 알림은 보내지 않는다). 지난 핸드 기록·리플레이는 바꾸지 않는다. 이미 보낸 채팅 줄은 보낸 때의 색을 유지한다.
+- **감사 기록**: `user.vip` `{from, to, reason, change: assign|color|remove, version}`(바뀐 것이 없으면 `changed: false`), 역할 변경으로 끝난 VIP는 `{from, to: null, reason, cause: 'role', role, version}`. 거절(400·403·409)은 `user.vip.failed`(사유 본문 없음). 조회(`GET /users/:id/vip`)는 거절만 남긴다.
+- **되돌리기(0031)**: 새 열 4개와 인덱스 1개만 더하므로, 되돌릴 때는 `DROP INDEX users_vip_idx` 뒤 `users`의 `vip_color`·`vip_version`·`vip_changed_by`·`vip_changed_at`를 지우면 된다. 다른 테이블·원장은 건드리지 않는다.
+
 ## 브랜드 상태
 
 `apps/api/src/routes/admin-brand.ts`·`apps/api/src/lib/brand.ts`, 콘솔은 "서비스 → 브랜드 상태"(`apps/admin/src/pages/Brand.tsx`, 서비스 화면의 링크).
@@ -119,7 +132,7 @@
 ## 관리자별 기능 권한
 
 - **유효 권한 = 역할이 허용하는 범위(위 표) ∩ 최고관리자가 켜 둔 기능 스위치.** 스위치는 관리자마다 D1 `admin_permissions`(관리자 ID, 켜진 스위치 JSON, 버전, 바꾼 사람·시각)에 저장하고, 서버가 요청마다 읽는다(요청 안에서 한 번). 최고관리자는 모든 스위치가 켜진 것으로 보고 스위치가 없다. 일반 관리자는 행이 없거나 목록에 없는 기능이 모두 꺼져 있다(**기본 거부**). 나중에 코드에 더하는 스위치도 최고관리자가 켜기 전까지 꺼져 있다.
-- **스위치(23개, `GRANTS`)**: 대시보드 조회(`dashboard`), 회원 조회(`members`, 회원 메모 포함), 회원 정지·해제(`sanctions`), 회원 강제 연결 종료(`disconnect`), 신고 조회·처리(`reports`), 게시판 관리(`board`), 공지 발송(`notices`), 쪽지 발송(`messages`), 테이블 생성·수정(`tables`, 소셜 정책 조회 포함), 테이블 긴급 제어(`tableControl`, 종료·타이머 복구 포함), 소액 칩 조정(`chips`), 원장 조회(`ledger`), 경제 통계(`economy`), 운영 통계(`stats`, 아카데미 통계 포함), 추천인 운영(`referral`), 봇 운영(`bots`), 그리고 기존 기능인 대회 진행(`tournaments`), 무료 칩 보충(`refill`), 핸드 기록(`hands`, 종료 핸드 카드 열람 포함), 정합성 점검(`reconcile`), 계정 설정 진단(`settings`), 재설정 링크(`resetLinks`), 점검 공지(`maintenance`, 브랜드 상태 조회 포함). 0028에서 기능 `social`·`brand`를 더했지만 새 스위치는 만들지 않고 같은 업무의 스위치에 붙였다(기존 관리자는 스위치를 다시 켜지 않아도 배포 직후 새 화면을 본다).
+- **스위치(24개, `GRANTS`)**: VIP 회원 지정·색 변경·해제(`vip`, 0031에서 추가, 기존 관리자에게는 꺼진 채로 시작), 대시보드 조회(`dashboard`), 회원 조회(`members`, 회원 메모 포함), 회원 정지·해제(`sanctions`), 회원 강제 연결 종료(`disconnect`), 신고 조회·처리(`reports`), 게시판 관리(`board`), 공지 발송(`notices`), 쪽지 발송(`messages`), 테이블 생성·수정(`tables`, 소셜 정책 조회 포함), 테이블 긴급 제어(`tableControl`, 종료·타이머 복구 포함), 소액 칩 조정(`chips`), 원장 조회(`ledger`), 경제 통계(`economy`), 운영 통계(`stats`, 아카데미 통계 포함), 추천인 운영(`referral`), 봇 운영(`bots`), 그리고 기존 기능인 대회 진행(`tournaments`), 무료 칩 보충(`refill`), 핸드 기록(`hands`, 종료 핸드 카드 열람 포함), 정합성 점검(`reconcile`), 계정 설정 진단(`settings`), 재설정 링크(`resetLinks`), 점검 공지(`maintenance`, 브랜드 상태 조회 포함). 0028에서 기능 `social`·`brand`를 더했지만 새 스위치는 만들지 않고 같은 업무의 스위치에 붙였다(기존 관리자는 스위치를 다시 켜지 않아도 배포 직후 새 화면을 본다).
 - **넘겨줄 수 없는 것**: 관리자 권한 설정(`admins.grants`), 최고관리자 지정·강등(`roles.change`), 관리자·최고관리자 제재(`admins.manage`), 고액 칩 조정(`chips.large`), 원장 정합성 직접 보정(`ledger.correct`), 회원 정보 대량 내보내기(`members.export`), 각종 정책 변경(`*.policy`, `tournament.structure`)은 능력(역할)으로만 정해지고 스위치가 없다. 시스템 비밀(Cloudflare secret, 메일 키 등)은 콘솔 API가 아예 없다. 감사 로그(자기 기록)와 보안 화면(자기 세션·권한)은 모든 관리자에게 항상 열려 있다.
 - **거절**: 역할 밖이면 403 `forbidden`(`super admin only`), 역할은 되지만 스위치가 꺼져 있으면 403 `permission_off`(`this feature is turned off for your account`). 미리보기도 똑같이 거절하고, 둘 다 `<action>.failed`로 실패 감사에 남는다(요청 본문은 남기지 않는다). 한 라우트가 여러 기능의 정보를 돌려주면 라우트가 직접 나눈다: 회원 상세는 `ledger`가 꺼지면 원장, `reports`가 꺼지면 최근 신고를 빼고 `hidden`에 적으며, 회원 이력은 신고 항목을 뺀다. 테이블 수정으로 입장을 막는 것(`entryBlocked`)은 긴급 제어와 같아서 `tableControl`과 재확인을 함께 요구한다.
 - **바꾸기(최고관리자만)**: `GET /api/admin/security/admins`(닉네임·ID 검색, 역할 필터, 서버 페이지, 이메일 없음), `GET /api/admin/security/admins/:id`(스위치·버전·기능별 실제 권한·변경 이력, 이력에 IP 없음), `PUT /api/admin/security/admins/:id/grants` `{grants, baseVersion, reason, preview?}`. 본인(400 `cannot change your own permissions`), 최고관리자·회원(409 `not_plain_admin`), 그 사이 다른 최고관리자가 저장한 경우(409 `admin_grants_conflict`, 지금 스위치·버전을 `details`로), 바뀐 것이 없는 경우(400 `admin_grants_no_change`)는 거절한다. 미리보기는 켜지고 꺼지는 스위치와 쓸 수 있는 작업 수 전 → 후를 보여 주고 아무것도 쓰지 않는다. 저장은 비밀번호 재확인과 사유(2–200자)를 받고, "아직 일반 관리자이고 버전이 그대로일 때만" 쓰는 한 문장이라 동시에 저장해도 하나만 된다.

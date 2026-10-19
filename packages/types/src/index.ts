@@ -6,6 +6,7 @@ export * from './community';
 export * from './academy';
 export * from './academy-names';
 export * from './social';
+export * from './vip';
 export * from './service';
 export * from './settings';
 export * from './timebank';

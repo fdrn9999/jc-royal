@@ -1,4 +1,5 @@
 import { activeDayInsert, schema, statsDay } from '@jc/db';
+import { shownVip } from '@jc/types';
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -147,6 +148,7 @@ export async function resolveSession(c: Context<AppEnv>, kind: 'user' | 'admin',
       balance: row.u.balance,
       createdAt: row.u.createdAt,
       presenceMode: row.u.presenceMode,
+      vip: shownVip(row.u),
     },
   };
 }

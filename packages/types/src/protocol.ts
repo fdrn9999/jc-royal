@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { PublicRole } from './social';
+import type { VipColor } from './vip';
 import type { TableCue, TableView } from './table';
 
 /** An automatic rebuy's total limit may cover at most this many rebuys of the chosen amount. */
@@ -125,6 +126,8 @@ export interface ChatMessage {
   nickname: string;
   /** Staff only (see PublicRole): the role the sender held when the line was posted. */
   role?: PublicRole;
+  /** A VIP member's name color when the line was posted (see shownVip). */
+  vip?: VipColor;
   text: string;
   at: number;
 }

@@ -81,6 +81,7 @@ export const FEATURES = [
   'chips',
   'resetLinks',
   'roles',
+  'vip',
   'tables',
   'tableControl',
   'hands',
@@ -136,6 +137,8 @@ export const GRANTS = [
   'settings',
   'resetLinks',
   'maintenance',
+  // A member's VIP name color (a display only: no chips, odds, seat or console access come with it).
+  'vip',
 ] as const;
 export type Grant = (typeof GRANTS)[number];
 
@@ -153,6 +156,7 @@ export const GRANT_OF: Record<Feature, Grant | 'always' | 'super'> = {
   chips: 'chips',
   resetLinks: 'resetLinks',
   roles: 'super',
+  vip: 'vip',
   tables: 'tables',
   tableControl: 'tableControl',
   hands: 'hands',
@@ -261,6 +265,9 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /users/:id/role': r('roles', 'user.role', { role: CAPABILITIES['roles.change'], reauth, preview, target: 'user' }),
   'POST /users/:id/chips': r('chips', 'user.chips', { reauth, preview, target: 'user' }),
   'POST /users/:id/reset-link': r('resetLinks', 'user.reset_link', { reauth, target: 'user' }),
+  // VIP name color (routes/admin-vip.ts): plain members only, never staff or bots; password and reason.
+  'GET /users/:id/vip': r('vip', 'user.vip_view', { target: 'user' }),
+  'PATCH /users/:id/vip': r('vip', 'user.vip', { reauth, preview, target: 'user' }),
 
   'GET /tables': r('tables', 'table.list'),
   'POST /tables': r('tables', 'table.create'),

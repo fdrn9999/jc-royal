@@ -133,6 +133,9 @@ const BY_CODE: Record<string, Key> = {
   admin_grants_conflict: 'errGrantsConflict',
   admin_grants_no_change: 'errGrantsNoChange',
   not_plain_admin: 'errNotPlainAdmin',
+  vip_conflict: 'errVipConflict',
+  vip_staff: 'errVipStaff',
+  vip_deleted: 'errVipDeleted',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

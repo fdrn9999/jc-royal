@@ -473,6 +473,37 @@
   border-left-color: rgba(90, 170, 255, 0.6);
 }
 
+/*
+ * VIP members (web MemberName): the name in the colour an administrator chose from a fixed palette (a key the server
+ * checked, never a CSS value), always with the VIP mark beside it: the gold-rimmed VIP pill where there is room, the
+ * small gold diamond where there is not (a seat). The colours are tokens (--vip-*) the colour vision modes adjust.
+ */
+.jc-vip-name[data-vip='gold'] { color: var(--vip-gold); }
+.jc-vip-name[data-vip='rose'] { color: var(--vip-rose); }
+.jc-vip-name[data-vip='sapphire'] { color: var(--vip-sapphire); }
+.jc-vip-name[data-vip='amethyst'] { color: var(--vip-amethyst); }
+.jc-vip-name[data-vip='emerald'] { color: var(--vip-emerald); }
+.jc-vip-name[data-vip='cyan'] { color: var(--vip-cyan); }
+.jc-vip-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.2rem;
+  border: 1px solid var(--vip-rim);
+  border-radius: 0.3rem;
+  padding: 0 0.35rem;
+  background: var(--vip-badge-bg);
+  color: var(--vip-badge-fg);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 15px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.jc-vip-icon {
+  color: var(--vip-badge-fg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .jc-flip-in,
   .jc-deal-in,
@@ -544,6 +575,16 @@
   --chip-t7-face: #2c6f93;
   --chip-t8-base: #1d1d22;
   --chip-t8-face: #3a3a44;
+  /* VIP names (the palette's keys, packages/types VIP_COLORS) and the VIP mark: gold on near-black with a thin gold rim. */
+  --vip-gold: #f2c14e;
+  --vip-rose: #ff8fb3;
+  --vip-sapphire: #82a8ff;
+  --vip-amethyst: #c39bff;
+  --vip-emerald: #4fd6a0;
+  --vip-cyan: #5ad7ec;
+  --vip-badge-bg: #17130a;
+  --vip-badge-fg: #f3d27a;
+  --vip-rim: #c9a54a;
 }
 
 /* Red-weak and green-weak: fold vermilion, call blue, all-in magenta; success blue, danger orange; online blue; the chips that

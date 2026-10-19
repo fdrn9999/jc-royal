@@ -9,6 +9,7 @@
  */
 import { z } from 'zod';
 import { TIME_BANK_LIMITS, timeBankProblem, type TimeBankRules } from './timebank';
+import type { VipColor } from './vip';
 
 export const TOURNAMENT_STATUSES = ['registering', 'closed', 'running', 'finished', 'cancelled', 'aborted'] as const;
 export type TournamentStatus = (typeof TOURNAMENT_STATUSES)[number];
@@ -157,6 +158,8 @@ export type TournamentIneligible = 'suspended' | 'bot' | 'unverified' | 'min_han
 
 export interface TournamentEntryView {
   nickname: string;
+  /** The member's VIP name color (a look only: it changes nothing in the tournament). */
+  vip?: VipColor;
   status: EntryStatus;
   place: number | null;
   /** Tournament chips as the table last reported them (running tournaments). */
@@ -189,6 +192,8 @@ export interface TournamentSummaryDto {
   startedAt: number | null;
   endedAt: number | null;
   winner: string | null;
+  /** The winner's VIP name color, when they have one. */
+  winnerVip?: VipColor;
   /** The viewer's entry, if any. */
   me: { status: EntryStatus; place: number | null } | null;
 }

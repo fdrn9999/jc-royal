@@ -501,7 +501,7 @@ export function TablePage() {
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
                 onSeatClick={(seat) =>
-                  seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}) })
+                  seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}), ...(seat.vip ? { vip: seat.vip } : {}) })
                 }
                 onShow={(card) => sock.send({ t: 'show', card })}
                 showOnCards={short}
@@ -678,10 +678,11 @@ export function TablePage() {
               myId={me?.id}
               hidden={hiddenChat}
               onPick={(m) => {
-                // A seated author shows their role now; otherwise the one the line was posted with.
+                // A seated author shows their role and VIP color now; otherwise the ones the line was posted with.
                 const seat = s?.seats.find((x) => x.userId === m.userId);
                 const role = seat ? seat.role : m.role;
-                setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: seat?.avatarUrl ?? null, ...(role ? { role } : {}) });
+                const vip = seat ? seat.vip : m.vip;
+                setPicked({ id: m.userId, nickname: m.nickname, avatarUrl: seat?.avatarUrl ?? null, ...(role ? { role } : {}), ...(vip ? { vip } : {}) });
               }}
             />
           </div>

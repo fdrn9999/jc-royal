@@ -357,10 +357,10 @@ export function ChatPanel({
           <div key={m.id} className={cx('break-words', m.role && 'jc-role-line')} data-role={m.role} data-testid="chat-line">
             {onPick && m.userId !== myId ? (
               <button type="button" className="max-w-full align-bottom font-semibold text-gold-300 hover:underline" onClick={() => onPick(m)} data-testid="chat-author">
-                <MemberName name={m.nickname} role={m.role} />
+                <MemberName name={m.nickname} role={m.role} vip={m.vip} />
               </button>
             ) : (
-              <MemberName name={m.nickname} role={m.role} className="font-semibold text-gold-300" />
+              <MemberName name={m.nickname} role={m.role} vip={m.vip} className="font-semibold text-gold-300" />
             )}
             {m.role && <RoleBadge role={m.role} className="ml-1 align-[1px]" />}{' '}
             <span className="text-ink-100">{m.text}</span>

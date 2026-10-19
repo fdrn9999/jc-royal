@@ -7,6 +7,7 @@ import {
   MAX_BLOCKS,
   MAX_FRIENDS,
   publicRole,
+  shownVip,
   SocialSettingsSchema,
   TableInviteSchema,
   type BlockedUserDto,
@@ -47,18 +48,22 @@ async function relation(c: Context<AppEnv>, me: string, other: string) {
 
 /**
  * A member as other players see them, with the staff role (see PublicRole) drawn from `users.role` when the social
- * policy shows that role's badge (`badge`, from badgesFor).
+ * policy shows that role's badge (`badge`, from badgesFor), and the VIP color (shownVip) read in the same query.
  */
-const toPublic = (u: { id: string; nickname: string; avatarUrl: string | null; role: string }, badge: Badge = publicRole): PublicUserDto => {
+const toPublic = (
+  u: { id: string; nickname: string; avatarUrl: string | null; role: string; status?: string; isBot?: boolean | number; vipColor?: string | null },
+  badge: Badge = publicRole,
+): PublicUserDto => {
   const role = badge(u.role);
-  return { id: u.id, nickname: u.nickname, avatarUrl: u.avatarUrl, ...(role ? { role } : {}) };
+  const vip = shownVip(u);
+  return { id: u.id, nickname: u.nickname, avatarUrl: u.avatarUrl, ...(role ? { role } : {}), ...(vip ? { vip } : {}) };
 };
 
 /** The player friend requests, blocks and messages are about. Table bots are not members and take none of them. */
 async function publicUser(c: Context<AppEnv>, where: { id?: string; nickname?: string }): Promise<PublicUserDto | null> {
   const u = await c.var.db.query.users.findFirst({
     where: where.id ? eq(schema.users.id, where.id) : sql`lower(${schema.users.nickname}) = lower(${where.nickname ?? ''})`,
-    columns: { id: true, nickname: true, avatarUrl: true, role: true, status: true, isBot: true },
+    columns: { id: true, nickname: true, avatarUrl: true, role: true, status: true, isBot: true, vipColor: true },
   });
   if (!u || u.status === 'deleted') return null;
   if (u.isBot) fail(409, 'bot_account', 'table bots take no friend requests, blocks or messages');
@@ -154,7 +159,22 @@ export const friendPresenceRoutes = new Hono<AppEnv>().get('/presence', requireU
   return c.json({ presence } satisfies FriendsPresenceDto);
 });
 
-type FriendRow = { status: 'pending' | 'accepted'; requesterId: string; createdAt: number; acceptedAt: number | null; id: string; nickname: string; avatarUrl: string | null; role: string; unread: number; last: string | null };
+type FriendRow = {
+  status: 'pending' | 'accepted';
+  requesterId: string;
+  createdAt: number;
+  acceptedAt: number | null;
+  id: string;
+  nickname: string;
+  avatarUrl: string | null;
+  role: string;
+  /** The member's account status (the friendship's is `status`). */
+  userStatus: string;
+  isBot: number;
+  vipColor: string | null;
+  unread: number;
+  last: string | null;
+};
 
 /** Friends, received and sent requests. */
 export const friendRoutes = new Hono<AppEnv>()
@@ -163,7 +183,7 @@ export const friendRoutes = new Hono<AppEnv>()
     const uid = c.var.user!.id;
     const { results } = await c.env.DB.prepare(
       `SELECT f.status, f.requester_id AS requesterId, f.created_at AS createdAt, f.accepted_at AS acceptedAt,
-              u.id, u.nickname, u.avatar_url AS avatarUrl, u.role,
+              u.id, u.nickname, u.avatar_url AS avatarUrl, u.role, u.status AS userStatus, u.is_bot AS isBot, u.vip_color AS vipColor,
               (SELECT COUNT(*) FROM direct_messages d WHERE d.pair_key = f.user_a || ':' || f.user_b AND d.recipient_id = ?1 AND d.read_at IS NULL) AS unread,
               (SELECT json_object('body', d.body, 'senderId', d.sender_id, 'at', d.created_at, 'kind', d.kind) FROM direct_messages d
                 WHERE d.pair_key = f.user_a || ':' || f.user_b ORDER BY d.created_at DESC LIMIT 1) AS last
@@ -176,7 +196,7 @@ export const friendRoutes = new Hono<AppEnv>()
     const out: FriendsDto = { friends: [], incoming: [], outgoing: [] };
     const badge = await badgesFor(c, results.map((r) => r.role));
     for (const r of results) {
-      const user = toPublic(r, badge);
+      const user = toPublic({ ...r, status: r.userStatus }, badge);
       if (r.status === 'pending') {
         const req: FriendRequestDto = { ...user, at: r.createdAt };
         (r.requesterId === uid ? out.outgoing : out.incoming).push(req);
@@ -304,12 +324,12 @@ export const blockRoutes = new Hono<AppEnv>()
   .use('*', requireUser)
   .get('/', async (c) => {
     const { results } = await c.env.DB.prepare(
-      `SELECT u.id, u.nickname, u.avatar_url AS avatarUrl, u.role, b.created_at AS at
+      `SELECT u.id, u.nickname, u.avatar_url AS avatarUrl, u.role, u.status, u.is_bot AS isBot, u.vip_color AS vipColor, b.created_at AS at
          FROM user_blocks b JOIN users u ON u.id = b.blocked_id
         WHERE b.blocker_id = ?1 AND u.status != 'deleted' AND u.role = 'user' ORDER BY b.created_at DESC`,
     )
       .bind(c.var.user!.id)
-      .all<{ id: string; nickname: string; avatarUrl: string | null; role: string; at: number }>();
+      .all<{ id: string; nickname: string; avatarUrl: string | null; role: string; status: string; isBot: number; vipColor: string | null; at: number }>();
     return c.json(results.map((r): BlockedUserDto => ({ ...toPublic(r), at: r.at })));
   })
   .put('/:userId', async (c) => {

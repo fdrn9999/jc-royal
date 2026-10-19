@@ -334,7 +334,7 @@ export function Seat(p: SeatProps) {
           <span className="flex min-w-0 flex-col leading-tight">
             {/* The width cap sits on a wrapper: MemberName's own max-w-full comes later in the stylesheet and would win. */}
             <span className={cx('flex min-w-0', z.name)}>
-              <MemberName name={s.nickname ?? ''} role={s.role} bot={s.bot} className={cx('font-semibold', z.nameText, p.isMe ? 'text-gold-300' : 'text-ivory')} />
+              <MemberName name={s.nickname ?? ''} role={s.role} vip={s.bot ? undefined : s.vip} bot={s.bot} className={cx('font-semibold', z.nameText, p.isMe ? 'text-gold-300' : 'text-ivory')} />
             </span>
             <span className={cx('font-mono font-semibold text-[#9fd8b6] tabular-nums', z.stack)} data-testid={`stack-${s.seatIndex}`}>
               {p.amounts.fmt(s.stack, compact)}

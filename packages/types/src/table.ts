@@ -1,6 +1,7 @@
 import type { Card, HandRankClass } from './cards';
 import type { ReactionRules } from './protocol';
 import type { PublicRole } from './social';
+import type { VipColor } from './vip';
 import type { TimeBankRules } from './timebank';
 import type { TournamentTableView } from './tournament';
 
@@ -49,6 +50,11 @@ export interface SeatView {
    * the social policy hides that role's badge.
    */
   role?: PublicRole;
+  /**
+   * A VIP member's name color (see shownVip): refreshed like `role`, when the player connects and when an administrator
+   * changes it, without touching the hand. Never on a staff or bot seat.
+   */
+  vip?: VipColor;
   /**
    * A table bot of this level, not a member: it has no profile, and cannot be befriended, messaged or reported. `true`
    * in the replay of a past hand, which records that a seat was a bot but not how well it played.

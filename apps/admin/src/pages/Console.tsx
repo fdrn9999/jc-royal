@@ -1,5 +1,5 @@
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat } from '@jc/ui';
-import { academyItemName, ageOn, BOT_LEVELS, botSettingsIssues, isoDate, type AcademyItemKind, type BotLevel } from '@jc/types';
+import { academyItemName, ageOn, BOT_LEVELS, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type VipColor } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
@@ -24,6 +24,7 @@ import { ApiError, canDo, errText, hasGrant, useAdmin, useData } from '../lib';
 import { dayStart, Feedback, JumpNav, jumpTarget, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 import { MemberSettingsPanel } from './MemberSettings';
+import { MemberVipPanel, vipColorLabel } from './MemberVip';
 import { MemberReferralPanel } from './Referrals';
 import { MemberRefillPanel, RefillRefLine, type RefillRef } from './Refill';
 
@@ -90,7 +91,31 @@ export function Table({ head, children, stack = false }: { head: ReactNode[]; ch
 }
 
 // ------------------------------------------------------------------ users
-interface UserRow { id: string; email: string; nickname: string; locale: Locale; role: string; status: string; balance: number; createdAt: number; lastLoginAt?: number | null; online?: boolean }
+interface UserRow {
+  id: string;
+  email: string;
+  nickname: string;
+  locale: Locale;
+  role: string;
+  status: string;
+  balance: number;
+  createdAt: number;
+  lastLoginAt?: number | null;
+  online?: boolean;
+  /** The VIP color, when the member is VIP (absent from older APIs). */
+  vipColor?: string | null;
+}
+
+/** The VIP pill and the color's name, in that color (the member list and the member page header). */
+function VipTag({ color }: { color: VipColor }) {
+  const { t } = useT();
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-testid="user-vip" data-vip={color}>
+      <span className="jc-vip-badge">VIP</span>
+      <span className="jc-vip-name text-xs font-semibold" data-vip={color}>{vipColorLabel(t, color)}</span>
+    </span>
+  );
+}
 
 const EXPORT_MAX = 1000;
 const PAGE = 50;
@@ -116,6 +141,7 @@ export function UsersPage() {
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [status, setStatus] = useState('');
   const [role, setRole] = useState('');
+  const [vip, setVip] = useState<'' | 'vip' | 'regular'>('');
   const [sort, setSort] = useState<(typeof SORTS)[number][0]>('created:desc');
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -127,6 +153,7 @@ export function UsersPage() {
   if (onlineOnly) params.set('online', '1');
   if (status) params.set('status', status);
   if (role) params.set('role', role);
+  if (vip) params.set('vip', vip);
   const { data, error, loading, reload } = useData<{ items: UserRow[]; total: number }>(`/api/admin/users?${params}`);
   // Any change to what is searched starts again from the first page (the selection for export stays).
   const filter = <T,>(set: (v: T) => void) => (v: T) => {
@@ -179,6 +206,11 @@ export function UsersPage() {
           <option value="">{t('allRoles')}</option>
           {(['user', 'admin', 'super_admin'] as const).map((r) => <option key={r} value={r}>{roleLabel(t, r)}</option>)}
         </select>
+        <select aria-label={t('featVip')} value={vip} onChange={(e) => filter(setVip)(e.target.value as typeof vip)} className={selectCls} data-testid="vip-filter">
+          <option value="">{t('vipFilterAll')}</option>
+          <option value="vip">{t('vipFilterVip')}</option>
+          <option value="regular">{t('vipFilterRegular')}</option>
+        </select>
         <select aria-label={t('language')} value={lang} onChange={(e) => filter(setLang)(e.target.value as '' | Locale)} className={selectCls} data-testid="lang-filter">
           <option value="">{t('allLanguages')}</option>
           <option value="ko">{t('langKo')}</option>
@@ -230,7 +262,12 @@ export function UsersPage() {
               <td className="px-2 py-2 font-semibold"><Link to={`/users/${u.id}`} className="inline-flex min-h-6 items-center text-gold-300 hover:underline">{u.nickname}</Link></td>
               <td className="px-2 py-2 text-ink-300">{u.email}</td>
               <td className="px-2 py-2"><LangBadge locale={u.locale} /></td>
-              <td className="px-2 py-2"><Badge tone={u.role === 'user' ? 'neutral' : 'gold'} className="whitespace-nowrap">{roleLabel(t, u.role)}</Badge></td>
+              <td className="px-2 py-2">
+                <span className="flex flex-wrap items-center gap-1">
+                  <Badge tone={u.role === 'user' ? 'neutral' : 'gold'} className="whitespace-nowrap">{roleLabel(t, u.role)}</Badge>
+                  {isVipColor(u.vipColor) && <VipTag color={u.vipColor} />}
+                </span>
+              </td>
               <td className="px-2 py-2">
                 <Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge>
                 {u.online && <Badge tone="blue" className="ml-1">{t('online')}</Badge>}
@@ -300,7 +337,15 @@ interface SanctionPreview {
   removeFromTable?: boolean;
 }
 interface UnsuspendPreview { from: string; to: string; suspendedReason: string | null }
-interface RolePreview { from: string; to: string; console: { from: boolean; to: boolean }; adminSessions: number; capabilities: { gained: string[]; lost: string[] } }
+interface RolePreview {
+  from: string;
+  to: string;
+  console: { from: boolean; to: boolean };
+  adminSessions: number;
+  capabilities: { gained: string[]; lost: string[] };
+  /** The VIP color the change ends (staff are never VIP). Absent from older APIs. */
+  vipCleared?: VipColor | null;
+}
 interface ChipPreview { amount: number; balanceBefore: number; balanceAfter: number; large: boolean; duplicate: boolean; ref: { id: string; type: string; amount: number; createdAt: number } | null }
 
 function ChangePreview({ p, data }: { p: Exclude<Pending, null>; data: unknown }) {
@@ -346,6 +391,11 @@ function ChangePreview({ p, data }: { p: Exclude<Pending, null>; data: unknown }
           </div>
         )}
         {d.capabilities.gained.length + d.capabilities.lost.length === 0 && <p className="text-ink-300">{t('pvNoCapChange')}</p>}
+        {d.vipCleared && (
+          <p className="text-ink-300" data-testid="pv-vip-cleared">
+            {t('vipClearedByRole')} ({vipColorLabel(t, d.vipCleared)})
+          </p>
+        )}
       </div>
     );
   }
@@ -573,6 +623,7 @@ export function UserDetailPage() {
         <Badge tone={u.status === 'active' ? 'green' : 'red'}>{userStatusLabel(t, u.status)}</Badge>
         {data.online && <Badge tone="blue">{t('online')}</Badge>}
         <Badge tone="gold">{roleLabel(t, u.role)}</Badge>
+        {isVipColor(u.vipColor) && <VipTag color={u.vipColor} />}
         {!data.ledgerConsistent && <Badge tone="red">{t('ledgerMismatch')}</Badge>}
         <span className="ml-auto flex flex-wrap gap-3">
           <Link to={`/audit?targetType=user&targetId=${encodeURIComponent(u.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="user-audit">{t('audit')} →</Link>
@@ -584,6 +635,7 @@ export function UserDetailPage() {
         items={[
           ...(on('chips') ? [['member-chips', t('adjustChips')] as [string, string]] : []),
           ...(statusActions ? [['member-status', t('status')] as [string, string]] : []),
+          ...(on('vip') ? [['member-vip', t('vipTitle')] as [string, string]] : []),
           ['member-connections', t('connectionsTitle')],
           ['member-history', t('historyTitle')],
           ['member-ledger', t('ledger')],
@@ -775,6 +827,17 @@ export function UserDetailPage() {
       {on('refill') && <MemberRefillPanel key={`refill${rev}`} userId={u.id} onCorrect={correctRefill} />}
       {on('referral') && <MemberReferralPanel key={`referral${rev}`} userId={u.id} />}
       {on('settings') && <MemberSettingsPanel key={`settings${rev}`} userId={u.id} />}
+      {/* A role or status change elsewhere on the page also changes what the VIP panel may do: it loads again. */}
+      {on('vip') && (
+        <MemberVipPanel
+          key={`vip:${u.role}:${u.status}`}
+          userId={u.id}
+          onChanged={() => {
+            setRev((n) => n + 1);
+            void reload();
+          }}
+        />
+      )}
       <Panel title={t('ledger')} id="member-ledger" className={jumpTarget}>
         {hidden.includes('ledger') && <p className="mb-2 text-xs text-ink-400" data-testid="ledger-hidden">{t('hiddenLedger')}</p>}
         <Table head={[t('time'), t('colKind'), t('amount'), t('balance'), t('memo')]}>
