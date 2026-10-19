@@ -47,7 +47,7 @@
 | t | 내용 |
 |---|---|
 | `state` | `{ state: TableView, cues: TableCue[] }`. 이 화면을 보는 사람 기준으로 투영된 전체 상태 |
-| `chatHistory` / `chat` | 최근 채팅 50개, 새 메시지. 관리자가 쓴 줄에는 `role`(아래 '운영진 표시') |
+| `chatHistory` / `chat` | 최근 채팅 50개, 새 메시지. 관리자가 쓴 줄에는 `role`(아래 '운영진 표시'), VIP 회원이 쓴 줄에는 `vip`(아래 'VIP 표시') |
 | `react` | `{seatIndex, userId, reaction, at}`: 테이블의 모든 연결(보낸 사람·관전자 포함)에 보내는 빠른 반응. 좌석과 회원은 룸이 받을 때의 값 |
 | `ack` | `{reqId}`: `reqId`를 단 명령의 성공(대기열에 들어간 충전 포함). 액션은 `reqId` 자리에 `intentId`. 이미 처리한 명령을 다시 받아도 `ack`만 다시 보냄 |
 | `error` | `{code, message, reqId?}` |
@@ -58,7 +58,7 @@
 ### TableView (요약, 정의는 `packages/types/src/table.ts`)
 
 - **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정, 회원 방이면 `roomType:'member'`와 방장 `hostId`), `status`(waiting/playing/closing/closed).
-- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시').
+- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시'), `vip`(VIP 회원 좌석만, 아래 'VIP 표시').
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 쇼다운에서 공개되지 않은 패(폴드, 쇼다운 없이 이김, 머크)는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
   - `shown`은 핸드가 끝난 뒤 주인이 보이기로 고른 카드입니다. `[카드 또는 null, 카드 또는 null]`로 고른 자리에만 카드가 있고, 고르지 않은 카드는 누구에게도 보내지 않습니다. 쇼다운에서 이미 공개된 좌석과 고른 카드가 없는 좌석에는 이 필드가 없습니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`(시간 은행으로 더한 시간 포함), `extraMs`(지금 차례에 시간 은행으로 더한 시간, 없으면 필드 없음), `result`(winners, showdown, returned).
@@ -106,7 +106,8 @@
 - **기록**: 같은 결정이 `hand_players.shown`(1 공개, 0 머크)에 들어가고, `/api/me/hands/:id`와 커뮤니티 핸드 리뷰는 본인이 아닌 머크된 패의 `holeCards`·`rankClass`를 null로 줍니다. 이 열이 NULL인 이전 기록은 `went_to_showdown`을 따릅니다. 관리자 감사 화면(종료 핸드 전체)은 그대로 모든 카드를 봅니다.
 - **이전 페이지와 이전 api**: 새 룸은 `you.autoMuck`을 보내지 않으므로, 설정 칸이 있는 이전 웹은 비교할 값이 없어 아무것도 보내지 않습니다. 보내더라도 `muck` 명령은 `ack`만 받고 바뀌는 것은 없습니다. 계정 설정의 `autoMuck` 칸은 이전 기기의 저장을 거절하지 않으려고 남겨 두었습니다(저장되지만 어디에도 쓰이지 않음). api는 더 이상 룸에 알리지 않고, 룸의 내부 동작 `muck`은 이전 api가 보내도 `ok`만 답합니다.
 - **비용**: 설정 저장·관리자 설정 초기화·복구 때 회원이 앉은 룸마다 보내던 내부 요청이 없어졌습니다.
-- **배포 순서**(마이그레이션 없음): game-worker → api → web. 새 룸과 이전 api가 섞이면 이전 api의 내부 `muck`은 `ok`를 받아 '반영한 테이블'로 세지만 바뀌는 것은 없습니다. 이전 룸은 자동 머크를 켠 사람에게만 `canShow`를 보내고 `card: 'both'`를 모르므로(`bad_request`), game-worker를 web보다 먼저 배포합니다.
+- **새 페이지와 이전 룸**(game-worker를 되돌렸거나 아직 올리지 않았을 때): 이전 룸은 좌석마다 자동 머크 설정을 두고(처음엔 꺼짐) 꺼진 좌석의 진 쇼다운 패를 공개합니다. 그래서 새 페이지는 룸이 내 좌석의 `you.autoMuck`을 `false`로 알리면 그 연결에서 한 번 `muck`(`on: true`)을 보내 켭니다(`apps/web/src/game/olderRooms.ts` `legacyMuckStep`). 새 룸은 이 칸을 보내지 않으므로 아무것도 보내지 않습니다. 연결이 끊긴 동안 보낸 명령은 남지 않으므로 다시 연결되면 다시 봅니다.
+- **배포 순서**(마이그레이션 없음): game-worker → api → web. 새 룸과 이전 api가 섞이면 이전 api의 내부 `muck`은 `ok`를 받아 '반영한 테이블'로 세지만 바뀌는 것은 없습니다. 새 web은 위처럼 이전 룸에서도 내 좌석의 자동 머크를 켜고 패 보이기를 장마다 보내므로(아래 '패 보이기') 순서가 바뀌어도 진 패가 공개되거나 보이기가 거절되지 않습니다. 다만 이전 룸은 보일지 고르는 1.5초가 없고, 아직 이전 web을 쓰는 사람에게는 그 계정의 자동 머크 설정을 따르므로 game-worker를 먼저 배포합니다.
 
 ## 패 보이기 (`show`)
 
@@ -119,7 +120,7 @@
 - **기록**: 핸드 기록(`hand_players.shown`)·리플레이·커뮤니티 리뷰에는 넣지 않습니다. 보이기는 그 자리에서 보여 주는 것일 뿐이라, 기록의 공개 규칙은 위 '쇼다운 머크' 그대로입니다.
 - **화면**: 내 카드 위에 장마다 '보이기', 두 장이 다 남았으면 '모두' 버튼이 있습니다. 누른 버튼은 답이 오거나 5초가 지날 때까지 흐리게 막아 두 번 보내지 않고, 보인 카드는 '공개됨'으로 바뀝니다. 다음 핸드에 버튼이 사라집니다.
 - **시간 비용**: 회원이 있는 핸드마다 다음 핸드가 1.5초 늦어 테이블의 시간당 핸드 수가 조금 줄어듭니다(토너먼트 테이블 포함). 봇끼리 한 핸드는 그대로입니다.
-- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `'both'`를 모르는 값으로 보고 `bad_request`를 보냅니다.
+- **배포 순서**: game-worker를 먼저 배포합니다. 이전 룸은 `'both'`를 모르는 값으로 보고 `bad_request`를 보내므로, 웹 페이지는 '모두'를 눌러도 아직 보이지 않은 카드마다 `card` 0·1 명령을 따로 보냅니다(`olderRooms.ts` `cardsToShow`, 응답을 기다리는 카드는 빼고 보냄). `'both'`는 프로토콜에 남아 있어 다른 클라이언트는 새 룸에 그대로 쓸 수 있습니다.
 
 ## 시간 은행 (`timeBank`)
 
@@ -153,6 +154,14 @@
 - **소셜 정책의 표시 숨김**: 정책이 최고 관리자·관리자 표시를 끄면 룸은 그 역할의 `role`을 좌석과 채팅 줄(새 줄과 접속 때의 `chatHistory`)에서 빼고 보낸다. 저장된 좌석·채팅 줄은 역할을 그대로 가지므로 다시 켜면 돌아온다. 정책을 다시 읽어 표시가 바뀌면 화면의 채팅을 `chatHistory`로 다시 보내고, 좌석은 다음 `state`부터 바뀐다. 운영진 신고·차단 규칙(`block_staff`·`report_super_admin`)은 표시와 상관없이 실제 역할로 정한다.
 - **역할 변경 즉시 반영**: 관리자 콘솔에서 역할을 바꾸면 api가 그 회원이 앉아 있는 테이블의 룸에 내부 요청 `role`(`?user=&role=`, 값은 D1에 저장된 역할)을 보냅니다. 룸은 그 회원의 열린 연결 신원을 고치고(다음 채팅부터 새 역할), 좌석 표시가 바뀌면 저장한 뒤 모두에게 `state`를 보냅니다(`version` 증가). 응답 `{ok, seated}`. 앉아 있지 않은 테이블의 관전 연결은 다시 연결할 때 맞춰집니다.
 - **배포 순서**: api와 game-worker를 먼저, 웹을 나중에. 이전 룸은 `role`을 보내지 않으므로 새 웹은 표시 없이 그대로 그립니다. 이전 룸이 내부 `role` 요청을 모르면 api는 `reached`에서 빼고 역할 변경은 그대로 저장합니다.
+
+## VIP 표시 (`vip`)
+
+- **값**: 팔레트 키 하나(`gold`·`rose`·`sapphire`·`amethyst`·`emerald`·`cyan`). 좌석(`seats[].vip`)과 채팅 줄(`chat`·`chatHistory`)에 붙고, VIP가 아니면 필드가 없습니다. 꾸밈일 뿐 룸의 어떤 판단(착석·액션·정산·칩)에도 쓰이지 않습니다(`docs/ADMIN_SECURITY.md` 'VIP 회원 관리').
+- **출처**: api가 세션을 확인하며 D1 `users.vip_color`에서 읽어 핸드셰이크 신원에 넣은 값뿐입니다(`shownVip`: 활동 중인 일반 회원만, 정지된 회원·운영진·봇은 없음). 클라이언트가 보낸 값은 스키마가 버리고, 룸은 팔레트에 없는 값과 운영진·봇 좌석의 값을 버립니다. 토너먼트 테이블은 룸이 참가자를 D1에서 읽을 때 같은 규칙으로 정합니다.
+- **좌석·채팅**: `role`과 같습니다. 앉을 때 좌석에 붙이고 핸드셰이크마다 다시 맞추며, 채팅 줄은 게시할 때의 값을 그대로 가집니다.
+- **즉시 반영**: 관리자가 VIP를 지정·변경·해제하면 api가 그 회원이 앉아 있는 테이블의 룸에 내부 요청 `vip`(`?user=&vip=`, 다른 사람에게 보일 값, 없으면 빈 값)를 보냅니다. 룸은 그 회원의 열린 연결 신원과 좌석을 고치고, 좌석이 바뀌면 저장한 뒤 모두에게 `state`를 한 번 보냅니다. 핸드·차례·스택·연결은 건드리지 않습니다. 응답 `{ok, seated}`. 답하지 않은 룸과 관전 연결은 그 회원의 다음 핸드셰이크에서 맞춰집니다. 운영진으로 승격되면 api가 같은 batch에서 VIP를 끝내므로, 룸의 `role` 처리도 그 연결의 `vip`를 지웁니다.
+- **배포 순서**: 마이그레이션 0031 → game-worker → api → 웹. 이전 룸은 `vip`를 보내지 않으므로 새 웹은 표시 없이 그리고, 내부 `vip` 요청을 모르는 룸은 api가 `reached`에서 뺍니다(VIP 저장은 그대로).
 
 ## 웹 클라이언트의 전달 규칙 (`apps/web/src/game/link.ts`, `useTableSocket.ts`)
 
