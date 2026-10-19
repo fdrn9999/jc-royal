@@ -184,7 +184,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
       const n = await db.prepare(`SELECT COUNT(*) AS n FROM tournament_entries WHERE tournament_id = ?1 AND status = 'registered'`).bind(id).first<{ n: number }>();
       if ((n?.n ?? 0) >= t.capacity) {
         try {
-          start = await startTournament(c.env, id, { actorId: null, auto: true });
+          start = await startTournament(c.env, id, { actorId: null, auto: true, ctx: c.executionCtx });
         } catch (err) {
           // The registration stands; the tournament shows as needing a start (start_stuck) until an operator starts it.
           console.error('automatic tournament start failed', id, err);

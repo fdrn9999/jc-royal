@@ -35,6 +35,11 @@ export const users = sqliteTable(
      * chips come from the bot fund (chip_ledger type bot_fund), never from the signup grant.
      */
     isBot: integer('is_bot', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * How the member shows to friends (packages/types/src/presence.ts): auto (online, away after a while without
+     * activity), away (never online), invisible (always offline). Written only when the member changes it.
+     */
+    presenceMode: text('presence_mode', { enum: ['auto', 'away', 'invisible'] }).notNull().default('auto'),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -1026,4 +1031,120 @@ export const tournamentEntries = sqliteTable(
     updatedAt: integer('updated_at').notNull().default(now),
   },
   (t) => [primaryKey({ columns: [t.tournamentId, t.userId] }), index('tournament_entries_user_idx').on(t.userId, t.status)],
+);
+
+/**
+ * A member's push notification choices (apps/api/src/lib/notify.ts, packages/types/src/notifications.ts), the account's
+ * and never a device's. No row: nothing agreed (service and night off, every type on once service is). `version` goes up
+ * with every change and a change must name the version it was made from, so a device that has not seen a withdrawal
+ * cannot turn it back on. Removed when the member withdraws.
+ */
+export const notificationSettings = sqliteTable('notification_settings', {
+  userId: text('user_id').primaryKey(),
+  /** "[선택] 서비스 푸시 알림 수신 동의". */
+  service: integer('service', { mode: 'boolean' }).notNull().default(false),
+  /** "[선택] 야간 서비스 푸시 알림 수신 동의": 21:00–08:00 Korean time as well. */
+  night: integer('night', { mode: 'boolean' }).notNull().default(false),
+  dm: integer('dm', { mode: 'boolean' }).notNull().default(true),
+  invite: integer('invite', { mode: 'boolean' }).notNull().default(true),
+  friendRequest: integer('friend_request', { mode: 'boolean' }).notNull().default(true),
+  friendAccepted: integer('friend_accepted', { mode: 'boolean' }).notNull().default(true),
+  tournamentStart: integer('tournament_start', { mode: 'boolean' }).notNull().default(true),
+  tournamentCancel: integer('tournament_cancel', { mode: 'boolean' }).notNull().default(true),
+  tournamentResult: integer('tournament_result', { mode: 'boolean' }).notNull().default(true),
+  version: integer('version').notNull().default(0),
+  /** When service and night consent were last changed (server clock). */
+  serviceAt: integer('service_at'),
+  nightAt: integer('night_at'),
+  updatedAt: integer('updated_at').notNull().default(now),
+});
+
+/**
+ * Every change of the two push consents, as the record of what was agreed when (server clock): never an IP address,
+ * device or browser. Kept under the pseudonymous id when the member withdraws (docs/PRIVACY_OPERATIONS.md).
+ */
+export const notificationConsents = sqliteTable(
+  'notification_consents',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    kind: text('kind', { enum: ['service', 'night'] }).notNull(),
+    agreed: integer('agreed', { mode: 'boolean' }).notNull(),
+    /** NOTIFICATION_CONSENT_VERSION of the wording shown. */
+    policyVersion: text('policy_version').notNull(),
+    source: text('source', { enum: ['signup', 'settings'] }).notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => [index('notification_consents_user_idx').on(t.userId, t.createdAt)],
+);
+
+/**
+ * A browser's Web Push subscription, for the member signed in there and that sign-in only: a push goes out only while
+ * `session_id` is a live session of `user_id` (so signing out, signing out everywhere, a password change, a suspension or
+ * a withdrawal stop it at once). The endpoint is a secret of the push service: it is never logged or sent back, and
+ * `endpoint_hash` (SHA-256) is what finds it again; the same browser signing in to another account takes the row over.
+ */
+export const pushSubscriptions = sqliteTable(
+  'push_subscriptions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    sessionId: text('session_id').notNull(),
+    endpoint: text('endpoint').notNull(),
+    endpointHash: text('endpoint_hash').notNull(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    /** Coarse device name for the member's list ("Chrome · Android"), from the browser's own description. */
+    label: text('label'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+    lastSuccessAt: integer('last_success_at'),
+    lastFailureAt: integer('last_failure_at'),
+    /** Failed sends in a row (a success resets it). */
+    failures: integer('failures').notNull().default(0),
+    /** The push service said it is gone (404/410), or it failed too often: never used again. */
+    disabledAt: integer('disabled_at'),
+  },
+  (t) => [
+    uniqueIndex('push_subscriptions_endpoint_uq').on(t.endpointHash),
+    index('push_subscriptions_user_idx').on(t.userId),
+    index('push_subscriptions_session_idx').on(t.sessionId),
+  ],
+);
+
+/**
+ * The push outbox: one row per notification a member should get (written after the action it reports, never in its
+ * way). `dedupe_key` makes it once per event. Sent at once by the api, or by the minute cron (retries, and events the
+ * game worker wrote); whether it may go is decided again when it is sent (consent, the type, the night, a live session).
+ * Kept NOTIFY_EVENT_RETENTION_MS.
+ */
+export const notificationEvents = sqliteTable(
+  'notification_events',
+  {
+    id: text('id').primaryKey(),
+    dedupeKey: text('dedupe_key').notNull(),
+    userId: text('user_id').notNull(),
+    type: text('type', { enum: ['dm', 'invite', 'friend_request', 'friend_accepted', 'tournament_start', 'tournament_cancel', 'tournament_result'] }).notNull(),
+    /** Where a click goes: an internal path only. */
+    url: text('url').notNull(),
+    /** Events with the same key replace each other on the device and share a cooldown ("dm:<sender>"). */
+    coalesceKey: text('coalesce_key'),
+    status: text('status', { enum: ['pending', 'sending', 'sent', 'skipped', 'failed', 'expired'] }).notNull().default('pending'),
+    /** Why it was skipped or failed (night, consent, type_off, viewing, cooldown, no_device, …). */
+    reason: text('reason'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    /** While one sender holds it (status sending). */
+    leaseUntil: integer('lease_until'),
+    expiresAt: integer('expires_at').notNull(),
+    createdAt: integer('created_at').notNull().default(now),
+    sentAt: integer('sent_at'),
+  },
+  (t) => [
+    uniqueIndex('notification_events_dedupe_uq').on(t.dedupeKey),
+    index('notification_events_due_idx').on(t.status, t.nextAttemptAt),
+    index('notification_events_user_idx').on(t.userId, t.createdAt),
+    // A member's pushes of the last hour, by when they went out (the hourly cap and the cooldown).
+    index('notification_events_sent_idx').on(t.userId, t.status, t.sentAt),
+  ],
 );

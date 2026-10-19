@@ -3,3 +3,7 @@ INTERNAL_SECRET=change-me-local-dev-secret
 # Password reset mail (optional). Also set MAIL_FROM to an address on a domain verified in Resend.
 # RESEND_API_KEY=re_xxx
 # MAIL_FROM=JC ROYAL <no-reply@your-verified-domain>
+# Web Push (optional): without both keys nothing is queued or sent. Make a pair with `node tools/vapid-keys.mjs`
+# (a throwaway pair for local use; production's pair is set with `wrangler secret put`, docs/DEPLOYMENT.md).
+# VAPID_PUBLIC_KEY=
+# VAPID_PRIVATE_KEY=

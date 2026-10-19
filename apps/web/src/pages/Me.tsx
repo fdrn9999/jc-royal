@@ -10,6 +10,8 @@ import { HandNotePanel, HandRow } from '../components/HandNotes';
 import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
 import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
+import { NotificationSettings } from '../components/NotificationSettings';
+import { PresenceLabel, PresenceModePicker } from '../components/Presence';
 import { ReferralCard } from '../components/Referral';
 import { RefillCard } from '../components/Refill';
 import { ReportModal, type ReportSubject } from '../components/Social';
@@ -19,6 +21,7 @@ import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAmounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { useMyPresence } from '../lib/presence';
 import { isGone, LoadFailed } from '../components/Loading';
 import { useBack } from '../lib/back';
 import { useKeptScroll } from '../lib/scroll';
@@ -60,6 +63,7 @@ export function MePage() {
   const nav = useNavigate();
   const stats = useLoad<StatsDto>('/api/me/stats');
   const badgeCount = useBadges().length;
+  const mine = useMyPresence();
   const hands = useLoad<HandSummaryDto[]>('/api/me/hands?limit=15');
   const ledger = useLoad<LedgerEntryDto[]>('/api/me/ledger?limit=20');
   const myPosts = useLoad<PostListItemDto[]>('/api/me/posts');
@@ -126,6 +130,7 @@ export function MePage() {
           <h1 className="truncate text-2xl font-bold">{me.nickname}</h1>
           <div className="text-sm text-ink-300">{me.email}</div>
           <div className="text-xs text-ink-400">{t('me.memberSince', { date: formatDate(me.createdAt, locale) })}</div>
+          {mine && <PresenceLabel state={mine.state} className="mt-1" />}
         </div>
         <div className="sm:ml-auto">
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-400">{t('common.balance')}</div>
@@ -134,6 +139,14 @@ export function MePage() {
           </div>
         </div>
       </div>
+
+      <Panel title={t('presence.title')} id="presence">
+        <PresenceModePicker className="max-w-xl" />
+      </Panel>
+
+      <Panel title={t('notify.title')} id="notifications">
+        <NotificationSettings />
+      </Panel>
 
       <RefillCard onClaimed={() => void ledger.reload()} />
 

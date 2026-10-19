@@ -37,6 +37,7 @@ import { looksPersonal } from '../lib/pii';
 import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
 import { kickEverywhere, refreshRoleEverywhere, roomCall } from '../lib/room';
+import { signedOut } from '../lib/signout';
 
 /** "Online": a member session used within this long (the dashboard counts the same way). */
 const ONLINE_MS = 5 * 60_000;
@@ -678,6 +679,7 @@ const admin = new Hono<AppEnv>()
     // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
     // First of what follows the commit, so a later step that fails cannot leave the member playing.
     const kick = await kickEverywhere(c.env, id, 'suspended', true);
+    signedOut(c, { user: id });
     if (body.reportId) {
       await c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: reason, createdAt: at });
     }
@@ -702,6 +704,7 @@ const admin = new Hono<AppEnv>()
     if (preview) return c.json({ preview: true, member: target, removeFromTable: body.removeFromTable, ...(await sanctionPreview(c.env.DB, id)) });
     const ended = await c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)).returning({ kind: schema.sessions.kind });
     const kick = await kickEverywhere(c.env, id, 'disconnected', body.removeFromTable);
+    signedOut(c, { user: id });
     await audit(c, 'user.disconnect', { type: 'user', id }, { ...body, sessions: ended.length, kick });
     return c.json({ ok: true, sessions: ended.length, kick });
   })

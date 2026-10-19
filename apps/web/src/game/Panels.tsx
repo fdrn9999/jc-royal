@@ -1,12 +1,13 @@
 import { sound, type AudioSettings } from '@jc/audio';
-import { AUTO_REBUY_MAX_TIMES, type ChatMessage, type TableView } from '@jc/types';
+import { AUTO_REBUY_MAX_TIMES, SETTINGS_COLOR_VISIONS, type ChatMessage, type TableView } from '@jc/types';
 import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { InstallSettingsLazy } from '../components/InstallLazy';
 import { RefillHintLazy } from '../components/RefillHintLazy';
 import { MemberName, RoleBadge } from '../components/MemberName';
+import { PresenceModePicker } from '../components/Presence';
 import { useAmounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -427,9 +428,10 @@ function SettingsSyncLine() {
 /** Sound, table look and language; from the header it also offers logout (`onLogout`), at a table its invite link (`top`). */
 export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean; onClose: () => void; onLogout?: () => void; top?: ReactNode }) {
   const { t, locale } = useI18n();
-  const { chooseLocale } = useAuth();
+  const { me, chooseLocale } = useAuth();
   const prefs = usePrefs();
   const audio = useAudioSettings();
+  const cvName = useId();
   // Opening the settings reads the account's again unless they were a moment ago (another device may have changed them).
   useEffect(() => {
     if (open) pullSettings();
@@ -440,6 +442,15 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
         {top && (
           <>
             {top}
+            <div className="jc-divider" />
+          </>
+        )}
+        {me && (
+          <>
+            <section className="flex flex-col gap-3">
+              <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-ink-300">{t('presence.title')}</h4>
+              <PresenceModePicker />
+            </section>
             <div className="jc-divider" />
           </>
         )}
@@ -481,6 +492,21 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
             {t('settings.fourColor')}
             <input type="checkbox" checked={prefs.fourColor} onChange={(e) => setPrefs({ fourColor: e.target.checked })} className="size-4 accent-[var(--color-gold-500)]" />
           </label>
+          <fieldset data-testid="settings-color-vision">
+            <legend className="text-sm">{t('settings.colorVision')}</legend>
+            <p className="mt-0.5 text-xs text-ink-300">{t('settings.colorVisionHint')}</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {SETTINGS_COLOR_VISIONS.map((cv) => (
+                <label
+                  key={cv}
+                  className={cx('flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-xs font-semibold', prefs.colorVision === cv ? 'border-gold-400 text-gold-300' : 'border-white/10 text-ink-200')}
+                >
+                  <input type="radio" name={cvName} value={cv} checked={prefs.colorVision === cv} onChange={() => setPrefs({ colorVision: cv })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" />
+                  {t(`settings.cv.${cv}` as MsgKey)}
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <label className="flex items-center justify-between gap-3 text-sm">
             {t('settings.beginner')}
             <input type="checkbox" checked={prefs.beginner} onChange={(e) => setPrefs({ beginner: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-beginner" />

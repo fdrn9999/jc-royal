@@ -10,20 +10,34 @@ const loadNotices = () => (notices ??= import('../legal/privacyNotice').then((m)
 export interface Agreements {
   age14: boolean;
   privacy: boolean;
+  /** The two optional push consents: off unless ticked, never needed to sign up, not part of "agree to all". */
+  pushService: boolean;
+  pushNight: boolean;
 }
+export const NO_AGREEMENTS: Agreements = { age14: false, privacy: false, pushService: false, pushNight: false };
 
-const box = 'size-[18px] shrink-0 cursor-pointer accent-gold-500';
+const box = 'size-[18px] shrink-0 cursor-pointer accent-gold-500 disabled:cursor-not-allowed';
 
 function Required() {
   const { t } = useI18n();
   return <span className="mr-1 font-semibold text-gold-300">[{t('consent.required')}]</span>;
 }
 
-/** Sign-up agreements: "agree to all", 14+ confirmation and the privacy notice (expandable). */
+function Optional() {
+  const { t } = useI18n();
+  return <span className="mr-1 font-semibold text-ink-300">[{t('consent.optional')}]</span>;
+}
+
+/**
+ * Sign-up agreements: "agree to all" (the required items), 14+ confirmation and the privacy notice (expandable), then
+ * the two optional push consents, each with what it covers. No browser permission is asked here: a push needs this
+ * device's permission as well, asked in My page when the member turns pushes on.
+ */
 export function SignupConsent({ value, onChange }: { value: Agreements; onChange: (v: Agreements) => void }) {
   const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
   const noticeId = useId();
+  const pushId = useId();
   const all = value.age14 && value.privacy;
   const [notice, setNotice] = useState<Record<'ko' | 'en', PrivacyNotice> | 'error' | null>(null);
   useEffect(() => {
@@ -42,7 +56,7 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
     <fieldset className="break-keep rounded-xl border border-white/10 bg-ink-900/60">
       <legend className="sr-only">{t('consent.title')}</legend>
       <label className="flex cursor-pointer items-start gap-3 border-b border-white/10 px-4 py-3.5">
-        <input type="checkbox" className={cx(box, 'mt-0.5')} checked={all} onChange={(e) => onChange({ age14: e.target.checked, privacy: e.target.checked })} />
+        <input type="checkbox" className={cx(box, 'mt-0.5')} checked={all} onChange={(e) => onChange({ ...value, age14: e.target.checked, privacy: e.target.checked })} />
         <span>
           <span className="block text-sm font-semibold text-ivory">{t('consent.all')}</span>
           <span className="mt-0.5 block text-xs text-ink-400">{t('consent.allHint')}</span>
@@ -101,7 +115,51 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
             </a>
           </div>
         )}
-        <p className="pt-1 text-xs text-ink-400">
+      </div>
+      <div className="flex flex-col gap-2 border-t border-white/10 px-4 py-3" role="group" aria-labelledby={`${pushId}-title`}>
+        <p id={`${pushId}-title`} className="sr-only">
+          {t('consent.pushGroup')}
+        </p>
+        <label className="flex cursor-pointer items-start gap-3 py-1 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            className={cx(box, 'mt-0.5')}
+            checked={value.pushService}
+            onChange={(e) => onChange({ ...value, pushService: e.target.checked, pushNight: e.target.checked && value.pushNight })}
+            aria-describedby={`${pushId}-service`}
+            data-testid="consent-push-service"
+          />
+          <span>
+            <Optional />
+            {t('consent.pushService')}
+            <span id={`${pushId}-service`} className="mt-0.5 block text-xs text-ink-400">
+              {t('consent.pushServiceHint')}
+            </span>
+          </span>
+        </label>
+        <label className={cx('flex items-start gap-3 py-1 text-sm', value.pushService ? 'cursor-pointer text-ink-200' : 'cursor-not-allowed text-ink-400')}>
+          <input
+            type="checkbox"
+            className={cx(box, 'mt-0.5')}
+            checked={value.pushNight}
+            disabled={!value.pushService}
+            onChange={(e) => onChange({ ...value, pushNight: e.target.checked })}
+            aria-describedby={`${pushId}-night`}
+            data-testid="consent-push-night"
+          />
+          <span>
+            <Optional />
+            {t('consent.pushNight')}
+            <span id={`${pushId}-night`} className="mt-0.5 block text-xs text-ink-400">
+              {t('consent.pushNightHint')}
+              {!value.pushService && ` ${t('consent.pushNightNeedsService')}`}
+            </span>
+          </span>
+        </label>
+        <p className="text-xs text-ink-400">{t('consent.pushLater')}</p>
+      </div>
+      <div className="px-4 pb-3">
+        <p className="text-xs text-ink-400">
           <a href="/terms" target="_blank" rel="noopener" className="underline underline-offset-2 hover:text-gold-300" data-testid="consent-terms-link">
             {t('consent.termsLink')}
           </a>

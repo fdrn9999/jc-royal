@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { I18nProvider, initialLocale, loadLocale, useI18n } from './lib/i18n';
 import { startInstallWatch } from './lib/install';
 import { applyInitialTheme, closeAccount, openAccount, setSyncState } from './lib/prefs';
+import { startPresence } from './lib/presence';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { LobbyPage } from './pages/Lobby';
 
@@ -129,6 +130,38 @@ function AcademySync() {
   return null;
 }
 
+/** Tells friends this member is here while signed in (lib/presence.ts); signed out, or another account, it stops. */
+function PresenceSync() {
+  const { me } = useAuth();
+  useEffect(() => (me ? startPresence(me.id) : undefined), [me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+/**
+ * Push notifications in this browser (lib/push.ts): the service worker is told who is signed in, and a tapped push
+ * opens its page here. Loaded only once the sign-in is known, and does nothing where pushes were never turned on.
+ */
+function PushSync() {
+  const { me, loading } = useAuth();
+  const id = me?.id ?? null;
+  useEffect(() => {
+    if (loading) return;
+    let gone = false;
+    let stop: (() => void) | undefined;
+    import('./lib/push').then(
+      (m) => {
+        if (!gone) stop = m.startPush(id, (url) => void router.navigate(url));
+      },
+      () => undefined,
+    );
+    return () => {
+      gone = true;
+      stop?.();
+    };
+  }, [id, loading]);
+  return null;
+}
+
 /**
  * The account's settings and favourite tables while someone is signed in (prefs.ts); signed out, or another account,
  * the previous one's leave the screen. The sync loads on demand: the settings already apply from this device meanwhile.
@@ -237,6 +270,8 @@ const render = () =>
         <AuthProvider>
           <AcademySync />
           <SettingsSync />
+          <PresenceSync />
+          <PushSync />
           <RouterProvider router={router} />
         </AuthProvider>
       </I18nProvider>

@@ -12,6 +12,15 @@ export const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
   return next();
 };
 
+/** requireUser for the presence heartbeat: the same check, without sliding the session (no D1 write). */
+export const requireUserQuiet: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const resolved = await resolveSession(c, 'user', { touch: false });
+  if (!resolved) fail(401, 'unauthorized', 'login required');
+  c.set('user', resolved.user);
+  c.set('session', resolved.session);
+  return next();
+};
+
 /**
  * Admin console guard. The role is read from D1 on every request (never taken
  * from the client) and only the separate admin session cookie is accepted.

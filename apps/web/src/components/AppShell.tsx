@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useTopOnNewPage } from '../lib/scroll';
 import { useUnread } from '../lib/unread';
+import { PresenceMenu } from './Presence';
 import { ServiceBanner } from './ServiceBanner';
 
 /** Links to /privacy and /terms (public pages), shown in page footers. */
@@ -51,7 +52,7 @@ export function BalancePill({ amount }: { amount: number }) {
 function CountBadge({ n, testId, className = '' }: { n: number; testId?: string; className?: string }) {
   if (n <= 0) return null;
   return (
-    <span className={`grid min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-bold leading-4 text-white ${className}`} data-testid={testId}>
+    <span className={`grid min-w-4 place-items-center rounded-full bg-danger-strong px-1 text-[10px] font-bold leading-4 text-white ${className}`} data-testid={testId}>
       {n > 99 ? '99+' : n}
     </span>
   );
@@ -122,6 +123,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
                 <CountBadge n={unread} testId="unread-badge" className="absolute -right-0.5 -top-0.5" />
               </Link>
+            )}
+            {me && (
+              <span className="hidden lg:inline">
+                <PresenceMenu />
+              </span>
             )}
             <span className="hidden xl:inline"><LangToggle /></span>
             <button type="button" className="rounded-full p-2 text-ink-200 hover:text-ivory" onClick={() => setSettings(true)} aria-label={t('settings.title')} data-testid="settings-open">

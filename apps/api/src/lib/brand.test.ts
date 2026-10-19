@@ -80,10 +80,10 @@ describe('manifestChecks', () => {
     icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }],
   };
 
-  it('passes a complete manifest, and reports the missing service worker as a deliberate note', () => {
+  it('passes a complete manifest, and reports the push-only service worker (no cache) as a deliberate note', () => {
     const checks = manifestChecks(good, index);
     expect(checks.filter((c) => c.status === 'fail' || c.status === 'warn')).toEqual([]);
-    expect(checks.find((c) => c.id === 'serviceWorker')).toMatchObject({ status: 'info', value: false });
+    expect(checks.find((c) => c.id === 'serviceWorker')).toMatchObject({ status: 'info', value: 'push-only' });
     expect(status(checks, 'maskable')).toBe('info');
   });
 

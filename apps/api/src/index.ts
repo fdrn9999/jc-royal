@@ -2,6 +2,7 @@ import { createDb } from '@jc/db';
 import { Hono, type Context } from 'hono';
 import type { AppEnv, Env } from './env';
 import { housekeeping } from './lib/housekeeping';
+import { flushPush } from './lib/notify';
 import { sharePageResponse } from './lib/og';
 import { countOps } from './lib/ops';
 import { sweepReferrals } from './lib/referral';
@@ -17,9 +18,14 @@ import { messageRoutes } from './routes/messages';
 import { reportRoutes } from './routes/reports';
 import { roomRoutes } from './routes/rooms';
 import { serviceRoutes } from './routes/service';
-import { blockRoutes, dmRoutes, friendRoutes } from './routes/social';
+import { notificationRoutes } from './routes/notifications';
+import { presenceRoutes } from './routes/presence';
+import { blockRoutes, dmRoutes, friendPresenceRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 import { tournamentRoutes } from './routes/tournaments';
+
+/** wrangler.jsonc `triggers`: every minute, the push outbox; any other run is the daily one. */
+const PUSH_CRON = '* * * * *';
 
 const app = new Hono<AppEnv>();
 
@@ -32,6 +38,11 @@ app.use('/api/*', csrfGuard);
 
 app.get('/api/health', (c) => c.json({ ok: true, env: c.env.ENVIRONMENT, at: Date.now() }));
 app.route('/api/auth', authRoutes);
+// Before meRoutes and friendRoutes: these check the sign-in without sliding it and answer before those routers'
+// requireUser would run (a use('*') of a router mounted at the same prefix applies to every path under it).
+app.route('/api/me', presenceRoutes);
+app.route('/api/me', notificationRoutes);
+app.route('/api/friends', friendPresenceRoutes);
 app.route('/api/me', meRoutes);
 app.route('/api/me', myCommunityRoutes);
 app.route('/api/board', boardRoutes);
@@ -86,9 +97,15 @@ export default {
    * Cron trigger (wrangler.jsonc `triggers`): rolls up the day that ended into the operations statistics (before the
    * housekeeping deletes old activity markers), deletes expired short-lived rows, then wakes rooms whose close or idle
    * close stalled, and settles referrals waiting for a payout (lib/referral.ts). Awaited, so a failure shows as a failed
-   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest.
+   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest. The minute trigger only sends
+   * the push outbox (lib/notify.ts), and without the push keys returns before touching D1.
    */
-  async scheduled(_event, env) {
+  async scheduled(event, env) {
+    if (event.cron === PUSH_CRON) {
+      const sent = await flushPush(env, { limit: 50 });
+      if (sent.claimed) console.log('push outbox', JSON.stringify(sent));
+      return;
+    }
     let failed: unknown = null;
     try {
       console.log('stats rollup', JSON.stringify(await rollup(env.DB, { maxChunks: 12 })));

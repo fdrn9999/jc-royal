@@ -5,14 +5,18 @@
  */
 import { resolve } from 'node:path';
 import { Client, PASSWORD, signupBody } from './client';
+import { startPushSink, type PushSink } from './push-sink';
 import { prepareState, root, startWorker, type RunningWorker } from './worker';
 
 let worker: RunningWorker | undefined;
+let sink: PushSink | undefined;
 
 export async function setup() {
   if (process.env.TEST_BASE_URL) return;
   const state = resolve(root, 'tests/.state/main');
   await prepareState(state);
+  sink = await startPushSink();
+  process.env.TEST_PUSH_SINK = sink.url;
   worker = await startWorker(Number(process.env.TEST_PORT ?? 8799), state);
   process.env.TEST_BASE_URL = worker.url;
   await bootstrapAdmin(worker.url);
@@ -36,4 +40,5 @@ export async function bootstrapAdmin(url: string) {
 
 export async function teardown() {
   await worker?.stop();
+  await sink?.close();
 }

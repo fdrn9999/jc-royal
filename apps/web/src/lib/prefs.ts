@@ -69,7 +69,7 @@ const devicePrefs = () => {
 function publish() {
   const next = viewOf(account, uid ? {} : devicePrefs());
   if (JSON.stringify(next) !== JSON.stringify(view)) view = next;
-  document.documentElement.dataset.theme = view.prefs.theme;
+  applyLook();
   for (const l of listeners) l();
 }
 
@@ -225,5 +225,11 @@ export function applyInitialTheme() {
   const last = readStore(LAST_KEY);
   const stored = last ? readStore(accountKey(last)) : null;
   view = viewOf(stored !== null ? parseAccount(stored) : null, stored !== null ? {} : devicePrefs());
+  applyLook();
+}
+
+/** The table theme and the colour vision mode, on <html> (styles.css reads both). */
+function applyLook() {
   document.documentElement.dataset.theme = view.prefs.theme;
+  document.documentElement.dataset.cv = view.prefs.colorVision;
 }

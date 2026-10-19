@@ -92,7 +92,7 @@ export function AcademyPage() {
             </Button>
             <Button size="lg" variant="outline" onClick={() => nav('/academy/review')} data-testid="academy-review">
               {tr(T.review)}
-              {weakTopics(p).length > 0 && <span className="ml-1 rounded-full bg-danger px-1.5 text-[11px] text-white">{weakTopics(p).length}</span>}
+              {weakTopics(p).length > 0 && <span className="ml-1 rounded-full bg-danger-strong px-1.5 text-[11px] text-white">{weakTopics(p).length}</span>}
             </Button>
           </div>
         </div>

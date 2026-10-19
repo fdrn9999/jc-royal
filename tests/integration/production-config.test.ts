@@ -35,6 +35,15 @@ describe('production addresses', () => {
     expect(c.workers_dev).not.toBe(false);
   });
 
+  // Web Push: the contact the push services see is the site; the key pair is never in a config (both are secrets), and
+  // the local push stand-in the tests use (PUSH_SINK_URL) is never set for production (notify.ts refuses it there too).
+  it.each([undefined, 'production'])('push settings (%s)', (env) => {
+    const c = read('api', env);
+    expect(c.vars.VAPID_SUBJECT).toBe('https://jc-royal.site');
+    for (const name of ['VAPID_PRIVATE_KEY', 'VAPID_PUBLIC_KEY', 'PUSH_SINK_URL']) expect(c.vars[name], name).toBeUndefined();
+    expect(c.triggers.crons).toEqual(['30 18 * * *', '* * * * *']);
+  });
+
   it('the game worker has no public address', () => {
     const c = read('game-worker', 'production');
     expect(c.routes ?? []).toEqual([]);

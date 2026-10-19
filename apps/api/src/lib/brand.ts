@@ -135,9 +135,10 @@ export function manifestChecks(m: Record<string, unknown> | null, index: HeadMet
     { id: 'manifestLink', status: index.links.manifest?.length ? 'ok' : 'fail', value: index.links.manifest?.[0] ?? null },
     { id: 'appleIcon', status: index.links['apple-touch-icon']?.length ? 'ok' : 'warn', value: index.links['apple-touch-icon']?.[0] ?? null },
     { id: 'https', status: SITE.startsWith('https://') ? 'ok' : 'fail', value: SITE },
-    // No service worker on purpose: game, sign-in and private card data are never cached offline. Browsers that still
-    // want one for their install prompt show none; the site is installed from the browser menu there.
-    { id: 'serviceWorker', status: 'info', value: false },
+    // A service worker for push notifications only (apps/web/public/sw.js), installed when a member turns pushes on in
+    // a browser: no fetch handler and no cache, so game, sign-in and private card data are never stored offline.
+    // Browsers that want an offline-capable one for their install prompt show none; the site is installed from the menu.
+    { id: 'serviceWorker', status: 'info', value: 'push-only' },
   ];
 }
 

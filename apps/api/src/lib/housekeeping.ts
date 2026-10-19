@@ -1,5 +1,8 @@
 import { ACTIVE_DAYS_MAX_RETENTION, ACTIVE_DAYS_RETENTION, OPS_RETENTION_MS, statsDay } from '@jc/db';
 
+/** Push outbox rows (sent, skipped, failed or expired; never what a push said) are kept this long, for the dedupe keys and the hourly cap. */
+export const PUSH_EVENT_RETENTION_MS = 7 * 24 * 60 * 60_000;
+
 /**
  * Daily clean-up of rows that are only needed for a short time, run by the cron trigger in wrangler.jsonc (the
  * `scheduled` handler in index.ts). Every delete is bounded by a time that is at least a day in the past, so a live
@@ -11,7 +14,7 @@ export const HOUSEKEEPING_GRACE_MS = 24 * 60 * 60_000;
 export async function housekeeping(db: D1Database, now = Date.now()) {
   const before = now - HOUSEKEEPING_GRACE_MS;
   const today = statsDay(now);
-  const [sessions, passwordResets, emailVerifications, rateLimits, opsMetrics, activeDays] = await db.batch([
+  const [sessions, passwordResets, emailVerifications, rateLimits, opsMetrics, activeDays, pushEvents, pushDevices] = await db.batch([
     // Signed-out, idle-expired and remember-me sessions that ran out: their IP and User-Agent go with them.
     db.prepare('DELETE FROM sessions WHERE expires_at < ?1').bind(before),
     // Reset links last 30 minutes, used or not.
@@ -30,6 +33,10 @@ export async function housekeeping(db: D1Database, now = Date.now()) {
         `DELETE FROM active_days WHERE day < MAX(?2, MIN(?1, COALESCE((SELECT n - 29 FROM daily_stats WHERE day = 0 AND metric = 'rolled_through'), ?2)))`
       )
       .bind(today - ACTIVE_DAYS_RETENTION, today - ACTIVE_DAYS_MAX_RETENTION),
+    // The push outbox: every event, a week after it happened (a pending one has long expired by then).
+    db.prepare('DELETE FROM notification_events WHERE created_at < ?1').bind(now - PUSH_EVENT_RETENTION_MS),
+    // Browsers registered in a sign-in that no longer exists (the sessions deleted above included): their endpoint and keys go.
+    db.prepare('DELETE FROM push_subscriptions WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = push_subscriptions.session_id)'),
   ]);
   return {
     sessions: sessions!.meta.changes,
@@ -38,5 +45,7 @@ export async function housekeeping(db: D1Database, now = Date.now()) {
     rateLimits: rateLimits!.meta.changes,
     opsMetrics: opsMetrics!.meta.changes,
     activeDays: activeDays!.meta.changes,
+    pushEvents: pushEvents!.meta.changes,
+    pushDevices: pushDevices!.meta.changes,
   };
 }

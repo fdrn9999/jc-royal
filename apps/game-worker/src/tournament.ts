@@ -7,7 +7,8 @@
  * next hand from being dealt, `runClock` starts it again from there when a hand is dealt, and moves past the levels
  * whose time is up. The level is fixed at the deal, so a hand in progress keeps its blinds.
  */
-import { advanceLevel, rankBusts, TOURNAMENT_FINISH_LINGER_MS, type BlindLevel, type TournamentStatus, type TournamentTimeBank } from '@jc/types';
+import { outboxForEntries } from '@jc/db';
+import { advanceLevel, isKstNight, rankBusts, TOURNAMENT_FINISH_LINGER_MS, type BlindLevel, type TournamentStatus, type TournamentTimeBank } from '@jc/types';
 import { maintenanceQuery, toMaintenance, type Maintenance } from './settlement';
 
 export interface TournamentEntryRow {
@@ -328,5 +329,23 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
   const res = await d1.batch(stmts);
   const back = res[res.length - 2]?.results[0] as { status?: string; pauseRequested?: number } | undefined;
   const status = back && STATUSES.includes(back.status as TournamentStatus) ? (back.status as TournamentStatus) : null;
+  if (finish && status === 'finished') {
+    // The result's push (apps/api/src/lib/notify.ts sends it, the minute cron), after the finish is saved and never with
+    // it: once per member however often this is written, and only for a finish of the last hour.
+    try {
+      await outboxForEntries(d1, {
+        tournamentId: t.id,
+        type: 'tournament_result',
+        statuses: ['eliminated', 'won'],
+        prefix: 'tournament_result',
+        url: `/tournaments/${t.id}`,
+        guard: `tn.status = 'finished' AND tn.finished_at >= ${Math.floor(now - 3_600_000)}`,
+        now,
+        night: isKstNight(now),
+      }).run();
+    } catch (e) {
+      console.warn('tournament result push not queued', e instanceof Error ? e.message : String(e));
+    }
+  }
   return { status, pauseRequested: back?.pauseRequested === 1, maintenance: toMaintenance(res[res.length - 1]?.results[0] as Maintenance | undefined) };
 }

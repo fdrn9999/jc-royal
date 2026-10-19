@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { PublicRole } from './social';
+import { PushConsentSchema } from './notifications';
 import { BOT_LEVELS, SUPPORTED_MAX_SEATS, type BotLevel } from './table';
 
 export const NICKNAME_RE = /^[\p{L}\p{N}_]{2,16}$/u;
@@ -55,6 +56,8 @@ export const RegisterSchema = z.object({
   emailVerificationToken: z.string().min(20).max(200).optional(),
   /** A referral code (from the link's `?ref=` or typed); empty is no code. Checked by the server: `referral_invalid`. */
   referralCode: z.string().max(40).optional(),
+  /** The two optional push consents (never needed to sign up; night counts only with service). */
+  pushConsent: PushConsentSchema.optional(),
 });
 export const EmailVerificationRequestSchema = z.object({ email: EmailSchema, locale: LocaleSchema.default('ko') });
 export const EmailVerificationConfirmSchema = z.object({ email: EmailSchema, code: z.string().regex(/^\d{6}$/) });

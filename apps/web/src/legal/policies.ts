@@ -21,7 +21,7 @@ export interface PolicyDoc {
 }
 
 /** Date this draft was written. The effective date is set only after legal review. */
-export const POLICY_DRAFT_DATE = '2026-10-16';
+export const POLICY_DRAFT_DATE = '2026-10-19';
 const [y, m, d] = POLICY_DRAFT_DATE.split('-').map(Number);
 
 export const LEGAL_DRAFT: Record<'ko' | 'en', string> = {
@@ -48,6 +48,9 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           '남용 방지: 요청 횟수를 세기 위한 기록(IP 주소, 이메일 주소 또는 회원 번호를 키로 사용)',
           '추천: 내 추천 코드, 추천한 회원과 가입한 회원, 보상 금액·상태·지급 일시, 가입 때 쓴 이메일 주소와 접속 네트워크를 서버의 비밀 키로 일방향 변환한 값(해시), 추천한 회원과 같은 IP 주소였는지 여부',
           '선택: 프로필 이미지 주소(URL)',
+          '알림: 푸시 알림 동의와 야간 알림 동의 여부, 동의·철회 이력(안내문 버전, 일시, 가입 화면과 설정 화면 중 어디서 했는지. IP 주소는 기록하지 않음), 알림 종류별 켜기·끄기, 보낼 알림의 처리 기록(받는 회원, 알림 종류, 열 화면의 주소, 처리 상태와 일시. 알림 문구나 메시지 내용은 저장하지 않음)',
+          '푸시 알림을 켠 브라우저: 브라우저가 만든 푸시 수신 주소와 암호화 키, 브라우저·운영체제 이름(예: "Chrome · Android"), 등록·마지막 전송 성공·실패 일시, 등록한 로그인 세션',
+          '접속 상태: 친구에게 보일 접속 상태의 공개 방식(자동·자리 비움·오프라인으로 표시). 열어 둔 화면이 약 30초마다 보내는 신호(마지막 활동 뒤 지난 시간, 화면이 보이는지, 지금 열어 둔 1:1 대화)는 게임 서버의 메모리에만 90초 동안 두고 데이터베이스에 저장하지 않습니다.',
         ],
       },
       {
@@ -59,6 +62,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           '부정 로그인·부정 이용·괴롭힘 방지, 신고 처리와 이용 제한',
           '비밀번호 재설정 등 서비스 메일 발송(이용 언어 기준)',
           '서비스 안정성 확보와 개선을 위한 이용 통계',
+          '친구에게 접속 상태를 보여 주고, 동의한 회원에게 1:1 메시지·게임 초대·친구 요청과 수락·토너먼트 시작·취소·결과를 푸시 알림으로 알림',
         ],
       },
       {
@@ -74,17 +78,19 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           '게시글·댓글: 직접 삭제하면 바로 화면에서 숨기지만, 신고와 분쟁 대응을 위해 데이터베이스에는 남습니다.',
           '가상 칩 원장, 핸드·좌석 기록: 칩 총량 검증과 분쟁 대응을 위해 탈퇴 후에도 회원 번호(무작위 값)로 보관합니다.',
           '추천 기록: 추천 보상 지급의 근거로 탈퇴 후에도 회원 번호로 보관합니다. 가입 이메일 주소의 해시 값은 탈퇴 뒤 같은 메일함으로 다시 가입해 보상을 또 받는 것을 막기 위해 함께 남고, 접속 네트워크의 해시 값은 30일이 지나면 정리 작업에서 지웁니다. 추천 코드는 탈퇴하면 삭제합니다.',
+          '푸시 알림 등록: 그 브라우저에서 알림을 끄거나 기기 목록에서 지우거나, 로그아웃(다른 기기·모든 기기 로그아웃과 비밀번호 재설정 포함)하거나, 푸시 알림 동의를 철회하거나, 이용이 제한되면 바로 삭제합니다. 푸시 서비스가 없어진 주소라고 답하거나 연속 3번 전달을 거부하면 바로 삭제하고, 로그인 세션이 정리되면 그 세션에서 한 등록도 같은 정리 작업에서 삭제합니다.',
+          '보낼 알림의 처리 기록은 생긴 지 7일이 지나면 정리 작업에서 삭제합니다. 알림 동의·철회 이력은 동의의 증거로 보관하며 탈퇴 후에도 회원 번호로 남습니다. 접속 상태 신호는 저장하지 않습니다.',
           '신고 기록과 증거, 운영자 감사 기록은 5항과 6항을 따릅니다. 관계 법령이 보존을 요구하는 정보는 그 법령이 정한 기간 동안 보관합니다.',
         ],
         review:
-          '보관 기한을 정하지 않은 항목(1:1 대화, 직접 삭제한 게시글·댓글, 칩 원장·핸드 기록, 추천 기록과 가입 이메일의 해시 값)의 기한과, 탈퇴 후 가명으로 남기는 기록의 보관 근거는 법무 검토 후 확정합니다.',
+          '보관 기한을 정하지 않은 항목(1:1 대화, 직접 삭제한 게시글·댓글, 칩 원장·핸드 기록, 추천 기록과 가입 이메일의 해시 값, 알림 동의·철회 이력)의 기한과, 탈퇴 후 가명으로 남기는 기록의 보관 근거는 법무 검토 후 확정합니다.',
       },
       {
         heading: '4. 회원 탈퇴 시 처리',
         items: [
-          '바로 삭제: 로그인 세션, 친구·친구 요청·차단, 보내거나 받은 1:1 대화 전부(상대방 화면에서도 사라집니다), 운영자 쪽지함, 아카데미 진도와 배지, 쓰지 않은 비밀번호 재설정 링크, 추천 코드',
+          '바로 삭제: 로그인 세션, 친구·친구 요청·차단, 보내거나 받은 1:1 대화 전부(상대방 화면에서도 사라집니다), 운영자 쪽지함, 아카데미 진도와 배지, 쓰지 않은 비밀번호 재설정 링크, 추천 코드, 알림 설정, 푸시 알림을 켠 브라우저 등록, 알림 처리 기록',
           '복구할 수 없게 바꾸는 정보: 이메일 주소, 닉네임, 생년월일, 프로필 이미지, 비밀번호',
-          '남는 정보: 게시글·댓글(작성자를 "탈퇴한 회원"으로 표시), 가상 칩 원장, 핸드·좌석 기록, 회원이 했거나 받은 신고와 그 증거, 추천 기록(아직 지급하지 않은 보상은 지급하지 않고 닫음). 이 기록은 회원 번호(무작위 값)로만 남습니다. 다른 회원의 핸드 기록에는 탈퇴한 회원이 "deleted-…" 형태의 이름으로 보입니다.',
+          '남는 정보: 게시글·댓글(작성자를 "탈퇴한 회원"으로 표시), 가상 칩 원장, 핸드·좌석 기록, 회원이 했거나 받은 신고와 그 증거, 추천 기록(아직 지급하지 않은 보상은 지급하지 않고 닫음), 알림 동의·철회 이력. 이 기록은 회원 번호(무작위 값)로만 남습니다. 다른 회원의 핸드 기록에는 탈퇴한 회원이 "deleted-…" 형태의 이름으로 보입니다.',
           '남은 가상 칩은 소멸하며 복구할 수 없습니다.',
         ],
         review: '탈퇴 후 게시글·댓글을 남길지(또는 일정 기간 뒤 삭제할지)와 남기는 기록의 범위는 법무 검토가 필요합니다.',
@@ -116,16 +122,18 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         items: [
           'Cloudflare, Inc.: 웹 서버, 데이터베이스, 게임 서버 운영(1항의 모든 정보). 정보는 국외에 있는 Cloudflare 데이터 센터에서 저장·처리될 수 있고, Cloudflare의 운영 로그에 요청 주소·시각 등이 Cloudflare가 정한 기간 동안 남을 수 있습니다.',
           'Resend: 인증번호·비밀번호 재설정 등 서비스 메일 발송(이메일 주소와 메일 내용). 서버가 국외에 있을 수 있습니다.',
+          '브라우저의 푸시 서비스(Google·Mozilla·Apple·Microsoft 중 회원이 푸시 알림을 켠 브라우저가 쓰는 곳): 그 브라우저로 푸시 알림을 전달합니다. 알림 내용은 그 브라우저만 풀 수 있게 암호화해 보내므로, 푸시 서비스가 받는 것은 수신 주소와 보낸 시각·크기·유효 시간입니다. 서버가 국외에 있을 수 있습니다.',
           '서비스는 회원의 개인정보를 제3자에게 제공하지 않습니다. 제공이 필요해지면 사전에 별도 동의를 받습니다.',
         ],
         review:
-          '국외 이전 고지 사항(이전되는 국가, 이전 일시와 방법, 업체 연락처, 보유 기간)과 법령에 따른 제공 예외 문구는 법무 검토 후 확정합니다.',
+          '국외 이전 고지 사항(이전되는 국가, 이전 일시와 방법, 업체 연락처, 보유 기간), 브라우저 푸시 서비스로의 전달을 처리 위탁이나 국외 이전으로 고지할지, 법령에 따른 제공 예외 문구는 법무 검토 후 확정합니다.',
       },
       {
         heading: '8. 회원의 권리와 행사 방법',
         items: [
           '마이페이지에서 닉네임·프로필 이미지·이용 언어와 비밀번호를 바꾸고, 언제든 탈퇴할 수 있습니다.',
           '친구 설정에서 친구 요청을 받을 범위와 1:1 대화 알림을 정하고, 원하지 않는 회원을 차단할 수 있습니다. 1:1 대화는 친구끼리만 주고받을 수 있습니다.',
+          '마이페이지에서 접속 상태의 공개 방식을 바꾸고, 푸시 알림 동의와 야간(21시~다음 날 8시, 한국 시간) 알림 동의, 알림 종류를 언제든 켜거나 끄고, 푸시 알림을 켠 기기를 지울 수 있습니다.',
           '그 밖의 열람·정정·삭제·처리정지 요청은 12항의 문의 창구로 할 수 있습니다.',
         ],
         review: '열람 등 요청의 접수 창구, 처리 기한, 대리인을 통한 요청 절차는 법무 검토 후 확정합니다.',
@@ -137,6 +145,8 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           '생년월일은 만 14세 이상인지 확인하고 연령대별 이용 통계를 내는 데만 씁니다.',
           'IP 주소와 브라우저 정보는 로그인 세션 보안, 요청 횟수 제한, 운영자 조치 기록, 추천 보상의 단시간 다수 가입 확인(해시 값으로만 30일 보관)에만 씁니다. 같은 네트워크라는 이유만으로 추천 보상을 거절하지 않습니다.',
           '운영자가 1:1 대화를 볼 수 있는 범위는 신고된 메시지로 한정합니다.',
+          '접속 상태는 친구 요청을 수락해 친구가 된 회원에게만 접속 중·자리 비움·오프라인 세 가지로 보이고, 마지막 접속 시각은 보여 주지 않습니다. 관리자 화면에서도 회원의 접속 상태를 볼 수 없습니다.',
+          '푸시 알림에는 보낸 사람의 이름이나 메시지 내용 없이 "새 메시지" 같은 일반 문구만 담습니다. 광고성 알림과 친구 접속 알림은 보내지 않습니다.',
         ],
         review: '연령 확인에 생년월일 전체가 필요한지(출생 연도와 월만으로 충분한지)는 법무 검토가 필요합니다.',
       },
@@ -153,6 +163,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         items: [
           '쿠키는 로그인을 유지하는 데에만 씁니다. 광고·분석용 쿠키나 외부 추적 도구는 쓰지 않습니다.',
           '브라우저 저장소에는 이용 언어, 화면·게임 표시 설정, 자동 로그인 선택 여부, 채팅 음소거 목록, 아카데미 진도를 저장합니다. 아카데미 진도는 로그인하면 계정과 동기화되고, 나머지는 기기에만 남습니다.',
+          '푸시 알림을 켠 브라우저에는 알림을 보여 주는 서비스 워커가 설치되고, 다른 계정의 알림이 보이지 않도록 알림을 켠 회원 번호를 그 브라우저에 저장합니다. 서비스 워커는 페이지·로그인·게임 데이터를 저장하지 않습니다.',
         ],
       },
       {
@@ -186,6 +197,9 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           'Abuse prevention: request counters keyed by IP address, email address or member ID',
           'Referrals: your referral code, who invited whom, reward amounts, status and payment times, one-way values (hashes) made with the server\'s secret key from the email address and network used at sign-up, and whether the IP address matched the inviting member\'s',
           'Optional: profile image address (URL)',
+          'Notifications: whether you agreed to push notifications and to night-time ones, the history of agreeing and withdrawing (notice version, time, and whether it was at sign-up or in settings; no IP address is recorded), each notification type on or off, and the processing record of notifications to send (recipient, type, the page to open, status and times; never the notification text or message content)',
+          'Browsers with push notifications on: the push address and encryption keys the browser created, the browser and operating system name (for example "Chrome · Android"), registration and last delivery success and failure times, and the sign-in session it was registered in',
+          'Status: how your status is shown to friends (automatic, away, or shown as offline). The signal an open page sends about every 30 seconds (time since your last activity, whether the page is in view, the 1:1 conversation open) is held only in the game server\'s memory for 90 seconds and never stored in the database.',
         ],
       },
       {
@@ -197,6 +211,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           'To prevent unauthorized sign-ins, abuse and harassment, and to handle reports and restrictions',
           'To send service mail such as password reset links, in your preferred language',
           'To keep usage statistics that keep the Service stable and improve it',
+          'To show your status to friends, and to send push notifications of 1:1 messages, game invites, friend requests and acceptances, and tournament starts, cancellations and results to members who agreed',
         ],
       },
       {
@@ -212,17 +227,19 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           'Posts and comments: when you delete one it is hidden at once, but it stays in the database for reports and disputes.',
           'Virtual chip ledger, hand and seat records: kept after account deletion under your member ID (a random value), to verify chip totals and resolve disputes.',
           'Referral records: kept after account deletion under your member ID, as the basis of the rewards paid. The hash of the sign-up email address stays with them so that signing up again with the same inbox does not earn another reward; the hash of the network is removed by the clean-up job after 30 days. Your referral code is deleted when you delete your account.',
+          'Push registrations: deleted at once when you turn notifications off in that browser or remove it from the device list, sign out (including signing out other devices or every device, and a password reset), withdraw push consent, or are restricted. Also deleted at once when the push service says the address no longer exists or refuses delivery 3 times in a row, and by the clean-up job when the sign-in session it was made in is cleaned up.',
+          'The processing record of notifications is deleted by the clean-up job 7 days after it was made. The history of agreeing to and withdrawing notifications is kept as evidence of consent, and remains under your member ID after account deletion. Status signals are not stored.',
           'Reports, evidence and operator audit records follow sections 5 and 6. Information that a law requires us to keep is kept for the period that law sets.',
         ],
         review:
-          'Retention periods for items with no fixed period (1:1 messages, deleted posts and comments, chip ledger and hand records, referral records and the sign-up email hash) and the legal basis for keeping pseudonymous records after account deletion will be settled after legal review.',
+          'Retention periods for items with no fixed period (1:1 messages, deleted posts and comments, chip ledger and hand records, referral records and the sign-up email hash, the notification consent history) and the legal basis for keeping pseudonymous records after account deletion will be settled after legal review.',
       },
       {
         heading: '4. When you delete your account',
         items: [
-          'Deleted at once: sign-in sessions, friends, friend requests and blocks, every 1:1 message you sent or received (it also disappears for the other person), your operator inbox, Academy progress and badges, unused password reset links, and your referral code',
+          'Deleted at once: sign-in sessions, friends, friend requests and blocks, every 1:1 message you sent or received (it also disappears for the other person), your operator inbox, Academy progress and badges, unused password reset links, your referral code, notification settings, browsers registered for push notifications, and the notification processing record',
           'Replaced so it cannot be restored: email address, nickname, date of birth, profile image and password',
-          'What remains: posts and comments (the author is shown as "Withdrawn member"), the virtual chip ledger, hand and seat records, reports you made or received with their evidence, and referral records (rewards not yet paid are closed unpaid). These remain only under your member ID (a random value). In other players\' hand history you appear under a name like "deleted-…".',
+          'What remains: posts and comments (the author is shown as "Withdrawn member"), the virtual chip ledger, hand and seat records, reports you made or received with their evidence, referral records (rewards not yet paid are closed unpaid), and the notification consent history. These remain only under your member ID (a random value). In other players\' hand history you appear under a name like "deleted-…".',
           'Remaining virtual chips are forfeited and cannot be restored.',
         ],
         review: 'Whether posts and comments should remain after account deletion (or be deleted after a period), and the scope of records kept, needs legal review.',
@@ -254,16 +271,18 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         items: [
           'Cloudflare, Inc.: web servers, database and game servers (all information in section 1). Information may be stored and processed in Cloudflare data centers outside Korea, and Cloudflare\'s operational logs may hold request addresses and times for the period Cloudflare sets.',
           'Resend: delivery of service mail such as verification codes and password reset links (email address and message content). Its servers may be outside Korea.',
+          'Browser push services (Google, Mozilla, Apple or Microsoft, whichever the browser you turned push notifications on in uses): delivery of push notifications to that browser. The content is encrypted so only that browser can read it; the push service receives the push address and the time, size and lifetime of each notification. Its servers may be outside Korea.',
           'We do not provide your personal information to third parties. If that becomes necessary, we will ask for your separate consent first.',
         ],
         review:
-          'The details required for transfers abroad (destination countries, when and how data is transferred, processor contacts, retention periods) and wording for disclosures required by law will be settled after legal review.',
+          'The details required for transfers abroad (destination countries, when and how data is transferred, processor contacts, retention periods), whether delivery through browser push services is disclosed as processing or a transfer abroad, and wording for disclosures required by law will be settled after legal review.',
       },
       {
         heading: '8. Your rights and how to use them',
         items: [
           'On My Page you can change your nickname, profile image, language and password, and delete your account at any time.',
           'In friend settings you can choose who may send you friend requests, turn 1:1 message notifications on or off, and block members. 1:1 messages can be exchanged only between friends.',
+          'On My Page you can change how your status is shown, turn push notifications, night-time notifications (21:00 to 08:00 Korean time) and each notification type on or off at any time, and remove devices with push notifications on.',
           'For other requests to access, correct, delete or stop processing your information, use the contact in section 12.',
         ],
         review: 'The contact point and deadline for such requests, and the procedure for requests made through a representative, will be settled after legal review.',
@@ -275,6 +294,8 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
           'Date of birth is used only to confirm you are 14 or older and for usage statistics by age group.',
           'IP addresses and browser information are used only for sign-in session security, request limits, records of operator actions and spotting many referral sign-ups in a short time (kept only as a hash, for 30 days). A shared network alone is never a reason to refuse a referral reward.',
           'Operators can see 1:1 messages only when they have been reported.',
+          'Your status is shown only to members who became your friends by an accepted friend request, and only as online, away or offline; the time you were last online is never shown. The admin console does not show members\' status either.',
+          'Push notifications carry only general wording such as "New message", never the sender\'s name or the message. We send no advertising notifications and no notifications that a friend came online.',
         ],
         review: 'Whether age checks need the full date of birth (or only the year and month) needs legal review.',
       },
@@ -291,6 +312,7 @@ export const PRIVACY_POLICY: Record<'ko' | 'en', PolicyDoc> = {
         items: [
           'Cookies are used only to keep you signed in. We use no advertising or analytics cookies and no third-party trackers.',
           'Browser storage holds your language, display and table settings, whether you chose to stay signed in, your chat mute list and Academy progress. Academy progress syncs with your account while you are signed in; the rest stays on your device.',
+          'A browser with push notifications on gets a service worker that shows them, and stores the member ID that turned them on so another account\'s notifications are never shown there. The service worker stores no pages, sign-in or game data.',
         ],
       },
       {
