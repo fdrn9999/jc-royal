@@ -62,18 +62,14 @@ export function PlayingCard({
   );
 }
 
-/** Casino denomination tiers (Elite-Poker), tuned to the JC ROYAL palette. */
-const TIERS = [
-  { min: 100_000, base: '#1d1d22', face: '#3a3a44' },
-  { min: 25_000, base: '#1f4f6b', face: '#2c6f93' },
-  { min: 5_000, base: '#5b2f78', face: '#7b45a0' },
-  { min: 1_000, base: '#9c7414', face: '#c9a227' },
-  { min: 500, base: '#6e2050', face: '#8d2f69' },
-  { min: 100, base: '#202026', face: '#383842' },
-  { min: 25, base: '#155a37', face: '#1f7a4b' },
-  { min: 5, base: '#8f2622', face: '#b23a35' },
-  { min: 0, base: '#2f5c8f', face: '#4176b0' },
-];
+/**
+ * Casino denomination tiers (Elite-Poker), tuned to the JC ROYAL palette. The colours are the --chip-tN tokens in
+ * styles.css, which the colour vision modes swap where neighbouring tiers would read as one.
+ */
+const TIERS = [100_000, 25_000, 5_000, 1_000, 500, 100, 25, 5, 0].map((min, i, all) => {
+  const n = all.length - 1 - i;
+  return { min, base: `var(--chip-t${n}-base)`, face: `var(--chip-t${n}-face)` };
+});
 
 export function chipTier(amount: number) {
   return TIERS.find((t) => amount >= t.min) ?? TIERS[TIERS.length - 1]!;

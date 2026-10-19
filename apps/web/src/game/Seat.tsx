@@ -223,14 +223,15 @@ export function Seat(p: SeatProps) {
   const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0) || !!shown;
   const cards = s.holeCards && s.holeCards.length ? s.holeCards : (shown ?? (showCards ? [null, null] : []));
   const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${p.amounts.fmt(s.lastAction.amount, true)}` : ''}` : null;
+  // The colour vision modes swap these (styles.css); the label always says the action too.
   const actionTone =
     s.lastAction?.type === 'fold'
-      ? 'text-[#f0a0a2]'
+      ? 'text-[color:var(--act-fold-text)]'
       : s.lastAction?.type === 'raise' || s.lastAction?.type === 'bet'
         ? 'text-gold-300'
         : s.lastAction?.type === 'allin'
-          ? 'text-[#f5a860]'
-          : 'text-[#9fd8b6]';
+          ? 'text-[color:var(--act-allin-text)]'
+          : 'text-[color:var(--act-call-text)]';
 
   return (
     <div
@@ -383,7 +384,7 @@ export function Seat(p: SeatProps) {
               {won}
             </span>
           ) : allIn ? (
-            <span className="rounded-full bg-[#e08227]/20 px-1.5 text-[#f5a860]">{t('table.allin')}</span>
+            <span className="rounded-full bg-[#e08227]/20 px-1.5 text-[color:var(--act-allin-text)]">{t('table.allin')}</span>
           ) : s.state === 'sittingOut' ? (
             <span className="text-ink-400">{t('table.sittingOut')}</span>
           ) : !s.connected ? (

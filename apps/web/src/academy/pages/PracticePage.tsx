@@ -20,7 +20,7 @@ import { PracticeSession } from '../practice/runner';
 import { buildScenarios, type PracticeQuestion, type Scenario } from '../practice/scenarios';
 import { completeScenario, missScenario, recordAnswer, SCENARIO_IDS, startScenario, updateProgress, useProgress, type ScenarioId, type Topic } from '../progress';
 import { track } from '../sync';
-import { HandRankingChart, UI } from '../ui';
+import { HandRankingChart, ResultMark, UI } from '../ui';
 
 const T = {
   title: l('Lesson 5 · 연습 게임', 'Lesson 5 · Practice'),
@@ -270,7 +270,7 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
 
       {/* coach */}
       <div className="z-30 px-3 pt-2">
-        <div className={cx('mx-auto max-w-2xl rounded-xl border px-3 py-2 text-sm', warn ? 'jc-shake border-danger/50 bg-danger/10 text-[#f3c3c4]' : 'border-gold-500/30 bg-ink-900/90 text-ivory')} role="status" aria-live="polite" data-testid="coach">
+        <div className={cx('mx-auto max-w-2xl rounded-xl border px-3 py-2 text-sm', warn ? 'jc-shake border-danger/50 bg-danger/10 text-danger-soft' : 'border-gold-500/30 bg-ink-900/90 text-ivory')} role="status" aria-live="polite" data-testid="coach">
           {warn ?? (finished ? tr(sc.outro) : heroTurn && step ? tr(step.coach) : thinking ? tr(T.thinking).replace('{name}', thinking) : !s.currentStep() && !s.settled ? tr(T.auto) : tr(sc.intro))}
         </div>
       </div>
@@ -304,15 +304,16 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
                     data-choice={o.id}
                     onClick={() => answer(o.id)}
                     className={cx(
-                      'jc-tap min-h-12 rounded-xl border px-2 text-sm font-semibold',
+                      'jc-tap flex min-h-12 items-center justify-center gap-1.5 rounded-xl border px-2 text-sm font-semibold',
                       asked.picked === o.id ? (o.id === asked.answer ? 'jc-pop border-success bg-success/15' : 'jc-shake border-danger bg-danger/10') : 'border-white/10 bg-ink-850 text-ivory',
                     )}
                   >
-                    {o.label}
+                    {asked.picked === o.id && <ResultMark ok={o.id === asked.answer} />}
+                    <span>{o.label}</span>
                   </button>
                 ))}
               </div>
-              {asked.picked && asked.picked !== asked.answer && <p className="text-xs text-[#f3c3c4]">{tr(UI.wrong)}</p>}
+              {asked.picked && asked.picked !== asked.answer && <p className="text-xs text-danger-soft">{tr(UI.wrong)}</p>}
               {asked.picked === asked.answer && (
                 <Button onClick={closeQuestion} data-testid="practice-continue">
                   {tr(UI.correct)} {tr(UI.next)} →
@@ -322,7 +323,7 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
           )}
           {fault && (
             <div className="jc-panel pointer-events-auto flex w-full max-w-md flex-col gap-2 border-danger/50 p-4" role="alert" data-testid="practice-fault">
-              <p className="text-sm text-[#f3c3c4]">{tr(T.fault)}</p>
+              <p className="text-sm text-danger-soft">{tr(T.fault)}</p>
               <Button onClick={onAgain}>{tr(T.again)}</Button>
             </div>
           )}

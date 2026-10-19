@@ -53,7 +53,7 @@ export function ProgressPage() {
             {weakTopics(p).map(({ topic, count }) => (
               <li key={topic} className="flex items-center justify-between gap-2">
                 <span className="text-ivory">
-                  {tr(TOPIC_INFO[topic].name)} <span className="font-mono text-xs text-[#f3c3c4]">×{count}</span>
+                  {tr(TOPIC_INFO[topic].name)} <span className="font-mono text-xs text-danger-soft">×{count}</span>
                 </span>
                 <Link to={`${LESSONS[TOPIC_INFO[topic].lesson].to}?step=${TOPIC_INFO[topic].step}`} className="jc-tap rounded px-2 py-1.5 text-xs text-gold-300 hover:underline">
                   {tr(LESSONS[TOPIC_INFO[topic].lesson].title)} →

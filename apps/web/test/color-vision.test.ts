@@ -9,7 +9,12 @@ import { SETTINGS_COLOR_VISIONS, type ColorVision } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 
 const css = readFileSync(fileURLToPath(new URL('../../../packages/ui/src/styles.css', import.meta.url)), 'utf8');
-const actionBar = readFileSync(fileURLToPath(new URL('../src/game/ActionBar.tsx', import.meta.url)), 'utf8');
+const src = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+const actionBar = src('../src/game/ActionBar.tsx');
+const seat = src('../src/game/Seat.tsx');
+const chips = src('../../../packages/ui/src/poker/cards.tsx');
+const academyUi = src('../src/academy/ui.tsx');
+const QUIZ_PAGES = ['ui.tsx', 'pages/PracticePage.tsx', 'pages/FreePracticePage.tsx', 'pages/ReviewPage.tsx', 'pages/ProgressPage.tsx'].map((f) => src(`../src/academy/${f}`));
 
 const vars = (body: string) => Object.fromEntries([...body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
 const theme = vars(/@theme\s*\{([^{}]*)\}/.exec(css)![1]!);
@@ -101,6 +106,8 @@ const SHOULD_DIFFER = 15;
 const SUITS_DIFFER = 20;
 
 const ACTIONS = ['fold', 'check', 'call', 'raise', 'allin'] as const;
+/** The chip denominations, 0 to 100K. */
+const CHIP_TIERS = 9;
 const CARD_FACE = ['#fffdf7', '#f3ecdc'];
 const PANELS = ['--color-ink-950', '--color-ink-900', '--color-ink-850', '--color-ink-800', '--color-ink-700'];
 
@@ -174,6 +181,27 @@ describe.each(SETTINGS_COLOR_VISIONS)('colour vision mode %s', (mode) => {
       for (let j = i + 1; j < states.length; j++) expect(apart(c(states[i]!), c(states[j]!), vision), `${states[i]}/${states[j]}`).toBeGreaterThanOrEqual(SUITS_DIFFER);
   });
 
+  it('a seat’s last action reads on the panels; fold and call far apart, every other pair apart (the word is there too)', () => {
+    const tone = { fold: c('--act-fold-text'), call: c('--act-call-text'), allin: c('--act-allin-text'), raise: c('--color-gold-300') };
+    for (const [k, v] of Object.entries(tone)) for (const bg of panels) expect(contrast(v, bg), `${k} on ${bg}`).toBeGreaterThanOrEqual(TEXT(mode));
+    expect(apart(tone.fold, tone.call, vision)).toBeGreaterThanOrEqual(MUST_DIFFER);
+    const keys = Object.keys(tone) as (keyof typeof tone)[];
+    for (let i = 0; i < keys.length; i++)
+      for (let j = i + 1; j < keys.length; j++) expect(apart(tone[keys[i]!], tone[keys[j]!], vision), `${keys[i]}/${keys[j]}`).toBeGreaterThanOrEqual(SHOULD_DIFFER);
+  });
+
+  it('neighbouring chip denominations stay apart, rim and face (the amount is written beside every stack)', () => {
+    for (let n = 0; n + 1 < CHIP_TIERS; n++)
+      for (const part of ['base', 'face']) expect(apart(c(`--chip-t${n}-${part}`), c(`--chip-t${n + 1}-${part}`), vision), `t${n}/t${n + 1} ${part}`).toBeGreaterThanOrEqual(SHOULD_DIFFER);
+  });
+
+  it('a quiz answer: its light right and wrong text reads on the panels, and the two stay apart (with ✓ and ✗)', () => {
+    for (const k of ['--color-success-soft', '--color-danger-soft']) for (const bg of panels) expect(contrast(c(k), bg), `${k} on ${bg}`).toBeGreaterThanOrEqual(TEXT(mode));
+    expect(apart(c('--color-success-soft'), c('--color-danger-soft'), vision)).toBeGreaterThanOrEqual(SHOULD_DIFFER);
+    // The ✓ or ✗ disc: a dark mark on the success or danger fill.
+    for (const k of ['--color-success', '--color-danger']) expect(contrast(c(k), c('--color-ink-950')), k).toBeGreaterThanOrEqual(TEXT(mode));
+  });
+
   it('secondary text reads on the panels', () => {
     for (const bg of panels) expect(contrast(c('--color-ink-300'), bg), bg).toBeGreaterThanOrEqual(mode === 'highContrast' ? 7 : 4.5);
     if (mode === 'highContrast') for (const bg of panels) expect(contrast(c('--color-ink-400'), bg), bg).toBeGreaterThanOrEqual(7);
@@ -194,6 +222,17 @@ describe('where the colours are used', () => {
     expect(css).toMatch(/\.jc-card \.suit-red \{ color: var\(--suit-red\); \}/);
     expect(css).toMatch(/\.jc-card \.suit-black \{ color: var\(--suit-black\); \}/);
     expect(css).toMatch(/\[data-four-color='1'\] \.jc-card\[data-card\$='d'\] \.jc-card-face \{ color: var\(--suit-diamond\); \}/);
+  });
+
+  it('seat labels, chips and quiz answers take their colours from the tokens; a quiz answer also has its ✓ or ✗', () => {
+    for (const k of ['fold', 'call', 'allin']) expect(seat).toContain(`text-[color:var(--act-${k}-text)]`);
+    expect(/const actionTone =[^;]*;/.exec(seat)![0]).not.toContain('#');
+    expect(chips).toContain('base: `var(--chip-t${n}-base)`, face: `var(--chip-t${n}-face)`');
+    expect(chips).not.toMatch(/base: '#/);
+    for (const page of QUIZ_PAGES) expect(page).not.toMatch(/text-\[#(bfe9d0|f3c3c4)\]/);
+    // The picked card, choice and comparison each show the mark (the practice table's options too).
+    expect(academyUi.match(/<ResultMark /g)).toHaveLength(3);
+    expect(QUIZ_PAGES[1]).toContain('<ResultMark ok={o.id === asked.answer} />');
   });
 
   it('high contrast outlines every action button, with a focus ring of its own', () => {
