@@ -28,6 +28,16 @@ export interface AcademyProgressDto {
   badges: BadgeDto[];
 }
 
+/**
+ * The Advanced GTO Academy's progress, stored apart from the beginner course's (same PUT body, AcademyProgressPutSchema).
+ * It earns no badges.
+ */
+export interface GtoProgressDto {
+  data: Record<string, unknown> | null;
+  version: number | null;
+  updatedAt: number | null;
+}
+
 const ItemId = z.string().regex(/^[A-Za-z0-9:_-]{1,48}$/);
 export const AcademyEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('question'), id: ItemId, correct: z.boolean() }),

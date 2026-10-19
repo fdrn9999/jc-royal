@@ -5,6 +5,8 @@ import { setPrefs, usePrefs } from '../../lib/prefs';
 import { l, useTr, type L } from '../content';
 import { isDone, LESSON_IDS, nextLesson, percent, SCENARIO_IDS, updateProgress, useProgress, weakTopics, type LessonId } from '../progress';
 import { BadgeShelf } from '../Badges';
+import { modulesDone, useGtoProgress } from '../gto/progress';
+import { GTO_MODULES } from '../gto/types';
 import { UI } from '../ui';
 
 export const LESSONS: Record<LessonId, { n: number; title: L; desc: L; to: string; icon: string }> = {
@@ -34,6 +36,15 @@ const T = {
   review: l('복습·랜덤 퀴즈', 'Review & random quiz'),
   badges: l('배지', 'Badges'),
   scenarios: l('연습 시나리오', 'Practice scenarios'),
+  courses: l('과정 선택', 'Choose a course'),
+  basicCourse: l('초보 과정', 'Beginner course'),
+  basicDesc: l('카드·족보·규칙·베팅 액션부터 연습 게임까지 5개 레슨', 'Five lessons: cards, rankings, rules and betting, then practice games'),
+  basicGo: l('목차 보기', 'See the lessons'),
+  gtoCourse: l('고급 GTO 과정', 'Advanced GTO course'),
+  gtoDesc: l('레인지·팟 오즈·기대값·베팅 크기·MDF·익스플로잇까지 10개 모듈과 계산 도구', 'Ten modules with calculators: ranges, pot odds, expected value, bet sizing, MDF and exploits'),
+  gtoPrereq: l('권장 선수 지식: 족보·홀덤 규칙·베팅 액션 (초보 과정을 끝내지 않아도 시작할 수 있습니다)', 'Good to know first: hand rankings, the rules and betting actions (you can start without finishing the beginner course)'),
+  gtoGo: l('고급 과정 열기', 'Open the advanced course'),
+  modules: l('모듈 {n}/{m} 완료', '{n}/{m} modules done'),
 };
 
 const CHOICES: { label: L; to: string; testid: string }[] = [
@@ -53,6 +64,7 @@ export function AcademyPage() {
   const pct = percent(p);
   const next = nextLesson(p);
   const started = Object.keys(p.lessons).length > 0;
+  const gtoDone = modulesDone(useGtoProgress(me?.id));
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5" data-testid="academy">
@@ -121,7 +133,26 @@ export function AcademyPage() {
         </section>
       )}
 
-      <section className="flex flex-col gap-2">
+      <section className="flex flex-col gap-2" data-testid="academy-courses">
+        <h2 className="text-sm font-bold tracking-[0.06em] text-gold-300">{tr(T.courses)}</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <a href="#academy-toc" className="jc-tap jc-panel flex flex-col gap-1 p-4 transition hover:border-gold-500/40" data-testid="academy-basic">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">Beginner · {pct}%</span>
+            <span className="font-bold text-ivory">{tr(T.basicCourse)}</span>
+            <span className="text-xs text-ink-300">{tr(T.basicDesc)}</span>
+            <span className="mt-1 text-xs font-semibold text-gold-300">{tr(T.basicGo)} ↓</span>
+          </a>
+          <Link to="/academy/gto" className="jc-tap jc-panel flex flex-col gap-1 border-gold-500/40 p-4 transition hover:border-gold-500/70" data-testid="academy-gto">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">Advanced · GTO · {tr(T.modules, { n: gtoDone, m: GTO_MODULES.length })}</span>
+            <span className="font-bold text-ivory">{tr(T.gtoCourse)}</span>
+            <span className="text-xs text-ink-300">{tr(T.gtoDesc)}</span>
+            <span className="text-[11px] text-ink-400">{tr(T.gtoPrereq)}</span>
+            <span className="mt-1 text-xs font-semibold text-gold-300">{tr(T.gtoGo)} →</span>
+          </Link>
+        </div>
+      </section>
+
+      <section id="academy-toc" className="flex scroll-mt-20 flex-col gap-2">
         <h2 className="text-sm font-bold tracking-[0.06em] text-gold-300">{tr(T.toc)}</h2>
         <div className="grid gap-2 sm:grid-cols-2">
           {LESSON_IDS.map((id) => {

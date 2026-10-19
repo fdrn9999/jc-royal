@@ -480,6 +480,18 @@ export const academyProgress = sqliteTable('academy_progress', {
   updatedAt: integer('updated_at').notNull(),
 });
 
+/**
+ * Advanced GTO Academy progress, kept apart from the beginner course's row: an older client reading academy_progress
+ * would drop fields it does not know, so the two never share one JSON. Same shape and rules (versioned client JSON,
+ * last write wins by updated_at); no badges, chips or ledger.
+ */
+export const academyGtoProgress = sqliteTable('academy_gto_progress', {
+  userId: text('user_id').primaryKey().references(() => users.id),
+  data: text('data').notNull(),
+  version: integer('version').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 /** Cosmetic achievements. Never linked to chips or the ledger. */
 export const userBadges = sqliteTable(
   'user_badges',

@@ -98,7 +98,7 @@
 | 무료 칩·봇·추천 | `refill_claims`, `bot_fund`, `bot_events`, `referral_codes`, `referrals` |
 | 토너먼트 | `tournament_templates`, `tournaments`, `tournament_entries` |
 | 커뮤니티·소셜 | `posts`, `post_hands`, `comments`, `messages`, `friendships`, `user_blocks`, `direct_messages`, `reports`, `report_events` |
-| 아카데미 | `academy_progress`, `user_badges`, `academy_stats` |
+| 아카데미 | `academy_progress`, `academy_gto_progress`(고급 GTO 진도), `user_badges`, `academy_stats` |
 | 운영 | `admin_audit_log`, `admin_permissions`, `admin_notes`, `service_notices`, `maintenance_windows`, `ops_metrics`, `active_days`, `daily_stats`, `rate_limits` |
 
 **관리자 권한**: 요청마다 역할 권한 표와 그 관리자의 기능 스위치(`admin_permissions`, 기본 거부)를 함께 검사한다. 최고관리자는 스위치를 읽지 않는다. 경제 정책·대회 구조처럼 위임하지 않는 작업은 최고관리자 전용이다(`docs/ADMIN_SECURITY.md`).

@@ -34,7 +34,7 @@
 | `notification_consents` | 회원 ID, 동의 종류(`service`·`night`), 동의·철회, 문구 버전, 경로(`signup`·`settings`), 시각. **IP·기기 정보 없음** | 동의를 받았다는 증거. 회원에게 보이지 않고 관리자 화면에도 없다 |
 | `push_subscriptions` | 회원 ID, 등록한 로그인 세션 ID, **푸시 서비스 주소(endpoint)와 그 SHA-256 해시**, 암호화 키(`p256dh`·`auth`), 대략의 브라우저 이름("Chrome · Android"), 만든·고친·마지막 성공·실패 시각, 연속 실패 수 | 회원이 이 브라우저에서 켰을 때만. 주소와 키는 발송에만 쓰고 응답·로그·관리자 화면·감사 기록에 넣지 않는다(기기 목록에는 이름과 시각만). 주소는 허용된 푸시 서비스(Google·Mozilla·Apple·Microsoft)만 받는다 |
 | `notification_events` | 회원 ID, 종류, 앱 안 이동 경로(예: `/friends/<회원 ID>`, `/tournaments/<ID>`), 중복 방지·묶음 키, 상태·사유·시도 횟수, 만든·보낸 시각. **메시지 본문·닉네임·금액은 없다** | 푸시 발송 대기열(`lib/notify.ts`). 푸시에 실리는 글은 보낼 때 정해진 일반 문구("새 메시지가 도착했습니다" 등)로만 만든다 |
-| `academy_progress`, `user_badges` | 회원 ID, 진도, 배지 | `academy_stats`에는 회원 ID가 없다(익명 집계) |
+| `academy_progress`, `academy_gto_progress`, `user_badges` | 회원 ID, 진도(초급·고급 GTO 따로), 배지 | `academy_stats`에는 회원 ID가 없다(익명 집계) |
 | `admin_audit_log` | 운영자 ID, 조치, 대상, 상세, **운영자 IP** | 5절 |
 | `admin_notes` | 대상 회원 ID, 작성한 운영자 ID, 본문(500자), 작성 시각 | 운영자 인수인계용 내부 메모, 회원에게 보이지 않음. 이메일·전화번호·주민등록번호·카드 번호처럼 보이는 본문은 거절(5절) |
 | `ops_metrics` | 없음. 1분 단위 시각, 지표 이름(`ws_retry`·`ws_drop`·`room_error`·`api_error`), 횟수만 | 관리자 대시보드의 오류·연결 추이. 회원 ID·IP·테이블 ID를 넣지 않는다 |
@@ -60,7 +60,7 @@
 | 인증번호, 재설정 링크, 요청 횟수 기록 | 만료(집계 창 종료)까지 | 만료 1일 뒤 정리 크론이 삭제. 인증번호는 새 요청 때도 지운다 | `lib/housekeeping.ts`, `routes/auth.ts` |
 | 1:1 대화 | **기한 없음**(검토 필요) | 두 사람 중 한 명이 탈퇴하면 양쪽 메시지 전부 삭제 | `/me/delete` |
 | 친구·요청·차단 | 해제할 때까지 | 해제·탈퇴 시 삭제 | `routes/social.ts`, `/me/delete` |
-| 운영자 쪽지, 아카데미 진도·배지 | 탈퇴까지 | 탈퇴 시 삭제 | `/me/delete` |
+| 운영자 쪽지, 아카데미 진도(초급·고급 GTO)·배지 | 탈퇴까지 | 탈퇴 시 삭제 | `/me/delete` |
 | 관리자 내부 메모 | 탈퇴까지(작성자나 슈퍼관리자가 먼저 지울 수 있음) | 탈퇴 시 그 회원에 대한 메모 삭제. 삭제 감사 기록에는 본문이 없음 | `/me/delete`, `routes/admin.ts` |
 | 테이블 채팅 | 테이블별 최근 50줄 | 테이블이 닫히고 24시간(`PLAYER_REPORT_WINDOW_MS`) 뒤 삭제 | `apps/game-worker/src/room.ts` 알람 |
 | 게시글·댓글 | **기한 없음**(검토 필요) | 회원 삭제는 숨김만. 탈퇴 후 남은 글은 "탈퇴한 회원"으로 표시 | `routes/board.ts` |

@@ -33,6 +33,37 @@ describe('academy progress sync', () => {
     expect((await put(a.client, { version: 'x', updatedAt: 1, data: {} })).status).toBe(400);
     expect((await new Client().get('/api/academy/progress')).status).toBe(401);
   });
+
+  it('keeps the Advanced GTO progress in its own row: last write wins, the beginner row untouched, no badges or chips', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    const gtoPut = (c: Client, body: unknown) => c.req('PUT', '/api/academy/gto/progress', body);
+    expect((await a.client.get('/api/academy/gto/progress')).body).toEqual({ data: null, version: null, updatedAt: null });
+    const beginner = { v: 2, lessons: { cards: done(100) }, practice: {}, updatedAt: 90 };
+    expect((await put(a.client, { version: 2, updatedAt: 90, data: beginner })).status).toBe(200);
+    const before = (await a.client.get('/api/auth/me')).body.balance;
+    const ledger = (await a.client.get('/api/me/ledger')).body.length;
+
+    const g1 = { v: 1, updatedAt: 300, modules: { foundations: { startedAt: 250, step: 2, completedAt: 290 } }, quiz: { f1: { correct: 1, wrong: 0, last: true } } };
+    const r1 = await gtoPut(a.client, { version: 1, updatedAt: 300, data: g1 });
+    expect(r1.status).toBe(200);
+    expect(r1.body).toEqual({ ok: true });
+    // A stale device's older copy does not overwrite it.
+    expect((await gtoPut(a.client, { version: 1, updatedAt: 200, data: { v: 1, modules: {} } })).status).toBe(200);
+    expect((await a.client.get('/api/academy/gto/progress')).body).toEqual({ data: g1, version: 1, updatedAt: 300 });
+    // The beginner course's row is separate and unchanged, GTO progress earns no badges, and the wallet and ledger are not touched.
+    const basic = (await a.client.get('/api/academy/progress')).body;
+    expect(basic.data).toEqual(beginner);
+    expect(basic.badges).toEqual([]);
+    expect((await a.client.get('/api/auth/me')).body.balance).toBe(before);
+    expect((await a.client.get('/api/me/ledger')).body.length).toBe(ledger);
+    // Other accounts never see it; bad payloads and anonymous callers are refused.
+    expect((await b.client.get('/api/academy/gto/progress')).body.data).toBeNull();
+    expect((await gtoPut(a.client, { version: 1, updatedAt: 400, data: { blob: 'x'.repeat(40_000) } })).status).toBe(400);
+    expect((await gtoPut(a.client, { version: 0, updatedAt: 400, data: {} })).status).toBe(400);
+    expect((await new Client().get('/api/academy/gto/progress')).status).toBe(401);
+    expect((await new Client().req('PUT', '/api/academy/gto/progress', { version: 1, updatedAt: 1, data: {} })).status).toBe(401);
+  });
 });
 
 const ALL_BADGES = ['academy-graduate', 'card-reader', 'first-step', 'hand-expert', 'practice-graduate', 'rule-keeper', 'sharp-eye'];

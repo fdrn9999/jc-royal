@@ -225,6 +225,13 @@
       "when": 1792400814428,
       "tag": "0031_vip",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1792405244165,
+      "tag": "0032_academy_gto",
+      "breakpoints": true
     }
   ]
 }

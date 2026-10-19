@@ -104,6 +104,8 @@ const loadMaintenance = () => import('./pages/Maintenance');
 const loadFriends = () => import('./pages/Friends');
 const loadMessages = () => import('./pages/Messages');
 const loadTournaments = () => import('./pages/Tournaments');
+/** The advanced (GTO) course is its own chunk: the beginner academy never fetches it. */
+const loadGto = () => import('./academy/gto/routes');
 
 /**
  * The table (its scene, layout, cues and controls) loads on demand as well, so sign-in and the lobby come up sooner.
@@ -257,6 +259,18 @@ const router = createBrowserRouter([
       { path: '/academy/practice', element: <Academy page="PracticeListPage" /> },
       { path: '/academy/progress', element: <Academy page="ProgressPage" /> },
       { path: '/academy/review', element: <Academy page="ReviewPage" /> },
+      {
+        path: '/academy/gto',
+        element: onDemand(loadGto, 'GtoLayout'),
+        children: [
+          { index: true, element: onDemand(loadGto, 'GtoHome') },
+          { path: 'quiz', element: onDemand(loadGto, 'GtoQuizPage') },
+          { path: 'hands', element: onDemand(loadGto, 'GtoHandsPage') },
+          { path: 'glossary', element: onDemand(loadGto, 'GtoGlossaryPage') },
+          { path: 'review', element: onDemand(loadGto, 'GtoReviewPage') },
+          { path: ':module', element: onDemand(loadGto, 'GtoModulePage') },
+        ],
+      },
       { path: '*', element: <NotFound /> },
     ],
   },

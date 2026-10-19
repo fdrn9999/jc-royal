@@ -104,6 +104,8 @@
 | GET | `/progress` | `{data, version, updatedAt, badges}`. 저장된 진도가 없으면 `data: null` |
 | PUT | `/progress` | `{version, updatedAt, data(≤32KB)}`. `updatedAt`이 더 새로울 때만 덮어씀(클라이언트가 로컬·서버 진도를 병합한 뒤 전송). 진도 중 아래 타당성 검사를 통과한 부분으로만 배지를 계산해 1회만 부여(`INSERT OR IGNORE`, 지급 시각은 처음 지급될 때 고정). 검사에 걸린 진도도 그대로 저장되며 배지만 주지 않음. 분당 60회 |
 | GET | `/badges` | 내 배지 |
+| GET | `/gto/progress` | 고급 GTO 아카데미 진도 `{data, version, updatedAt}`(초급 진도와 별도 행 `academy_gto_progress`). 없으면 모두 `null` |
+| PUT | `/gto/progress` | 본문은 `/progress`와 같음(`≤32KB`, `updatedAt`이 더 새로울 때만 덮어씀). 배지를 주지 않고 `{ok: true}`만 답함. 분당 60회 |
 | POST | `/events` | `{events: [{kind:'question', id, correct} \| {kind:'lesson'\|'scenario', id, phase:'start'\|'complete'}]}`(최대 50). 사용자 ID 없이 항목별 카운터와 그날의 일별 카운터(`daily_stats`의 `ac_*`, 운영 통계)만 증가. 분당 30회 |
 
 **배지의 성격:** 배지는 본인 학습 기록으로 받는 **장식용 표시**이며 공식 수료 증명이 아니다. 레슨·퀴즈는 브라우저에서 진행되고 서버가 채점하지 않으므로, 서버는 공부했다는 사실을 증명할 수 없다. 배지는 본인 화면(아카데미·진행 현황·마이페이지)에만 보이고, 다른 사용자·관리자 화면이나 게임 로직, 칩·원장에는 쓰이지 않는다. 화면에도 이 점을 안내한다.

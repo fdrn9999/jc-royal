@@ -389,6 +389,7 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.directMessages).where(or(eq(schema.directMessages.senderId, me.id), eq(schema.directMessages.recipientId, me.id))),
       db.delete(schema.messages).where(eq(schema.messages.userId, me.id)),
       db.delete(schema.academyProgress).where(eq(schema.academyProgress.userId, me.id)),
+      db.delete(schema.academyGtoProgress).where(eq(schema.academyGtoProgress.userId, me.id)),
       db.delete(schema.userBadges).where(eq(schema.userBadges.userId, me.id)),
       db.delete(schema.passwordResets).where(eq(schema.passwordResets.userId, me.id)),
       // Administrators' internal notes about the member (sanction reasons stay in the audit log).

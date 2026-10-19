@@ -3,7 +3,7 @@
  * statistics. Nothing here touches wallets, the chip ledger or game history.
  */
 import { schema, statsDay, statsIncrements, type AcademyMetric } from '@jc/db';
-import { AcademyEventsSchema, AcademyProgressPutSchema, BADGES, plausibleBadges, type AcademyProgressDto, type BadgeDto, type BadgeId } from '@jc/types';
+import { AcademyEventsSchema, AcademyProgressPutSchema, BADGES, plausibleBadges, type AcademyProgressDto, type BadgeDto, type BadgeId, type GtoProgressDto } from '@jc/types';
 import { eq } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
@@ -65,6 +65,29 @@ export const academyRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, badges: await badgesOf(c, uid) });
   })
   .get('/badges', async (c) => c.json(await badgesOf(c, c.var.user!.id)))
+  /** The Advanced GTO Academy's progress: its own row (academy_gto_progress), the same last-write-wins rule, no badges. */
+  .get('/gto/progress', async (c) => {
+    const row = await c.var.db.query.academyGtoProgress.findFirst({ where: eq(schema.academyGtoProgress.userId, c.var.user!.id) });
+    const out: GtoProgressDto = {
+      data: row ? (JSON.parse(row.data) as Record<string, unknown>) : null,
+      version: row?.version ?? null,
+      updatedAt: row?.updatedAt ?? null,
+    };
+    return c.json(out);
+  })
+  .put('/gto/progress', async (c) => {
+    const uid = c.var.user!.id;
+    await rateLimit(c, `academy-gto-put:${uid}`, 60, 60_000);
+    const body = await parseBody(c, AcademyProgressPutSchema);
+    await c.env.DB.prepare(
+      `INSERT INTO academy_gto_progress (user_id, data, version, updated_at) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, version = excluded.version, updated_at = excluded.updated_at
+       WHERE excluded.updated_at >= academy_gto_progress.updated_at`,
+    )
+      .bind(uid, JSON.stringify(body.data), body.version, body.updatedAt)
+      .run();
+    return c.json({ ok: true });
+  })
   /**
    * Anonymous counters: academy_stats never holds a user id. The id appears only in this request's rate-limit key,
    * a rate_limits row that the daily housekeeping deletes once its window is long over. The same events are added to
