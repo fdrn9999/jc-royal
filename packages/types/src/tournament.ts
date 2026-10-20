@@ -336,8 +336,8 @@ export interface TournamentTableView {
   playersLeft: number;
   entrants: number;
   startStack: number;
-  /** Places decided so far, best first. */
-  places: { nickname: string; place: number }[];
+  /** Places decided so far, best first (with the VIP color the member's name shows; looks only). */
+  places: { nickname: string; place: number; vip?: VipColor }[];
   /** The viewer: still playing, out (with place), the winner, stopped by an abort, or watching. */
   you: { status: 'playing' | 'eliminated' | 'won' | 'stopped' | 'watching'; place: number | null };
 }

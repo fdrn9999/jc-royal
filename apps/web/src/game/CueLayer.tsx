@@ -126,42 +126,48 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
   return { staged, flights: staged ? active!.plan.flights : [], start: active?.start ?? 0, arrival: hand && arrival.current?.id === hand.id ? arrival.current : null };
 }
 
-/** The running plan's chips, each flying at its time in the plan. */
-export function Flights({ flights, start, geometry, pot, amounts }: { flights: Flight[]; start: number; geometry: SeatGeometry[]; pot: Point; amounts: Amounts }) {
+/** The running plan's chips, each flying at its time in the plan. `box`: the table's size in px, which the flights move by. */
+export function Flights({ flights, start, geometry, pot, box, amounts }: { flights: Flight[]; start: number; geometry: SeatGeometry[]; pot: Point; box: { w: number; h: number }; amounts: Amounts }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-30" aria-hidden data-testid="flights">
       {flights.map((f) => {
         const g = geometry[f.seat];
         if (!g) return null;
         const [from, to] = f.kind === 'bet' ? [g.seat, g.bet] : f.kind === 'sweep' ? [g.bet, pot] : f.kind === 'return' ? [g.bet, g.seat] : [pot, g.seat];
-        return <FlyingChips key={`${start}-${f.id}`} flight={f} from={from} to={to} start={start} text={f.kind === 'payout' ? amounts.fmt(f.amount, true) : null} />;
+        return <FlyingChips key={`${start}-${f.id}`} flight={f} from={from} to={to} box={box} start={start} text={f.kind === 'payout' ? amounts.fmt(f.amount, true) : null} />;
       })}
     </div>
   );
 }
 
-function FlyingChips({ flight, from, to, start, text }: { flight: Flight; from: Point; to: Point; start: number; text: string | null }) {
+function FlyingChips({ flight, from, to, box, start, text }: { flight: Flight; from: Point; to: Point; box: { w: number; h: number }; start: number; text: string | null }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof el.animate !== 'function') return;
     // Drawn after its plan started (a resize, a redraw): the flight keeps its place in the plan.
     const late = performance.now() - start;
+    // Placed where it starts and moved from there by a transform only (with its opacity), which the compositor runs:
+    // moving left and top would lay the page out again every frame of the flight.
+    const dx = ((to.x - from.x) * box.w) / 100;
+    const dy = ((to.y - from.y) * box.h) / 100;
+    const lift = (4 * box.h) / 100;
     const anim = el.animate(
       [
-        { left: `${from.x}%`, top: `${from.y}%`, opacity: 0, transform: 'translate(-50%,-50%) scale(0.8)' },
+        { opacity: 0, transform: 'translate(0px,0px) scale(0.8)' },
         { opacity: 1, offset: 0.15 },
-        { left: `${(from.x + to.x) / 2}%`, top: `${(from.y + to.y) / 2 - 4}%`, transform: 'translate(-50%,-50%) scale(1.04)', offset: 0.5 },
+        { transform: `translate(${dx / 2}px,${dy / 2 - lift}px) scale(1.04)`, offset: 0.5 },
         { opacity: 1, offset: 0.85 },
-        { left: `${to.x}%`, top: `${to.y}%`, opacity: 0, transform: 'translate(-50%,-50%) scale(0.92)' },
+        { opacity: 0, transform: `translate(${dx}px,${dy}px) scale(0.92)` },
       ],
       { duration: flight.dur, delay: flight.at - late, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'both' },
     );
     return () => anim.cancel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flight, from.x, from.y, to.x, to.y]);
+  }, [flight, from.x, from.y, to.x, to.y, box.w, box.h]);
   return (
-    <div ref={ref} className="absolute" style={{ left: `${from.x}%`, top: `${from.y}%`, opacity: 0 }} data-flight={flight.kind} data-seat={flight.seat} data-amount={flight.amount}>
+    // Centred by `translate` (Tailwind's), which applies before the animated transform.
+    <div ref={ref} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${from.x}%`, top: `${from.y}%`, opacity: 0 }} data-flight={flight.kind} data-seat={flight.seat} data-amount={flight.amount}>
       <ChipStack amount={flight.amount} size={text ? '1.1rem' : '0.95rem'} label={!!text} text={text ?? undefined} />
     </div>
   );

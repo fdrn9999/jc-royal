@@ -246,7 +246,8 @@ export function estimateEquity(hole: readonly Card[], board: readonly Card[], op
 /**
  * The action a bot of this level takes. `rand` gives numbers in [0, 1) (tests pass a seeded one). `opts.style` sets
  * how it plays (tight, loose, aggressive, passive …); `opts.stats` gives each seat's counters from earlier hands, which
- * the levels that adapt read. Should anything in the strategy fail, the bot checks, or folds when it cannot.
+ * the levels that adapt read. Should anything in the strategy fail, the bot checks, or folds when it cannot (and
+ * `opts.onFallback` is told).
  */
 export function decideBot(level: BotLevel, v: BotView, rand: () => number = Math.random, opts: DecideOptions = {}): ActionRequest {
   let want: ActionRequest;
@@ -255,6 +256,7 @@ export function decideBot(level: BotLevel, v: BotView, rand: () => number = Math
     want = v.stage === 'preflop' ? preflopAct(spot) : postflopAct(spot);
   } catch {
     want = passive(v);
+    opts.onFallback?.();
   }
   const req = legalize(v, want);
   // Folding when checking is free is never right.

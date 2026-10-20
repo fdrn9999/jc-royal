@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const { t } = useI18n();
   const nav = useNavigate();
-  const { unread, dmUnread, friendRequests } = useUnread();
+  const { unread, dmUnread, friendRequests } = useUnread(me?.id ?? '');
   const [settings, setSettings] = useState(false);
   const social = dmUnread + friendRequests;
   useTopOnNewPage();

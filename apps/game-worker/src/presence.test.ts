@@ -124,6 +124,22 @@ describe('PresenceBook', () => {
     expect(b.viewing(T0 + 2 + PRESENCE_EXPIRE_MS, 'u1', 'dm:friend-1')).toBe(false);
   });
 
+  it('a visible page on the conversation whose member is away from it (no activity for five minutes) is not viewing', () => {
+    const b = new PresenceBook();
+    b.beat(T0, beat({ view: 'dm:friend-1', idleMs: PRESENCE_AWAY_MS - 1_000 }));
+    expect(b.viewing(T0, 'u1', 'dm:friend-1')).toBe(true);
+    // Still beating (the page is open and visible), but nothing done there since: their pushes go out again.
+    b.beat(T0 + 1_000, beat({ view: 'dm:friend-1', idleMs: PRESENCE_AWAY_MS + 1_000 }));
+    expect(b.viewing(T0 + 1_000, 'u1', 'dm:friend-1')).toBe(false);
+    // The member moves the mouse there again.
+    b.beat(T0 + 2_000, beat({ view: 'dm:friend-1', idleMs: 0 }));
+    expect(b.viewing(T0 + 2_000, 'u1', 'dm:friend-1')).toBe(true);
+    // Left idle on the desk while the member reads it on the phone: the phone counts.
+    b.beat(T0 + 3_000, beat({ view: 'dm:friend-1', idleMs: PRESENCE_AWAY_MS * 2 }));
+    b.beat(T0 + 3_000, beat({ conn: 'c2-phone', view: 'dm:friend-1', idleMs: 0 }));
+    expect(b.viewing(T0 + 3_000, 'u1', 'dm:friend-1')).toBe(true);
+  });
+
   it('shows a device no longer than its sign-in lasts, and records nothing for a sign-in that has run out', () => {
     const b = new PresenceBook();
     expect(b.beat(T0, beat({ until: T0 + 10_000 }))).toBe('online');

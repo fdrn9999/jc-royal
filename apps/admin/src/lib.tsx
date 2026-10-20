@@ -299,17 +299,23 @@ export function useData<T>(path: string | null) {
   // Only the newest request may change what is shown: an answer for an earlier path (a filter since changed) that
   // arrives late is dropped instead of replacing the newer list.
   const seq = useRef(0);
-  const reload = useCallback(async () => {
-    if (!path) return setLoading(false);
+  // true when this request's answer is what is shown now (not when it failed or a newer request took over).
+  const reload = useCallback(async (): Promise<boolean> => {
+    if (!path) {
+      setLoading(false);
+      return false;
+    }
     const mine = ++seq.current;
     setLoading(true);
     try {
       const d = await api<T>(path);
-      if (mine !== seq.current) return;
+      if (mine !== seq.current) return false;
       setData(d);
       setError(null);
+      return true;
     } catch (e) {
       if (mine === seq.current) setError(e);
+      return false;
     } finally {
       if (mine === seq.current) setLoading(false);
     }

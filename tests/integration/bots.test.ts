@@ -127,6 +127,13 @@ function autoplay(players: TableSocket[], choose: (s: TableView) => Choice) {
   };
 }
 
+/** A level's play counters for the admin console (`bt_<level>_<key>` in daily_stats), summed over all days. */
+async function botPlay(level: string) {
+  const rows = await d1<{ metric: string; n: number }>(`SELECT metric, SUM(n) AS n FROM daily_stats WHERE metric GLOB 'bt_${level}_*' GROUP BY metric`);
+  const n = (key: string) => Number(rows.find((r) => r.metric === `bt_${level}_${key}`)?.n ?? 0);
+  return { hands: n('hands'), decisions: n('decisions') };
+}
+
 const ids = (xs: string[]) => xs.map((x) => `'${x}'`).join(', ');
 /** Members' wallets + all bots' wallets − what the fund issued: unchanged across a test once nobody is seated. */
 async function books(members: string[], state?: string) {
@@ -404,6 +411,7 @@ describe('table bots', () => {
     const T = 'it-bot-yield';
     const [a, b] = await Promise.all([newUser(), newUser()]);
     const before = await books([a.me.id, b.me.id]);
+    const playedBefore = await botPlay('normal');
     const wa = await watch(a.client, T);
     await sit(wa, 0, 300);
     await wa.waitState((s) => isMyTurn(s) && s.seats[1]!.bot === 'normal' && s.seats[1]!.hasCards, 30_000, 'the member to act beside the bot');
@@ -427,6 +435,19 @@ describe('table bots', () => {
     await wa.waitState(empty, 90_000, 'the table to empty');
     await stop();
     await balanced(T, [a.me.id, b.me.id], before);
+
+    // The bot's play went into the statistics with the first hand it was not in, once per hand it was in, by level only.
+    const [withBot] = await d1<{ n: number }>(`SELECT COALESCE(SUM(bots), 0) AS n FROM hands WHERE table_id = '${T}' AND bots > 0`);
+    expect(Number(withBot!.n)).toBeGreaterThan(0);
+    const played = await botPlay('normal');
+    expect(played.hands - playedBefore.hands).toBe(Number(withBot!.n));
+    expect(played.decisions).toBeGreaterThanOrEqual(playedBefore.decisions);
+    const names = await d1<{ metric: string }>(`SELECT DISTINCT metric FROM daily_stats WHERE metric GLOB 'bt_*'`);
+    expect(names.every((r) => /^bt_(easy|normal|hard|expert)_[A-Za-z0-9]+$/.test(r.metric)), JSON.stringify(names)).toBe(true);
+    // The console sums the same counters over its period.
+    const play = (await admin.get('/api/admin/bots')).body.play as { level: string; hands: number }[];
+    expect(play.map((p) => p.level)).toEqual(['easy', 'normal', 'hard', 'expert']);
+    expect(play.find((p) => p.level === 'normal')!.hands).toBeGreaterThanOrEqual(played.hands - playedBefore.hands);
   }, 300_000);
 
   it('any administrator can stop the bots at once: they finish the hand and stand up, and only the super admin turns them on', async () => {

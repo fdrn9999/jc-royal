@@ -87,7 +87,7 @@ test('on a phone: the result of a save, a refused stale save and a chip adjustme
   await page.getByTestId('confirm-end').click();
   const reauth = page.getByTestId('reauth-confirm');
   await reauth.waitFor({ timeout: 15000 });
-  await page.getByRole('dialog').getByLabel(/비밀번호/).fill(PASSWORD);
+  await page.getByRole('dialog').getByLabel(/^비밀번호$/).fill(PASSWORD);
   await reauth.click();
   const note = page.getByTestId('feedback');
   await expect(note).toHaveText('저장되었습니다.');

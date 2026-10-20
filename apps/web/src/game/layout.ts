@@ -159,6 +159,8 @@ export interface TablePlan {
   /** Per seat index: where the seat is centred and where its bet is centred (px). */
   seats: Point[];
   bets: Point[];
+  /** Per seat index: the room the seat takes, from the top of what rises over its cards to its status line's bottom. */
+  rooms: Rect[];
   /** The pot, the board and the status line under them. */
   block: Rect;
   /** The centre of the pot row, where chips fly to and from. */
@@ -490,6 +492,7 @@ function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick
     potChip: s.d.potChip,
     seats: q.anchors,
     bets,
+    rooms: q.rects.map((r) => ({ x: r.l, y: r.t, w: r.r - r.l, h: r.b - r.t })),
     block: { x: q.block.l, y: q.block.t, w: q.block.r - q.block.l, h: q.block.b - q.block.t },
     pot: { x: cx, y: q.block.t + s.blk.potRowH / 2 },
     felt: { x: cx - fa, y: cy - fb, w: 2 * fa, h: 2 * fb },

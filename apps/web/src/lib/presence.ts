@@ -235,6 +235,9 @@ export function sortFriends<T extends { id: string }>(list: readonly T[], presen
     .map((x) => x.f);
 }
 
+/** Friends' status read longer ago than this is not shown as current (a hidden tab does not ask, nor a closed list). */
+const FRIENDS_STALE_MS = PRESENCE_POLL_MS * 2.5;
+
 let friends: Record<string, PresenceState> | null = null;
 let friendsAt = 0;
 let friendsLoading = false;
@@ -254,6 +257,8 @@ async function pollFriends(force = false) {
   const r = run;
   if (!r || friendsLoading || document.visibilityState !== 'visible') return;
   if (!force && Date.now() - friendsAt < PRESENCE_POLL_MS / 3) return;
+  // Back to a tab or a list after a while: what was read then goes while it is asked again, rather than show as current.
+  if (friends && Date.now() - friendsAt > FRIENDS_STALE_MS) setFriends(null);
   friendsLoading = true;
   try {
     const res = await api<FriendsPresenceDto>('/api/friends/presence');
@@ -262,7 +267,7 @@ async function pollFriends(force = false) {
     setFriends(res.presence);
   } catch {
     // A status that could not be read again for a while is not shown as if it were current.
-    if (run === r && friends && Date.now() - friendsAt > PRESENCE_POLL_MS * 2.5) setFriends(null);
+    if (run === r && friends && Date.now() - friendsAt > FRIENDS_STALE_MS) setFriends(null);
   } finally {
     friendsLoading = false;
   }
@@ -272,25 +277,31 @@ const onFriendsVisible = () => {
   if (document.visibilityState === 'visible') void pollFriends();
 };
 
+/** Friends' status as known now: null until known, and when it was not read for a while. */
+export const friendsPresence = () => friends;
+
+/** Asks for friends' status while a screen shows it (useFriendsPresence); the returned function stops watching. */
+export function watchFriendsPresence(): () => void {
+  if (watchers++ === 0) {
+    pollTimer = setInterval(() => void pollFriends(true), PRESENCE_POLL_MS);
+    document.addEventListener('visibilitychange', onFriendsVisible);
+  }
+  void pollFriends();
+  return () => {
+    if (--watchers === 0) {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+      document.removeEventListener('visibilitychange', onFriendsVisible);
+    }
+  };
+}
+
 /**
  * Friends' status (accepted friends only) while the calling screen is on: null until known, and when it could not be
  * read for a while. `refreshKey` asks again when it changes (the friends list changed).
  */
 export function useFriendsPresence(refreshKey?: unknown): Record<string, PresenceState> | null {
-  useEffect(() => {
-    if (watchers++ === 0) {
-      pollTimer = setInterval(() => void pollFriends(true), PRESENCE_POLL_MS);
-      document.addEventListener('visibilitychange', onFriendsVisible);
-    }
-    void pollFriends();
-    return () => {
-      if (--watchers === 0) {
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = null;
-        document.removeEventListener('visibilitychange', onFriendsVisible);
-      }
-    };
-  }, []);
+  useEffect(() => watchFriendsPresence(), []);
   useEffect(() => {
     if (refreshKey !== undefined) void pollFriends();
   }, [refreshKey]);
@@ -299,6 +310,6 @@ export function useFriendsPresence(refreshKey?: unknown): Record<string, Presenc
       friendListeners.add(cb);
       return () => friendListeners.delete(cb);
     },
-    () => friends,
+    friendsPresence,
   );
 }

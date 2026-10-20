@@ -139,6 +139,24 @@ describe('places', () => {
     expect([t.status, t.winnerId, playersLeft(t)]).toEqual(['finished', 'c', 1]);
   });
 
+  it("keeps a VIP member's name color on their place, from the seat they left or the entry D1 sent", () => {
+    const t = seeded(['a', 'b', 'c']);
+    const vip: Record<string, 'rose' | 'cyan'> = { a: 'rose', c: 'cyan' };
+    bustOut(t, dealt({ a: 300, b: 500, c: 700 }), new Map([['a', 0], ['b', 800], ['c', 700]]), 1000, (id) => vip[id]);
+    bustOut(t, dealt({ b: 800, c: 700 }), new Map([['b', 0], ['c', 1500]]), 2000, (id) => vip[id]);
+    expect(t.places.map((p) => [p.userId, p.place, p.vip ?? null])).toEqual([
+      ['a', 3, 'rose'],
+      ['b', 2, null],
+      ['c', 1, 'cyan'],
+    ]);
+    // Without a lookup, a place has no color key at all (as places stored before this).
+    const u = seeded(['a', 'b']);
+    bustOut(u, dealt({ a: 100, b: 2900 }), new Map([['a', 0], ['b', 3000]]), 1000);
+    expect(u.places.every((p) => !('vip' in p))).toBe(true);
+    const ended = seedTourney(row({ status: 'finished', entries: [{ ...entry('a', 'eliminated', 2), vip: 'gold' }, entry('b', 'won', 1)] }), 5_000);
+    expect(ended.places.map((p) => [p.userId, p.vip ?? null])).toEqual([['a', 'gold']]);
+  });
+
   it('a stop drops places D1 never took and leaves no winner', () => {
     const t = seeded(['a', 'b']);
     bustOut(t, dealt({ a: 100, b: 2900 }), new Map([['a', 0], ['b', 3000]]), 1000);

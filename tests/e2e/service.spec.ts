@@ -40,12 +40,12 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
   const page = await ctx.newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
   const reauth = async () => {
     const dialog = page.getByRole('dialog').filter({ has: page.getByTestId('reauth-confirm') });
-    await dialog.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+    await dialog.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
     await dialog.getByTestId('reauth-confirm').click();
   };
   /** Ends whatever maintenance this test left planned or running, so later tests can seat players. */
@@ -258,7 +258,7 @@ test('a dismissed general notice stays hidden on this device, but shows again on
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
   const call = (method: string, path: string, body?: unknown) =>

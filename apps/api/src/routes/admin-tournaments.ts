@@ -34,6 +34,7 @@ import type { AppEnv } from '../env';
 import { audit, searchAudit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
 import { queuePush } from '../lib/notify';
+import { pick } from '../lib/pick';
 import { roomCall } from '../lib/room';
 import {
   newTournamentId,
@@ -198,7 +199,7 @@ function templateOf(r: Record<string, unknown>): TournamentTemplateDto {
 }
 
 const STRUCTURE_KEYS = ['name', 'capacity', 'minPlayers', 'startStack', 'levels', 'levelMinutes', 'turnSeconds', 'timeBank', 'minHands', 'requireVerified', 'autoStart'] as const;
-const structureOf = (s: TournamentStructure): TournamentStructure => Object.fromEntries(STRUCTURE_KEYS.map((k) => [k, s[k]])) as unknown as TournamentStructure;
+const structureOf = (s: TournamentStructure): TournamentStructure => pick(s, STRUCTURE_KEYS);
 const sameStructure = (a: TournamentStructure, b: TournamentStructure) => JSON.stringify(structureOf(a)) === JSON.stringify(structureOf(b));
 
 async function loadTemplate(db: D1Database, id: string) {

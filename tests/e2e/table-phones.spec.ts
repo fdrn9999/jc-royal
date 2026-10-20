@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { checkOrCall, signUp, sitWith, test, widerThanDevice } from './helpers';
 import type { LayoutIssue } from './replay-layout';
-import { measureTable, smallTargets, type TableReport } from './table-layout';
+import { measureTable, smallTargets, tablePlaces, type TableReport } from './table-layout';
 
 /**
  * The live 6-seat table, one player with five bots, on phones held upright, from the smallest still in use (320×568)
@@ -91,11 +91,11 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
     expect(before.issues, `${sc.name} turn`).toEqual([]);
     expect(await smallTargets(p), `${sc.name} turn: small targets`).toEqual([]);
 
-    await raise.click();
+    // The table makes way for the panel a frame after it opens (once the stack's room is measured), in one move: the
+    // table's size is worked out with the room it gives, not measured a frame later (it moved twice; TEST_REPORT).
+    expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table moves once as the panel opens`).toBe(2);
     await expect(raise).toHaveAttribute('aria-expanded', 'true');
     await expect(bar.getByTestId('action-commit')).toBeVisible();
-    // The table makes way for the panel a frame or two after it opens (the stack's room is measured, then the table's
-    // box): it is read once it has.
     await expect.poll(async () => (await measureTable(p)).table, { message: `${sc.name}: table makes way for the panel` }).not.toEqual(before.table);
     // Every card's face, bet, stack, name and the pot hit-tested over the whole of its text or face.
     const open = await look('raise-open', /^(card|board|bet|stack|name|pot)-/);
@@ -133,7 +133,7 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
     };
     expect(open.issues.filter((x) => !x.item.includes(':') && !x.item.startsWith('line-') && !tight(x)), `${sc.name} raise open: table`).toEqual([]);
 
-    await raise.click();
+    expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table moves once as the panel closes`).toBe(2);
     await expect(bar.getByTestId('action-commit')).toHaveCount(0);
     // The table takes its room back once the panel has closed (a frame for the stack to be read again).
     await expect.poll(async () => (await measureTable(p)).table, { message: `${sc.name}: table back to its size` }).toEqual(before.table);

@@ -314,6 +314,39 @@ describe('flushPush, one event after another', () => {
     expect(event(db, 'e1')).toMatchObject({ status: 'pending', attempts: 0, lease: null });
     expect(event(db, 'e2')).toMatchObject({ status: 'sent' });
   });
+
+  it('a message or invite the member has read since (another device, or before a retry) is not pushed; an unread one is', async () => {
+    const db = database();
+    const dm = (id: string, seq: number, kind: string, readAt: number | null) =>
+      db.prepare(
+        `INSERT INTO direct_messages (id, pair_key, sender_id, recipient_id, body, kind, created_at, seq, read_at) VALUES (?1, 'fr:me', 'fr', 'me', 'hi', ?2, ?3, ?4, ?5)`,
+      ).run(id, kind, NOON - 10_000 + seq, seq, readAt);
+    dm('m1', 1, 'text', NOON - 500);
+    dm('m2', 2, 'invite', NOON - 500);
+    dm('m3', 3, 'text', null);
+    // The event's dedupe key names the message (queue() gives the key the event's id).
+    queue(db, 'dm:m1', 'dm', 'dm:fr', NOON - 3_000);
+    queue(db, 'invite:m2', 'invite', 'invite:fr', NOON - 2_000);
+    queue(db, 'dm:m3', 'dm', 'dm:fr', NOON - 1_000);
+    const r = await flushPush(env(db), { clock: () => NOON });
+    expect(r).toMatchObject({ claimed: 3, sent: 1, skipped: 2 });
+    expect(event(db, 'dm:m1')).toMatchObject({ status: 'skipped', reason: 'read' });
+    expect(event(db, 'invite:m2')).toMatchObject({ status: 'skipped', reason: 'read' });
+    expect(event(db, 'dm:m3')).toMatchObject({ status: 'sent' });
+    expect(pushes).toHaveBeenCalledTimes(1);
+  });
+
+  it('a block of a friend who is now staff does not stop their pushes (as it does not stop their messages); a block of a member does', async () => {
+    const db = database();
+    db.prepare(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ('me', 'fr')`).run();
+    db.prepare(`UPDATE users SET role = 'admin' WHERE id = 'fr'`).run();
+    queue(db, 'e1', 'dm', 'dm:fr', NOON - 1_000);
+    expect(await flushPush(env(db), { clock: () => NOON })).toMatchObject({ sent: 1 });
+    db.prepare(`UPDATE users SET role = 'user' WHERE id = 'fr'`).run();
+    queue(db, 'e2', 'friend_accepted', 'fa:fr', NOON - 500);
+    expect(await flushPush(env(db), { clock: () => NOON + 1_000 })).toMatchObject({ sent: 0, skipped: 1 });
+    expect(event(db, 'e2')).toMatchObject({ status: 'skipped', reason: 'no_relation' });
+  });
 });
 
 describe('outboxOne at night', () => {

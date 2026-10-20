@@ -1153,7 +1153,7 @@ export const notificationEvents = sqliteTable(
     /** Events with the same key replace each other on the device and share a cooldown ("dm:<sender>"). */
     coalesceKey: text('coalesce_key'),
     status: text('status', { enum: ['pending', 'sending', 'sent', 'skipped', 'failed', 'expired'] }).notNull().default('pending'),
-    /** Why it was skipped or failed (night, consent, type_off, viewing, cooldown, no_device, …). */
+    /** Why it was skipped or failed (night, consent, type_off, read, viewing, cooldown, no_device, …). */
     reason: text('reason'),
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: integer('next_attempt_at').notNull(),

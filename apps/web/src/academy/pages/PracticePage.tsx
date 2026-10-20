@@ -9,7 +9,7 @@ import { Button, cx, Modal } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ActionBar } from '../../game/ActionBar';
-import { TableScene, useBoxSize, useStackRoom, useTableLayout } from '../../game/TableScene';
+import { TableScene, useAreaSize, useStackRoom, useTableLayout } from '../../game/TableScene';
 import { wonFrom } from '../../game/won';
 import { useAuth } from '../../lib/auth';
 import { HAND_PAGE, useBack } from '../../lib/back';
@@ -152,9 +152,9 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
   const [finished, setFinished] = useState(false);
   const [chart, setChart] = useState(false);
   const [fault, setFault] = useState(false);
-  const [areaRef, area] = useBoxSize<HTMLDivElement>();
-  const layout = useTableLayout(area, view.table.maxSeats, sc.hero, { me: true, footer: true });
   const room = useStackRoom('');
+  const [areaRef, area] = useAreaSize<HTMLDivElement>(room.style);
+  const layout = useTableLayout(area, view.table.maxSeats, sc.hero, { me: true, footer: true });
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
   const delay = reducedMotion ? 350 : 800;
 
@@ -344,6 +344,9 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
                 ) : (
                   <Button onClick={() => nav('/')}>{tr(T.toLobby)} →</Button>
                 )}
+                <Button variant="outline" onClick={() => nav('/academy/practice/free')} data-testid="practice-free">
+                  {tr(T.free)}
+                </Button>
                 <Button variant="outline" onClick={onAgain}>
                   {tr(T.again)}
                 </Button>

@@ -2,7 +2,7 @@
 // server's side is apps/game-worker/src/presence.test.ts and tests/integration/presence.test.ts.
 import { PRESENCE_ACTIVITY_BEAT_MS, PRESENCE_AWAY_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_IDLE_STOP_MS } from '@jc/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setPresenceView, sortFriends, startPresence } from '../src/lib/presence';
+import { friendsPresence, setPresenceView, sortFriends, startPresence, watchFriendsPresence } from '../src/lib/presence';
 
 interface Call {
   url: string;
@@ -145,6 +145,43 @@ describe('presence beats', () => {
     stop = startPresence('u2');
     await vi.advanceTimersByTimeAsync(0);
     expect(beats().at(-1)!.body!.conn).not.toBe(conn);
+  });
+});
+
+describe("friends' status", () => {
+  it('back to a tab after a while: what was read before is not shown as current while it is asked again', async () => {
+    let friendsAnswer: Promise<Response> = Promise.resolve(new Response(JSON.stringify({ presence: { f1: 'online' } }), { status: 200 }));
+    vi.stubGlobal('fetch', async (url: string) =>
+      url === '/api/friends/presence' ? friendsAnswer : new Response(JSON.stringify({ mode: 'auto', state: 'online' }), { status: 200 }),
+    );
+    stop = startPresence('u1');
+    const unwatch = watchFriendsPresence();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(friendsPresence()).toEqual({ f1: 'online' });
+    // A short look away: kept while asked again.
+    doc.visibilityState = 'hidden';
+    fire(doc, 'visibilitychange');
+    await vi.advanceTimersByTimeAsync(20_000);
+    let release!: (r: Response) => void;
+    friendsAnswer = new Promise((resolve) => (release = resolve));
+    doc.visibilityState = 'visible';
+    fire(doc, 'visibilitychange');
+    expect(friendsPresence()).toEqual({ f1: 'online' });
+    release(new Response(JSON.stringify({ presence: { f1: 'online' } }), { status: 200 }));
+    await vi.advanceTimersByTimeAsync(0);
+    // Ten minutes in another tab (a hidden tab does not ask): gone at once on coming back, then the new answer.
+    doc.visibilityState = 'hidden';
+    fire(doc, 'visibilitychange');
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(friendsPresence()).toEqual({ f1: 'online' });
+    friendsAnswer = new Promise((resolve) => (release = resolve));
+    doc.visibilityState = 'visible';
+    fire(doc, 'visibilitychange');
+    expect(friendsPresence()).toBeNull();
+    release(new Response(JSON.stringify({ presence: { f1: 'away' } }), { status: 200 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(friendsPresence()).toEqual({ f1: 'away' });
+    unwatch();
   });
 });
 

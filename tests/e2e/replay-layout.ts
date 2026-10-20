@@ -30,23 +30,28 @@ export interface LayoutReport {
  *
  * A table drawn in a scrolling window is whole inside the window's scrolled extent (else it is cut off); a piece past
  * the part showing is off screen for now, as one past the bottom navigation is. `windowTo` scrolls the window first.
+ *
+ * The capture mode (root `[data-testid=replay-capture]`) is measured the same way: fixed over the page, its band is the
+ * whole screen, and its table is the capture's own area.
  */
 export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls' | 'none', root = '[data-testid=hand-replay]', windowTo?: number): Promise<LayoutReport> {
   return page.evaluate(
     ([scrollMode, rootSel, windowAt]) => {
       const host = document.querySelector(rootSel)!;
-      const surface = (host.querySelector('[data-testid=replay-table]') ?? host.querySelector('.jc-game-surface'))!;
+      const surface = (host.querySelector('[data-testid=replay-table]') ?? host.querySelector('[data-testid=capture-table]') ?? host.querySelector('.jc-game-surface'))!;
       const win = surface instanceof HTMLElement && surface.dataset.window === '1' ? surface : null;
       if (win && windowAt !== null) win.scrollTop = windowAt;
+      // A layer over the page (the capture mode) has the whole screen; the page's header and navigation are under it.
+      const over = getComputedStyle(host).position === 'fixed';
       // Where the header ends, its own content included: on a tablet its labels wrap and run past its 64px box, and
       // whatever lies under them is under the header.
-      const headerEl = document.querySelector('header');
+      const headerEl = over ? null : document.querySelector('header');
       const headerEnd = () => Math.max(headerEl?.getBoundingClientRect().bottom ?? 0, ...Array.from(headerEl?.querySelectorAll('*') ?? []).map((e) => e.getBoundingClientRect().bottom));
       const header = headerEnd();
       const first = host.querySelector('[data-testid=replay-status]') ?? surface;
       const vw = document.documentElement.clientWidth;
       const vh = innerHeight;
-      const nav = Array.from(document.querySelectorAll('nav')).find((n) => getComputedStyle(n).position === 'fixed' && n.getBoundingClientRect().height > 0);
+      const nav = over ? undefined : Array.from(document.querySelectorAll('nav')).find((n) => getComputedStyle(n).position === 'fixed' && n.getBoundingClientRect().height > 0);
       const bottom = nav ? nav.getBoundingClientRect().top : vh;
       if (scrollMode === 'table') scrollBy(0, Math.min(first.getBoundingClientRect().top, surface.getBoundingClientRect().top) - Math.max(0, header));
       if (scrollMode === 'bottom') scrollBy(0, host.getBoundingClientRect().bottom - bottom);

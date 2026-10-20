@@ -1,4 +1,4 @@
-import type { PushDeviceDto, PushSubscribeResult, SwNavigateMessage, SwOwnerMessage } from '@jc/types';
+import type { PushDeviceDto, PushSubscribeResult, SwOwnerMessage, SwReadMessage } from '@jc/types';
 import { api, ApiError } from './api';
 
 /**
@@ -117,8 +117,8 @@ export async function consentWithdrawn(): Promise<void> {
 }
 
 /**
- * Before signing out: pushes stop here, and what is shown goes from the screen. The server removes this sign-in's
- * registration with the sign-out itself.
+ * Once signed out (auth.tsx): pushes stop here, and what is shown goes from the screen. The server removes this
+ * sign-in's registration with the sign-out itself, so nothing is asked of it here.
  */
 export async function pushSignOut(): Promise<void> {
   const reg = await registration();
@@ -129,21 +129,30 @@ export async function pushSignOut(): Promise<void> {
 }
 
 /**
+ * A conversation read here: its pushes still shown in this browser (the friend's messages and invites) go, if it is
+ * still read here (`reading`) once the service worker is found; left meanwhile, a push shown since may be for a newer
+ * message, still unread. Nothing where pushes were never turned on. Other devices keep theirs until tapped; nothing
+ * more is pushed for a read message.
+ */
+export async function closeReadPushes(friend: string, reading: () => boolean): Promise<void> {
+  const reg = await registration();
+  if (!reading()) return;
+  const msg: SwReadMessage = { type: 'jc-read', tags: [`dm:${friend}`, `invite:${friend}`] };
+  reg?.active?.postMessage(msg);
+}
+
+/**
  * While the app is open, from the moment the sign-in is known: tells the service worker who is signed in (or nobody),
  * keeps this browser's registration current for the member who turned it on here (one request when the page opens;
  * the server writes nothing when it is the same), removes it when someone else is signed in or the permission was
- * taken back, and follows a tapped push to its page. Nothing at all when pushes were never turned on in this browser.
+ * taken back. Nothing at all when pushes were never turned on in this browser. (A tapped push is followed to its page
+ * by push-nav.ts, listening from the start.)
  */
-export function startPush(uid: string | null, navigate: (url: string) => void): () => void {
+export function startPush(uid: string | null): () => void {
   let stopped = false;
-  const onMessage = (e: MessageEvent<SwNavigateMessage>) => {
-    const url = e.data?.type === 'jc-navigate' ? e.data.url : null;
-    if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) navigate(url);
-  };
   void (async () => {
     const reg = await registration();
     if (!reg || stopped) return;
-    navigator.serviceWorker.addEventListener('message', onMessage);
     tellOwner(reg, uid);
     void reg.update().catch(() => undefined);
     if (!uid) return;
@@ -173,6 +182,5 @@ export function startPush(uid: string | null, navigate: (url: string) => void): 
   })();
   return () => {
     stopped = true;
-    if (pushSupport() === 'supported') navigator.serviceWorker.removeEventListener('message', onMessage);
   };
 }

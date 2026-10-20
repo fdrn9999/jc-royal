@@ -19,6 +19,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
+import { pick } from '../lib/pick';
 import { roomCall } from '../lib/room';
 
 const ReasonSchema = z.string().trim().min(2).max(200);
@@ -68,7 +69,7 @@ const policyOf = (r: Record<string, unknown>): SocialPolicyRow => ({
   createdAt: Number(r.createdAt),
 });
 const SETTINGS = ['reactionsEnabled', 'cooldownMs', 'burstMax', 'burstWindowMs', 'showSuperAdmin', 'showAdmin'] as const;
-const settingsOf = (p: SocialSettings): SocialSettings => Object.fromEntries(SETTINGS.map((k) => [k, p[k]])) as unknown as SocialSettings;
+const settingsOf = (p: SocialSettings): SocialSettings => pick(p, SETTINGS);
 const brief = (p: SocialPolicyRow | null) => (p ? { version: p.version, ...settingsOf(p) } : null);
 
 async function currentPolicy(db: D1Database): Promise<SocialPolicyRow | null> {

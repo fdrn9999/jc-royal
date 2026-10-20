@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Route } from '@playwright/test';
 import { checkOrCall, PASSWORD, signUp, test, widerThanDevice } from './helpers';
 
 const ADMIN = 'http://localhost:5174';
@@ -20,7 +20,7 @@ function sql(command: string) {
 async function reauthIfAsked(page: Page) {
   const prompt = page.getByTestId('reauth-confirm');
   if (await prompt.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) {
-    await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
+    await page.getByRole('dialog').getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
     await prompt.click();
   }
 }
@@ -35,7 +35,7 @@ test('mobile: a heads-up Sit & Go from the template to the stop, for the operato
   const page = op.page;
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
 
@@ -135,6 +135,13 @@ test('mobile: a heads-up Sit & Go from the template to the stop, for the operato
 
   // Pause from the next hand, then the stop: the reason, the name typed again, the password.
   await page.goto(`${ADMIN}/tournaments/${id}`);
+  // The page is slow to look again after each change: the stop is opened as soon as the pause says it is done, and it
+  // must name the version the pause made (the page said done only once it had it), not the one before.
+  const slowLook = async (route: Route) => {
+    if (route.request().method() === 'GET') await new Promise((r) => setTimeout(r, 1_500));
+    await route.continue();
+  };
+  await page.route(`**/api/admin/tournaments/${id}`, slowLook);
   await page.getByTestId('tn-act-pause').click();
   await expect(page.getByTestId('tn-act-dialog')).toContainText('진행 중인 핸드는 그대로 끝나고');
   await page.getByTestId('tn-act-confirm').click();
@@ -155,6 +162,7 @@ test('mobile: a heads-up Sit & Go from the template to the stop, for the operato
   await reauthIfAsked(page);
   await expect(page.getByTestId('tn-detail-feedback')).toContainText('중단했습니다');
   await expect(page.getByTestId('tn-result')).toContainText('정상 종료가 아니며');
+  await page.unroute(`**/api/admin/tournaments/${id}`, slowLook);
 
   // The hand in play finishes; then each player's card says the tournament was stopped.
   await expect(async () => {

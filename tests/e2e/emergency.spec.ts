@@ -42,7 +42,7 @@ test('emergency controls: an admin ends a seated member’s connections, the pag
   const page = await ctx.newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
 
@@ -57,7 +57,7 @@ test('emergency controls: an admin ends a seated member’s connections, the pag
   await expect(page.getByRole('dialog')).toContainText('E2E 연결 점검');
   await page.getByTestId('confirm-end').click();
   await expect(page.getByTestId('reauth-confirm')).toBeVisible();
-  await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByRole('dialog').getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByTestId('reauth-confirm').click();
   const result = page.getByTestId('kick-result');
   await expect(result).toContainText(/연결 1개를 닫았습니다|Closed 1 connections/);

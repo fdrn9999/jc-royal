@@ -95,7 +95,7 @@ page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 await page.goto(admin);
 await page.getByLabel(/이메일|Email/).fill(owner.email);
-await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
 const firstLive = page.waitForResponse((r) => r.url().includes('/api/admin/ops/live'));
 await page.getByRole('button', { name: /로그인|Log in/ }).click();
 const liveBody = await (await firstLive).json();

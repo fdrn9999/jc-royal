@@ -15,7 +15,7 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   const page = await ctx.newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(owner.email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
   // The live part refreshes itself while watched; errors and connections come from the server's counters.
@@ -52,7 +52,7 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await expect(page.getByTestId('change-preview')).toContainText('+777');
   await page.getByTestId('confirm-end').click();
   await expect(page.getByTestId('reauth-confirm')).toBeVisible();
-  await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByRole('dialog').getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByTestId('reauth-confirm').click();
   await expect(page.getByRole('cell', { name: '+777' })).toBeVisible();
   // The member's history lists the adjustment with its memo.

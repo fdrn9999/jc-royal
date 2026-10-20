@@ -104,3 +104,38 @@ test('a hand → the lesson or practice it points to → back: the hand again; a
   await expect(page.getByTestId('lesson-back')).toHaveText('← 아카데미');
   await expect(page.getByTestId('lesson-back')).toHaveAttribute('href', '/academy');
 });
+
+test('a hand → its pot-odds study topic → a step on → back: the hand again; free practice from a module’s end goes back to the module; opened directly, each goes to its own list', async ({ browser }) => {
+  const a = await signUp(browser);
+  const b = await signUp(browser);
+  const ids = seedHands(await idOf(a.page), await idOf(b.page));
+  const page = a.page;
+  await page.goto(`/me/hands/${ids.A}`);
+
+  // The viewer called a flop bet in hand A.
+  await page.getByTestId('hand-lessons').locator('[data-link=pot-odds]').click();
+  await expect(page).toHaveURL('/academy/gto/math?step=0');
+  const back = page.getByTestId('gto-back');
+  await expect(back).toHaveText('← 핸드로 돌아가기');
+  // Its steps keep where it was opened from.
+  await page.getByTestId('gto-next').click();
+  await expect(page).toHaveURL('/academy/gto/math?step=1');
+  await expect(back).toHaveText('← 핸드로 돌아가기');
+  await back.click();
+  await expect(page).toHaveURL(`/me/hands/${ids.A}`);
+
+  await page.goto('/academy/gto/math?step=3');
+  await page.getByTestId('gto-finish').click();
+  await page.getByTestId('gto-free-practice').click();
+  await expect(page).toHaveURL('/academy/practice/free');
+  await expect(page.getByTestId('free-back')).toHaveText('← 학습으로 돌아가기');
+  await page.getByTestId('free-back').click();
+  await expect(page).toHaveURL('/academy/gto/math?step=3');
+
+  await page.goto('/academy/gto/math');
+  await expect(back).toHaveText('← 아카데미');
+  await expect(back).toHaveAttribute('href', '/academy');
+  await page.goto('/academy/practice/free');
+  await expect(page.getByTestId('free-back')).toHaveText('← 아카데미');
+  await expect(page.getByTestId('free-back')).toHaveAttribute('href', '/academy/practice');
+});

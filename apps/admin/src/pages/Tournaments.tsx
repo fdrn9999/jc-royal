@@ -494,13 +494,17 @@ export function TournamentDetailPage() {
         await api(`${base}/recover`, { body: { reason: why } });
         text = t('tnDoneRecover');
       }
+      // The page has the new version before it says it is done: a control opened next names that version, not the
+      // one this change replaced (which the server would refuse as someone else's change). Once more when that look
+      // did not land (it failed, or the 15-second one took over); failing again, the server's refusal is the backstop.
+      if (!(await reload())) await reload();
       setAct(null);
       setNote({ ok: true, text });
-      await reload();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'reauth_cancelled') return;
       if (e instanceof ApiError && STALE.has(e.code)) {
-        // Someone (or the table) changed it first: the dialog closes and the page shows it as it is now.
+        // Someone (or the table) changed it first: the page shows it as it is now, and the dialog closes.
+        await reload();
         setAct(null);
         const d = e.details as { eligible?: number; minPlayers?: number; dropped?: { reason: string }[] } | undefined;
         const text =
@@ -511,7 +515,6 @@ export function TournamentDetailPage() {
               ].filter(Boolean).join(' ')
             : errText(e, t);
         setNote({ ok: false, text });
-        await reload();
         return;
       }
       setActError(errText(e, t));

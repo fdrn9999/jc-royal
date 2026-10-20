@@ -151,8 +151,20 @@ export interface SwOwnerMessage {
   type: 'jc-owner';
   uid: string | null;
 }
-/** The service worker asks an open page to go to a push's path inside the app. */
+/**
+ * The service worker asks an open page to go to a push's path inside the app, and waits for the page's answer on the
+ * message's port (SwNavigateReply); with none in time, it takes the window there itself (public/sw.js).
+ */
 export interface SwNavigateMessage {
   type: 'jc-navigate';
   url: string;
+}
+/** The page read a conversation here: the pushes about it still shown in this browser (by tag) go. */
+export interface SwReadMessage {
+  type: 'jc-read';
+  tags: string[];
+}
+/** The page's answer: it went there (ok), or it stays where it is (a game table is never left for a push). */
+export interface SwNavigateReply {
+  ok: boolean;
 }

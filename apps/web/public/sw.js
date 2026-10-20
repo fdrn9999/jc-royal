@@ -112,8 +112,22 @@ async function updateBadge() {
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
+/** A tag of what a page may close once read here: a friend's messages or invites (the api's coalesce keys). */
+const READ_TAG = /^(?:dm|invite):[A-Za-z0-9_-]{1,64}$/;
+
 self.addEventListener('message', (event) => {
   const m = event.data;
+  if (m && m.type === 'jc-read' && Array.isArray(m.tags)) {
+    // A conversation read on this page: its pushes still shown go (closing one by hand tells nobody, so the badge too).
+    const tags = m.tags.filter((t) => typeof t === 'string' && READ_TAG.test(t)).slice(0, 4);
+    event.waitUntil(
+      (async () => {
+        for (const n of await self.registration.getNotifications()) if (tags.includes(n.tag)) n.close();
+        await updateBadge();
+      })(),
+    );
+    return;
+  }
   if (!m || m.type !== 'jc-owner') return;
   const uid = typeof m.uid === 'string' && m.uid.length <= 64 ? m.uid : null;
   event.waitUntil(
@@ -170,19 +184,91 @@ self.addEventListener('push', (event) => {
   );
 });
 
+/** How long an open page has to answer that it went to a tapped push's page, before this worker takes it there itself. */
+const ANSWER_MS = 3000;
+
+/** A window at a game table, which a tapped push never takes away from it (the member may be in a hand). */
+function atTable(win) {
+  try {
+    return new URL(win.url).pathname.startsWith('/table/');
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the window is at this path of the site already. */
+function samePage(win, url) {
+  try {
+    const u = new URL(win.url);
+    return u.pathname + u.search === url;
+  } catch {
+    return false;
+  }
+}
+
+/** The window as it is now (its page may have moved on since it was listed); undefined once it is gone. */
+function lookAgain(win) {
+  return Promise.resolve()
+    .then(() => self.clients.get(win.id))
+    .catch(() => undefined);
+}
+
+/**
+ * Asks the page in `win` to go to `url` itself (no reload: the app keeps its state). 'went'; 'stays' (it is at a table
+ * by now); or null, no answer in time (the app has not started there yet, or the page is from before this worker).
+ */
+function askToGo(win, url) {
+  return new Promise((resolve) => {
+    let ch = null;
+    const done = (v) => {
+      clearTimeout(timer);
+      if (ch) ch.port1.close();
+      resolve(v);
+    };
+    const timer = setTimeout(() => done(null), ANSWER_MS);
+    try {
+      ch = new MessageChannel();
+      ch.port1.onmessage = (e) => done(e.data && e.data.ok === true ? 'went' : 'stays');
+      win.postMessage({ type: 'jc-navigate', url }, [ch.port2]);
+    } catch {
+      done(null);
+    }
+  });
+}
+
 self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const url = internal(event.notification.data && event.notification.data.url);
+  const n = event.notification;
+  const url = internal(n.data && n.data.url);
   event.waitUntil(
     (async () => {
       const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       const here = wins.filter((w) => new URL(w.url).origin === self.location.origin);
-      // An open window goes there (the page checks the sign-in and access as for any link); none: a new one.
-      const win = here.find((w) => w.visibilityState === 'visible') || here[0];
+      // An open window of the site goes there, the one on screen first (the page checks the sign-in and access as for
+      // any link); none: a new one. A window at a game table is never taken there, and no window is opened beside one
+      // either: an installed app on Android may open it in that same window. With only tables open, one comes forward
+      // and the push stays shown, to be opened after the hand.
+      const free = here.filter((w) => !atTable(w));
+      const win = free.find((w) => w.visibilityState === 'visible') || free[0];
       if (win) {
         await win.focus().catch(() => undefined);
-        win.postMessage({ type: 'jc-navigate', url });
+        // Looked at again once it has come forward, before it is asked: it may have gone to a game table meanwhile,
+        // and a page from before this worker follows the question without looking where it is.
+        let said = atTable((await lookAgain(win)) || win) ? 'stays' : await askToGo(win, url);
+        if (said === null) {
+          // No answer, so the window is looked at again as it is now: it may have gone to a game table meanwhile (it
+          // stays, as above), or a page from before this worker may have gone there itself (not loaded a second time).
+          const now = await lookAgain(win);
+          if (now && atTable(now)) said = 'stays';
+          else if (now && samePage(now, url)) said = 'went';
+        }
+        if (said !== 'stays') n.close();
+        // No answer: the worker takes the window there (a window it does not control cannot be: a new one instead).
+        if (said === null && !(await Promise.resolve().then(() => win.navigate(url)).catch(() => null))) await self.clients.openWindow(url).catch(() => null);
+      } else if (here.length) {
+        const table = here.find((w) => w.visibilityState === 'visible') || here[0];
+        await table.focus().catch(() => undefined);
       } else {
+        n.close();
         await self.clients.openWindow(url);
       }
       await updateBadge();

@@ -56,7 +56,7 @@ const IDLE_AFTER_MS = 5 * 60_000;
 const REASON_KEY: Record<string, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
 
 /** Calls `reload` every LIVE_REFRESH_MS while the tab is visible and the admin used it within IDLE_AFTER_MS. */
-function useLiveRefresh(reload: () => Promise<void>) {
+function useLiveRefresh(reload: () => Promise<unknown>) {
   const [paused, setPaused] = useState(false);
   const lastFetch = useRef(Date.now());
   const lastActive = useRef(Date.now());

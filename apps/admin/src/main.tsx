@@ -1,4 +1,4 @@
-import { Button, Input, Logo, Spinner } from '@jc/ui';
+import { Button, Logo, PasswordInput, Spinner } from '@jc/ui';
 import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, NavLink, Outlet, RouterProvider } from 'react-router';
@@ -47,10 +47,23 @@ const NAV: [string, Key, string[]][] = [
   ['/security', 'security', []],
 ];
 
+/**
+ * The password asked again before a sensitive change (every one goes through here: lib.tsx's api). What was typed is
+ * sent once and forgotten: cleared when it is sent and whenever the prompt closes, however it closed, so the prompt
+ * opens again empty, with the password hidden.
+ */
 function ReauthModal() {
   const { t } = useT();
   const { reauthPrompt } = useAdmin();
   const [pw, setPw] = useState('');
+  useEffect(() => {
+    if (!reauthPrompt.open) setPw('');
+  }, [reauthPrompt.open]);
+  const submit = () => {
+    if (!pw) return;
+    reauthPrompt.confirm(pw);
+    setPw('');
+  };
   return (
     <Modal
       open={reauthPrompt.open}
@@ -59,12 +72,21 @@ function ReauthModal() {
       footer={
         <>
           <Button variant="ghost" onClick={reauthPrompt.cancel}>{t('cancel')}</Button>
-          <Button disabled={!pw} onClick={() => { reauthPrompt.confirm(pw); setPw(''); }} data-testid="reauth-confirm">{t('confirm')}</Button>
+          <Button disabled={!pw} onClick={submit} data-testid="reauth-confirm">{t('confirm')}</Button>
         </>
       }
     >
       <p className="mb-3 text-sm text-ink-200">{t('reauthHint')}</p>
-      <Input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && pw && (reauthPrompt.confirm(pw), setPw(''))} aria-label={t('password')} />
+      <PasswordInput
+        autoComplete="current-password"
+        value={pw}
+        onChange={(e) => setPw(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()}
+        aria-label={t('password')}
+        showLabel={t('showPassword')}
+        hideLabel={t('hidePassword')}
+        data-testid="reauth-password"
+      />
       {reauthPrompt.error && <p className="mt-2 text-sm text-danger" role="alert">{reauthPrompt.error}</p>}
     </Modal>
   );

@@ -13,7 +13,8 @@
  *   rows, each bot's wallet its ledger, and the bots' result against members is
  *   bot wallets + chips bots took to tables − issued. A correction goes through reconciliation like any other.
  */
-import { dayStart, statsDay, STATS_DAY } from '@jc/db';
+import { BOT_STAT_KEYS, botStatMetric, dayStart, statsDay, STATS_DAY, type BotStatKey } from '@jc/db';
+import { BOT_LEVELS } from '@jc/types';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -102,6 +103,15 @@ async function writeVersion(c: Context<AppEnv>, from: BotPolicy | null, next: { 
   return { version: (from?.version ?? 0) + 1, ...next };
 }
 
+/**
+ * The bots' play per level over the period (game-worker bot-stats.ts, summed from `bt_*` daily counters): the counters
+ * themselves, so each rate is shown with its own denominator. Every level, zeros included.
+ */
+function botPlay(rows: Record<string, unknown>[]) {
+  const sum = new Map(rows.map((r) => [String(r.metric), Number(r.n)]));
+  return BOT_LEVELS.map((level) => ({ level, ...(Object.fromEntries(BOT_STAT_KEYS.map((k) => [k, sum.get(botStatMetric(level, k)) ?? 0])) as Record<BotStatKey, number>) }));
+}
+
 const page = (c: Context<AppEnv>, fallback = 50) => ({
   limit: Math.min(Math.max(Number(c.req.query('limit') ?? fallback) || fallback, 1), 200),
   offset: Math.max(Number(c.req.query('offset') ?? 0) || 0, 0),
@@ -110,8 +120,8 @@ const page = (c: Context<AppEnv>, fallback = 50) => ({
 export const adminBotRoutes = new Hono<AppEnv>()
   /**
    * The policy and its latest versions, the fund (issued, limit, left), the bots' chips and result, the tables that
-   * allow bots with the bots seated there, and the period's play (`days` 1 to 30): hands with a bot, and the bots' net
-   * by the table's level now.
+   * allow bots with the bots seated there, and the period's play (`days` 1 to 30): hands with a bot, the bots' net
+   * by the table's level now, and how each level played (`play`: public counters and its moves, from bot-stats.ts).
    */
   .get('/bots', async (c) => {
     const days = Math.trunc(Number(c.req.query('days') ?? 7));
@@ -145,6 +155,7 @@ export const adminBotRoutes = new Hono<AppEnv>()
         .bind(since),
       db.prepare(`SELECT day, metric, n FROM daily_stats WHERE day >= ?1 AND metric IN ('hands_bots', 'tables_bots')`).bind(first),
       db.prepare(`SELECT kind, COUNT(*) AS n FROM bot_events WHERE created_at >= ?1 GROUP BY kind`).bind(since),
+      db.prepare(`SELECT metric, SUM(n) AS n FROM daily_stats WHERE day >= ?1 AND metric GLOB 'bt_*' GROUP BY metric`).bind(first),
     ]);
     const rows = (i: number) => (res[i]?.results ?? []) as Record<string, unknown>[];
     const versions = rows(0).map(policyOf);
@@ -178,6 +189,7 @@ export const adminBotRoutes = new Hono<AppEnv>()
       byLevel: rows(6).map((r) => ({ level: r.level as string, hands: Number(r.hands), net: Number(r.net) })),
       series: Array.from({ length: days }, (_, i) => ({ date: new Date((first + i) * STATS_DAY).toISOString().slice(0, 10), ...(series.get(first + i) ?? { hands: 0, tables: 0 }) })),
       events: Object.fromEntries(rows(8).map((r) => [r.kind as string, Number(r.n)])),
+      play: botPlay(rows(9)),
     });
   })
   /**

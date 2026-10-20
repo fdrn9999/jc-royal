@@ -1,4 +1,4 @@
-import { mergePresence, PRESENCE_EXPIRE_MS, PRESENCE_MAX_DEVICES, type PresenceState } from '@jc/types';
+import { mergePresence, PRESENCE_AWAY_MS, PRESENCE_EXPIRE_MS, PRESENCE_MAX_DEVICES, type PresenceState } from '@jc/types';
 
 /** One device of a member, as the hub (presence.ts) keeps it. */
 interface Conn {
@@ -148,11 +148,14 @@ export class PresenceBook {
     return out;
   }
 
-  /** A live, visible page of the member shows this view. */
+  /**
+   * A live, visible page of the member shows this view and they did something there lately (not away from it): a page
+   * left open on a desk while they went away holds back no push, theirs or their other devices'.
+   */
   viewing(now: number, user: string, view: string): boolean {
     const conns = this.users.get(user);
     if (!conns) return false;
-    for (const c of conns.values()) if (c.expiresAt > now && c.visible && c.view === view) return true;
+    for (const c of conns.values()) if (c.expiresAt > now && c.visible && c.view === view && now - c.activeAt < PRESENCE_AWAY_MS) return true;
     return false;
   }
 

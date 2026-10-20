@@ -2,9 +2,15 @@ export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
 }
 
+// Made once: toLocaleString builds a formatter on every call, and a table draws dozens of amounts each time it draws
+// (most of the time its seats took to format their numbers in a profile of a slowed phone; TEST_REPORT).
+const CHIPS = new Intl.NumberFormat('en-US');
+const BB = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+const BB_TINY = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 2 });
+
 /** 1250 → "1,250"; compact: 12500 → "12.5K". Integers only (virtual chips). */
 export function formatChips(n: number, compact = false): string {
-  if (!compact || Math.abs(n) < 10_000) return Math.trunc(n).toLocaleString('en-US');
+  if (!compact || Math.abs(n) < 10_000) return CHIPS.format(Math.trunc(n));
   const abs = Math.abs(n);
   const fmt = (v: number, s: string) => `${n < 0 ? '-' : ''}${(Math.floor(v * 10) / 10).toString().replace(/\.0$/, '')}${s}`;
   if (abs >= 1_000_000) return fmt(abs / 1_000_000, 'M');
@@ -19,7 +25,7 @@ export function formatBB(n: number, bigBlind: number, compact = false): string {
   const bb = n / bigBlind;
   if (compact && Math.abs(bb) >= 10_000) return `${formatChips(bb, true)} BB`;
   const tiny = bb !== 0 && Math.abs(bb) < 0.01;
-  return `${bb.toLocaleString('en-US', tiny ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: 2 })} BB`;
+  return `${(tiny ? BB_TINY : BB).format(bb)} BB`;
 }
 
 export function formatDate(ms: number, locale: string): string {
