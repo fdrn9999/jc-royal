@@ -1,5 +1,5 @@
 import { schema, type Db } from '@jc/db';
-import { publicRole, type HandPotDto, type HandReplayFields, type HandReplayPlayer, type HandReviewDto, type MessageCategory } from '@jc/types';
+import { publicRole, shownVip, type HandPotDto, type HandReplayFields, type HandReplayPlayer, type HandReviewDto, type MessageCategory } from '@jc/types';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { Badge } from './badges';
 
@@ -61,23 +61,32 @@ export function replaySettlement(pots: HandPotDto[] | null, rows: SettlementRow[
 }
 
 /** The columns of `users` a replay player is drawn with. */
-export type ReplayUser = { nickname: string; role: string; status: string; isBot: boolean };
-export const replayUser = { nickname: schema.users.nickname, role: schema.users.role, status: schema.users.status, isBot: schema.users.isBot };
+export type ReplayUser = { nickname: string; role: string; status: string; isBot: boolean; vipColor: string | null };
+export const replayUser = {
+  nickname: schema.users.nickname,
+  role: schema.users.role,
+  status: schema.users.status,
+  isBot: schema.users.isBot,
+  vipColor: schema.users.vipColor,
+};
 
 /**
  * A player of a finished hand as `viewerId` may see it: hole cards, rank and best five only for the viewer and for
  * hands that were face up at showdown (see shownAtShowdown). `user` is the member's row now: a deleted account shows no
- * role, and a staff role only when the social policy shows its badge (`badge`, from lib/badges.ts).
+ * role, and a staff role only when the social policy shows its badge (`badge`, from lib/badges.ts); the VIP color is
+ * the one other players see now (shownVip), as at the tables.
  */
 export function replayPlayer(hp: typeof schema.handPlayers.$inferSelect, user: ReplayUser, viewerId: string, badge: Badge = publicRole): HandReplayPlayer {
   const visible = hp.userId === viewerId || shownAtShowdown(hp);
   const ranked = visible && hp.wentToShowdown;
   const role = user.status === 'deleted' ? undefined : badge(user.role);
+  const vip = shownVip(user);
   return {
     seatIndex: hp.seatIndex,
     nickname: user.nickname,
     ...(role ? { role } : {}),
     ...(user.isBot ? { bot: true as const } : {}),
+    ...(vip ? { vip } : {}),
     holeCards: visible ? (JSON.parse(hp.holeCards) as string[]) : null,
     stackStart: hp.stackStart,
     net: hp.net,

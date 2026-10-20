@@ -98,6 +98,12 @@ function otherOf(coalesceKey: string | null): string | null {
   return m ? m[1]! : null;
 }
 
+/** The 1:1 message a message or invite event is about, from its dedupe key (`dm:<id>`, `invite:<id>`). */
+function messageOf(dedupeKey: string): string | null {
+  const m = dedupeKey.match(/^(?:dm|invite):([A-Za-z0-9_-]{1,64})$/);
+  return m ? m[1]! : null;
+}
+
 /** The notification_settings column of each type (fixed names, written into the SQL). */
 const COLUMN: Record<OutboxType, string> = {
   dm: 'dm',
@@ -121,6 +127,8 @@ const URGENCY: Record<OutboxType, 'normal' | 'high'> = {
 
 interface EventRow {
   id: string;
+  /** For a message or an invite, `dm:<message id>` / `invite:<message id>` (routes/social.ts). */
+  dedupe_key: string;
   user_id: string;
   type: OutboxType;
   url: string;
@@ -209,7 +217,7 @@ export async function flushPush(env: Env, opts: { user?: string; limit?: number;
                                WHERE o.user_id = n.user_id AND o.type IN ('dm', 'invite') AND o.status = 'pending' AND o.lease_until > ?1))
                       ORDER BY n.next_attempt_at LIMIT ?3)
           AND status = 'pending' AND (lease_until IS NULL OR lease_until <= ?1)
-        RETURNING id, user_id, type, url, coalesce_key, attempts, expires_at, created_at, lease_until`,
+        RETURNING id, dedupe_key, user_id, type, url, coalesce_key, attempts, expires_at, created_at, lease_until`,
     )
     .bind(start, start + LEASE_MS, Math.min(opts.limit ?? 20, 50), ...(opts.user ? [opts.user] : []))
     .all<EventRow>();
@@ -270,7 +278,8 @@ export async function flushPush(env: Env, opts: { user?: string; limit?: number;
       }
       const other = otherOf(ev.coalesce_key);
       if (ev.type === 'dm' || ev.type === 'invite' || ev.type === 'friend_request' || ev.type === 'friend_accepted') {
-        // The friendship (or the request) still stands, the friend is still an active member, and neither blocked the other.
+        // The friendship (or the request) still stands, the friend is still an active member, and neither blocked the other
+        // (a block of someone who is now staff has no effect, as in routes/social.ts).
         if (!other) {
           await skip(ev, 'no_relation');
           continue;
@@ -281,7 +290,8 @@ export async function flushPush(env: Env, opts: { user?: string; limit?: number;
             `SELECT 1 AS ok FROM friendships f JOIN users s ON s.id = ?3 AND s.status = 'active'
               WHERE f.user_a = ?1 AND f.user_b = ?2
                 AND ${ev.type === 'friend_request' ? `f.status = 'pending' AND f.requester_id = ?3` : `f.status = 'accepted'`}
-                AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE (ub.blocker_id = ?1 AND ub.blocked_id = ?2) OR (ub.blocker_id = ?2 AND ub.blocked_id = ?1))`,
+                AND NOT EXISTS (SELECT 1 FROM user_blocks ub JOIN users bu ON bu.id = ub.blocked_id AND bu.role = 'user'
+                                 WHERE (ub.blocker_id = ?1 AND ub.blocked_id = ?2) OR (ub.blocker_id = ?2 AND ub.blocked_id = ?1))`,
           )
           .bind(a, b, other)
           .first<{ ok: number }>();
@@ -293,14 +303,20 @@ export async function flushPush(env: Env, opts: { user?: string; limit?: number;
       if (ev.type === 'dm' || ev.type === 'invite') {
         // What was sent is saved before the next event is looked at (below), so this counts this run's pushes too.
         // Counted by when they went out (an event that waited is a push of the hour it was sent in).
+        // In the same read: whether the member has read the message since (on another device, or before a retry).
         const now = clock();
         const recent = await db
           .prepare(
             `SELECT (SELECT COUNT(*) FROM notification_events WHERE user_id = ?1 AND type IN ('dm', 'invite') AND status = 'sent' AND sent_at > ?2) AS hour,
-                    (SELECT MAX(sent_at) FROM notification_events WHERE user_id = ?1 AND coalesce_key = ?3 AND status = 'sent' AND sent_at > ?2) AS last`,
+                    (SELECT MAX(sent_at) FROM notification_events WHERE user_id = ?1 AND coalesce_key = ?3 AND status = 'sent' AND sent_at > ?2) AS last,
+                    EXISTS (SELECT 1 FROM direct_messages WHERE id = ?4 AND recipient_id = ?1 AND read_at IS NOT NULL) AS seen`,
           )
-          .bind(ev.user_id, now - 3_600_000, ev.coalesce_key)
-          .first<{ hour: number; last: number | null }>();
+          .bind(ev.user_id, now - 3_600_000, ev.coalesce_key, messageOf(ev.dedupe_key))
+          .first<{ hour: number; last: number | null; seen: number }>();
+        if (recent?.seen) {
+          await skip(ev, 'read');
+          continue;
+        }
         if ((recent?.hour ?? 0) >= DM_HOURLY_CAP) {
           await skip(ev, 'hourly_cap');
           continue;

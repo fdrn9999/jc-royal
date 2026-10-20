@@ -2,8 +2,9 @@
 // gives an ordinary member, nothing more. Who may change it (a super admin; an administrator whose `vip` switch is on;
 // never a member), with the password, a reason and the version the console showed; refused accounts (table bots, staff,
 // deleted); the audit log; what other players see (friends, requests, blocks, messages, the board, the lobby, tournaments,
-// the table and its chat, in real time without anyone reconnecting); and what it never changes (role, chips, the hand).
-import type { ServerMessage, TableView } from '@jc/types';
+// the table and its chat, in real time without anyone reconnecting, and a finished hand's replay); and what it never
+// changes (role, chips, the hand).
+import type { HandDetailDto, ServerMessage, TableView } from '@jc/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
@@ -506,11 +507,28 @@ describe('at the table', () => {
     // The hand finishes as it would have.
     await actor.act('fold');
     await wb.waitState((s) => s.hand?.id === handId && s.hand.stage === 'settled', 15_000, 'settled');
+    // The replay (and the share image drawn from it) shows the colors the names have now, for both players.
+    const replayVips = async () => {
+      for (let i = 0; i < 50; i++) {
+        const r = await b.client.get(`/api/me/hands/${handId}`);
+        if (r.status === 200) return (r.body as HandDetailDto).players.map((p) => [p.seatIndex, p.vip ?? null]);
+        await new Promise((res) => setTimeout(res, 200));
+      }
+      throw new Error(`hand ${handId} was not recorded`);
+    };
+    expect(await replayVips()).toEqual([
+      [0, 'cyan'],
+      [1, 'emerald'],
+    ]);
 
     // Ended: the plain name at the seat and in new lines.
     expect((await setVip(a.me.id, { enabled: false })).body).toMatchObject({ changed: true, tables: 1, reached: 1 });
     const plain = await ws.waitState((s) => !('vip' in s.seats[0]!), 3_000, 'ended');
     expect(plain.seats[0]!.nickname).toBe(a.me.nickname);
+    expect(await replayVips()).toEqual([
+      [0, null],
+      [1, 'emerald'],
+    ]);
     expect('vip' in (await chat(wa, wb, 'plain again'))).toBe(false);
     // Nobody was disconnected along the way.
     for (const w of [wa, wb, ws]) expect(w.closed).toBeNull();

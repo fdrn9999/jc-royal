@@ -891,6 +891,22 @@ describe('Bot AI 2.0: fairness and safety', () => {
     expect(styleFor('bot-7')).toBe(styleFor('bot-7'));
   });
 
+  it('checks or folds when its strategy fails, and tells only the caller who asked (for statistics)', async () => {
+    const v = await viewAt(2, 6, { 2: 'Jh Td' }, [...FOLD_TO_BTN, [0, 'raise', 25], [1, 'fold']]);
+    const broken = () => {
+      throw new Error('no randomness');
+    };
+    for (const level of BOT_LEVELS) {
+      let told = 0;
+      expect(decideBot(level, v, broken, { onFallback: () => told++ })).toEqual({ type: 'fold' });
+      expect(told).toBe(1);
+      // Without the option nothing changes, and a decision that worked tells nothing.
+      expect(decideBot(level, v, broken)).toEqual({ type: 'fold' });
+      decideBot(level, v, seeded(3), { onFallback: () => told++ });
+      expect(told).toBe(1);
+    }
+  });
+
   it('decides quickly enough at Expert, multiway after the flop', async () => {
     const h = deal(6, { 3: 'Jh Td' }, { board: '9c 8s 2d Kh 4c' });
     await play(h, [

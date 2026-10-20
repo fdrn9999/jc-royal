@@ -12,6 +12,7 @@ import { I18nProvider, initialLocale, loadLocale, useI18n } from './lib/i18n';
 import { startInstallWatch } from './lib/install';
 import { applyInitialTheme, closeAccount, openAccount, setSyncState } from './lib/prefs';
 import { startPresence } from './lib/presence';
+import { followPushTaps } from './lib/push-nav';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { LobbyPage } from './pages/Lobby';
 
@@ -140,8 +141,8 @@ function PresenceSync() {
 }
 
 /**
- * Push notifications in this browser (lib/push.ts): the service worker is told who is signed in, and a tapped push
- * opens its page here. Loaded only once the sign-in is known, and does nothing where pushes were never turned on.
+ * Push notifications in this browser (lib/push.ts): the service worker is told who is signed in. Loaded only once the
+ * sign-in is known, and does nothing where pushes were never turned on. (A tapped push: followPushTaps below.)
  */
 function PushSync() {
   const { me, loading } = useAuth();
@@ -152,7 +153,7 @@ function PushSync() {
     let stop: (() => void) | undefined;
     import('./lib/push').then(
       (m) => {
-        if (!gone) stop = m.startPush(id, (url) => void router.navigate(url));
+        if (!gone) stop = m.startPush(id);
       },
       () => undefined,
     );
@@ -275,6 +276,8 @@ const router = createBrowserRouter([
     ],
   },
 ]);
+// From the start, before the sign-in is known: a tapped push that brought this window forward opens its page here.
+followPushTaps((url) => void router.navigate(url));
 
 // English is a separate chunk: load it first for someone who chose it, so the first screen is not Korean.
 const render = () =>

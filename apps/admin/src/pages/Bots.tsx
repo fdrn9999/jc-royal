@@ -51,6 +51,27 @@ interface Overview {
   byLevel: { level: string; hands: number; net: number }[];
   series: { date: string; hands: number; tables: number }[];
   events: Record<string, number>;
+  /** Absent from an API older than this page (shown as nothing recorded). */
+  play?: LevelPlay[];
+}
+/** How a level played over the period (the API's botPlay): counters only, each rate over its own chances. */
+interface LevelPlay {
+  level: string;
+  hands: number;
+  vpipOpp: number;
+  vpip: number;
+  pfr: number;
+  threeBetOpp: number;
+  threeBet: number;
+  bbStealOpp: number;
+  bbFoldToSteal: number;
+  foldToOverbetOpp: number;
+  foldToOverbet: number;
+  decisions: number;
+  fallbacks: number;
+  failures: number;
+  lagMs: number;
+  slow: number;
 }
 interface RoomsReached { tables: number; reached: number; unreached: string[] }
 interface BotEvent { id: string; tableId: string; tableName: string | null; botId: string | null; nickname: string | null; kind: string; code: string | null; createdAt: number }
@@ -435,6 +456,7 @@ function PlayPanel({ o, days, setDays, loading }: { o: Overview; days: number; s
             ))}
           </Table>
         )}
+        <LevelPlayTable rows={o.play ?? []} />
         <figure>
           <div role="img" aria-label={t('botsChart')} className="flex h-24 items-end gap-px border-b border-white/10" data-testid="bots-chart">
             {o.series.map((s) => (
@@ -460,6 +482,65 @@ function PlayPanel({ o, days, setDays, loading }: { o: Overview; days: number; s
         )}
       </div>
     </Panel>
+  );
+}
+
+/** A rate with the chances it is out of; a dash when there were none. */
+function Rate({ n, of }: { n: number; of: number }) {
+  if (of <= 0) return <span className="text-ink-400">—</span>;
+  return (
+    <>
+      {((n / of) * 100).toFixed(1)}% <span className="text-ink-400">({formatChips(of)})</span>
+    </>
+  );
+}
+
+function LevelPlayTable({ rows }: { rows: LevelPlay[] }) {
+  const { t } = useT();
+  const shown = rows.filter((r) => r.hands > 0 || r.decisions > 0);
+  const pct = (n: number, of: number) => (of > 0 ? ` (${((n / of) * 100).toFixed(1)}%)` : '');
+  return (
+    <div className="flex flex-col gap-2" data-testid="bots-level-play">
+      <h3 className="text-sm font-bold">{t('botsLevelPlay')}</h3>
+      <p className="text-xs text-ink-400">{t('botsLevelPlayHint')}</p>
+      {shown.length === 0 ? (
+        <p className="text-xs text-ink-400">{t('botsLevelPlayEmpty')}</p>
+      ) : (
+        <Table
+          head={[
+            t('botsLevel'),
+            t('botsColSeatHands'),
+            t('botsColVpip'),
+            t('botsColPfr'),
+            t('botsCol3Bet'),
+            t('botsColBbDefense'),
+            t('botsColFoldOverbet'),
+            t('botsColDecisions'),
+            t('botsColFallback'),
+            t('botsColFailures'),
+            t('botsColLag'),
+            t('botsColSlow'),
+          ]}
+        >
+          {shown.map((r) => (
+            <tr key={r.level} data-level={r.level}>
+              <td className={td}>{botLevelLabel(t, r.level)}</td>
+              <td className={`${td} font-mono`}>{formatChips(r.hands)}</td>
+              <td className={`${td} whitespace-nowrap font-mono`}><Rate n={r.vpip} of={r.vpipOpp} /></td>
+              <td className={`${td} whitespace-nowrap font-mono`}><Rate n={r.pfr} of={r.vpipOpp} /></td>
+              <td className={`${td} whitespace-nowrap font-mono`}><Rate n={r.threeBet} of={r.threeBetOpp} /></td>
+              <td className={`${td} whitespace-nowrap font-mono`}><Rate n={r.bbStealOpp - r.bbFoldToSteal} of={r.bbStealOpp} /></td>
+              <td className={`${td} whitespace-nowrap font-mono`}><Rate n={r.foldToOverbet} of={r.foldToOverbetOpp} /></td>
+              <td className={`${td} font-mono`}>{formatChips(r.decisions)}</td>
+              <td className={`${td} whitespace-nowrap font-mono`}>{formatChips(r.fallbacks)}<span className="text-ink-400">{pct(r.fallbacks, r.decisions)}</span></td>
+              <td className={`${td} whitespace-nowrap font-mono`}>{formatChips(r.failures)}<span className="text-ink-400">{pct(r.failures, r.decisions)}</span></td>
+              <td className={`${td} whitespace-nowrap font-mono`}>{r.decisions > 0 ? `${formatChips(Math.round(r.lagMs / r.decisions))} ms` : '—'}</td>
+              <td className={`${td} font-mono`}>{formatChips(r.slow)}</td>
+            </tr>
+          ))}
+        </Table>
+      )}
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
+import { applyLedger, botStatsIncrement, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
 import { BOT_LEVELS, toSocialPolicy, type BotLevel, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
 import { TOURNAMENT_JSON, toTournamentRow, type TournamentRow } from './tournament';
@@ -277,7 +277,8 @@ async function gzipBase64(text: string): Promise<string> {
  * ask), so a dealing room that was never told of a change (the admin's fan-out did not reach it, and its occupancy did
  * not change) learns of it before its next hand; the time bank and social policies are read back the same way. `bots` is how many
  * table bots were dealt in: hands with bots are kept apart from members-only play in statistics. `timeBank` is the
- * hand's time bank counters (added to the day's statistics only with the hand's first write).
+ * hand's time bank counters and `botStats` the bots' play summed over the last few hands (bot-stats.ts), each added to
+ * the day's statistics only with the hand's first write.
  */
 export async function recordHand(
   d1: D1Database,
@@ -285,7 +286,7 @@ export async function recordHand(
   handNumber: number,
   rec: HandRecord,
   engineLog: unknown,
-  opts: { bots?: number; botPolicy?: boolean; timeBank?: Partial<Record<TimeBankMetric, number>> } = {},
+  opts: { bots?: number; botPolicy?: boolean; timeBank?: Partial<Record<TimeBankMetric, number>>; botStats?: { day: number; n: Record<string, number> }[] } = {},
 ): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null; timeBank: TimeBankPolicy | null; social: SocialPolicy | null }> {
   const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
   const policy = opts.botPolicy ? [d1.prepare(`SELECT (${BOT_POLICY_ON}) AS botPolicyOn`)] : [];
@@ -295,6 +296,7 @@ export async function recordHand(
     d1.prepare(`SELECT (${TIME_BANK_POLICY}) AS timeBank, (${SOCIAL_POLICY_JSON}) AS social`),
     // Counted only the first time, so writing a hand again (a retry after an unclear failure) changes nothing.
     ...handStatsIncrements(d1, statsDay(rec.endedAt), rec.handId, opts.timeBank ?? {}),
+    ...(opts.botStats ?? []).flatMap((b) => botStatsIncrement(d1, b.day, rec.handId, b.n)),
     d1
       .prepare(`UPDATE tables SET hands_played = hands_played + 1 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM hands WHERE id = ?2)`)
       .bind(tableId, rec.handId),

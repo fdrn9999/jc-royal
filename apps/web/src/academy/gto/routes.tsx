@@ -7,8 +7,9 @@
 import { sound } from '@jc/audio';
 import { Button, cx } from '@jc/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, NavLink, Outlet, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../../lib/auth';
+import { HAND_PAGE, useBack } from '../../lib/back';
 import { useI18n } from '../../lib/i18n';
 import { l, useTr, type L } from '../content';
 import { isDone, useProgress, type LessonId } from '../progress';
@@ -40,6 +41,7 @@ const T = {
   glossary: l('용어', 'Glossary'),
   review: l('복습', 'Review'),
   toBeginner: l('← 아카데미', '← Academy'),
+  toHand: l('← 핸드로 돌아가기', '← Back to the hand'),
   progress: l('고급 과정 진행률', 'Advanced course progress'),
   parts: l('모듈 {m}/{M} · 맞힌 퀴즈 {q}/{Q} · 핸드 분석 {h}/{H}', 'Modules {m}/{M} · quizzes right {q}/{Q} · hands {h}/{H}'),
   start: l('첫 모듈 시작하기', 'Start the first module'),
@@ -71,6 +73,7 @@ const T = {
   finished: l('모듈 완료!', 'Module complete!'),
   nextModule: l('다음 모듈: {t}', 'Next module: {t}'),
   toHome: l('코스 홈으로', 'Back to the course'),
+  freePractice: l('자유 연습에서 직접 해 보기', 'Try it in free practice'),
   example: l('예시', 'Example'),
   all: l('전체', 'All'),
   onlyWrong: l('틀린 문제만', 'Wrong ones only'),
@@ -140,13 +143,15 @@ const TABS: { to: string; label: L; end?: boolean; testid: string }[] = [
 export function GtoLayout() {
   const tr = useTr();
   const me = useMe();
+  // Opened from a hand's review, back goes to that hand.
+  const back = useBack(HAND_PAGE, '/academy');
   useGtoSync(me?.id);
   useEffect(() => sound.installAutoUnlock(), []);
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4" data-testid="gto">
       <div className="flex items-center justify-between gap-2 text-sm">
-        <Link to="/academy" className="jc-tap -ml-2 rounded-lg px-2 py-2 text-ink-300 hover:text-ivory" data-testid="gto-back">
-          {tr(T.toBeginner)}
+        <Link to={back.to} onClick={back.onClick} className="jc-tap -ml-2 rounded-lg px-2 py-2 text-ink-300 hover:text-ivory" data-testid="gto-back">
+          {tr(back.from ? T.toHand : T.toBeginner)}
         </Link>
         <span className="truncate font-display text-xs font-bold tracking-[0.2em] text-gold-400">GTO</span>
       </div>
@@ -367,6 +372,7 @@ function ModuleView({ id }: { id: GtoModuleId }) {
   const m = MODULE_BY_ID[id];
   const p = useGtoProgress(me?.id);
   const [params, setParams] = useSearchParams();
+  const loc = useLocation();
   const total = m.steps.length + 1; // the lesson steps, then the review
   const step = Math.min(total - 1, Math.max(0, Number(params.get('step') ?? 0) || 0));
   const isReview = step === m.steps.length;
@@ -381,7 +387,8 @@ function ModuleView({ id }: { id: GtoModuleId }) {
   }, [me, id, step]);
 
   const go = (s: number) => {
-    setParams({ step: String(s) }, { replace: true });
+    // The state keeps where the module was opened from (the way back to a hand).
+    setParams({ step: String(s) }, { replace: true, state: loc.state });
     setFinished(false);
     top.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
@@ -481,6 +488,9 @@ function ModuleView({ id }: { id: GtoModuleId }) {
                 {tr(T.nextModule, { t: tr(MODULE_BY_ID[after].title) })} →
               </Button>
             )}
+            <Button size="lg" variant="outline" onClick={() => nav('/academy/practice/free', { state: { from: loc.pathname + loc.search } })} data-testid="gto-free-practice">
+              {tr(T.freePractice)}
+            </Button>
             <Button size="lg" variant="outline" onClick={() => nav('/academy/gto')}>
               {tr(T.toHome)}
             </Button>
@@ -710,6 +720,7 @@ function HandView({ h }: { h: GtoHandAnalysis }) {
   const me = useMe();
   const p = useGtoProgress(me?.id);
   const [picked, setPicked] = useState<string | null>(null);
+  const back = useBack(HAND_PAGE, '/academy/gto/hands');
   const idx = HANDS.indexOf(h);
   const prev = HANDS[idx - 1];
   const after = HANDS[idx + 1];
@@ -722,8 +733,8 @@ function HandView({ h }: { h: GtoHandAnalysis }) {
   };
   return (
     <div className="flex flex-col gap-4" data-testid={`gto-hand-view-${h.id}`}>
-      <Link to="/academy/gto/hands" className="jc-tap -ml-2 self-start rounded-lg px-2 py-1 text-sm text-ink-300 hover:text-ivory">
-        {tr(T.listBack)}
+      <Link to={back.to} onClick={back.onClick} className="jc-tap -ml-2 self-start rounded-lg px-2 py-1 text-sm text-ink-300 hover:text-ivory" data-testid="gto-hand-back">
+        {tr(back.from ? T.toHand : T.listBack)}
       </Link>
       <section className="jc-panel flex flex-col gap-3 p-4 sm:p-6">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">

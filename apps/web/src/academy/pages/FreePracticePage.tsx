@@ -9,9 +9,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Link } from 'react-router';
 import { ActionHelp, CurrentHandPill } from '../../game/BeginnerAids';
 import { ActionBar } from '../../game/ActionBar';
-import { TableScene, useBoxSize, useStackRoom, useTableLayout } from '../../game/TableScene';
+import { TableScene, useAreaSize, useStackRoom, useTableLayout } from '../../game/TableScene';
 import { wonFrom } from '../../game/won';
 import { useAuth } from '../../lib/auth';
+import { useBack } from '../../lib/back';
 import { useI18n, type MsgKey } from '../../lib/i18n';
 import { l, useTr } from '../content';
 import { HandRankingChart } from '../HandChart';
@@ -38,19 +39,25 @@ const T = {
   settings: l('설정', 'Setup'),
   fault: l('연습 진행 중 문제가 생겼습니다. 새 핸드로 다시 시작해 주세요.', 'Something went wrong in this practice hand. Please start a new one.'),
   restart: l('새로 시작', 'Restart'),
+  toStudy: l('학습으로 돌아가기', 'Back to the lesson'),
 };
+
+/** A page of the advanced course, as `state.from` names it (with its step). */
+const STUDY_PAGE = /^\/academy\/gto(\/[a-z-]+)?(\?[^#]*)?$/;
 
 export function FreePracticePage() {
   const tr = useTr();
+  // Opened from the end of a lesson, back goes to that lesson.
+  const back = useBack(STUDY_PAGE, '/academy/practice');
   const [cfg, setCfg] = useState<FreeConfig | null>(null);
   const [draft, setDraft] = useState<FreeConfig>({ bots: 2, style: 'mixed' });
   const [round, setRound] = useState(0);
-  if (cfg) return <FreeTable key={round} cfg={cfg} onSetup={() => setCfg(null)} onRestart={() => setRound((r) => r + 1)} />;
+  if (cfg) return <FreeTable key={round} cfg={cfg} back={back} onSetup={() => setCfg(null)} onRestart={() => setRound((r) => r + 1)} />;
   const pill = (on: boolean) => cx('jc-tap min-h-11 rounded-full border px-4 text-sm font-semibold', on ? 'border-gold-400 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-200');
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-4 px-4 py-6" data-testid="free-setup">
-      <Link to="/academy/practice" className="jc-tap -ml-2 self-start rounded-lg px-2 py-2 text-sm text-ink-300 hover:text-ivory">
-        ← {tr(UI.back)}
+      <Link to={back.to} onClick={back.onClick} className="jc-tap -ml-2 self-start rounded-lg px-2 py-2 text-sm text-ink-300 hover:text-ivory" data-testid="free-back">
+        ← {tr(back.from ? T.toStudy : UI.back)}
       </Link>
       <h1 className="font-display text-xl font-bold tracking-[0.08em] text-gold-300">{tr(T.title)}</h1>
       <p className="text-sm text-ink-300">{tr(T.sub)}</p>
@@ -83,7 +90,7 @@ export function FreePracticePage() {
   );
 }
 
-function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () => void; onRestart: () => void }) {
+function FreeTable({ cfg, back, onSetup, onRestart }: { cfg: FreeConfig; back: ReturnType<typeof useBack>; onSetup: () => void; onRestart: () => void }) {
   const tr = useTr();
   const { t } = useI18n();
   const { me } = useAuth();
@@ -95,9 +102,9 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
   const [busy, setBusy] = useState(false);
   const [fault, setFault] = useState(false);
   const [chart, setChart] = useState(false);
-  const [areaRef, area] = useBoxSize<HTMLDivElement>();
-  const layout = useTableLayout(area, view.table.maxSeats, 0, { me: true, footer: true });
   const room = useStackRoom('');
+  const [areaRef, area] = useAreaSize<HTMLDivElement>(room.style);
+  const layout = useTableLayout(area, view.table.maxSeats, 0, { me: true, footer: true });
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
   // The table turns the hands over before it shows who won: the bar and the net wait for it (the next hand does not).
   // Told per hand and stage, so a settled hand never starts out with the word the table gave on the one before.
@@ -150,7 +157,7 @@ function FreeTable({ cfg, onSetup, onRestart }: { cfg: FreeConfig; onSetup: () =
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }} data-testid="free-table">
       <header className="jc-game-surface z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
-        <Link to="/academy/practice" className="jc-tap grid size-10 place-items-center rounded-lg text-ink-200" aria-label={tr(UI.back)}>
+        <Link to={back.to} onClick={back.onClick} className="jc-tap grid size-10 place-items-center rounded-lg text-ink-200" aria-label={tr(back.from ? T.toStudy : UI.back)} data-testid="free-table-back">
           ←
         </Link>
         <div className="min-w-0">

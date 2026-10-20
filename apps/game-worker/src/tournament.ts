@@ -132,13 +132,17 @@ export function toTournamentRow(raw: unknown): TournamentRow | null {
   }
 }
 
-/** A place decided at the table: who, which place, in which tournament hand, when. */
+/**
+ * A place decided at the table: who, which place, in which tournament hand, when — and the VIP color the member's name
+ * showed then (looks only: kept in room storage for the result on screen, never written to D1).
+ */
 export interface TourneyPlace {
   userId: string;
   nickname: string;
   place: number;
   hand: number;
   at: number;
+  vip?: VipColor;
 }
 
 /** The tournament as the room plays it (RoomState.tourney). */
@@ -183,7 +187,7 @@ export function seedTourney(row: TournamentRow, now: number): TourneyState {
   const status: TourneyState['status'] = row.status === 'running' ? 'running' : row.status === 'finished' ? 'finished' : 'aborted';
   const places = took
     .filter((e) => (e.status === 'eliminated' || e.status === 'won') && e.place !== null)
-    .map((e) => ({ userId: e.userId, nickname: e.nickname, place: e.place!, hand: 0, at: now }))
+    .map((e): TourneyPlace => ({ userId: e.userId, nickname: e.nickname, place: e.place!, hand: 0, at: now, ...(e.vip ? { vip: e.vip } : {}) }))
     .filter((p) => p.userId !== winner?.userId);
   // A clock D1 shows running keeps running; one never started (or stopped) waits for the first deal.
   const stopped = row.levelEndsAt === null;
@@ -247,9 +251,15 @@ export function playersLeft(t: TourneyState): number {
 /**
  * A settled hand of a running tournament: those who lost their last chip get their places (docs: bigger stack at the
  * start of the hand places higher, equal stacks share the higher place), and with one player left that player wins.
- * Returns the busted user ids.
+ * Returns the busted user ids. `vipOf` gives the VIP color a player's seat shows (for the result on screen).
  */
-export function bustOut(t: TourneyState, dealt: readonly { playerId: string; displayName: string; stack: number }[], final: ReadonlyMap<string, number>, now: number): string[] {
+export function bustOut(
+  t: TourneyState,
+  dealt: readonly { playerId: string; displayName: string; stack: number }[],
+  final: ReadonlyMap<string, number>,
+  now: number,
+  vipOf: (userId: string) => VipColor | undefined = () => undefined,
+): string[] {
   if (t.status !== 'running') return [];
   const placed = new Set(t.places.map((p) => p.userId));
   const busts = dealt
@@ -257,7 +267,11 @@ export function bustOut(t: TourneyState, dealt: readonly { playerId: string; dis
     .map((p) => ({ userId: p.playerId, nickname: t.players[p.playerId] ?? p.displayName, startStack: p.stack }));
   if (busts.length === 0) return [];
   const before = playersLeft(t);
-  for (const b of rankBusts(before, busts)) t.places.push({ userId: b.userId, nickname: b.nickname, place: b.place, hand: t.hands, at: now });
+  const place = (userId: string, nickname: string, n: number): TourneyPlace => {
+    const vip = vipOf(userId);
+    return { userId, nickname, place: n, hand: t.hands, at: now, ...(vip ? { vip } : {}) };
+  };
+  for (const b of rankBusts(before, busts)) t.places.push(place(b.userId, b.nickname, b.place));
   t.dirty = true;
   if (playersLeft(t) <= 1) {
     const out = new Set(t.places.map((p) => p.userId));
@@ -266,7 +280,7 @@ export function bustOut(t: TourneyState, dealt: readonly { playerId: string; dis
     t.winnerId = winner;
     t.finishedAt = now;
     t.closeAt = now + TOURNAMENT_FINISH_LINGER_MS;
-    if (winner) t.places.push({ userId: winner, nickname: t.players[winner] ?? '', place: 1, hand: t.hands, at: now });
+    if (winner) t.places.push(place(winner, t.players[winner] ?? '', 1));
   }
   return busts.map((b) => b.userId);
 }

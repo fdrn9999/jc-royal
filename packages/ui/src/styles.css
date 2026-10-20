@@ -151,6 +151,11 @@
   input[type='range'] {
     accent-color: var(--color-gold-500);
   }
+  /* Edge draws its own reveal and clear buttons in password fields; PasswordInput has its own eye button. */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
 }
 
 @layer components {
@@ -248,6 +253,8 @@
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
   /* The fan (another player's two cards) and the lift (a winning card) are variables: the animations end on them. */
   transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-lift, 0px));
+  /* A folded hand's cards darken, and brighten again when their owner shows one (a fade, once). */
+  transition: filter 0.3s ease;
 }
 .jc-card-face {
   position: absolute;
@@ -294,7 +301,7 @@
 .jc-card.highlight {
   --card-lift: -4px;
   box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 18px rgba(230, 197, 107, 0.55);
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.3s ease;
 }
 .jc-card.dim {
   filter: brightness(0.55) saturate(0.6);
@@ -317,6 +324,23 @@
 }
 .jc-deal-in {
   animation: jc-deal-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+/* A winner's cards shown after the hand (web Seat): they rest by the board, the move (--rx, --ry) and the size (--rs)
+   worked out from the table's plan (web reveal.ts). A card shown in front of us slides there from its place at the seat
+   (jc-reveal-in: undoing the move and the size, --sx and --gx its middle off the cards' middle at the seat and at rest),
+   slowing as it comes and turned a little (--rr) on the way, turning face up as it goes (jc-flip-in); transforms only,
+   so it runs off the main thread. */
+.jc-reveal {
+  transform: translate(-50%, -50%) translate(var(--rx, 0px), var(--ry, 0px)) scale(var(--rs, 1));
+}
+@keyframes jc-reveal-in {
+  0% {
+    transform: translate(calc((var(--sx, 0px) - var(--rx, 0px)) / var(--rs, 1) - var(--gx, 0px)), calc(var(--ry, 0px) / var(--rs, 1) * -1)) rotate(var(--rr, 0deg)) scale(calc(1 / var(--rs, 1)));
+  }
+  100% { transform: translate(0px, 0px) rotate(0deg) scale(1); }
+}
+.jc-reveal-in {
+  animation: jc-reveal-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 /* ------------------------------------------------------------------ chips */
@@ -350,28 +374,58 @@
   left: 0;
 }
 
-@keyframes jc-pulse-gold {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 197, 107, 0.5); }
-  50% { box-shadow: 0 0 0 6px rgba(230, 197, 107, 0); }
+/*
+ * Glows that breathe (a gold pulse, the winner's plate, my seat on my turn): a still shadow on the element and a
+ * stronger one on a layer of its own (::after, behind the element's content) that fades in and out. Only that layer's
+ * opacity changes, which the compositor runs without the page: an animated box-shadow is repainted on the main thread
+ * every frame instead (my plate's ring alone took about a fifth of a 6x slowed CPU during my turn; see TEST_REPORT).
+ */
+@keyframes jc-breathe {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
-.jc-pulse-gold {
-  animation: jc-pulse-gold 1.6s ease-in-out infinite;
+.jc-pulse-gold,
+.jc-winner,
+.jc-turn {
+  isolation: isolate;
 }
-@keyframes jc-winner-glow {
-  0%, 100% { box-shadow: 0 0 0 2px var(--t-winner), 0 0 22px rgba(243, 221, 155, 0.45); }
-  50% { box-shadow: 0 0 0 2px var(--t-winner), 0 0 36px rgba(243, 221, 155, 0.75); }
+@layer components {
+  /* Under the utilities, so an element placed by one (absolute, fixed) keeps its place. */
+  .jc-pulse-gold,
+  .jc-winner,
+  .jc-turn {
+    position: relative;
+  }
+}
+.jc-pulse-gold::after,
+.jc-winner::after,
+.jc-turn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  animation: jc-breathe var(--jc-breathe, 1.6s) ease-in-out infinite;
+}
+.jc-pulse-gold::after {
+  box-shadow: 0 0 0 3px rgba(230, 197, 107, 0.4);
 }
 .jc-winner {
-  animation: jc-winner-glow 1.4s ease-in-out infinite;
+  --jc-breathe: 1.4s;
+  box-shadow: 0 0 0 2px var(--t-winner), 0 0 22px rgba(243, 221, 155, 0.45);
+}
+.jc-winner::after {
+  box-shadow: 0 0 36px rgba(243, 221, 155, 0.6);
 }
 /* My seat on my turn (web Seat): a gold ring outside the plate that breathes slowly; a still ring under reduced motion. */
-@keyframes jc-turn-glow {
-  0%, 100% { box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 10px rgba(230, 197, 107, 0.35); }
-  50% { box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 18px rgba(230, 197, 107, 0.7); }
-}
 .jc-turn {
-  box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 12px rgba(230, 197, 107, 0.45);
-  animation: jc-turn-glow 1.8s ease-in-out infinite;
+  --jc-breathe: 1.8s;
+  box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 10px rgba(230, 197, 107, 0.35);
+}
+.jc-turn::after {
+  box-shadow: 0 0 18px rgba(230, 197, 107, 0.6);
 }
 
 /* Academy feedback: correct answers pop, wrong ones shake. */
@@ -477,7 +531,8 @@
 /*
  * VIP members (web MemberName): the name in the colour an administrator chose from a fixed palette (a key the server
  * checked, never a CSS value), always with the VIP mark beside it: the gold-rimmed VIP pill where there is room, the
- * small gold diamond where there is not (a seat). The colours are tokens (--vip-*) the colour vision modes adjust.
+ * small gold diamond where there is not (a seat). The colours are tokens (--vip-*), the same in every colour vision
+ * mode: being VIP is never told by colour alone (the mark says it), so no mode needs to change them.
  */
 .jc-vip-name[data-vip='gold'] { color: var(--vip-gold); }
 .jc-vip-name[data-vip='rose'] { color: var(--vip-rose); }
@@ -508,9 +563,10 @@
 @media (prefers-reduced-motion: reduce) {
   .jc-flip-in,
   .jc-deal-in,
-  .jc-pulse-gold,
-  .jc-winner,
-  .jc-turn,
+  .jc-reveal-in,
+  .jc-pulse-gold::after,
+  .jc-winner::after,
+  .jc-turn::after,
   .jc-pop,
   .jc-shake,
   .jc-react {

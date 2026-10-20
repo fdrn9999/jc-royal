@@ -53,6 +53,8 @@ export interface DecideOptions {
   style?: BotStyle;
   /** Counters per seat, from earlier hands (only the levels that adapt read them). */
   stats?: StatsInput;
+  /** Told when the strategy failed and the bot fell back to checking or folding (for statistics; the move is the same). */
+  onFallback?: () => void;
 }
 
 export interface Opp {

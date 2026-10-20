@@ -66,6 +66,7 @@ import {
 import { botBuyIn, botEvent, pickBot, type BotEventKind } from './bots';
 import { addShown, afterHandMs } from './muck';
 import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
+import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
@@ -204,6 +205,8 @@ interface RoomState {
   banks?: Record<string, { ms: number; hands: number; at: number }>;
   /** The current hand's time bank counters, moved into its record when it settles (statistics only). */
   tbCount?: { handId: string; n: Partial<Record<TimeBankMetric, number>> } | null;
+  /** The table bots' play since it was last moved into a hand's record (bot-stats.ts; statistics only). */
+  botStats?: BotStatsAcc | null;
   /**
    * The Sit & Go this table plays (tournament tables only: tournament.ts, docs/TOURNAMENT.md). Seeded from D1 once; from
    * then on the room's own state leads, and D1 only brings an operator's pause request and an abort.
@@ -250,6 +253,8 @@ interface UnrecordedHand {
   bots?: number;
   /** The hand's time bank counters, for the day's statistics (absent: none). */
   timeBank?: Partial<Record<TimeBankMetric, number>>;
+  /** The bots' play summed up to this hand, per day, for the statistics (absent: none). */
+  botStats?: BotStatsFlush[];
 }
 
 /** A chat line's id from its sender and request id: a line sent again is recognised without storing anything more. */
@@ -1516,7 +1521,7 @@ export class TableRoom extends DurableObject<Env> {
       // places for those who lost their last chip, the winner once one player is left — written to D1 below.
       this.refillTimeBanks(h);
       this.room.tbCount = null;
-      bustOut(tn, h.startingSeats, stacks, now);
+      bustOut(tn, h.startingSeats, stacks, now, (id) => this.room.seats.find((s) => s?.userId === id)?.vip);
       if (tn.status !== 'aborted') tn.dirty = true;
       await this.save();
     } else if (firstTime) {
@@ -1539,6 +1544,15 @@ export class TableRoom extends DurableObject<Env> {
         ...(bots ? { bots } : {}),
         ...(tb ? { timeBank: tb } : {}),
       };
+      // The bots' play for the admin console, counted and saved with the result like the time bank's (statistics only).
+      try {
+        const levelOf = (id: string) => (botIds.has(id) ? (this.botSeat(id)?.bot ?? undefined) : undefined);
+        const counted = countHand(this.room.botStats, entry.record, h.rules.bigBlind, levelOf, now, this.room.closing);
+        this.room.botStats = counted.acc;
+        if (counted.flush.length) entry.botStats = counted.flush;
+      } catch (e) {
+        console.error('bot play statistics', e instanceof Error ? e.message : e);
+      }
       // At a table with bots, what the members did goes into the bots' statistics in the same write as the result. They
       // are only a help to the bots: should counting fail, the hand settles all the same, uncounted.
       let opp: OppStats | null = null;
@@ -1824,7 +1838,7 @@ export class TableRoom extends DurableObject<Env> {
       playersLeft: playersLeft(tn),
       entrants: Object.keys(tn.players).length,
       startStack: tn.startStack,
-      places: [...tn.places].sort((x, y) => x.place - y.place).map((p) => ({ nickname: p.nickname, place: p.place })),
+      places: [...tn.places].sort((x, y) => x.place - y.place).map((p) => ({ nickname: p.nickname, place: p.place, ...(p.vip ? { vip: p.vip } : {}) })),
       you: { status, place: mine?.place ?? null },
     };
   }
@@ -2321,14 +2335,17 @@ export class TableRoom extends DurableObject<Env> {
     const actor = h.actorId();
     const seat = actor ? this.botSeat(actor) : null;
     if (!actor || !seat?.bot) return false;
+    const plannedAt = this.botActAt();
     let failed: string | null = null;
+    let fellBack = false;
     let r: ActResult | null = null;
     try {
       const v = botView(h, actor, h.rules.bigBlind);
       if (!v) failed = 'no_view';
       else {
         const stats = statsBySeat(await this.oppStats(), this.room.seats, now);
-        r = await h.act(actor, decideBot(seat.bot, v, Math.random, { style: styleFor(actor), stats }), `bot-${h.version}`, now);
+        const onFallback = () => (fellBack = true);
+        r = await h.act(actor, decideBot(seat.bot, v, Math.random, { style: styleFor(actor), stats, onFallback }), `bot-${h.version}`, now);
         if (!r.ok) failed = r.code;
       }
     } catch (e) {
@@ -2342,6 +2359,11 @@ export class TableRoom extends DurableObject<Env> {
         this.fault('bot turn failed', new Error(r.reason));
         return false;
       }
+    }
+    // Counted with the move (saved with it below); tournament hands are not recorded, so their moves are not counted.
+    if (this.table?.roomType !== 'tournament') {
+      const lagMs = plannedAt === null ? 0 : now - plannedAt;
+      this.room.botStats = countMove(this.room.botStats, now, seat.bot, { lagMs, fallback: fellBack || !!failed, failed: !!failed });
     }
     if (failed) await this.logBot('action_failed', actor, failed);
     await this.progress(r.cues);
@@ -2425,7 +2447,7 @@ export class TableRoom extends DurableObject<Env> {
       const read = ++this.maintReads;
       try {
         const r = u
-          ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log, { bots: u.bots ?? 0, botPolicy: !!this.table?.bots.enabled, timeBank: u.timeBank })
+          ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log, { bots: u.bots ?? 0, botPolicy: !!this.table?.bots.enabled, timeBank: u.timeBank, botStats: u.botStats })
           : undefined;
         if (r && this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
         // Bots switched on or off service-wide: `schedule` seats them or sends them away.
@@ -2853,7 +2875,16 @@ export class TableRoom extends DurableObject<Env> {
       const { vip: _old, ...rest } = a;
       ws.serializeAttachment(vip ? { ...rest, vip } : rest);
     }
-    if (this.setSeatVip(userId, vip)) {
+    // A tournament's places on screen follow too. The api reaches only the tables the member sits at, so the place of
+    // one already out keeps the color it had until the finished table closes.
+    let placed = false;
+    for (const p of this.room.tourney?.places ?? []) {
+      if (p.userId !== userId || p.vip === vip) continue;
+      if (vip) p.vip = vip;
+      else delete p.vip;
+      placed = true;
+    }
+    if (this.setSeatVip(userId, vip) || placed) {
       await this.save();
       this.broadcast();
     }

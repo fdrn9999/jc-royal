@@ -118,6 +118,12 @@ export function MePage() {
       setDelErr(err(x instanceof ApiError ? x.code : null));
     }
   }
+  // The password typed to confirm goes with the prompt: it opens again empty.
+  function closeDelete() {
+    setDeleting(false);
+    setDelPw('');
+    setDelErr(null);
+  }
 
   const st = stats.data;
   return (
@@ -338,17 +344,17 @@ export function MePage() {
 
       <Modal
         open={deleting}
-        onClose={() => setDeleting(false)}
+        onClose={closeDelete}
         title={t('me.delete')}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setDeleting(false)}>{t('common.cancel')}</Button>
+            <Button variant="ghost" onClick={closeDelete}>{t('common.cancel')}</Button>
             <Button variant="danger" disabled={!delPw} onClick={deleteAccount}>{t('me.delete')}</Button>
           </>
         }
       >
         <p className="mb-3 text-sm text-ink-200">{t('me.deleteConfirm')}</p>
-        <Input type="password" value={delPw} onChange={(e) => setDelPw(e.target.value)} autoComplete="current-password" />
+        <PasswordInput value={delPw} onChange={(e) => setDelPw(e.target.value)} autoComplete="current-password" aria-label={t('auth.password')} />
         {delErr && <p className="mt-2 text-sm text-danger">{delErr}</p>}
       </Modal>
     </div>
@@ -419,7 +425,7 @@ export function HandDetailPage() {
                 <span className="w-6 text-xs text-ink-400">#{p.seatIndex + 1}</span>
                 <span className="flex gap-0.5">{(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.7rem" />)}</span>
                 <span className="flex min-w-0 flex-1 text-sm">
-                  <MemberName name={p.nickname} role={p.role} bot={p.bot} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
+                  <MemberName name={p.nickname} role={p.role} vip={p.vip} bot={p.bot} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
                 </span>
                 {/* Stacked, so an amount in big blinds ("+2.5 BB") leaves the name its room on a phone. */}
                 <span className="flex shrink-0 flex-col items-end leading-tight">

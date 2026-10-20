@@ -21,16 +21,20 @@ function sql(command: string) {
 async function reauthIfAsked(page: Page) {
   const prompt = page.getByTestId('reauth-confirm');
   if (await prompt.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) {
-    await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
+    await page.getByRole('dialog').getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
     await prompt.click();
   }
 }
+
+/** Today's counters for the expert bots, as a table's record would add them (game-worker bot-stats.ts, `bt_<level>_<key>`). */
+const EXPERT_PLAY = { hands: 40, vpipOpp: 40, vpip: 11, pfr: 6, threeBetOpp: 20, threeBet: 1, bbStealOpp: 10, bbFoldToSteal: 4, foldToOverbetOpp: 8, foldToOverbet: 4, decisions: 200, fallbacks: 2, lagMs: 3000 };
 
 // The test ends with bots off; the seeded policy (on, 1,000,000 chips, 20 bots) comes back for whatever runs next.
 test.afterEach(() => {
   sql(
     `INSERT INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) SELECT version + 1, 1, 1000000, 20, 'policy', 'e2e reset' FROM bot_policies WHERE version = (SELECT MAX(version) FROM bot_policies) AND NOT (enabled = 1 AND fund_limit = 1000000 AND max_bots = 20)`,
   );
+  sql(`DELETE FROM daily_stats WHERE metric GLOB 'bt_expert_*'`);
 });
 
 test('bot administration: the seated bot and its fund, a policy change with before → after and a reason, an emergency stop the table follows, the event log and the fund check', async ({ browser }) => {
@@ -41,11 +45,18 @@ test('bot administration: the seated bot and its fund, a policy change with befo
 
   const op = await signUp(browser);
   sql(`UPDATE users SET role = 'super_admin' WHERE email = '${op.email}'`);
+  // Days are counted in KST (packages/db stats.ts `statsDay`).
+  const today = Math.floor((Date.now() + 9 * 3_600_000) / 86_400_000);
+  sql(
+    `INSERT INTO daily_stats (day, metric, n) VALUES ${Object.entries(EXPERT_PLAY)
+      .map(([k, n]) => `(${today}, 'bt_expert_${k}', ${n})`)
+      .join(', ')} ON CONFLICT (day, metric) DO UPDATE SET n = excluded.n`,
+  );
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
   await page.getByRole('link', { name: /^봇 운영$|^Bots$/ }).click();
@@ -60,6 +71,10 @@ test('bot administration: the seated bot and its fund, a policy change with befo
   await expect(row).toContainText('어려움');
   expect(Number((await page.getByTestId('bots-seated-now').innerText()).replace(/,/g, ''))).toBeGreaterThanOrEqual(1);
   expect(Number((await page.getByTestId('bots-issued').innerText()).replace(/,/g, ''))).toBeGreaterThan(0);
+
+  // How each level played: every rate with its own denominator, and how the moves went.
+  const expert = page.getByTestId('bots-level-play').locator('tr[data-level="expert"]');
+  await expect(expert.locator('td')).toHaveText(['전문가', '40', '27.5% (40)', '15.0% (40)', '5.0% (20)', '60.0% (10)', '50.0% (8)', '200', '2 (1.0%)', '0 (0.0%)', '15 ms', '0']);
 
   // The table's own page shows the same settings and whether bots may sit there now.
   await row.getByRole('link', { name: 'E2E Bots Admin' }).click();

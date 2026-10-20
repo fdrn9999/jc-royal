@@ -49,7 +49,7 @@ export async function adminLogin(browser: Browser, email: string, opts: { mobile
   const page = await ctx.newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
   return page;

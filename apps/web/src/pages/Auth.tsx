@@ -60,7 +60,7 @@ export function LoginPage() {
     <AuthLayout title={t('auth.login')}>
       <form className="flex flex-col gap-4" onSubmit={submit}>
         <Field label={t('auth.email')}>{(id) => <Input id={id} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />}</Field>
-        <Field label={t('auth.password')}>{(id) => <Input id={id} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />}</Field>
+        <Field label={t('auth.password')}>{(id) => <PasswordInput id={id} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />}</Field>
         <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-ink-100">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="size-5 shrink-0 accent-[var(--color-gold-500)]" data-testid="login-remember" />
           <span>

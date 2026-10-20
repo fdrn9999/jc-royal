@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
 import logo128 from '../../assets/logo-128.webp';
 import logo192 from '../../assets/logo-192.webp';
 import { cx } from '../util';
@@ -96,6 +96,53 @@ export function Input({ className, ...rest }: ComponentProps<'input'>) {
         className,
       )}
     />
+  );
+}
+
+/**
+ * A password field with an eye button that shows what was typed or hides it again. Hidden at first, and again each time
+ * it is drawn anew (a dialog opened again). Toggling keeps the value, the focus and the caret: a click or tap on the eye
+ * leaves the focus in the field (a phone keeps its keyboard), a keyboard user stays on the button. The labels name the
+ * button in the page's language.
+ */
+export function PasswordInput({ showLabel, hideLabel, id, ...rest }: Omit<ComponentProps<'input'>, 'type' | 'className' | 'ref'> & { showLabel: string; hideLabel: string }) {
+  const [shown, setShown] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const caret = useRef<[number, number] | null>(null);
+  const ownId = useId();
+  const fieldId = id ?? ownId;
+  // A new type may move the caret to the end: put it back where it was.
+  useLayoutEffect(() => {
+    const el = input.current;
+    const at = caret.current;
+    caret.current = null;
+    if (el && at && document.activeElement === el) el.setSelectionRange(at[0], at[1]);
+  }, [shown]);
+  const toggle = () => {
+    const el = input.current;
+    if (el && document.activeElement === el && el.selectionStart !== null && el.selectionEnd !== null) caret.current = [el.selectionStart, el.selectionEnd];
+    setShown((s) => !s);
+  };
+  return (
+    <div className="relative">
+      <Input {...rest} ref={input} id={fieldId} type={shown ? 'text' : 'password'} className="pr-11" />
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={toggle}
+        aria-label={shown ? hideLabel : showLabel}
+        aria-controls={fieldId}
+        className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-ink-400 transition hover:text-ivory focus-visible:text-gold-300 focus-visible:outline-none"
+        data-testid="password-toggle"
+        data-shown={shown ? '1' : '0'}
+      >
+        <svg aria-hidden viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+          <circle cx="12" cy="12" r="3" />
+          {shown && <path d="M4 4l16 16" />}
+        </svg>
+      </button>
+    </div>
   );
 }
 

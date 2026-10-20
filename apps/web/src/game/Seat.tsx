@@ -10,6 +10,7 @@ import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import type { Density } from './layout';
 import { cardsToShow } from './olderRooms';
+import type { RevealSpot } from './reveal';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { ReactionBubble, ReactionTray, type ReactionSender, type SeatReaction } from './Reactions';
 
@@ -51,12 +52,13 @@ function initials(name?: string) {
  * The seat's sizes at each density. layout.ts (DIMS) lays the table out by them: change both together. Written out
  * in full so the stylesheet keeps every class.
  */
-const SIZE: Record<Density, Record<'me' | 'other' | 'cards' | 'spread' | 'plate' | 'avatar' | 'initials' | 'name' | 'nameText' | 'stack' | 'badges' | 'dealer' | 'blind' | 'host' | 'status' | 'sit' | 'empty', string>> = {
+const SIZE: Record<Density, Record<'me' | 'other' | 'cards' | 'spread' | 'pull' | 'plate' | 'avatar' | 'initials' | 'name' | 'nameText' | 'stack' | 'badges' | 'dealer' | 'blind' | 'host' | 'status' | 'sit' | 'empty', string>> = {
   full: {
     me: '3.4rem',
     other: '2.5rem',
     cards: 'mb-[-0.6rem]',
     spread: '-space-x-3',
+    pull: '-0.75rem',
     plate: 'min-w-[8.5rem] gap-2 py-1 pl-1 pr-3',
     avatar: 'size-11',
     initials: 'text-xs',
@@ -76,6 +78,7 @@ const SIZE: Record<Density, Record<'me' | 'other' | 'cards' | 'spread' | 'plate'
     other: '1.7rem',
     cards: 'mb-[-0.6rem]',
     spread: '-space-x-3',
+    pull: '-0.75rem',
     plate: 'min-w-[6.5rem] gap-2 py-1 pl-1 pr-3',
     avatar: 'size-9',
     initials: 'text-xs',
@@ -95,6 +98,7 @@ const SIZE: Record<Density, Record<'me' | 'other' | 'cards' | 'spread' | 'plate'
     other: '1.45rem',
     cards: 'mb-[-0.5rem]',
     spread: '-space-x-2',
+    pull: '-0.5rem',
     plate: 'min-w-[5.75rem] gap-1 py-0.5 pl-0.5 pr-2',
     avatar: 'size-6',
     initials: 'text-[9px]',
@@ -140,6 +144,12 @@ export interface SeatProps {
   onShow?: (card: 0 | 1) => void;
   /** Those buttons lie on the cards' lower half, clear of the plate, instead of above them (no room kept there). */
   showOver?: boolean;
+  /**
+   * Where a winner's cards shown after the hand rest by the board (reveal.ts): shown in front of us they slide there,
+   * turning face up on the way; shown before this page saw the hand (a reload), they are just there. Without one (no
+   * room clear by the board) they turn where they lie.
+   */
+  reveal?: RevealSpot | null;
   /** The quick reaction this player sent, while it shows. */
   reaction?: SeatReaction | null;
   /** My seat at a real table, with reactions on: tapping the plate opens the reaction tray. */
@@ -166,6 +176,10 @@ export function Seat(p: SeatProps) {
   const [showing, setShowing] = useState<readonly number[]>([]);
   const shownKey = (s.shown ?? []).map((c) => (c ? 1 : 0)).join('');
   useEffect(() => setShowing([]), [shownKey, p.newHandKey]);
+  // What was shown when this hand first drew here: only cards shown since are seen being shown (they move).
+  const [seen, setSeen] = useState({ hand: p.newHandKey, shown: shownKey });
+  if (seen.hand !== p.newHandKey) setSeen({ hand: p.newHandKey, shown: shownKey });
+  const fresh = (i: number) => seen.hand === p.newHandKey && seen.shown[i] !== '1';
   useEffect(() => {
     if (!showing.length) return;
     const id = setTimeout(() => setShowing([]), 5_000);
@@ -219,6 +233,9 @@ export function Seat(p: SeatProps) {
   // Cards shown after the hand: face up where chosen, the other one face down (its owner sees both in holeCards).
   const shown = s.shown?.length ? s.shown : null;
   const isShown = (i: number) => !!shown?.[i];
+  // A winner's shown cards rest by the board (reveal); their places at the seat stay, empty.
+  const rest = winner && shown && p.reveal ? p.reveal : null;
+  const rests = (i: number) => !!rest && isShown(i);
   const show = (choice: 0 | 1 | 'both') => {
     const todo = cardsToShow(choice, showing, isShown);
     setShowing([...showing, ...todo]);
@@ -248,23 +265,28 @@ export function Seat(p: SeatProps) {
       data-state={s.state}
     >
       {trayOpen && <ReactionTray sender={p.react!} onClose={() => setTray(false)} />}
-      <div className={cx('relative flex flex-col items-center', folded && !shown && 'opacity-55')}>
+      {/* A folded hand fades back in when its owner shows a card (quieter than a winner's: it stays where it is). */}
+      <div className={cx('relative flex flex-col items-center transition-opacity duration-300', folded && !shown && 'opacity-55')}>
         {/* hole cards */}
         {cards.length > 0 && (
           <div className={cx('relative flex', z.cards, p.isMe ? 'gap-1' : z.spread)} key={p.newHandKey ?? 'cards'}>
-            {cards.map((c, i) => (
-              <PlayingCard
-                key={`${c ?? 'x'}-${i}`}
-                card={c ?? null}
-                size={cardSize}
-                animate={p.still && (!c || p.still.has(c)) ? false : c ? 'flip' : 'deal'}
-                highlight={!!c && !!p.bestFive?.includes(c)}
-                dim={folded && !isShown(i)}
-                // Dealt round the table in order; cards turned later (a showdown) one after the other. The fan is a
-                // variable, so the card's lift and its animations keep it.
-                style={{ animationDelay: `${p.deal && (p.isMe || !c) ? p.deal[i] : i * 90}ms`, ['--card-rot' as string]: !p.isMe ? `${i === 0 ? -6 : 6}deg` : undefined }}
-              />
-            ))}
+            {cards.map((c, i) =>
+              rests(i) ? (
+                <span key={`rest-${i}`} aria-hidden className="block shrink-0" style={{ width: cardSize, height: `calc(${cardSize} * 1.4)` }} />
+              ) : (
+                <PlayingCard
+                  key={`${c ?? 'x'}-${i}`}
+                  card={c ?? null}
+                  size={cardSize}
+                  animate={p.still && (!c || p.still.has(c)) ? false : c ? 'flip' : 'deal'}
+                  highlight={!!c && !!p.bestFive?.includes(c)}
+                  dim={folded && !isShown(i)}
+                  // Dealt round the table in order; cards turned later (a showdown) one after the other. The fan is a
+                  // variable, so the card's lift and its animations keep it.
+                  style={{ animationDelay: `${p.deal && (p.isMe || !c) ? p.deal[i] : i * 90}ms`, ['--card-rot' as string]: !p.isMe ? `${i === 0 ? -6 : 6}deg` : undefined }}
+                />
+              ),
+            )}
             {p.onShow && (
               <div className={cx('absolute left-0 flex gap-1', p.showOver ? 'bottom-2 z-10' : 'bottom-full mb-1')} data-testid="show-cards">
                 {cards.map((_, i) =>
@@ -308,6 +330,35 @@ export function Seat(p: SeatProps) {
                 )}
               </div>
             )}
+          </div>
+        )}
+        {/* A winner's shown cards, resting by the board, each in its own place of two (a card shown later takes the other
+            without moving the first). One shown in front of us slides there from its place at the seat (--sx: its middle
+            off the cards' middle there, --gx: here), turning face up on the way if others saw only its back. */}
+        {rest && (
+          <div
+            className="jc-reveal pointer-events-none absolute left-1/2 z-10 flex gap-1"
+            style={{ top: `calc(${cardSize} * 0.7)`, ['--rx' as string]: `${rest.x}px`, ['--ry' as string]: `${rest.y}px`, ['--rs' as string]: rest.s }}
+            data-testid={`reveal-${s.seatIndex}`}
+          >
+            {cards.map((c, i) => {
+              const side = i === 0 ? -1 : 1;
+              return rests(i) && c ? (
+                <span
+                  key={`${c}-${i}`}
+                  className={cx('block', fresh(i) && 'jc-reveal-in')}
+                  style={{
+                    ['--sx' as string]: `calc((${cardSize} + ${p.isMe ? '0.25rem' : z.pull}) / 2 * ${side})`,
+                    ['--gx' as string]: `calc((${cardSize} + 0.25rem) / 2 * ${side})`,
+                    ['--rr' as string]: `${(p.isMe ? 0 : 6 * side) + (rest.x > 0 ? -6 : 6)}deg`,
+                  }}
+                >
+                  <PlayingCard card={c} size={cardSize} animate={fresh(i) && !p.isMe && !p.still?.has(c) ? 'flip' : false} highlight={!!p.bestFive?.includes(c)} />
+                </span>
+              ) : (
+                <span key={`gap-${i}`} aria-hidden className="block shrink-0" style={{ width: cardSize }} />
+              );
+            })}
           </div>
         )}
         {/* plate */}

@@ -1,7 +1,7 @@
 import { sound } from '@jc/audio';
 import type { ActionType, PublicUserDto, SeatView, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { updateProgress, useProgress } from '../academy/progress';
@@ -19,7 +19,7 @@ import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { legacyMuckStep } from '../game/olderRooms';
 import { useReactionSender } from '../game/Reactions';
 import { realTableOptions, useShortScreen } from '../game/short';
-import { amountChars, TableScene, useBoxSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
+import { amountChars, TableScene, useAreaSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -51,14 +51,23 @@ function tournamentStalled(s: TableView): boolean {
   return !!tn && tn.status === 'running' && !tn.paused && tn.levelEndsAt === null && tn.levelLeftMs !== null && !s.nextHandAt && !s.hand;
 }
 
+const secondsTo = (target: number) => Math.max(0, Math.ceil((target - Date.now()) / 1000));
+
 function useCountdown(target: number | null) {
-  const [now, setNow] = useState(Date.now());
+  // The whole page draws with it: again when the second shown changes, not on every check of the clock.
+  const [, redraw] = useReducer((x: number) => x + 1, 0);
   useEffect(() => {
     if (!target) return;
-    const h = setInterval(() => setNow(Date.now()), 250);
+    let shown = secondsTo(target);
+    const h = setInterval(() => {
+      const left = secondsTo(target);
+      if (left === shown) return;
+      shown = left;
+      redraw();
+    }, 250);
     return () => clearInterval(h);
   }, [target]);
-  return target ? Math.max(0, Math.ceil((target - now) / 1000)) : null;
+  return target ? secondsTo(target) : null;
 }
 
 /** Moving to another table remounts the page, so nothing from the previous table (state, dialogs, ?sit) carries over. */
@@ -111,7 +120,6 @@ export function TablePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [topUpOpen, setTopUpOpen] = useState(false);
-  const [areaRef, area] = useBoxSize<HTMLDivElement>();
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => sound.installAutoUnlock(), []);
@@ -236,6 +244,7 @@ export function TablePage() {
   const short = useShortScreen();
   const academy = useProgress(me?.id);
   const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${prefs.showHand}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
+  const [areaRef, area] = useAreaSize<HTMLDivElement>(room.style);
   // Seated, my seat is at the bottom, with room above my cards for the show-card buttons unless the screen is short.
   // The raise panel open (my turn, so no cards to show), that room goes to the table too.
   const tableOpts = realTableOptions(short);

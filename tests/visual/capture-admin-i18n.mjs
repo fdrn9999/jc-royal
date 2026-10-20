@@ -162,7 +162,7 @@ const page = await ctx.newPage();
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(admin);
 await page.getByLabel(/이메일|Email/).fill(owner.email);
-await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
 await page.getByRole('button', { name: /로그인|Log in/ }).click();
 await page.getByTestId('dashboard').waitFor();
 
@@ -188,7 +188,7 @@ for (const lang of ['ko', 'en']) {
     await page.goto(admin + path);
     await page.waitForTimeout(900);
     if (await page.getByTestId('reauth-confirm').isVisible().catch(() => false)) {
-      await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+      await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
       await page.getByTestId('reauth-confirm').click();
       await page.waitForTimeout(900);
     }

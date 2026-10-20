@@ -4,7 +4,7 @@
 // nothing held for the morning); everything checked again when it goes out (a block, a withdrawal, an expiry); a friend's
 // messages a minute apart, none for the conversation being read; a browser that is gone is dropped, a busy one tried
 // again, and the action stands whatever the push does. A mocked push service, not a real browser or device.
-import { isKstNight, type TournamentStructure, type TournamentTemplateDto, type AdminTournamentRow, type TableView } from '@jc/types';
+import { isKstNight, PRESENCE_AWAY_MS, type TournamentStructure, type TournamentTemplateDto, type AdminTournamentRow, type TableView } from '@jc/types';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
@@ -275,6 +275,17 @@ describe('how often', () => {
     expect((await got(b.sub, 'dm')).map((x) => x.p.tag)).toEqual([`dm:${c.me.id}`]);
   });
 
+  it('a conversation left open on a device untouched for five minutes holds back nothing', async () => {
+    const [a, b] = await Promise.all([member(), member()]);
+    await befriend(a, b);
+    const conn = `push-${Date.now().toString(36)}`;
+    const idleMs = PRESENCE_AWAY_MS + 1_000;
+    expect((await b.client.post('/api/me/presence/heartbeat', { conn, idleMs, visible: true, view: `dm:${a.me.id}` })).status).toBe(200);
+    expect((await a.client.post(`/api/dm/${b.me.id}`, { text: 'away' })).status).toBe(201);
+    expect((await settled(b.me.id, 1, 'dm'))[0]).toMatchObject({ status: 'sent' });
+    expect((await got(b.sub, 'dm')).map((x) => x.p.tag)).toEqual([`dm:${a.me.id}`]);
+  });
+
   it('sent once however many senders run at the same time', async () => {
     const b = await member();
     const id = await queueRaw(b.me.id, 'tournament_result', { url: '/tournaments/x', coalesce: 'tournament_result:x' });
@@ -318,6 +329,20 @@ describe('when the push service says no', () => {
     expect(dev).toMatchObject({ failures: 1 });
     expect(dev!.last_failure_at).toBeGreaterThan(0);
     expect((await b.client.get(`/api/dm/${a.me.id}`)).body.messages.at(-1)).toMatchObject({ body: 'kept' });
+  });
+
+  it('a message read before its push is tried again is not pushed', async () => {
+    const { a, b } = await pair('busy');
+    expect((await a.client.post(`/api/dm/${b.me.id}`, { text: 'read meanwhile' })).status).toBe(201);
+    await eventually(() => events(b.me.id, 'dm'), (r) => r[0]?.reason === 'retry');
+    const { seq } = (await b.client.get(`/api/dm/${a.me.id}`)).body.messages.at(-1);
+    expect((await b.client.post(`/api/dm/${a.me.id}/read`, { upToSeq: seq })).status).toBe(200);
+    // Due now, as if its minute had passed (the test database only).
+    await d1(`UPDATE notification_events SET next_attempt_at = 0 WHERE user_id = '${b.me.id}' AND type = 'dm'`);
+    await runPushCron();
+    // Each run that takes the event counts a try (the first one pushed, this one stopped before pushing).
+    expect((await events(b.me.id, 'dm'))[0]).toMatchObject({ status: 'skipped', reason: 'read', attempts: 2 });
+    expect(await got(b.sub, 'dm'), 'only the first try reached the push service').toHaveLength(1);
   });
 
   it('a browser refused three times in a row is dropped; a push reaching any browser is sent', async () => {

@@ -17,7 +17,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { JoinCodeModal } from '../components/JoinCode';
 import { isGone, LoadFailed, Loading } from '../components/Loading';
-import { MemberName } from '../components/MemberName';
+import { HostedBy, MemberName } from '../components/MemberName';
 import { PresenceCorner, PresenceLabel } from '../components/Presence';
 import { Avatar, BlockConfirm, ReportModal, type ReportSubject } from '../components/Social';
 import { api, ApiError } from '../lib/api';
@@ -25,6 +25,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { setPrefs, usePrefs } from '../lib/prefs';
 import { setPresenceView, sortFriends, useFriendsPresence } from '../lib/presence';
+import { closeReadPushes } from '../lib/push';
 import { blockUser, loadBlocks, unblockUser } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
 
@@ -127,10 +128,18 @@ function InvitePicker({ friend, onClose, onSent }: { friend: FriendDto | null; o
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold text-ivory">{tb.name}</span>
-                      <span className="block truncate text-xs text-ink-400">
-                        {t('lobby.blinds')} {formatChips(tb.smallBlind)}/{formatChips(tb.bigBlind)}
-                        {tb.host && ` · ${t('room.hostedBy', { name: tb.host.nickname })}`}
-                        {tb.isPrivate && ` · 🔒 ${t('invite.private')}`}
+                      {/* The host with their staff or VIP mark and color, as in the lobby; the name gives way first. */}
+                      <span className="flex min-w-0 items-center gap-1 text-xs whitespace-nowrap text-ink-400">
+                        <span className="shrink-0">
+                          {t('lobby.blinds')} {formatChips(tb.smallBlind)}/{formatChips(tb.bigBlind)}
+                        </span>
+                        {tb.host && (
+                          <>
+                            <span aria-hidden>·</span>
+                            <HostedBy host={tb.host} />
+                          </>
+                        )}
+                        {tb.isPrivate && <span className="shrink-0">· 🔒 {t('invite.private')}</span>}
                       </span>
                     </span>
                     <span className="shrink-0 text-right font-mono text-sm tabular-nums text-gold-300">
@@ -557,7 +566,11 @@ export function ConversationPage() {
         });
         if (!onScreen.current || current.current !== userId) return;
       }
-      await api(`/api/dm/${userId}/read`, { body: { upToSeq } }).catch(() => {});
+      // Read: their pushes still shown in this browser go too, while the conversation is still read here. Left
+      // meanwhile, a push shown since may be for a message after this one, still unread: it stays.
+      const read = await api(`/api/dm/${userId}/read`, { body: { upToSeq } }).then(() => true, () => false);
+      const reading = () => onScreen.current && current.current === userId && document.visibilityState === 'visible';
+      if (read && reading()) void closeReadPushes(userId, reading).catch(() => {});
       void refreshUnread();
     },
     [userId],

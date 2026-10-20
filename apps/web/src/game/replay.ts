@@ -167,6 +167,7 @@ export function buildReplay(h: ReplayInput, heroSeat: number | null): ReplayStep
         nickname: p.nickname,
         ...(p.role ? { role: p.role } : {}),
         ...(p.bot ? { bot: true as const } : {}),
+        ...(p.vip ? { vip: p.vip } : {}),
         stack,
         streetBet: final ? 0 : (streetBets.get(i) ?? 0),
         connected: true,

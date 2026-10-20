@@ -12,6 +12,38 @@ export interface TableReport {
   stack: { top: number; bottom: number; left: number; right: number } | null;
 }
 
+/**
+ * How many places the table and the player's seat (its centre: the seat's width follows its countdown) are drawn in,
+ * read at every frame, from just before `start` until `ms` after it: 1 when nothing moved, 2 when they moved once. The
+ * raise panel opening or closing moves them once, not to a place in between first (TEST_REPORT).
+ */
+export async function tablePlaces(page: Page, seat: string, start: () => Promise<void>, ms = 1_200): Promise<number> {
+  await page.evaluate((id) => {
+    const w = window as unknown as { __places?: string[] };
+    const read = () => {
+      const t = document.querySelector('[data-testid=table]')?.getBoundingClientRect();
+      const s = document.querySelector(`[data-testid="seat-${id}"]`)?.getBoundingClientRect();
+      const half = (v: number) => Math.round(v * 2) / 2;
+      return [t ? [t.left, t.top, t.width, t.height].map(half).join(',') : '-', s ? [s.left + s.width / 2, s.top + s.height / 2].map(half).join(',') : '-'].join('|');
+    };
+    const places = (w.__places = [read()]);
+    const tick = () => {
+      const now = read();
+      if (now !== places[places.length - 1]) places.push(now);
+      if (w.__places === places) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, seat);
+  await start();
+  await page.waitForTimeout(ms);
+  return page.evaluate(() => {
+    const w = window as unknown as { __places?: string[] };
+    const n = w.__places?.length ?? 0;
+    w.__places = undefined;
+    return n;
+  });
+}
+
 /** Every button and field of the action bar smaller than 40px either way, by what it says and its size. */
 export function smallTargets(page: Page): Promise<string[]> {
   return page.getByTestId('action-bar').evaluate((bar) =>

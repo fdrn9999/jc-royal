@@ -8,6 +8,7 @@ import type { TournamentTableView } from '@jc/types';
 import { cx, formatChips } from '@jc/ui';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
+import { MemberName } from '../components/MemberName';
 import { useI18n } from '../lib/i18n';
 import { serverNow } from '../lib/service';
 import { useTn } from './tournament-text';
@@ -119,8 +120,9 @@ export function TournamentResult({ tn }: { tn: TournamentTableView }) {
       {places.length > 0 && (
         <ol className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-200" aria-label={tr('result.places')}>
           {places.map((p) => (
-            <li key={`${p.place}-${p.nickname}`} className={cx(p.place === 1 && 'font-semibold text-gold-300')}>
-              {tr('place', { n: p.place })} {p.nickname}
+            <li key={`${p.place}-${p.nickname}`} className={cx('inline-flex min-w-0 max-w-full items-center gap-1', p.place === 1 && 'font-semibold text-gold-300')}>
+              <span className="shrink-0">{tr('place', { n: p.place })}</span>
+              <MemberName name={p.nickname} vip={p.vip} />
             </li>
           ))}
         </ol>

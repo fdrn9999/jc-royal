@@ -7,8 +7,8 @@
  *   a new day). Only the day is kept, never a time, page or count, and only for ACTIVE_DAYS_RETENTION days: daily,
  *   weekly and monthly active members are counted from it and kept as numbers in `daily_stats`.
  * - `daily_stats`: one number per day and metric. Most are rolled up once a day from the records the service keeps
- *   anyway (accounts, seats, hands, reports); the Academy, free refill, hand note, settings and time bank counters are
- *   added as events arrive. Day 0
+ *   anyway (accounts, seats, hands, reports); the Academy, free refill, hand note, settings, time bank and bot counters
+ *   are added as events arrive. Day 0
  *   holds markers.
  */
 export const STATS_TZ_OFFSET_MS = 9 * 60 * 60_000;
@@ -83,6 +83,37 @@ export type SettingsMetric = (typeof SETTINGS_METRICS)[number];
 export const TIME_BANK_METRICS = ['tb_use', 'tb_sec', 'tb_empty', 'tb_expired', 'tb_late', 'tb_recover'] as const;
 export type TimeBankMetric = (typeof TIME_BANK_METRICS)[number];
 
+/**
+ * Table bots' play per level (apps/game-worker/src/bot-stats.ts), metric `bt_<level>_<key>`: from each hand a bot was
+ * dealt into, the public counters the bots' statistics of their opponents use (packages/poker-engine ai/profile.ts:
+ * hands, chances to put chips in preflop and how often they did or raised, 3-bets, the big blind against a steal, folds
+ * to an overbet); per decision, how many there were, how many fell back to a check or fold (the strategy failed or the
+ * engine refused its choice), how many the engine refused, and how late the room moved (ms after the moment planned,
+ * and moves over BOT_SLOW_MS late). Summed in the room over a few hands and written with a hand record (once, also when
+ * it is written again), per level only, never per bot or member. Kept by the daily rollup.
+ */
+export const BOT_STAT_KEYS = [
+  'hands',
+  'vpipOpp',
+  'vpip',
+  'pfr',
+  'threeBetOpp',
+  'threeBet',
+  'bbStealOpp',
+  'bbFoldToSteal',
+  'foldToOverbetOpp',
+  'foldToOverbet',
+  'decisions',
+  'fallbacks',
+  'failures',
+  'lagMs',
+  'slow',
+] as const;
+export type BotStatKey = (typeof BOT_STAT_KEYS)[number];
+/** A bot move this much later than planned counts as slow. */
+export const BOT_SLOW_MS = 1_000;
+export const botStatMetric = (level: string, key: BotStatKey) => `bt_${level}_${key}`;
+
 type Metric = AcademyMetric | RefillMetric | HandNoteMetric | SettingsMetric | TimeBankMetric;
 
 /** Markers on day 0: the first day with activity markers, and the last day rolled up. */
@@ -116,4 +147,18 @@ export function handStatsIncrements(d1: D1Database, day: number, handId: string,
         )
         .bind(day, metric, n, handId),
     );
+}
+
+/** Like handStatsIncrements for the bots' counters (`bt_*`, any number of them), in one statement. */
+export function botStatsIncrement(d1: D1Database, day: number, handId: string, counts: Record<string, number>): D1PreparedStatement[] {
+  const rows = Object.entries(counts).filter(([m, n]) => m.startsWith('bt_') && Number.isInteger(n) && n > 0);
+  if (!rows.length) return [];
+  return [
+    d1
+      .prepare(
+        `INSERT INTO daily_stats (day, metric, n) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?2)
+          WHERE NOT EXISTS (SELECT 1 FROM hands WHERE id = ?3) ON CONFLICT (day, metric) DO UPDATE SET n = n + excluded.n`,
+      )
+      .bind(day, JSON.stringify(rows), handId),
+  ];
 }

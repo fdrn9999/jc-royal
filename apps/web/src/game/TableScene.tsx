@@ -11,6 +11,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { Flights, useCueStaging } from './CueLayer';
 import { DIMS, planHeight, planTable, type Density, type PlanInput, type Point, type SeatGeometry, type TablePlan } from './layout';
 import type { ReactionSender, SeatReaction } from './Reactions';
+import { revealSpots } from './reveal';
 import { Seat } from './Seat';
 import { collected as collectedOf } from './staging';
 import type { CueEvent } from './useTableSocket';
@@ -21,11 +22,40 @@ export function useBoxSize<T extends HTMLElement>() {
   const [size, setSize] = useState({ w: 1200, h: 700 });
   useEffect(() => {
     if (!ref.current) return;
-    const ro = new ResizeObserver(([e]) => e && setSize({ w: e.contentRect.width, h: e.contentRect.height }));
+    const ro = new ResizeObserver(([e]) => e && setSize((s) => (s.w === e.contentRect.width && s.h === e.contentRect.height ? s : { w: e.contentRect.width, h: e.contentRect.height })));
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
   return [ref, size] as const;
+}
+
+/** A margin of a style in px; one not given in px (a `max(…, env(…))`) counts as none, the same when measured as when set. */
+const px = (v: unknown) => (typeof v === 'number' ? v : Number.parseFloat(String(v ?? '')) || 0);
+
+/**
+ * The size of a table area kept clear of the stack by useStackRoom's `style`, for that style: the area is measured
+ * without the room's margins it had then, and the style's are taken off here, in the render that sets them. A raise panel
+ * opening or closing lays the table out once, not once for the new margins and again a frame later for the size the
+ * area was measured to have with them (the table moved twice, each a whole render of it; TEST_REPORT). The measurement
+ * after it finds the same size and draws nothing.
+ */
+export function useAreaSize<T extends HTMLElement>(style: CSSProperties) {
+  const ref = useRef<T>(null);
+  const [base, setBase] = useState({ w: 1200, h: 700 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => {
+      if (!e) return;
+      const w = e.contentRect.width + px(el.style.marginRight);
+      const h = e.contentRect.height + px(el.style.marginBottom);
+      // Under half a pixel is the rounding of a layout, not a new size.
+      setBase((b) => (Math.abs(b.w - w) < 0.5 && Math.abs(b.h - h) < 0.5 ? b : { w, h }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, { w: Math.max(0, base.w - px(style.marginRight)), h: Math.max(0, base.h - px(style.marginBottom)) }] as const;
 }
 
 /**
@@ -247,6 +277,15 @@ export function TableScene({
   const showdown = useMemo(() => new Map(result ? (hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x]) : []), [hand?.result, result]);
   const topWinner = won[0]?.seatIndex;
   const winningFive = topWinner !== undefined ? (showdown.get(topWinner)?.bestFive ?? []) : [];
+  // Where winners' cards shown after the hand come to rest by the board (reveal.ts), worked out once per plan and set
+  // of such winners.
+  const showing = s.seats.filter((x) => (winners.get(x.seatIndex) ?? 0) > 0 && x.shown?.some(Boolean)).map((x) => x.seatIndex);
+  const showingKey = showing.join();
+  const spots = useMemo(
+    () => (showing.length ? revealSpots(plan, showing.map((seat) => ({ seat, mine: seat === mySeat }))) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `showing` is read through its key
+    [plan, showingKey, mySeat],
+  );
   // Chips already gathered in the middle; after settlement they have been paid out.
   const collected = staged?.pot ?? collectedOf(s);
   const boardShown = staged?.board ?? hand?.board.length ?? 0;
@@ -349,6 +388,7 @@ export function TableScene({
               onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
               onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? onShow : undefined}
               showOver={showOnCards}
+              reveal={spots?.get(seat.seatIndex) ?? null}
               reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
               react={seat.seatIndex === mySeat ? react : undefined}
               density={density}
@@ -364,7 +404,7 @@ export function TableScene({
         );
       })}
 
-      <Flights flights={flights} start={start} geometry={geometry} pot={layout.pot} amounts={amounts} />
+      <Flights flights={flights} start={start} geometry={geometry} pot={layout.pot} box={box} amounts={amounts} />
     </div>
   );
 }

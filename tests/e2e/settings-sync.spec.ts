@@ -42,7 +42,7 @@ const failSaves = (page: Page, failing: () => boolean) =>
 async function reauthIfAsked(page: Page) {
   const prompt = page.getByTestId('reauth-confirm');
   if (await prompt.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) {
-    await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
+    await page.getByRole('dialog').getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
     await prompt.click();
   }
 }

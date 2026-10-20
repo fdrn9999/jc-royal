@@ -96,7 +96,7 @@ export function AcademyPage() {
                 {started ? tr(T.cont) : tr(T.start)} →
               </Button>
             )}
-            <Button size="lg" variant="outline" onClick={() => nav('/academy/practice')}>
+            <Button size="lg" variant="outline" onClick={() => nav('/academy/practice/free')} data-testid="academy-free">
               {tr(T.free)}
             </Button>
             <Button size="lg" variant="outline" onClick={() => nav('/academy/hands?step=3')}>

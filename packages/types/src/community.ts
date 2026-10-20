@@ -68,6 +68,8 @@ export interface HandReplayPlayer {
   role?: PublicRole;
   /** A table bot (the server played its moves). */
   bot?: true;
+  /** A VIP member's name color now (only an active ordinary member's; see shownVip). Looks only. */
+  vip?: VipColor;
   holeCards: string[] | null;
   stackStart: number;
   net: number;

@@ -21,7 +21,7 @@ function sql(command: string) {
 async function reauthIfAsked(page: Page) {
   const prompt = page.getByTestId('reauth-confirm');
   if (await prompt.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) {
-    await page.getByRole('dialog').getByLabel(/비밀번호|Password/).fill(PASSWORD);
+    await page.getByRole('dialog').getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
     await prompt.click();
   }
 }
@@ -81,7 +81,7 @@ test('free refill administration: the policy changed with before → after and a
   const page = await ctx.newPage();
   await page.goto(ADMIN);
   await page.getByLabel(/이메일|Email/).fill(op.email);
-  await page.getByLabel(/비밀번호|Password/).fill(PASSWORD);
+  await page.getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
   await page.getByRole('button', { name: /로그인|Log in/ }).click();
   await expect(page.getByTestId('dashboard')).toBeVisible();
 
