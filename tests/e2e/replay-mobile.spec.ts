@@ -42,6 +42,8 @@ async function shot(page: Page, name: string, fullPage = false) {
 }
 
 test('mobile: a finished hand replays action by action on the table, hiding the other hand until the showdown', async ({ browser }) => {
+  // The hand to replay is found by playing (below, up to 150 s), so the test as a whole has room for that and the rest.
+  test.setTimeout(240_000);
   const a = await signUp(browser, { mobile: true });
   const b = await signUp(browser);
   await b.page.goto('/table/e2e-replay?sit=1');
@@ -49,7 +51,8 @@ test('mobile: a finished hand replays action by action on the table, hiding the 
   await a.page.goto('/table/e2e-replay?sit=1');
   await a.page.getByTestId('buyin-confirm').tap();
 
-  // Check a hand down to the river: both hands are shown down.
+  // Check a hand down to the river: both hands are shown down. Auto-muck always applies, so the other hand is shown only
+  // when it won (or split) — about one hand in two, hence the wait; one's own hand is always one's own to see.
   let hand: HandDetailDto | undefined;
   await expect(async () => {
     (await checkOrCall(a.page)) || (await checkOrCall(b.page));
@@ -58,7 +61,7 @@ test('mobile: a finished hand replays action by action on the table, hiding the 
       if (d.players.length === 2 && d.players.every((p) => p.holeCards)) hand = d;
     }
     expect(hand).toBeDefined();
-  }).toPass({ timeout: 120_000 });
+  }).toPass({ timeout: 150_000 });
   const h = hand!;
   const me = h.players.find((p) => p.isYou)!.seatIndex;
   const opp = h.players.find((p) => !p.isYou)!.seatIndex;
