@@ -757,6 +757,7 @@ export const en: Dict = {
   'bot.easy': 'Easy',
   'bot.normal': 'Normal',
   'bot.hard': 'Hard',
+  'bot.expert': 'Expert',
   'bot.levelLine': 'Level: {level}',
   'bot.leaving': 'Leaving',
   'bot.leavingTitle': 'Leaves the seat when this hand ends.',

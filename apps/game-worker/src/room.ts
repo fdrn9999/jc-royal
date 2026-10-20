@@ -7,12 +7,13 @@
  *   room  — seats, button, hand counter, waitlist, timers
  *   hand  — the current hand's engine log (HandEngine.persist())
  *   chat  — recent chat lines
+ *   oppStats — at tables with bots, what the bots learned of the members (opp-stats.ts)
  * Sockets use the WebSocket Hibernation API; each socket carries the verified
  * identity forwarded by the API worker in its attachment.
  */
 import { DurableObject } from 'cloudflare:workers';
 import { OpsCounter, type TimeBankMetric } from '@jc/db';
-import { botView, decideBot, HandEngine, nextButtonSeat, type ActResult, type HandRecord, type PersistedHand } from '@jc/poker-engine';
+import { botView, decideBot, HandEngine, nextButtonSeat, STRATEGY_VERSION, styleFor, type ActResult, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
   AUTO_REBUY_MAX_TIMES,
   blindsAt,
@@ -64,6 +65,7 @@ import {
 } from './settlement';
 import { botBuyIn, botEvent, pickBot, type BotEventKind } from './bots';
 import { addShown, afterHandMs } from './muck';
+import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
@@ -191,6 +193,8 @@ interface RoomState {
   botRetryAt?: number | null;
   /** Bot joins that failed in a row, for the back-off. */
   botFails?: number;
+  /** The bots' statistics of the members (`oppStats`) were written here: the table's closing deletes them. */
+  oppStats?: boolean;
   /**
    * The time bank rules the current (or last) hand was dealt with; null or absent: none. Fixed at the deal, so a policy
    * changed during a hand applies from the next one and never moves a deadline already running.
@@ -294,6 +298,9 @@ export class TableRoom extends DurableObject<Env> {
   private maintApplied = 0;
   /** Whether the views last sent showed maintenance under way (its start is announced by the alarm). */
   private maintShown = false;
+  /** The bots' statistics of the members (`oppStats`), read from storage the first time a table with bots needs them. */
+  private opp: OppStats | null = null;
+  private oppRead = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -377,6 +384,15 @@ export class TableRoom extends DurableObject<Env> {
   private async save(extra: Record<string, unknown> = {}) {
     this.room.version += 1;
     await this.ctx.storage.put({ ...extra, room: this.room, hand: this.hand ? this.hand.persist() : null });
+  }
+
+  /** The bots' statistics of the members (only tables with bots read or write them). */
+  private async oppStats(): Promise<OppStats | null> {
+    if (!this.oppRead) {
+      this.opp = readOppStats(await this.ctx.storage.get(OPP_STATS_KEY));
+      this.oppRead = true;
+    }
+    return this.opp;
   }
 
   /** Open sockets, optionally excluding one that is in the middle of closing. */
@@ -1511,7 +1527,8 @@ export class TableRoom extends DurableObject<Env> {
       this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
       // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
       const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
-      const bots = h.startingSeats.filter((p) => this.botSeat(p.playerId)).length;
+      const botIds = new Set(h.startingSeats.filter((p) => this.botSeat(p.playerId)).map((p) => p.playerId));
+      const bots = botIds.size;
       this.refillTimeBanks(h);
       const tb = this.room.tbCount?.handId === h.handId ? this.room.tbCount.n : null;
       this.room.tbCount = null;
@@ -1522,7 +1539,19 @@ export class TableRoom extends DurableObject<Env> {
         ...(bots ? { bots } : {}),
         ...(tb ? { timeBank: tb } : {}),
       };
-      await this.save({ [key]: entry });
+      // At a table with bots, what the members did goes into the bots' statistics in the same write as the result. They
+      // are only a help to the bots: should counting fail, the hand settles all the same, uncounted.
+      let opp: OppStats | null = null;
+      if (bots || this.table?.bots.enabled) {
+        try {
+          opp = addHand(await this.oppStats(), entry.record, h.rules.bigBlind, (id) => !botIds.has(id), now);
+        } catch (e) {
+          console.error('bot statistics', STRATEGY_VERSION, e instanceof Error ? e.message : e);
+        }
+      }
+      if (opp) this.room.oppStats = true;
+      await this.save({ [key]: entry, ...(opp ? { [OPP_STATS_KEY]: opp } : {}) });
+      if (opp) this.opp = opp;
       this.unrecorded.add(key);
     }
     // Results stay visible until the next hand starts. They go out before the D1 write: the result is already saved
@@ -1629,6 +1658,11 @@ export class TableRoom extends DurableObject<Env> {
       await this.save();
       this.broadcast();
       return;
+    }
+    // A level an operator changed applies to the bots already seated from this deal on (never during a hand).
+    for (const i of dealt) {
+      const s = this.room.seats[i]!;
+      if (s.bot && s.bot !== t.bots.level) s.bot = t.bots.level;
     }
     // (A tournament's button moves to the next player still in: busted seats are free, so there is no dead button.)
     const button = nextButtonSeat(this.room.buttonSeat, dealt, t.maxSeats);
@@ -2278,8 +2312,9 @@ export class TableRoom extends DurableObject<Env> {
 
   /**
    * The table bot to act moves, from what its own seat sees (`botView`: its cards, the board, the pot, the bets and its
-   * legal moves — never another player's cards or the deck), through the engine's checks like anyone's move. A choice
-   * the engine refuses becomes a check, or a fold when it must call. False when it could not move at all.
+   * legal moves — never another player's cards or the deck) and the members' public statistics at this table, through
+   * the engine's checks like anyone's move. Its style comes from its account, the same at every table. A choice the
+   * engine refuses becomes a check, or a fold when it must call. False when it could not move at all.
    */
   private async playBotTurn(now: number): Promise<boolean> {
     const h = this.hand!;
@@ -2292,12 +2327,13 @@ export class TableRoom extends DurableObject<Env> {
       const v = botView(h, actor, h.rules.bigBlind);
       if (!v) failed = 'no_view';
       else {
-        r = await h.act(actor, decideBot(seat.bot, v), `bot-${h.version}`, now);
+        const stats = statsBySeat(await this.oppStats(), this.room.seats, now);
+        r = await h.act(actor, decideBot(seat.bot, v, Math.random, { style: styleFor(actor), stats }), `bot-${h.version}`, now);
         if (!r.ok) failed = r.code;
       }
     } catch (e) {
       failed = 'error';
-      console.error('bot decision', e instanceof Error ? e.message : e);
+      console.error('bot decision', STRATEGY_VERSION, e instanceof Error ? e.message : e);
     }
     if (!r?.ok) {
       const type = h.legalOptions(actor).some((o) => o.type === 'check') ? 'check' : 'fold';
@@ -2417,6 +2453,17 @@ export class TableRoom extends DurableObject<Env> {
     this.room.nextHandAt = null;
     this.hand = null;
     await this.save();
+    // What the bots learned of the members here is of no use once the table is closed. Only a table where they counted a
+    // hand has any to delete; should deleting fail, the table still closes and tells its players.
+    if (this.room.oppStats) {
+      try {
+        await this.ctx.storage.delete(OPP_STATS_KEY);
+        this.opp = null;
+        this.oppRead = true;
+      } catch (e) {
+        console.error('bot statistics', STRATEGY_VERSION, e instanceof Error ? e.message : e);
+      }
+    }
     for (const ws of this.sockets()) {
       this.send(ws, { t: 'error', code: 'table_closed', message: 'table closed' });
       try {

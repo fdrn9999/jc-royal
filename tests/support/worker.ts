@@ -21,7 +21,7 @@ export interface TestTable {
   beginner?: boolean;
   entryBlocked?: boolean;
   /** Table bots allowed here (an official table), with these settings; the service-wide policy still has to turn them on. */
-  bots?: { level?: 'easy' | 'normal' | 'hard'; minHumans?: number; max?: number; fillTo?: number; yieldSeat?: boolean };
+  bots?: { level?: 'easy' | 'normal' | 'hard' | 'expert'; minHumans?: number; max?: number; fillTo?: number; yieldSeat?: boolean };
 }
 
 /** Tables seeded for integration tests (admin API arrives in Phase 7). */
@@ -103,6 +103,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-bot-yield', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { yieldSeat: true } },
   { id: 'it-bot-stop', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'hard' } },
   { id: 'it-bot-fund', maxSeats: 2, sb: 50, bb: 100, min: 10000, max: 10000, turnSeconds: 60, bots: {} },
+  // A level changed while a bot plays a hand (it applies from the next one).
+  { id: 'it-bot-level', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'normal' } },
   // Referral rewards: a new member plays the hand the policy asks for, heads-up so one fold ends it.
   { id: 'it-ref-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Account settings: the auto-muck an older device still saves, and an administrator's reset, while the member sits

@@ -11,6 +11,7 @@ JC ROYAL은 `poker-engine-ts@0.1.3`(MIT)을 게임 규칙의 **유일한 판단 
 | 홀카드 배분 | 버튼 왼쪽부터 시계방향으로 `dealHoleCards`. 결과를 `initialSnapshot`에 넣고 `SessionManager.resume` |
 | 액션 매핑 | UI 액션(`fold/check/call/bet/raise/allin`, bet·raise는 "to" 총액)을 엔진 intent로 변환. intent id 멱등성(중복 제출 거부) |
 | 투영 | 보는 사람별 좌석 정보. 본인 홀카드와 쇼다운 공개 카드만 포함(`partitionShowdownByVisibility`) |
+| 공개 액션 | `publicActions()`: 지금까지의 액션(블라인드 포함, 좌석·스트리트·종류·넣은 칩). 비공개 정보가 없어 핸드 중에도 쓸 수 있고, 핸드 기록의 `actions`와 테이블 봇(`docs/BOT_AI.md`)이 같은 목록을 쓴다 |
 | 영속화 | `persist()` → JSON(초기 스냅샷 + 이벤트 로그). `restore()`는 로그 재생으로 상태를 재구성 |
 | 무결성 | 매 액션 후 칩 총량(스택+팟) 보존을 검사. 어긋나면 예외를 던져 해당 핸드는 정산되지 않음 |
 

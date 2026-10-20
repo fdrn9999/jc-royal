@@ -11,15 +11,17 @@ import { useI18n } from '../lib/i18n';
 
 const LABEL = { super_admin: 'role.superAdmin', admin: 'role.admin' } as const;
 /** How a table bot's level reads ("Normal"). */
-export const BOT_LEVEL_LABEL = { easy: 'bot.easy', normal: 'bot.normal', hard: 'bot.hard' } as const;
+export const BOT_LEVEL_LABEL = { easy: 'bot.easy', normal: 'bot.normal', hard: 'bot.hard', expert: 'bot.expert' } as const;
 
 /**
  * The BOT pill on a table bot's name (the same word in Korean and English). The level, when known, is in its title and
- * read out by screen readers; the replay of a past hand knows only that the seat was a bot.
+ * read out by screen readers; the replay of a past hand knows only that the seat was a bot. A level this build does
+ * not know yet (a newer server) reads as a plain table bot.
  */
 export function BotBadge({ level, className }: { level: BotLevel | true; className?: string }) {
   const { t } = useI18n();
-  const label = level === true ? t('bot.label') : t('bot.labelLevel', { level: t(BOT_LEVEL_LABEL[level]) });
+  const key = level === true ? undefined : (BOT_LEVEL_LABEL as Record<string, (typeof BOT_LEVEL_LABEL)[BotLevel] | undefined>)[level];
+  const label = key ? t('bot.labelLevel', { level: t(key) }) : t('bot.label');
   return (
     <span className={cx('jc-bot-badge', className)} title={label} data-level={level === true ? undefined : level} data-testid="bot-badge">
       <span aria-hidden>BOT</span>

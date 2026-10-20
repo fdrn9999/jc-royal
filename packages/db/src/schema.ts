@@ -175,7 +175,7 @@ export const tables = sqliteTable(
      * ot_yield a bot leaves after its hand for each member waiting for a seat.
      */
     botsEnabled: integer('bots_enabled', { mode: 'boolean' }).notNull().default(false),
-    botLevel: text('bot_level', { enum: ['easy', 'normal', 'hard'] }).notNull().default('normal'),
+    botLevel: text('bot_level', { enum: ['easy', 'normal', 'hard', 'expert'] }).notNull().default('normal'),
     botMinHumans: integer('bot_min_humans').notNull().default(1),
     botMax: integer('bot_max').notNull().default(1),
     botFillTo: integer('bot_fill_to').notNull().default(2),
