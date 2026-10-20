@@ -286,7 +286,7 @@ export const noticeKindLabel = labeler({ general: 'noticeKindGeneral', urgent: '
 export const noticeStateLabel = labeler({ live: 'noticeStateLive', scheduled: 'noticeStateScheduled', ended: 'noticeStateEnded', deleted: 'noticeStateDeleted' });
 export const maintStateLabel = labeler({ active: 'maintStateActive', scheduled: 'maintStateScheduled', finished: 'maintStateFinished', ended_early: 'maintStateEndedEarly', cancelled: 'maintStateCancelled' });
 /** Table bots: difficulty, the operations log's kinds and the codes the room writes with them (others are shown as they are). */
-export const botLevelLabel = labeler({ easy: 'botLevelEasy', normal: 'botLevelNormal', hard: 'botLevelHard' });
+export const botLevelLabel = labeler({ easy: 'botLevelEasy', normal: 'botLevelNormal', hard: 'botLevelHard', expert: 'botLevelExpert' });
 export const botEventKindLabel = labeler({ join: 'botEvJoin', leave: 'botEvLeave', fund_exhausted: 'botEvFundExhausted', join_failed: 'botEvJoinFailed', action_failed: 'botEvActionFailed' });
 const botCodes = labeler({
   busted: 'botCodeBusted',

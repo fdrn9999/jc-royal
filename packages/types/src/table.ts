@@ -34,9 +34,10 @@ export type SeatState = 'empty' | 'waiting' | 'active' | 'folded' | 'allin' | 's
 
 /**
  * Levels of the table bots an official table may seat (apps/game-worker/src/bots.ts): rule-based players that use the
- * same engine and legal options as everybody and see only what a player in their seat sees.
+ * same engine and legal options as everybody and see only what a player in their seat sees. Expert reads ranges most
+ * carefully and adapts fastest to how the others at the table play (docs/STATUS.md "봇 AI 2.0").
  */
-export const BOT_LEVELS = ['easy', 'normal', 'hard'] as const;
+export const BOT_LEVELS = ['easy', 'normal', 'hard', 'expert'] as const;
 export type BotLevel = (typeof BOT_LEVELS)[number];
 
 export interface SeatView {

@@ -809,16 +809,6 @@ export class HandEngine {
         shown: revealed.has(seat.playerId),
       };
     });
-    const actions: PublicActionRecord[] = [];
-    for (const round of s.hand.bettingRounds) {
-      for (const t of round.turns) {
-        const seatIndex = this.seatOf(t.actor) ?? -1;
-        let type: PublicActionRecord['type'] | null = mapActionType(t.action);
-        if (t.action.type === 'post-blind') type = t.action.blind === 'small' ? 'post-sb' : 'post-bb';
-        if (t.action.type === 'timeout') type = t.action.fallback === 'check' ? 'timeout-check' : 'timeout-fold';
-        if (type) actions.push({ seatIndex, playerId: t.actor, stage: round.stage as HandStage, type, amount: t.contribution, at: t.timestamp });
-      }
-    }
     return {
       handId: this.meta.handId,
       startedAt: this.meta.startedAt,
@@ -829,8 +819,26 @@ export class HandEngine {
       buttonSeat: this.meta.buttonSeat,
       pots: this.potBreakdown(payouts),
       players,
-      actions,
+      actions: this.publicActions(),
     };
+  }
+
+  /**
+   * Every action so far, blinds included, as the whole table saw it (seat, street, type, chips put in). Nothing in it
+   * is private, so it is safe for any view and for the bots, during the hand as well as after it.
+   */
+  publicActions(): PublicActionRecord[] {
+    const actions: PublicActionRecord[] = [];
+    for (const round of this.snapshot.hand.bettingRounds) {
+      for (const t of round.turns) {
+        const seatIndex = this.seatOf(t.actor) ?? -1;
+        let type: PublicActionRecord['type'] | null = mapActionType(t.action);
+        if (t.action.type === 'post-blind') type = t.action.blind === 'small' ? 'post-sb' : 'post-bb';
+        if (t.action.type === 'timeout') type = t.action.fallback === 'check' ? 'timeout-check' : 'timeout-fold';
+        if (type) actions.push({ seatIndex, playerId: t.actor, stage: round.stage as HandStage, type, amount: t.contribution, at: t.timestamp });
+      }
+    }
+    return actions;
   }
 
   /** Final stacks by player (settled hands). */

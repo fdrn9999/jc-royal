@@ -281,6 +281,40 @@ describe('table bots', () => {
     await balanced(T, [m.me.id], before);
   }, 300_000);
 
+  it('a level an administrator changes reaches the seated bot from the next hand, never in the hand being played', async () => {
+    const T = 'it-bot-level';
+    const m = await newUser();
+    const before = await books([m.me.id]);
+    const ws = await watch(m.client, T);
+    await sit(ws, 0, 500);
+    const playing = await ws.waitState((s) => isMyTurn(s) && s.seats[1]!.bot === 'normal' && s.seats[1]!.hasCards, 30_000, 'the member to act beside the bot');
+    const number = playing.hand!.number;
+    const botId = playing.seats[1]!.userId;
+
+    await reauth();
+    const patched = await admin.patch(`/api/admin/tables/${T}`, { botLevel: 'expert' });
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+    // The hand under way (the member's turn, a minute long) is played out at the level it was dealt with.
+    await pause(1500);
+    expect(ws.state!.hand!.number).toBe(number);
+    expect(ws.state!.seats[1]).toMatchObject({ userId: botId, bot: 'normal' });
+
+    const stop = autoplay([ws], careful(30));
+    const next = await ws.waitState((s) => (s.hand?.number ?? 0) > number && live(s), 60_000, 'the next hand');
+    // The same bot, now an expert: it did not stand up for another.
+    expect(next.seats[1]).toMatchObject({ userId: botId, bot: 'expert' });
+    const row = ((await m.client.get('/api/tables')).body as LobbyTableDto[]).find((t) => t.id === T);
+    expect(row).toMatchObject({ botLevel: 'expert', bots: 1 });
+    // It plays on through the engine with what it has counted of the member, every move accepted.
+    await ws.waitState((s) => (s.hand?.number ?? 0) >= next.hand!.number + 3, 120_000, 'three more hands');
+    expect(await events(T, 'action_failed')).toEqual([]);
+
+    await leave(ws);
+    await ws.waitState(empty, 90_000, 'the table to empty');
+    await stop();
+    await balanced(T, [m.me.id], before);
+  }, 300_000);
+
   it('all-ins of different sizes against a bot make side pots it is part of, and nothing is lost', async () => {
     const T = 'it-bot-pot';
     const [a, b] = await Promise.all([newUser(), newUser()]);

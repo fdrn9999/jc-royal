@@ -757,6 +757,7 @@ const ko = {
   'bot.easy': '쉬움',
   'bot.normal': '보통',
   'bot.hard': '어려움',
+  'bot.expert': '전문가',
   'bot.levelLine': '난이도 {level}',
   'bot.leaving': '퇴장 예정',
   'bot.leavingTitle': '이번 핸드가 끝나면 자리를 비웁니다.',

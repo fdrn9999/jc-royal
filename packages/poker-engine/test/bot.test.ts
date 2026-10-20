@@ -17,7 +17,7 @@ function seeded(seed: number) {
   };
 }
 
-const VIEW_KEYS = ['aggressors', 'bigBlind', 'board', 'hole', 'legal', 'opponents', 'position', 'pot', 'stack', 'stage', 'streetBet', 'toCall'];
+const VIEW_KEYS = ['actions', 'aggressors', 'bigBlind', 'board', 'buttonSeat', 'hole', 'legal', 'opponents', 'position', 'pot', 'seat', 'seats', 'stack', 'stage', 'streetBet', 'toCall'];
 
 const tableArb = fc.constantFrom<MaxSeats>(2, 6, 9).chain((maxSeats) =>
   fc.record({
