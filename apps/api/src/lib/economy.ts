@@ -57,14 +57,14 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
               SUM(is_bot) AS botAccounts, COALESCE(SUM(CASE WHEN is_bot = 1 THEN balance ELSE 0 END), 0) AS bots
          FROM users`,
     ),
-    // Every ledger row once: totals by type since the start, and by day within the period. Automatic rebuys are top-ups
-    // with their own key prefix.
+    // Every ledger row once: totals by type since the start, and by day within the period. Automatic rebuys (1) and
+    // automatic top-ups (2) are top-ups with their own key prefix.
     db.prepare(
       `SELECT type, CASE WHEN created_at >= ?1 THEN CAST((created_at + ?2) / 86400000 AS INTEGER) END AS day,
-              (type = 'top_up' AND substr(idempotency_key, 1, 6) = 'rebuy:') AS rebuy,
+              CASE WHEN type != 'top_up' THEN 0 WHEN substr(idempotency_key, 1, 6) = 'rebuy:' THEN 1 WHEN substr(idempotency_key, 1, 8) = 'autotop:' THEN 2 ELSE 0 END AS auto,
               COUNT(*) AS n, SUM(amount) AS sum,
               SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS plus, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS minus
-         FROM chip_ledger GROUP BY type, day, rebuy`,
+         FROM chip_ledger GROUP BY type, day, auto`,
     ).bind(since, shift),
     db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(buy_in), 0) AS buyIn FROM table_sessions WHERE status = 'seated'`),
     // Admin adjustments of the period through the unique key index ('admin:' keys), newest first.
@@ -81,7 +81,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
     ).bind(since),
     db.prepare(
       `SELECT CAST((bucket + ?2) / 86400000 AS INTEGER) AS day, metric, SUM(n) AS n FROM ops_metrics
-        WHERE bucket >= ?1 AND metric IN ('cashout_fail', 'room_error', 'api_error') GROUP BY day, metric`,
+        WHERE bucket >= ?1 AND metric IN ('cashout_fail', 'room_error', 'api_error', 'autobuy_stop', 'autobuy_dup', 'autobuy_invalid') GROUP BY day, metric`,
     ).bind(since, shift),
     db.prepare(`SELECT id, name, status, last_issue AS issue FROM tables WHERE last_issue LIKE '%cash-out%' ORDER BY updated_at DESC LIMIT 20`),
     // CROSS JOIN starts from the seated rows (as many as people at tables), not from every table.
@@ -104,13 +104,13 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
 
   // Ledger: totals by type, period counts, and the daily movement.
   const total: Record<LedgerType, Flow> = { signup_grant: flow(), buy_in: flow(), top_up: flow(), cash_out: flow(), admin_adjust: flow(), reconcile: flow(), free_refill: flow(), bot_fund: flow(), referral: flow() };
-  const period = { ...structuredClone(total), auto_rebuy: flow() };
+  const period = { ...structuredClone(total), auto_rebuy: flow(), auto_topup: flow() };
   const perDay = new Map<number, Flow>();
-  for (const r of rows<Flow & { type: LedgerType; day: number | null; rebuy: number }>(ledger)) {
+  for (const r of rows<Flow & { type: LedgerType; day: number | null; auto: number }>(ledger)) {
     const f = { n: r.n, sum: r.sum ?? 0, plus: r.plus ?? 0, minus: r.minus ?? 0 };
     add(total[r.type], f);
     if (r.day === null) continue;
-    add(r.rebuy ? period.auto_rebuy : period[r.type], f);
+    add(r.auto === 1 ? period.auto_rebuy : r.auto === 2 ? period.auto_topup : period[r.type], f);
     const d = perDay.get(r.day) ?? flow();
     add(d, f);
     perDay.set(r.day, d);
@@ -159,7 +159,7 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
 
   // Operations counters are kept OPS_RETENTION_MS: before that the period has none.
   const opsFrom = Math.max(since, now - OPS_RETENTION_MS);
-  const opsTotals = { cashout_fail: 0, room_error: 0, api_error: 0 };
+  const opsTotals = { cashout_fail: 0, room_error: 0, api_error: 0, autobuy_stop: 0, autobuy_dup: 0, autobuy_invalid: 0 };
   const cashoutByDay = new Map<number, number>();
   for (const r of rows<{ day: number; metric: keyof typeof opsTotals; n: number }>(ops)) {
     opsTotals[r.metric] += r.n;
@@ -195,6 +195,8 @@ export async function economy(db: D1Database, days: number, tz: number, now = Da
       cashout: opsTotals.cashout_fail,
       room: opsTotals.room_error,
       api: opsTotals.api_error,
+      // Automatic rebuys and top-ups: turned off with nothing taken, a repeat the ledger key stopped, a refused policy.
+      autoBuy: { stop: opsTotals.autobuy_stop, dup: opsTotals.autobuy_dup, invalid: opsTotals.autobuy_invalid },
       cashoutDays: [...cashoutByDay].sort((a, b) => a[0] - b[0]).map(([day, n]) => ({ date: new Date(day * DAY).toISOString().slice(0, 10), n })),
       tables: issues,
     },

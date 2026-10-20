@@ -13,19 +13,49 @@ export function shownAtShowdown(hp: { wentToShowdown: boolean; shown: boolean | 
 
 /** What replaySettlement reads of a hand's player rows. */
 export type SettlementRow = { seatIndex: number; won: number; potWon: number | null };
+/** What replayLog reads of a hand's player rows: their settlement, and the stack each started with (replayBlinds). */
+export type ReplayRow = SettlementRow & { stackStart?: number };
 
 /**
- * The public part of a stored hand log: actions (without player ids or times), button seat and pot payouts, settled
- * with the hand's player rows (replaySettlement). Hands recorded before the button and pots were stored have null for
- * them. The engine log is never read here.
+ * The public part of a stored hand log: actions (without player ids or times), button seat, blinds (replayBlinds) and
+ * pot payouts, settled with the hand's player rows (replaySettlement). Hands recorded before the button and pots were
+ * stored have null for them. The engine log is never read here.
  */
-export function replayLog(eventLog: string, rows: SettlementRow[]): Pick<HandReplayFields, 'actions' | 'buttonSeat' | 'pots' | 'returned'> {
-  const log = JSON.parse(eventLog) as { actions: HandReplayFields['actions']; button?: unknown; pots?: unknown };
+export function replayLog(
+  eventLog: string,
+  rows: ReplayRow[],
+): Pick<HandReplayFields, 'actions' | 'buttonSeat' | 'smallBlind' | 'bigBlind' | 'pots' | 'returned'> {
+  const log = JSON.parse(eventLog) as { actions: HandReplayFields['actions']; button?: unknown; blinds?: unknown; pots?: unknown };
+  const actions = log.actions.map((a) => ({ seatIndex: a.seatIndex, stage: a.stage, type: a.type, amount: a.amount }));
   return {
-    actions: log.actions.map((a) => ({ seatIndex: a.seatIndex, stage: a.stage, type: a.type, amount: a.amount })),
+    actions,
     buttonSeat: typeof log.button === 'number' ? log.button : null,
+    ...replayBlinds(log.blinds, actions, rows),
     ...replaySettlement(Array.isArray(log.pots) ? (log.pots as HandPotDto[]) : null, rows),
   };
+}
+
+const chips = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n > 0;
+
+/**
+ * The blinds a hand was dealt at: stored with the hand since they were (the engine's record), else read off a blind
+ * posted by a player who still had chips after posting it (a stack shorter than its blind posts all it has, which tells
+ * nothing about the blind). Never the table's blinds now: an admin may have changed them since, and a tournament's
+ * rise with its levels. Null where the log doesn't tell, and a replay then counts in chips, not big blinds.
+ */
+export function replayBlinds(
+  stored: unknown,
+  actions: Pick<HandReplayFields['actions'][number], 'seatIndex' | 'type' | 'amount'>[],
+  rows: Pick<ReplayRow, 'seatIndex' | 'stackStart'>[],
+): Pick<HandReplayFields, 'smallBlind' | 'bigBlind'> {
+  const b = stored as { sb?: unknown; bb?: unknown } | null | undefined;
+  if (b && chips(b.sb) && chips(b.bb)) return { smallBlind: b.sb, bigBlind: b.bb };
+  const posted = (type: 'post-sb' | 'post-bb') => {
+    const a = actions.find((x) => x.type === type);
+    const start = a && rows.find((r) => r.seatIndex === a.seatIndex)?.stackStart;
+    return a && chips(a.amount) && typeof start === 'number' && start > a.amount ? a.amount : null;
+  };
+  return { smallBlind: posted('post-sb'), bigBlind: posted('post-bb') };
 }
 
 /**
@@ -72,7 +102,8 @@ export const replayUser = {
 
 /**
  * A player of a finished hand as `viewerId` may see it: hole cards, rank and best five only for the viewer and for
- * hands that were face up at showdown (see shownAtShowdown). `user` is the member's row now: a deleted account shows no
+ * hands that were face up at showdown (see shownAtShowdown); a hand mucked at the showdown says so (`mucked`, which the
+ * table saw), never what it held. `user` is the member's row now: a deleted account shows no
  * role, and a staff role only when the social policy shows its badge (`badge`, from lib/badges.ts); the VIP color is
  * the one other players see now (shownVip), as at the tables.
  */
@@ -88,6 +119,7 @@ export function replayPlayer(hp: typeof schema.handPlayers.$inferSelect, user: R
     ...(user.isBot ? { bot: true as const } : {}),
     ...(vip ? { vip } : {}),
     holeCards: visible ? (JSON.parse(hp.holeCards) as string[]) : null,
+    ...(hp.wentToShowdown && !shownAtShowdown(hp) ? { mucked: true as const } : {}),
     stackStart: hp.stackStart,
     net: hp.net,
     won: hp.won,
@@ -117,7 +149,7 @@ export async function handReviews(
   const ids = handIds.filter((id) => allowed.has(id));
   if (ids.length === 0) return [];
   const hands = await db
-    .select({ h: schema.hands, t: { name: schema.tables.name, sb: schema.tables.smallBlind, bb: schema.tables.bigBlind, maxSeats: schema.tables.maxSeats } })
+    .select({ h: schema.hands, t: { name: schema.tables.name, maxSeats: schema.tables.maxSeats } })
     .from(schema.hands)
     .innerJoin(schema.tables, eq(schema.tables.id, schema.hands.tableId))
     .where(inArray(schema.hands.id, ids));
@@ -140,8 +172,6 @@ export async function handReviews(
         endedAt: h.endedAt,
         board: JSON.parse(h.board) as string[],
         potTotal: h.potTotal,
-        smallBlind: t.sb,
-        bigBlind: t.bb,
         maxSeats: t.maxSeats,
         ...replayLog(h.eventLog, seated.map((p) => p.hp)),
         players: seated.map(({ hp, user }) => ({ ...replayPlayer(hp, user, perspectiveUserId, badge), isAuthor: hp.userId === perspectiveUserId })),

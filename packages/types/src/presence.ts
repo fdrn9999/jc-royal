@@ -25,6 +25,11 @@ export const PRESENCE_ACTIVITY_BEAT_MS = 10_000;
 export const PRESENCE_POLL_MS = 30_000;
 /** Devices kept per member (the oldest heard from goes first). */
 export const PRESENCE_MAX_DEVICES = 10;
+/**
+ * The closest the server saves a member's last-online time again while they stay online (users.last_online_at, one
+ * D1 row write). The hub knows it to the beat; the saved one answers after the hub restarts, at most this much early.
+ */
+export const PRESENCE_STAMP_MS = 10 * 60_000;
 
 /**
  * One device's state for one member, as the hub keeps it. `activeAt` is when the member last did something there (by
@@ -81,6 +86,12 @@ export interface MyPresenceDto {
 /** GET /api/friends/presence: accepted friends only (never a request, a blocked or a withdrawn member). */
 export interface FriendsPresenceDto {
   presence: Record<string, PresenceState>;
+  /**
+   * When each friend shown offline was last confirmed online (ms, to the minute): their last beat while not shown as
+   * offline (closing the page or signing out does not move it). No key when it is not known (and no map when none is);
+   * never for a friend shown online or away.
+   */
+  lastOnline?: Record<string, number>;
 }
 
 /** The order of the friends list by status (online first), then the given tie-break. */

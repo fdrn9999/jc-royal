@@ -1,9 +1,10 @@
 // Friends' status (routes/presence.ts, GET /api/friends/presence, the presence hub in the game worker): only accepted
 // friends see it, the server decides it from each device's beats, the account's mode applies on every device, and a
-// request, a block, an unfriending, a suspension or a withdrawal shows nothing, the same as a stranger.
+// request, a block, an unfriending, a suspension or a withdrawal shows nothing, the same as a stranger. A friend shown
+// offline comes with when they were last online, to the minute, only when the server recorded it.
 import { PRESENCE_AWAY_MS } from '@jc/types';
 import { describe, expect, it } from 'vitest';
-import { Client, newUser, PASSWORD } from '../support/client';
+import { Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
 import { d1 } from '../support/d1';
 
 type User = Awaited<ReturnType<typeof newUser>>;
@@ -19,7 +20,7 @@ const beat = (c: Client, body: Record<string, unknown>) => c.post('/api/me/prese
 const friendsSee = async (c: Client) => {
   const r = await c.get('/api/friends/presence');
   expect(r.status).toBe(200);
-  return r.body as { presence: Record<string, string> };
+  return r.body as { presence: Record<string, string>; lastOnline?: Record<string, number> };
 };
 
 /** A sign-out reaches the hub after the answer (waitUntil): wait a little for it. */
@@ -58,14 +59,77 @@ describe('friends status', () => {
     expect((await friendsSee(b.client)).presence[solo.me.id]).toBe('away');
   });
 
-  it('only online, away or offline: no time last seen, no device, no other field', async () => {
+  it('online or away carries no time; offline carries when last online, to the minute; no device, no other field', async () => {
     const [a, b] = await Promise.all([newUser(), newUser()]);
     await befriend(a, b);
-    await beat(a.client, { conn: conn() });
+    const tab = conn();
+    const before = Date.now();
+    await beat(a.client, { conn: tab });
     const r = await b.client.get('/api/friends/presence');
     expect(Object.keys(r.body)).toEqual(['presence']);
     expect(r.body.presence).toEqual({ [a.me.id]: 'online' });
     expect(JSON.stringify(r.body)).not.toMatch(/last|seen|at"|device|session/i);
+
+    expect((await a.client.post('/api/me/presence/leave', { conn: tab })).status).toBe(200);
+    const off = await b.client.get('/api/friends/presence');
+    const after = Date.now();
+    expect(Object.keys(off.body)).toEqual(['presence', 'lastOnline']);
+    expect(off.body.presence).toEqual({ [a.me.id]: 'offline' });
+    expect(Object.keys(off.body.lastOnline)).toEqual([a.me.id]);
+    const at = off.body.lastOnline[a.me.id] as number;
+    expect(at % 60_000).toBe(0);
+    expect(at).toBeGreaterThanOrEqual(Math.floor(before / 60_000) * 60_000);
+    expect(at).toBeLessThanOrEqual(after);
+    expect(JSON.stringify(off.body)).not.toMatch(/seen|device|session|conn/i);
+    // Saved for after the hub restarts: one value on the member's row, written after the answer.
+    await eventually(async () => ((await d1<{ at: number | null }>(`SELECT last_online_at AS at FROM users WHERE id = '${a.me.id}'`))[0]?.at ?? 0) >= before);
+    // For friends only: the admin console's member detail leaves it out.
+    const detail = await sharedAdmin().get(`/api/admin/users/${a.me.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.user.id).toBe(a.me.id);
+    expect(detail.body.user).not.toHaveProperty('lastOnlineAt');
+    expect(JSON.stringify(detail.body)).not.toMatch(/last_?online/i);
+  });
+
+  it('strangers, requests and blocks never see when; invisible beats never move it; a withdrawal deletes it', async () => {
+    const [a, b, c, stranger, asker] = await Promise.all([newUser(), newUser(), newUser(), newUser(), newUser()]);
+    await befriend(a, b);
+    await befriend(a, c);
+    expect((await asker.client.post('/api/friends/requests', { userId: a.me.id })).status).toBe(201);
+    const tab = conn();
+    await beat(a.client, { conn: tab });
+    await a.client.post('/api/me/presence/leave', { conn: tab });
+    expect((await friendsSee(b.client)).lastOnline?.[a.me.id]).toEqual(expect.any(Number));
+    for (const x of [stranger, asker]) expect(await friendsSee(x.client)).toEqual({ presence: {} });
+    expect((await c.client.req('PUT', `/api/blocks/${a.me.id}`)).status).toBe(200);
+    expect(await friendsSee(c.client)).toEqual({ presence: {} });
+
+    // Invisible from the start: its beats show offline and record no time at all.
+    const [e, f] = await Promise.all([newUser(), newUser()]);
+    await befriend(e, f);
+    expect((await e.client.req('PUT', '/api/me/presence', { mode: 'invisible' })).status).toBe(200);
+    const hidden = conn();
+    expect((await beat(e.client, { conn: hidden })).body).toEqual({ mode: 'invisible', state: 'offline' });
+    await e.client.post('/api/me/presence/leave', { conn: hidden });
+    expect(await friendsSee(f.client)).toEqual({ presence: { [e.me.id]: 'offline' } });
+    expect(await d1(`SELECT last_online_at AS at FROM users WHERE id = '${e.me.id}'`)).toEqual([{ at: null }]);
+    // Shown, then invisible again: offline, with when it was last shown.
+    expect((await e.client.req('PUT', '/api/me/presence', { mode: 'auto' })).status).toBe(200);
+    await beat(e.client, { conn: conn() });
+    expect(await friendsSee(f.client)).toEqual({ presence: { [e.me.id]: 'online' } });
+    expect((await e.client.req('PUT', '/api/me/presence', { mode: 'invisible' })).status).toBe(200);
+    const shown = await friendsSee(f.client);
+    expect(shown.presence[e.me.id]).toBe('offline');
+    expect(shown.lastOnline?.[e.me.id]).toEqual(expect.any(Number));
+
+    // A withdrawal deletes the saved time (the hub's is never shown: only active members are), and nothing after it
+    // writes it back.
+    await eventually(async () => (await d1<{ at: number | null }>(`SELECT last_online_at AS at FROM users WHERE id = '${a.me.id}'`))[0]?.at != null);
+    await beat(a.client, { conn: conn() });
+    expect((await a.client.post('/api/auth/me/delete', { password: PASSWORD })).status).toBe(200);
+    expect(await friendsSee(b.client)).toEqual({ presence: {} });
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(await d1(`SELECT last_online_at AS at FROM users WHERE id = '${a.me.id}'`)).toEqual([{ at: null }]);
   });
 
   it('the account mode applies on every device: invisible is offline, away is away, auto follows the devices', async () => {

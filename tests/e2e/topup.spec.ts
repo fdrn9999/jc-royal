@@ -120,3 +120,89 @@ test('auto rebuy: off by default, needs explicit consent with an amount and a li
   await a.page.keyboard.press('Escape');
   await expect(a.page.getByTestId('rebuy-badge')).toHaveCount(0);
 });
+
+test('auto top-up: chosen with the first buy-in, it fills the stack back to the target after a hand, from the wallet, once', async ({ browser }) => {
+  const a = await signUp(browser);
+  await a.page.goto('/table/e2e-autotop?sit=1');
+  const dialog = a.page.getByRole('dialog');
+  const confirm = a.page.getByTestId('buyin-confirm');
+  const auto = dialog.getByTestId('buyin-autobuy');
+  await expect(auto).toBeVisible();
+  // Off unless the player picks a policy, and one at a time.
+  await expect(auto.getByTestId('autobuy-mode-off')).toHaveAttribute('aria-checked', 'true');
+  await setRange(dialog.locator('input[type="range"]'), 300);
+  await expect(confirm).toContainText('300');
+  await expect(confirm).toBeEnabled();
+  await auto.getByTestId('autobuy-mode-rebuy').click();
+  await expect(auto.getByTestId('rebuy-range')).toBeVisible();
+  await expect(confirm).toBeDisabled();
+  await auto.getByTestId('autobuy-mode-topup').click();
+  await expect(auto.getByTestId('autobuy-mode-rebuy')).toHaveAttribute('aria-checked', 'false');
+  await expect(auto.getByTestId('rebuy-range')).toHaveCount(0);
+  // The target starts at the buy-in, and the trigger at the target (below it, a top-up is due).
+  await expect(auto.getByTestId('autotop-target-amount')).toHaveText('300');
+  await expect(auto.getByTestId('autotop-trigger-amount')).toHaveText('300');
+  await setRange(auto.getByTestId('autotop-target'), 500);
+  await expect(auto.getByTestId('autotop-trigger-amount')).toHaveText('500');
+  await setRange(auto.getByTestId('autotop-trigger'), 400);
+  await expect(auto.getByTestId('autotop-trigger-amount')).toHaveText('400');
+  // No consent, no buy-in with the policy; changing the terms withdraws the consent given for the old ones.
+  await auto.getByTestId('autotop-times-2').click();
+  await expect(confirm).toBeDisabled();
+  await auto.getByTestId('autotop-consent').check();
+  await expect(auto.getByTestId('autotop-consent').locator('..')).toContainText(/400.*500.*1,000/);
+  await expect(confirm).toBeEnabled();
+  await auto.getByTestId('autotop-times-3').click();
+  await expect(auto.getByTestId('autotop-consent')).not.toBeChecked();
+  await expect(confirm).toBeDisabled();
+  await auto.getByTestId('autotop-times-2').click();
+  await auto.getByTestId('autotop-consent').check();
+  await a.page.screenshot({ path: 'test-results/autotop-buyin-desktop.png', animations: 'disabled' });
+  await confirm.click();
+  await expect(confirm).toHaveCount(0);
+
+  // Seated with the policy; choosing it took nothing but the buy-in.
+  await expect(a.page.getByTestId('autotop-badge')).toContainText('0/1,000');
+  await expect.poll(() => balanceOf(a.page)).toBe(9700);
+  await a.page.getByTestId('topup-open').click();
+  const modal = a.page.getByTestId('topup-modal');
+  await expect(modal.getByTestId('autotop-active')).toContainText(/500.*400/);
+  // 300 is below 400: the next hand, ended here, would bring 200. Shown as an estimate only.
+  await expect(modal.getByTestId('autotop-estimate')).toContainText('200');
+  await expect(modal.getByTestId('autotop-active')).toContainText(/확정 금액이 아닙니다|not a confirmed amount/);
+  await a.page.screenshot({ path: 'test-results/autotop-status-desktop.png', animations: 'disabled' });
+  await a.page.keyboard.press('Escape');
+  expect(await balanceOf(a.page)).toBe(9700);
+
+  // A hand with a second player: check/call ends it near 300, below the trigger, and the room fills it up to 500.
+  const b = await signUp(browser);
+  await sitWith(b.page, 'e2e-autotop', 100);
+  const notice = a.page.getByTestId('table-notice');
+  for (let i = 0; i < 80 && !(await notice.isVisible()); i++) {
+    if (!(await checkOrCall(a.page)) && !(await checkOrCall(b.page))) await a.page.waitForTimeout(250);
+  }
+  await expect(notice).toContainText(/자동 스택 보충 완료|Auto top-up done/);
+  const added = Number(((await notice.textContent()) ?? '').match(/([\d,]+)\s*(칩을|chips)/)![1]!.replace(/,/g, ''));
+  // Whatever the hand left (290, 300 or 310 with these blinds), what the wallet gave is what the stack lacked.
+  expect([190, 200, 210]).toContain(added);
+  await expect.poll(() => balanceOf(a.page)).toBe(9700 - added);
+  await expect(a.page.getByTestId('autotop-badge')).toContainText(`${added}/1,000`);
+
+  // The wallet history names it apart from a top-up the player made.
+  const me = await a.page.context().newPage();
+  await me.goto('/me');
+  await expect(me.getByTestId('ledger').getByText(/^(자동 스택 보충|Auto top-up)$/)).toHaveCount(1);
+  await expect(me.getByTestId('ledger').getByText(/^(스택 충전|Table top-up)$/)).toHaveCount(0);
+  await me.close();
+
+  // Turned off from the seat (while B holds the turn, so A's bar shows), it takes nothing more.
+  await expect
+    .poll(async () => (await checkOrCall(a.page), !(await a.page.getByTestId('action-bar').isVisible()) && (await a.page.getByTestId('topup-open').isVisible())), { timeout: 15_000 })
+    .toBe(true);
+  await a.page.getByTestId('topup-open').click();
+  await modal.getByTestId('autotop-off').click();
+  await expect(modal.getByTestId('autotop-active')).toHaveCount(0);
+  await expect(modal.getByTestId('autobuy-mode-topup')).toBeVisible();
+  await a.page.keyboard.press('Escape');
+  await expect(a.page.getByTestId('autotop-badge')).toHaveCount(0);
+});

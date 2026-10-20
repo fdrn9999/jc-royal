@@ -495,7 +495,8 @@ const admin = new Hono<AppEnv>()
     const ledgerSum = await DB.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM chip_ledger WHERE user_id = ?1`).bind(id).first<{ s: number }>();
     // Full profile incl. birth date and consent record.
     await audit(c, 'user.view', { type: 'user', id });
-    const { passwordHash: _ph, ...safe } = u;
+    // The last-online time is for the member's friends only (docs/PRESENCE.md), not the admin console.
+    const { passwordHash: _ph, lastOnlineAt: _lo, ...safe } = u;
     const online = sessions.some((s) => s.kind === 'user' && s.lastSeenAt > Date.now() - ONLINE_MS);
     const [recentTables, filed, against, recentFiled, recentAgainst] = history;
     const counts = (r: D1Result | undefined) => {

@@ -36,6 +36,41 @@ test('mobile: play together from the friends list; the table picker fits and eve
   expect(await overflow()).toBe(false);
 });
 
+test('mobile: a friend who signs out reads as last online a moment ago, to the minute and never later than it was, not as online, and the label fits the row', async ({ browser }) => {
+  const a = await signUp(browser, { mobile: true });
+  const b = await signUp(browser);
+  const aId = (await call<{ id: string }>(a.page, '/api/auth/me')).id;
+  const bId = (await call<{ id: string }>(b.page, '/api/auth/me')).id;
+  await call(a.page, '/api/friends/requests', { userId: bId });
+  await call(b.page, `/api/friends/${aId}/accept`, {});
+
+  await a.page.goto('/friends');
+  const item = a.page.getByTestId('friend-item').filter({ hasText: b.nickname });
+  // b's open page beats: online, with no last-online time beside it.
+  await expect(async () => {
+    await a.page.reload();
+    await expect(item).toContainText('접속 중', { timeout: 2_000 });
+  }).toPass({ timeout: 45_000 });
+  await expect(item.getByTestId('last-online')).toHaveCount(0);
+
+  // Signing out takes b's device off at once; what friends see is when b was last confirmed online: b's last beat
+  // (at most a beat, 30 s, before signing out), cut down to the minute — never later than it was.
+  const signedOut = Date.now();
+  await call(b.page, '/api/auth/logout', {});
+  await b.page.context().close();
+  await expect(async () => {
+    await a.page.reload();
+    await expect(item.getByTestId('last-online')).toHaveText(/(방금 전|1분 전) 접속$/, { timeout: 2_000 });
+  }).toPass({ timeout: 45_000 });
+  await expect(item).not.toContainText('접속 중');
+  const at = (await call<{ lastOnline?: Record<string, number> }>(a.page, '/api/friends/presence')).lastOnline?.[bId];
+  expect(at! % 60_000).toBe(0);
+  expect(at!).toBeLessThanOrEqual(signedOut);
+  expect(at!).toBeGreaterThan(signedOut - 30_000 - 60_000 - 5_000);
+  expect(await widerThanDevice(a.page)).toBe(false);
+  await a.page.screenshot({ path: 'test-results/mobile-friend-last-online.png', animations: 'disabled' });
+});
+
 async function call<T = any>(page: Page, path: string, body?: unknown): Promise<T> {
   return page.evaluate(
     async ([p, b]) => {

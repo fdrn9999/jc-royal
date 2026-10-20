@@ -5,10 +5,10 @@
  * replay meanwhile changes nothing in it. Loaded only when it opens.
  */
 import { Button, cx, Modal, Spinner } from '@jc/ui';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { canShareFiles, downloadShare, encodeShare, paintShare, renderShare, shareArt, shareFile, type ShareArt } from './shareDraw';
-import { SHARE_FORMATS, SHARE_RATIOS, SHARE_SIZES, SHARE_TEMPLATES, shareFileName, type ShareFormat, type ShareOptions, type ShareRatio, type ShareSnap } from './shareSnap';
+import { SHARE_FORMATS, SHARE_RATIOS, SHARE_SIZES, SHARE_TEMPLATES, shareFileName, type ShareFormat, type ShareOptions, type ShareRatio, type SnapAt } from './shareSnap';
 
 type Made = { blob: Blob; format: ShareFormat };
 type Status = { kind: 'idle' } | { kind: 'making' } | { kind: 'saved'; name: string; fallback: boolean } | { kind: 'shared' } | { kind: 'failed' };
@@ -62,15 +62,18 @@ function Check({ label, checked, onChange, id }: { label: string; checked: boole
 }
 
 export default function ShareDialog({
-  snap,
+  snapAt,
+  bigBlind,
   fourColor,
   opt,
   onOpt,
   onClose,
   failed = false,
 }: {
-  /** The step as it was when the image was asked for. */
-  snap: ShareSnap;
+  /** The step as it was when the image was asked for, or the whole hand, in the unit chosen. */
+  snapAt: SnapAt;
+  /** The hand's big blind: amounts in big blinds only where the record has it. */
+  bigBlind: number | null;
   fourColor: boolean;
   opt: ShareOptions;
   onOpt: (o: ShareOptions) => void;
@@ -79,6 +82,8 @@ export default function ShareDialog({
   failed?: boolean;
 }) {
   const { t } = useI18n();
+  const snap = useMemo(() => snapAt({ span: opt.span, unit: opt.unit }), [snapAt, opt.span, opt.unit]);
+  const inBB = !!bigBlind && bigBlind > 0;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [art, setArt] = useState<ShareArt | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -209,12 +214,13 @@ export default function ShareDialog({
             {!drawn && status.kind !== 'failed' && <Spinner className="absolute size-8 text-gold-300" label={t('shareImg.making')} />}
           </div>
           <figcaption className="text-xs text-ink-400" data-testid="share-step">
-            {t('shareImg.stepNote', { phase: snap.phaseLabel })}
+            {opt.span === 'hand' ? t('shareImg.handNote') : t('shareImg.stepNote', { phase: snap.phaseLabel })}
           </figcaption>
         </figure>
         <div className="flex min-w-0 flex-col gap-3">
-          <Choice label={t('shareImg.template')} value={opt.template} id="template" cols="grid-cols-4 sm:grid-cols-2" onChange={(v) => set({ template: v })} options={SHARE_TEMPLATES.map((v) => ({ v, label: t(`shareImg.template.${v}` as MsgKey) }))} />
+          <Choice label={t('shareImg.template')} value={opt.template} id="template" cols="grid-cols-3 sm:grid-cols-2" onChange={(v) => set({ template: v })} options={SHARE_TEMPLATES.map((v) => ({ v, label: t(`shareImg.template.${v}` as MsgKey) }))} />
           <Choice label={t('shareImg.ratio')} value={opt.ratio} id="ratio" cols="grid-cols-4 sm:grid-cols-2" onChange={(v) => set({ ratio: v })} options={SHARE_RATIOS.map((v) => ({ v, label: t(RATIO_KEY[v]) }))} />
+          <Choice label={t('shareImg.span')} value={opt.span} id="span" cols="grid-cols-2" onChange={(v) => set({ span: v })} options={(['step', 'hand'] as const).map((v) => ({ v, label: t(`shareImg.span.${v}`) }))} />
           <details className="group rounded-lg border border-white/10 px-3 py-1" data-testid="share-more">
             <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between text-sm font-semibold text-ink-200 [&::-webkit-details-marker]:hidden">
               {t('shareImg.moreOptions')}
@@ -223,6 +229,7 @@ export default function ShareDialog({
               </span>
             </summary>
             <div className="flex flex-col gap-3 pt-1 pb-2">
+              {inBB && <Choice label={t('shareImg.unit')} value={opt.unit} id="unit" cols="grid-cols-2" onChange={(v) => set({ unit: v })} options={(['chips', 'bb'] as const).map((v) => ({ v, label: t(`shareImg.unit.${v}`) }))} />}
               <Choice label={t('shareImg.resolution')} value={opt.scale} id="res" cols="grid-cols-2" onChange={(v) => set({ scale: v })} options={([1, 2] as const).map((v) => ({ v, label: t(`shareImg.res.${v}`, { w: w * v, h: h * v }) }))} />
               <Choice label={t('shareImg.format')} value={opt.format} id="format" cols="grid-cols-2" onChange={(v) => set({ format: v })} options={SHARE_FORMATS.map((v) => ({ v, label: v === 'png' ? 'PNG' : 'WebP' }))} />
               {opt.format === 'webp' && !webp && <p className="text-xs text-ink-400" data-testid="share-webp-note">{t('shareImg.webpFallback')}</p>}

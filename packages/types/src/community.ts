@@ -71,6 +71,11 @@ export interface HandReplayPlayer {
   /** A VIP member's name color now (only an active ordinary member's; see shownVip). Looks only. */
   vip?: VipColor;
   holeCards: string[] | null;
+  /**
+   * Went to the showdown and mucked: the table saw the cards go in face down (the viewer's own still show to them).
+   * Absent for every other player, and for hands recorded before mucking existed (all shown down).
+   */
+  mucked?: true;
   stackStart: number;
   net: number;
   won: number;

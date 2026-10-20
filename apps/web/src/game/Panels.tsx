@@ -1,5 +1,5 @@
 import { sound, type AudioSettings } from '@jc/audio';
-import { AUTO_REBUY_MAX_TIMES, SETTINGS_COLOR_VISIONS, type ChatMessage, type TableView } from '@jc/types';
+import { SETTINGS_COLOR_VISIONS, type AutoBuyPolicy, type AutoBuyRequest, type ChatMessage, type TableView } from '@jc/types';
 import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -12,6 +12,7 @@ import { useAmounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { AMOUNT_UNITS, pullSettings, setPrefs, usePrefs, useSettingsSync } from '../lib/prefs';
+import { AUTO_TIMES, autoBuyEstimate, draftFrom, draftRequest, editDraft, seatPolicy, type AutoBuyDraft } from './autoBuy';
 import { RequestError, rid, type TableSocketApi } from './useTableSocket';
 
 /**
@@ -41,7 +42,8 @@ export function BuyInModal({
   state: TableView;
   seatIndex: number | null;
   wallet: number;
-  onConfirm: (amount: number) => void;
+  /** `autoBuy`: the automatic chip policy chosen with the buy-in (absent when off). */
+  onConfirm: (amount: number, autoBuy?: AutoBuyRequest) => void;
   busy: boolean;
   error: string | null;
 }) {
@@ -56,6 +58,24 @@ export function BuyInModal({
   }, [open, cap, minBuyIn, bigBlind]);
   const affordable = cap >= minBuyIn;
   const refill = useShortWhileOpen(open, !affordable);
+  // Off unless the player picks one. A room older than automatic top-ups would drop the choice: none is offered there.
+  const offerAuto = state.you.autoBuy !== undefined && state.table.roomType !== 'tournament';
+  const [draft, setDraft] = useState(() => draftFrom(null, 'off', amount));
+  // Until the player sets the policy's amounts, they are the buy-in's: a rebuy of it, a top-up back to it.
+  const touched = useRef(false);
+  useLayoutEffect(() => {
+    if (!open) return;
+    touched.current = false;
+    setDraft(draftFrom(null, 'off', amount));
+    // Only when the dialog opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  useEffect(() => {
+    if (touched.current) return;
+    setDraft((d) => (d.mode === 'off' || (d.amount === amount && d.target === amount) ? d : editDraft(d, { amount, target: amount, trigger: amount })));
+  }, [amount]);
+  const autoReq = offerAuto && draft.mode !== 'off' ? draftRequest(draft) : null;
+  const ready = affordable && (!offerAuto || draft.mode === 'off' || autoReq !== null);
   return (
     <Modal
       open={open}
@@ -66,7 +86,7 @@ export function BuyInModal({
           <Button variant="ghost" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={!affordable} loading={busy} onClick={() => onConfirm(amount)} data-testid="buyin-confirm">
+          <Button disabled={!ready} loading={busy} onClick={() => onConfirm(amount, autoReq ?? undefined)} data-testid="buyin-confirm">
             {t('table.buyIn')} {a.exact(amount)}
           </Button>
         </>
@@ -94,6 +114,25 @@ export function BuyInModal({
         ) : (
           <p className="text-sm text-danger">{t('err.insufficient_balance')}</p>
         )}
+        {affordable && offerAuto && (
+          <section className="flex flex-col gap-2 border-t border-white/5 pt-3" data-testid="buyin-autobuy">
+            <div>
+              <h4 className="text-sm font-bold text-ivory">{t('autobuy.title')}</h4>
+              <p className="mt-1 text-xs text-ink-400">{t('autobuy.desc')}</p>
+            </div>
+            <AutoBuyFields
+              draft={draft}
+              edit={(p) => {
+                if (p.consent === undefined) touched.current = true;
+                setDraft((d) => editDraft(d, p));
+              }}
+              // A new choice starts from the buy-in being made.
+              onMode={(mode) => setDraft(draftFrom(null, mode, amount))}
+              modes={['off', 'rebuy', 'topup']}
+              table={state.table}
+            />
+          </section>
+        )}
         {refill && <RefillHintLazy />}
         {error &&<p className="text-sm text-danger" role="alert">{error}</p>}
       </div>
@@ -102,11 +141,144 @@ export function BuyInModal({
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-const REBUY_TIMES = [1, 2, 3, AUTO_REBUY_MAX_TIMES];
 
 /**
- * Adding chips from the wallet to a seated player's stack, and the opt-in automatic rebuy. The server checks
- * everything again; the limits here only keep the controls within what it accepts.
+ * The controls of an automatic chip policy: the mode, its terms, the total limit and the player's consent to them
+ * (`draftRequest` turns them into what the room is sent). Rebuy amounts and top-up targets stay within the buy-in range.
+ */
+function AutoBuyFields({
+  draft: d,
+  edit,
+  onMode,
+  modes,
+  table,
+}: {
+  draft: AutoBuyDraft;
+  edit: (patch: Partial<AutoBuyDraft>) => void;
+  onMode: (mode: AutoBuyDraft['mode']) => void;
+  modes: AutoBuyDraft['mode'][];
+  table: TableView['table'];
+}) {
+  const { t } = useI18n();
+  const { minBuyIn, maxBuyIn, bigBlind } = table;
+  const a = useAmounts(bigBlind);
+  const fmt = (n: number) => formatChips(n);
+  const topup = d.mode === 'topup';
+  const per = topup ? d.target : d.amount;
+  const id = topup ? 'autotop' : 'rebuy';
+  const range = (value: number, min: number, max: number, set: (n: number) => void, testId: string, label: string) => (
+    <input type="range" min={min} max={max} step={1} value={value} onChange={(e) => set(Number(e.target.value))} aria-label={label} data-testid={testId} />
+  );
+  return (
+    <div className="flex flex-col gap-3">
+      {modes.length > 1 && (
+        <div className="flex flex-col gap-1.5" role="radiogroup" aria-label={t('autobuy.mode')}>
+          {modes.map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={d.mode === m}
+              onClick={() => d.mode !== m && onMode(m)}
+              className={cx('jc-tap rounded-lg border px-3 py-2 text-left text-xs font-semibold', d.mode === m ? 'border-gold-400 bg-gold-500/10 text-gold-300' : 'border-white/10 text-ink-200')}
+              data-testid={`autobuy-mode-${m}`}
+            >
+              {t(`autobuy.${m}`)}
+            </button>
+          ))}
+        </div>
+      )}
+      {d.mode === 'rebuy' && (
+        <label className="flex flex-col gap-1.5 text-xs text-ink-300">
+          <span className="flex justify-between">
+            {t('rebuy.amount')}
+            <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="rebuy-amount">{a.exact(d.amount)}</span>
+          </span>
+          {range(d.amount, minBuyIn, maxBuyIn, (amount) => edit({ amount }), 'rebuy-range', t('rebuy.amount'))}
+        </label>
+      )}
+      {topup && (
+        <>
+          <label className="flex flex-col gap-1.5 text-xs text-ink-300">
+            <span className="flex justify-between">
+              {t('autotop.target')}
+              <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="autotop-target-amount">{a.exact(d.target)}</span>
+            </span>
+            {range(d.target, minBuyIn, maxBuyIn, (target) => edit({ target }), 'autotop-target', t('autotop.target'))}
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs text-ink-300">
+            <span className="flex justify-between gap-2">
+              {t('autotop.trigger')}
+              <span className="shrink-0 font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="autotop-trigger-amount">{a.exact(d.trigger)}</span>
+            </span>
+            {range(d.trigger, 1, d.target, (trigger) => edit({ trigger }), 'autotop-trigger', t('autotop.trigger'))}
+          </label>
+          <label className="flex items-start gap-2 text-xs text-ink-200">
+            <input type="checkbox" checked={d.partial} onChange={(e) => edit({ partial: e.target.checked })} className="mt-0.5 size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="autotop-partial" />
+            {t('autotop.partial')}
+          </label>
+        </>
+      )}
+      {d.mode !== 'off' && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs text-ink-300">{t('rebuy.cap')}</span>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label={t('rebuy.cap')}>
+              {AUTO_TIMES.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  role="radio"
+                  aria-checked={d.times === n}
+                  onClick={() => edit({ times: n })}
+                  className={cx('jc-tap rounded-lg border px-2 py-2 text-xs font-semibold', d.times === n ? 'border-gold-400 text-gold-300' : 'border-white/10 text-ink-200')}
+                  data-testid={`${id}-times-${n}`}
+                >
+                  {t('rebuy.times', { n, total: a.fmt(per * n) })}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-xs text-ink-200">
+            <input type="checkbox" checked={d.consent} onChange={(e) => edit({ consent: e.target.checked })} className="mt-0.5 size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid={`${id}-consent`} />
+            {topup
+              ? t(d.partial ? 'autotop.consentPartial' : 'autotop.consent', { target: fmt(d.target), trigger: fmt(d.trigger), cap: fmt(per * d.times) })
+              : t('rebuy.consent', { amount: fmt(d.amount), cap: fmt(per * d.times) })}
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The policy the room holds for this seat: its terms, what it used of its limit, and for a top-up what the next one may take. */
+function AutoBuyStatus({ policy: p, stack, wallet, table }: { policy: AutoBuyPolicy; stack: number; wallet: number; table: TableView['table'] }) {
+  const { t } = useI18n();
+  const a = useAmounts(table.bigBlind);
+  if (p.mode === 'rebuy') {
+    return (
+      <p className="text-sm text-gold-300" data-testid="rebuy-active">
+        {t('rebuy.active', { amount: a.exact(p.amount), spent: a.fmt(p.spent), cap: a.fmt(p.cap) })}
+      </p>
+    );
+  }
+  const next = autoBuyEstimate(p, stack, table, wallet);
+  return (
+    <div className="flex flex-col gap-1 text-xs text-ink-300" data-testid="autotop-active">
+      <p className="text-sm font-semibold text-gold-300">{t('autotop.active')}</p>
+      <p>{t('autotop.terms', { target: a.exact(p.target), trigger: a.exact(p.trigger) })}</p>
+      <p>{t('autotop.used', { spent: a.fmt(p.spent), cap: a.fmt(p.cap) })}</p>
+      <p className="font-semibold text-ivory" data-testid="autotop-estimate">
+        {next.stop ? t(next.stop === 'short' ? 'autotop.estimateShort' : 'autotop.estimateCap') : next.amount > 0 ? t('autotop.estimate', { amount: a.exact(next.amount) }) : t('autotop.estimateNone')}
+      </p>
+      <p className="text-ink-400">{t('autotop.estimateNote', { stack: a.exact(stack) })}</p>
+    </div>
+  );
+}
+
+/**
+ * Adding chips from the wallet to a seated player's stack, and the opt-in automatic chip policy (rebuy or top-up). The
+ * server checks everything again; the limits here only keep the controls within what it accepts.
  */
 export function TopUpModal({
   open,
@@ -142,19 +314,21 @@ export function TopUpModal({
   // A retry after a lost connection reuses the request id, so the server applies the top-up at most once.
   const pendingReq = useRef<{ amount: number; id: string } | null>(null);
 
-  const auto = state.you.autoRebuy;
-  const [rebuyAmount, setRebuyAmount] = useState(minBuyIn);
-  const [times, setTimes] = useState(1);
-  const [consent, setConsent] = useState(false);
+  const policy = seatPolicy(state.you);
+  // A room older than automatic top-ups knows only the rebuy (and its own message for it).
+  const topUpOffered = state.you.autoBuy !== undefined;
+  const base = clamp(bigBlind * 100, minBuyIn, maxBuyIn);
+  const [draft, setDraft] = useState(() => draftFrom(null, 'rebuy', base));
+  // Changing the policy the seat holds, rather than choosing one.
+  const [editing, setEditing] = useState(false);
 
   // A layout effect, so the dialog never shows (or lets anyone move) the amount left from the last time it was open:
   // a passive effect could run after a quick pick and replace it with the suggestion.
   useLayoutEffect(() => {
     if (!open) return;
     setAmount(clamp(bigBlind * 100 - stack, lo, Math.max(lo, hi)));
-    setRebuyAmount(clamp(bigBlind * 100, minBuyIn, maxBuyIn));
-    setTimes(1);
-    setConsent(false);
+    setDraft(draftFrom(null, 'rebuy', base));
+    setEditing(false);
     setError(null);
     pendingReq.current = null;
     // Only when the dialog opens: later stack changes must not move the chosen amount.
@@ -180,12 +354,15 @@ export function TopUpModal({
     }
   }
 
-  async function setRebuy(on: boolean) {
+  /** Sets (or with `{ mode: 'off' }` ends) the seat's policy; the room answers with the policy it now holds. */
+  async function setPolicy(p: AutoBuyRequest) {
     setBusy('rebuy');
     setError(null);
     try {
-      await request(on ? { t: 'autoRebuy', on, amount: rebuyAmount, cap: rebuyAmount * times, consent: true } : { t: 'autoRebuy', on });
-      setConsent(false);
+      if (topUpOffered) await request({ t: 'autoBuy', policy: p });
+      else await request(p.mode === 'rebuy' ? { t: 'autoRebuy', on: true, amount: p.amount, cap: p.cap, consent: true } : { t: 'autoRebuy', on: false });
+      setDraft((d) => ({ ...d, consent: false }));
+      setEditing(false);
     } catch (e) {
       setError(err(e instanceof RequestError ? e.code : null));
     } finally {
@@ -248,66 +425,63 @@ export function TopUpModal({
         <div className="jc-divider" />
         <section className="flex flex-col gap-3" data-testid="rebuy-section">
           <div>
-            <h4 className="text-sm font-bold text-ivory">{t('rebuy.title')}</h4>
-            <p className="mt-1 text-xs text-ink-400">{t('rebuy.desc')}</p>
+            <h4 className="text-sm font-bold text-ivory">{t(topUpOffered ? 'autobuy.title' : 'rebuy.title')}</h4>
+            <p className="mt-1 text-xs text-ink-400">{t(topUpOffered ? 'autobuy.descSeated' : 'rebuy.desc')}</p>
           </div>
-          {auto ? (
+          {policy && !editing ? (
             <div className="flex flex-col gap-2">
-              <p className="text-sm text-gold-300" data-testid="rebuy-active">
-                {t('rebuy.active', { amount: a.exact(auto.amount), spent: a.fmt(auto.spent), cap: a.fmt(auto.cap) })}
-              </p>
-              <Button variant="outline" loading={busy === 'rebuy'} disabled={busy !== null} onClick={() => setRebuy(false)} data-testid="rebuy-off">
-                {t('rebuy.off')}
-              </Button>
+              <AutoBuyStatus policy={policy} stack={stack} wallet={wallet} table={state.table} />
+              <div className="flex flex-wrap gap-2">
+                {topUpOffered && (
+                  <Button
+                    variant="ghost"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setDraft(draftFrom(policy, policy.mode, base));
+                      setEditing(true);
+                    }}
+                    data-testid="autobuy-change"
+                  >
+                    {t('autobuy.change')}
+                  </Button>
+                )}
+                <Button variant="outline" loading={busy === 'rebuy'} disabled={busy !== null} onClick={() => setPolicy({ mode: 'off' })} data-testid={policy.mode === 'rebuy' ? 'rebuy-off' : 'autotop-off'}>
+                  {t(policy.mode === 'rebuy' ? 'rebuy.off' : 'autotop.off')}
+                </Button>
+              </div>
+              <Link to="/me" target="_blank" rel="noopener" className="jc-tap self-start py-1 text-xs text-gold-300 underline underline-offset-2" data-testid="autobuy-wallet-link">
+                {t('topup.wallet')} →
+              </Link>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              <label className="flex flex-col gap-1.5 text-xs text-ink-300">
-                <span className="flex justify-between">
-                  {t('rebuy.amount')}
-                  <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="rebuy-amount">{a.exact(rebuyAmount)}</span>
-                </span>
-                <input
-                  type="range"
-                  min={minBuyIn}
-                  max={maxBuyIn}
-                  step={1}
-                  value={rebuyAmount}
-                  onChange={(e) => {
-                    setRebuyAmount(Number(e.target.value));
-                    setConsent(false);
+              <AutoBuyFields
+                draft={draft}
+                edit={(p) => setDraft((d) => editDraft(d, p))}
+                onMode={(mode) => setDraft(draftFrom(null, mode, base))}
+                modes={topUpOffered ? ['rebuy', 'topup'] : ['rebuy']}
+                table={state.table}
+              />
+              {editing && <p className="text-xs text-ink-400">{t('autobuy.changeNote')}</p>}
+              <div className="flex flex-wrap gap-2">
+                {editing && (
+                  <Button variant="ghost" disabled={busy !== null} onClick={() => setEditing(false)} data-testid="autobuy-change-cancel">
+                    {t('common.cancel')}
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  loading={busy === 'rebuy'}
+                  disabled={!draft.consent || busy !== null}
+                  onClick={() => {
+                    const p = draftRequest(draft);
+                    if (p) void setPolicy(p);
                   }}
-                  data-testid="rebuy-range"
-                />
-              </label>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs text-ink-300">{t('rebuy.cap')}</span>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label={t('rebuy.cap')}>
-                  {REBUY_TIMES.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      role="radio"
-                      aria-checked={times === n}
-                      onClick={() => {
-                        setTimes(n);
-                        setConsent(false);
-                      }}
-                      className={cx('jc-tap rounded-lg border px-2 py-2 text-xs font-semibold', times === n ? 'border-gold-400 text-gold-300' : 'border-white/10 text-ink-200')}
-                      data-testid={`rebuy-times-${n}`}
-                    >
-                      {t('rebuy.times', { n, total: a.fmt(rebuyAmount * n) })}
-                    </button>
-                  ))}
-                </div>
+                  data-testid={draft.mode === 'topup' ? 'autotop-on' : 'rebuy-on'}
+                >
+                  {t(editing ? 'autobuy.save' : draft.mode === 'topup' ? 'autotop.on' : 'rebuy.on')}
+                </Button>
               </div>
-              <label className="flex items-start gap-2 text-xs text-ink-200">
-                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="rebuy-consent" />
-                {t('rebuy.consent', { amount: fmt(rebuyAmount), cap: fmt(rebuyAmount * times) })}
-              </label>
-              <Button variant="outline" loading={busy === 'rebuy'} disabled={!consent || busy !== null} onClick={() => setRebuy(true)} data-testid="rebuy-on">
-                {t('rebuy.on')}
-              </Button>
             </div>
           )}
         </section>

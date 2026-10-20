@@ -16,6 +16,8 @@ import { OpsCounter, type TimeBankMetric } from '@jc/db';
 import { botView, decideBot, HandEngine, nextButtonSeat, STRATEGY_VERSION, styleFor, type ActResult, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
   AUTO_REBUY_MAX_TIMES,
+  type AutoBuyPolicy,
+  type AutoBuyRequest,
   blindsAt,
   type BotLevel,
   ClientMessageSchema,
@@ -120,11 +122,18 @@ interface SeatState {
    * A top-up in flight. 'queued' waits for the hand the player is in to end (nothing taken yet); 'debiting' is being
    * written to D1, and after a restart or a failed call the ledger key decides whether the chips arrived. 'debiting'
    * is only ever set for a key the ledger did not have yet, so a committed key found here has not been counted.
-   * `auto` marks an automatic rebuy.
+   * `auto` marks an automatic rebuy or top-up (`autoBuy`).
    */
   topUp?: { key: string; amount: number; state: 'queued' | 'debiting'; auto?: boolean } | null;
-  /** Automatic rebuy after busting, turned on by the player for this seat only: chips per rebuy, total limit, used. */
+  /**
+   * The automatic chip policy the player turned on for this seat only: a rebuy after busting, or a top-up back to a
+   * target after a hand that left the stack below its trigger — never both. It lasts while they keep the seat.
+   */
+  autoBuy?: AutoBuyPolicy | null;
+  /** Rooms before `autoBuy` kept an automatic rebuy here; taken over when the room loads, never written. */
   autoRebuy?: { amount: number; cap: number; spent: number } | null;
+  /** The last hand after which `autoBuy` took chips at this seat: at most once per hand, whichever policy it has. */
+  autoHand?: string | null;
   /**
    * What the player chose for their next turn of this street, with the amount they faced when choosing. `progress`
    * carries it out when the turn comes, only as a check or a fold the engine still allows.
@@ -321,6 +330,12 @@ export class TableRoom extends DurableObject<Env> {
       ]);
       this.tableId = tableId ?? null;
       this.room = room ?? emptyRoom(9);
+      // A room saved before automatic top-up kept an automatic rebuy on its own (an older build writes only that).
+      for (const s of this.room.seats) {
+        if (!s || !('autoRebuy' in s)) continue;
+        s.autoBuy = s.autoRebuy ? { mode: 'rebuy', ...s.autoRebuy } : null;
+        delete s.autoRebuy;
+      }
       this.chat = chat ?? [];
       this.unrecorded = new Set(unrecorded.keys());
       if (hand) this.hand = HandEngine.restore(hand, Date.now());
@@ -816,7 +831,10 @@ export class TableRoom extends DurableObject<Env> {
   private async handle(ws: WebSocket, a: Attachment, msg: Exclude<ClientMessage, { t: 'ping' }>) {
     const t = this.table!;
     // A tournament seat is neither taken nor given up by hand, and its chips come from the tournament only.
-    if (t.roomType === 'tournament' && (msg.t === 'sit' || msg.t === 'leave' || msg.t === 'topUp' || msg.t === 'cancelTopUp' || msg.t === 'autoRebuy' || (msg.t === 'waitlist' && msg.join))) {
+    if (
+      t.roomType === 'tournament' &&
+      (msg.t === 'sit' || msg.t === 'leave' || msg.t === 'topUp' || msg.t === 'cancelTopUp' || msg.t === 'autoRebuy' || msg.t === 'autoBuy' || (msg.t === 'waitlist' && msg.join))
+    ) {
       throw new CommandError('tournament_table', 'not at a tournament table');
     }
     switch (msg.t) {
@@ -861,7 +879,7 @@ export class TableRoom extends DurableObject<Env> {
       }
       case 'sit':
         if (this.room.recentReqs.includes(msg.reqId)) return this.send(ws, { t: 'ack', reqId: msg.reqId });
-        await this.sit(a, msg.seatIndex, msg.buyIn, msg.reqId);
+        await this.sit(a, msg.seatIndex, msg.buyIn, msg.reqId, msg.autoBuy);
         this.send(ws, { t: 'ack', reqId: msg.reqId });
         return;
       case 'leave':
@@ -884,8 +902,10 @@ export class TableRoom extends DurableObject<Env> {
         return this.ack(ws, msg.reqId);
       }
       case 'autoRebuy':
+      case 'autoBuy':
         if (this.room.recentReqs.includes(msg.reqId)) return this.send(ws, { t: 'ack', reqId: msg.reqId });
-        this.setAutoRebuy(a.userId, msg);
+        if (msg.t === 'autoRebuy') this.setAutoRebuy(a.userId, msg);
+        else this.seatedSeat(a.userId).autoBuy = this.autoBuyPolicy(msg.policy);
         this.remember(msg.reqId);
         await this.save();
         this.broadcast();
@@ -1037,11 +1057,13 @@ export class TableRoom extends DurableObject<Env> {
     };
   }
 
-  private async sit(a: Attachment, seatIndex: number, amount: number, reqId: string) {
+  private async sit(a: Attachment, seatIndex: number, amount: number, reqId: string, auto?: AutoBuyRequest) {
     const t = this.table!;
     this.assertSeatFree(a.userId, this.hasAccess(a), seatIndex);
     if (!Number.isSafeInteger(amount) || amount < t.minBuyIn || amount > t.maxBuyIn) throw new CommandError('buyin_out_of_range', 'buy-in out of range');
     this.assertNoWaitlistPriority(a.userId);
+    // Checked before anything is taken: a policy the table refuses refuses the buy-in with it.
+    const autoBuy = auto ? this.autoBuyPolicy(auto) : null;
 
     const tableSessionId = crypto.randomUUID();
     const role = publicRole(a.role);
@@ -1061,6 +1083,7 @@ export class TableRoom extends DurableObject<Env> {
       leaveAfterHand: false,
       timeouts: 0,
       joinedAt: Date.now(),
+      ...(autoBuy ? { autoBuy } : {}),
     };
     // Reserve the seat durably before touching the wallet (crash safety).
     this.room.seats[seatIndex] = seat;
@@ -1204,7 +1227,7 @@ export class TableRoom extends DurableObject<Env> {
     await this.save();
   }
 
-  // ------------------------------------------------------------------ top-ups & automatic rebuy
+  // ------------------------------------------------------------------ top-ups & automatic chip policy (rebuy, top-up)
 
   private seatedSeat(userId: string): SeatState {
     const i = this.seatIndexOf(userId);
@@ -1259,16 +1282,23 @@ export class TableRoom extends DurableObject<Env> {
    * if the room restarts or the D1 call fails half way, `resolveTopUp` asks the ledger whether the chips moved.
    * A key the ledger already has was counted when it was committed (here or by `resolveTopUp`), so it is neither
    * noted nor written again: it is 'duplicate' and adds nothing. Noting it would let `resolveTopUp` count it twice.
+   * `hand`: an automatic charge's hand, noted with the attempt so that hand is never charged again however it ends.
    */
-  private async debitTopUp(seat: SeatState, p: { key: string; amount: number; auto?: boolean }): Promise<'applied' | 'duplicate' | 'insufficient' | 'suspended'> {
+  private async debitTopUp(
+    seat: SeatState,
+    p: { key: string; amount: number; auto?: boolean },
+    memo = p.auto ? 'auto rebuy' : 'top-up',
+    hand?: string,
+  ): Promise<'applied' | 'duplicate' | 'insufficient' | 'suspended'> {
     if ((await committedTopUp(this.env.DB, p.key)) !== null) {
       seat.topUp = null;
       await this.save();
       return 'duplicate';
     }
     seat.topUp = { ...p, state: 'debiting' };
+    if (hand) seat.autoHand = hand;
     await this.save();
-    const r = await topUp(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: p.amount, key: p.key, memo: p.auto ? 'auto rebuy' : 'top-up' });
+    const r = await topUp(this.env.DB, { userId: seat.userId, tableId: this.tableId!, tableSessionId: seat.tableSessionId, amount: p.amount, key: p.key, memo });
     seat.topUp = null;
     if (r === 'applied') this.addChips(seat, p.amount, p.auto);
     await this.save();
@@ -1278,7 +1308,8 @@ export class TableRoom extends DurableObject<Env> {
   private addChips(seat: SeatState, amount: number, auto?: boolean) {
     seat.stack += amount;
     seat.buyIn += amount;
-    if (auto && seat.autoRebuy) seat.autoRebuy.spent += amount;
+    // (One settled after a policy change counts against the new limit: never less than was taken.)
+    if (auto && seat.autoBuy) seat.autoBuy.spent += amount;
   }
 
   /**
@@ -1294,25 +1325,50 @@ export class TableRoom extends DurableObject<Env> {
     return true;
   }
 
-  /** Turns automatic rebuy on (only with the player's explicit consent, an amount and a total limit) or off. */
+  /**
+   * Turns automatic rebuy on (only with the player's explicit consent, an amount and a total limit), replacing an
+   * automatic top-up, or off. Pages before `autoBuy` send this; turning it off leaves an automatic top-up alone.
+   */
   private setAutoRebuy(userId: string, msg: Extract<ClientMessage, { t: 'autoRebuy' }>) {
-    const t = this.table!;
     const seat = this.seatedSeat(userId);
     if (!msg.on) {
-      seat.autoRebuy = null;
+      if (seat.autoBuy?.mode === 'rebuy') seat.autoBuy = null;
       return;
     }
     const { amount, cap } = msg;
-    if (msg.consent !== true || !amount || !cap) throw new CommandError('bad_request', 'consent, an amount and a limit are required');
-    if (amount < t.minBuyIn || amount > t.maxBuyIn) throw new CommandError('buyin_out_of_range', 'rebuy amount out of range');
-    if (cap < amount || cap > amount * AUTO_REBUY_MAX_TIMES) throw new CommandError('bad_request', 'limit out of range');
-    seat.autoRebuy = { amount, cap, spent: 0 };
+    if (msg.consent !== true || !amount || !cap) throw this.badPolicy('bad_request', 'consent, an amount and a limit are required');
+    seat.autoBuy = this.autoBuyPolicy({ mode: 'rebuy', amount, cap, consent: true });
   }
 
   /**
-   * Between hands: apply the top-ups that waited for the hand to end, then rebuy busted players who turned automatic
-   * rebuy on. Neither takes more than the player chose, and the stack stays within the buy-in range. `handId` is the
-   * hand just finished (one rebuy per hand). A seat whose D1 write fails keeps its state for the next attempt.
+   * The automatic chip policy a player asked for, checked against this table's buy-in range: the rebuy amount or the
+   * top-up target within it, a top-up's trigger at most its target (the target when not given), and a total limit
+   * covering at least one rebuy (or one top-up from nothing) and at most AUTO_REBUY_MAX_TIMES of them. Nothing used yet.
+   */
+  private autoBuyPolicy(req: AutoBuyRequest): AutoBuyPolicy | null {
+    const t = this.table!;
+    if (req.mode === 'off') return null;
+    const per = req.mode === 'rebuy' ? req.amount : req.target;
+    if (per < t.minBuyIn || per > t.maxBuyIn) throw this.badPolicy('buyin_out_of_range', `${req.mode} amount out of range`);
+    if (req.cap < per || req.cap > per * AUTO_REBUY_MAX_TIMES) throw this.badPolicy('bad_request', 'limit out of range');
+    if (req.mode === 'rebuy') return { mode: 'rebuy', amount: req.amount, cap: req.cap, spent: 0 };
+    const trigger = req.trigger ?? req.target;
+    if (trigger > req.target) throw this.badPolicy('bad_request', 'trigger above the target');
+    return { mode: 'topup', target: req.target, trigger, partial: req.partial ?? false, cap: req.cap, spent: 0 };
+  }
+
+  /** A policy request the room refuses (counted for the admin economy page: a page should never send one). */
+  private badPolicy(code: ErrorCode, message: string) {
+    this.ops.add('autobuy_invalid');
+    return new CommandError(code, message);
+  }
+
+  /**
+   * Between hands: apply the top-ups that waited for the hand to end, then the seat's automatic policy — a rebuy for a
+   * busted player, or a top-up back to the target for a stack the hand left below the trigger. None takes more than the
+   * player chose, and the stack stays within the buy-in range. `handId` is the hand just finished: one automatic charge
+   * per hand, its ledger key made from it. A seat whose D1 call fails keeps its state for the next attempt: a charge
+   * not yet noted is tried again, one noted is settled by the ledger and not tried again for that hand.
    */
   private async applyTopUps(handId: string | null): Promise<Notice[]> {
     const t = this.table!;
@@ -1337,34 +1393,84 @@ export class TableRoom extends DurableObject<Env> {
             else if (r === 'insufficient') notices.push({ userId: s.userId, code: 'topup_insufficient' });
           }
         }
-        const auto = s.autoRebuy;
-        if (auto && s.stack === 0 && !s.leaveAfterHand && handId) {
-          const amount = Math.min(auto.amount, t.maxBuyIn);
-          let stop: NoticeCode | null = null;
-          // (Also when the table's range has since moved past the chosen amount.)
-          if (amount < t.minBuyIn || auto.spent + amount > auto.cap) stop = 'rebuy_cap';
-          else {
-            const r = await this.debitTopUp(s, { key: `rebuy:${s.tableSessionId}:${handId}`, amount, auto: true });
-            if (r === 'applied') notices.push({ userId: s.userId, code: 'rebuy_applied', amount });
-            else if (r === 'insufficient') stop = 'rebuy_insufficient';
-            else if (r === 'suspended') {
-              // Off, quietly: the busted seat of a suspended account stands up as usual.
-              s.autoRebuy = null;
-              await this.save();
-            }
-          }
-          if (stop) {
-            // Off for good: the busted player stands up as usual.
-            s.autoRebuy = null;
-            await this.save();
-            notices.push({ userId: s.userId, code: stop });
-          }
+        const pol = s.autoBuy;
+        if (pol && handId && s.autoHand !== handId && !s.leaveAfterHand) {
+          const n = pol.mode === 'rebuy' ? await this.autoRebuy(s, pol, handId) : await this.autoTopUp(s, pol, handId);
+          if (n) notices.push(n);
         }
       } catch (e) {
         this.fault('top-up failed', e);
       }
     }
     return notices;
+  }
+
+  /** A busted player's automatic rebuy of the chosen amount. */
+  private async autoRebuy(s: SeatState, pol: Extract<AutoBuyPolicy, { mode: 'rebuy' }>, handId: string): Promise<Notice | null> {
+    if (s.stack > 0) return null;
+    const t = this.table!;
+    const amount = Math.min(pol.amount, t.maxBuyIn);
+    // (Also when the table's range has since moved past the chosen amount.) The busted player stands up as usual.
+    if (amount < t.minBuyIn || pol.spent + amount > pol.cap) return this.stopAuto(s, 'rebuy_cap');
+    return this.autoDebit(s, handId, { key: `rebuy:${s.tableSessionId}:${handId}`, amount, memo: 'auto rebuy', done: 'rebuy_applied', short: 'rebuy_insufficient' });
+  }
+
+  /**
+   * An automatic top-up: a stack the hand left below the trigger (0 included) is brought back to the target, the
+   * shortfall taken from the wallet — all of it, or with `partial` as much as the wallet holds when that still brings
+   * the stack to the table's minimum. Never past the table's maximum or the policy's limit.
+   */
+  private async autoTopUp(s: SeatState, pol: Extract<AutoBuyPolicy, { mode: 'topup' }>, handId: string): Promise<Notice | null> {
+    if (s.stack >= pol.trigger) return null;
+    const t = this.table!;
+    const target = Math.min(pol.target, t.maxBuyIn);
+    // (The table's range has since moved past the target.)
+    if (target < t.minBuyIn) return this.stopAuto(s, 'autotopup_cap');
+    let amount = target - s.stack;
+    if (amount <= 0) return null;
+    if (pol.partial) {
+      // Read once here; the ledger checks the balance again as it takes the chips.
+      amount = Math.min(amount, await walletBalance(this.env.DB, s.userId));
+      if (amount <= 0 || s.stack + amount < t.minBuyIn) return this.stopAuto(s, 'autotopup_insufficient');
+    }
+    if (pol.spent + amount > pol.cap) return this.stopAuto(s, 'autotopup_cap');
+    return this.autoDebit(s, handId, { key: `autotop:${s.tableSessionId}:${handId}`, amount, memo: 'auto top-up', done: 'autotopup_applied', short: 'autotopup_insufficient' });
+  }
+
+  /**
+   * Takes an automatic rebuy's or top-up's chips (`debitTopUp`: noted first, so a restart or a failed call settles it
+   * by the ledger key, which a repeat cannot pass). The hand is noted with the attempt: once its chips may have moved,
+   * that hand is not charged again, not even under the other policy (another key) after a change. A wallet too short
+   * turns the policy off with one notice, so it is neither retried nor announced again; a suspended account's, quietly.
+   */
+  private async autoDebit(
+    s: SeatState,
+    handId: string,
+    p: { key: string; amount: number; memo: string; done: NoticeCode; short: NoticeCode },
+  ): Promise<Notice | null> {
+    const r = await this.debitTopUp(s, { key: p.key, amount: p.amount, auto: true }, p.memo, handId);
+    if (r === 'insufficient') return this.stopAuto(s, p.short);
+    if (r === 'suspended') {
+      s.autoBuy = null;
+      await this.save();
+      return null;
+    }
+    s.autoHand = handId;
+    await this.save();
+    // The ledger had the key already: counted when it was committed, so neither taken nor announced again.
+    if (r === 'duplicate') {
+      this.ops.add('autobuy_dup');
+      return null;
+    }
+    return { userId: s.userId, code: p.done, amount: p.amount };
+  }
+
+  /** The policy turns itself off, nothing taken, with one notice (counted for the admin economy page). */
+  private async stopAuto(s: SeatState, code: NoticeCode): Promise<Notice> {
+    s.autoBuy = null;
+    await this.save();
+    this.ops.add('autobuy_stop');
+    return { userId: s.userId, code };
   }
 
   private notify(notices: Notice[]) {
@@ -1573,7 +1679,7 @@ export class TableRoom extends DurableObject<Env> {
     this.broadcast(cues);
     if (tn) await this.syncTourney();
     else await this.retryUnrecorded();
-    // Top-ups that waited for this hand and automatic rebuys happen before busted players stand up.
+    // Top-ups that waited for this hand and the automatic policy (rebuy, top-up) happen before busted players stand up.
     const notices = await this.applyTopUps(h.handId);
     const left: TableCue[] = [];
     for (let i = 0; i < this.room.seats.length; i++) {
@@ -2741,6 +2847,7 @@ export class TableRoom extends DurableObject<Env> {
     });
     const myLegal = h && isSeated && !h.isSettled && h.actorId() === a.userId && !h.isStalled() ? h.legalOptions(a.userId) : [];
     const myPre = isSeated ? this.room.seats[mySeat]!.preAction : null;
+    const myAuto = isSeated ? (this.room.seats[mySeat]!.autoBuy ?? null) : null;
     const res = this.room.reservation;
     const reservationLive = res && res.until > Date.now() ? res : null;
     const access = this.hasAccess(a);
@@ -2796,7 +2903,8 @@ export class TableRoom extends DurableObject<Env> {
         canSit,
         needsCode: !isSeated && !access,
         topUpQueued: isSeated && this.room.seats[mySeat]!.topUp?.state === 'queued' ? this.room.seats[mySeat]!.topUp!.amount : null,
-        autoRebuy: isSeated ? (this.room.seats[mySeat]!.autoRebuy ?? null) : null,
+        autoRebuy: isSeated && myAuto?.mode === 'rebuy' ? { amount: myAuto.amount, cap: myAuto.cap, spent: myAuto.spent } : null,
+        autoBuy: isSeated ? myAuto : null,
         preAction: myPre && h && !h.isSettled && myPre.handId === h.handId && myPre.stage === h.stage ? myPre.kind : null,
         // The same conditions as the `show` command (still true once both are shown, so the page marks them shown).
         canShow:

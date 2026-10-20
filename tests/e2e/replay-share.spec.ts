@@ -4,7 +4,7 @@ import type { HandDetailDto } from '@jc/types';
 import { signUp, test, widerThanDevice } from './helpers';
 import { build, HAND_2, HAND_6, HAND_9 } from './replay-hands';
 
-const TEMPLATES = ['classic', 'summary', 'highlight', 'minimal'] as const;
+const TEMPLATES = ['betline', 'classic', 'summary', 'highlight', 'minimal'] as const;
 const RATIOS = { '1:1': [1080, 1080], '4:5': [1080, 1350], '9:16': [1080, 1920], '16:9': [1920, 1080] } as const;
 type Ratio = keyof typeof RATIOS;
 
@@ -203,6 +203,43 @@ test('share image: the step it shows is the step it was asked at — earlier str
     await p.keyboard.press('Escape');
     await expect(p.getByTestId('share-dialog')).toHaveCount(0);
   }
+});
+
+test('share image: the betting line by default, up to the step or of the whole hand as chosen, in chips or big blinds', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const { page: p } = await signUp(browser);
+  await open(p, HAND_9);
+  await p.getByTestId('replay-phase-flop').click();
+  await dialog(p);
+  await expect(p.getByTestId('share-template-betline')).toHaveAttribute('aria-pressed', 'true');
+  await expect(p.getByTestId('share-span-step')).toHaveAttribute('aria-pressed', 'true');
+  const step = await save(p);
+  expect(step.d.suggestedFilename()).toBe('JC-ROYAL_Hand-42_Flop.png');
+  await step.d.saveAs(test.info().outputPath('share-9-flop-betline-step.png'));
+
+  // The whole hand: said so under the preview, named by its last step; the replay itself stays at the flop.
+  await p.getByTestId('share-span-hand').click();
+  await expect(p.getByTestId('share-step')).toContainText(/핸드 전체|whole hand/);
+  await expect(p.getByTestId('share-preview')).toHaveAttribute('data-ready', '1');
+  const whole = await save(p);
+  expect(whole.d.suggestedFilename()).toBe('JC-ROYAL_Hand-42_Result.png');
+  expect(dims(whole.buf)).toEqual({ type: 'png', w: 1080, h: 1080 });
+  expect((await apart(p, whole.buf, 'image/png')).mean).toBeLessThan(0.01);
+  await whole.d.saveAs(test.info().outputPath('share-9-hand-betline.png'));
+
+  // In big blinds: another picture of the same hand.
+  await p.getByTestId('share-more').locator('summary').click();
+  await p.getByTestId('share-unit-bb').click();
+  await expect(p.getByTestId('share-preview')).toHaveAttribute('data-ready', '1');
+  const bb = await save(p);
+  expect((await apart(p, whole.buf, 'image/png')).mean).toBeGreaterThan(0.01);
+  expect((await apart(p, bb.buf, 'image/png')).mean).toBeLessThan(0.01);
+  await bb.d.saveAs(test.info().outputPath('share-9-hand-betline-bb.png'));
+
+  // Kept for the quick save, whose label says what it saves.
+  await p.keyboard.press('Escape');
+  await p.getByTestId('replay-capture-open').click();
+  await expect(p.getByTestId('replay-share-quick')).toHaveText(/핸드 전체|whole hand/);
 });
 
 test('share image on a phone: the capture mode saves at once, keeps the step it was asked at while it is made, and a failed save can be tried again', async ({ browser }) => {

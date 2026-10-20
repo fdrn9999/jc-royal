@@ -142,6 +142,8 @@ export interface HandRecord {
   potTotal: number;
   engineVersion: string;
   buttonSeat: number;
+  /** The blinds this hand was dealt at (a tournament level, or a cash table's blinds before an admin changed them). */
+  blinds: { sb: number; bb: number };
   /** Main pot first, then side pots. Null if the breakdown does not add up to the payouts (never expected). */
   pots: HandPotRecord[] | null;
   players: HandPlayerRecord[];
@@ -817,6 +819,7 @@ export class HandEngine {
       potTotal: [...payouts.values()].reduce((a, b) => a + b, 0),
       engineVersion: ENGINE_VERSION,
       buttonSeat: this.meta.buttonSeat,
+      blinds: { sb: this.meta.rules.smallBlind, bb: this.meta.rules.bigBlind },
       pots: this.potBreakdown(payouts),
       players,
       actions: this.publicActions(),

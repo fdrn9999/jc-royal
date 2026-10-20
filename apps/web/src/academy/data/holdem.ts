@@ -1,4 +1,5 @@
 import type { Card } from '@jc/types';
+import { positionNames } from '../../game/positions';
 import { l, type L } from '../content';
 import type { ChoiceQuestion } from '../quiz';
 
@@ -55,20 +56,8 @@ export const WALKTHROUGH = { hero: c('Ah Kd'), villain: c('Qh Qc'), board: c('Ks
 export const BOARD_PLAYS = { hole: c('2c 3d'), board: c('As Ks Qs Js Ts') };
 export const BEST_FIVE_DEMO = { hole: c('Ah Jh'), board: c('Kh 9h 4c 2h 7s') };
 
-/**
- * Position names in seat order starting at the button and going clockwise.
- * Middle seats are named from the button backwards: CO, HJ, LJ, MP, UTG+1, and
- * the first seat after the big blind is UTG.
- */
-export function positionNames(players: number): string[] {
-  if (players < 2 || players > 9) throw new Error('2-9 players');
-  if (players === 2) return ['BTN/SB', 'BB'];
-  const middle = players - 3;
-  const tail = ['CO', 'HJ', 'LJ', 'MP', 'UTG+1'];
-  const names: string[] = [];
-  for (let k = 0; k < middle; k++) names.push(k === 0 ? 'UTG' : tail[middle - 1 - k]!);
-  return ['BTN', 'SB', 'BB', ...names];
-}
+// The names themselves live with the replays' (game/positions.ts), which name the seats of a recorded hand with them.
+export { positionNames };
 
 /** Indexes into positionNames() in acting order. */
 export function actingOrder(players: number, street: 'preflop' | 'postflop'): number[] {

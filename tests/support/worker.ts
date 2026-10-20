@@ -57,6 +57,10 @@ export const TABLES: TestTable[] = [
   // Top-ups: heads-up tables, plus tables with a huge minimum where one player sits alone to empty a wallet.
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-topup-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000 })),
   ...Array.from({ length: 4 }, (_, i) => ({ id: `it-topup-drain-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 9000, max: 9900 })),
+  // Automatic rebuy and top-up policies: heads-up tables and one for three players (long turns keep the clock out of
+  // it), plus tables to empty a wallet as above.
+  ...Array.from({ length: 7 }, (_, i) => ({ id: `it-autotop-${i}`, maxSeats: (i === 1 ? 6 : 2) as 2 | 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  ...Array.from({ length: 4 }, (_, i) => ({ id: `it-autotop-drain-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 9000, max: 9900 })),
   // Pre-actions: three players, so one can choose while another is to act. Long turns keep the clock out of it.
   ...Array.from({ length: 6 }, (_, i) => ({ id: `it-pre-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Showdown muck (always on): heads-up, so a checked-down hand has one covered loser.

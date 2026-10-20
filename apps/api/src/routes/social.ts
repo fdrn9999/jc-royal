@@ -131,13 +131,14 @@ const requestUnavailable = (): never => fail(403, 'request_unavailable', 'this p
  * GET /api/friends/presence: my accepted friends' status, mounted before friendRoutes so a friends page polling it
  * (PRESENCE_POLL_MS) checks the sign-in without sliding it. Takes no ids: the list is decided here, from D1, as the
  * friends who are active members neither side has blocked, so a pending request, a block, an unfriending, a
- * suspension or a withdrawal shows nothing (the member is simply absent, the same answer as never befriended). Only
- * online / away / offline, never when someone was last seen.
+ * suspension or a withdrawal shows nothing (the member is simply absent, the same answer as never befriended). Online /
+ * away / offline, and for a friend shown offline when they were last confirmed online (docs/PRESENCE.md): the later of
+ * the hub's time and the saved one (users.last_online_at, read in the same query), to the minute, never made up.
  */
 export const friendPresenceRoutes = new Hono<AppEnv>().get('/presence', requireUserQuiet, async (c) => {
   const uid = c.var.user!.id;
   const { results } = await c.env.DB.prepare(
-    `SELECT u.id, u.presence_mode AS mode
+    `SELECT u.id, u.presence_mode AS mode, u.last_online_at AS lastOnline
        FROM friendships f
        JOIN users u ON u.id = CASE WHEN f.user_a = ?1 THEN f.user_b ELSE f.user_a END
       WHERE (f.user_a = ?1 OR f.user_b = ?1) AND f.status = 'accepted' AND u.status = 'active' AND u.is_bot = 0
@@ -145,18 +146,29 @@ export const friendPresenceRoutes = new Hono<AppEnv>().get('/presence', requireU
       LIMIT ${MAX_FRIENDS}`,
   )
     .bind(uid)
-    .all<{ id: string; mode: PresenceMode }>();
-  // Invisible friends are offline whatever their devices do; the hub is not asked about them.
-  const ask = results.filter((r) => r.mode !== 'invisible').map((r) => r.id);
+    .all<{ id: string; mode: PresenceMode; lastOnline: number | null }>();
+  // Every friend is asked about for the last-online time. Invisible friends are offline whatever their devices do, and
+  // their time stays where it was when they chose it: their beats never move it (the hub's `mark`).
   let live: Record<string, PresenceState> = {};
-  if (ask.length) {
-    const r = await hubCall<HubQuery>(c.env, 'query', { asker: uid, ids: ask });
+  const seen: Record<string, number> = {};
+  if (results.length) {
+    // The hub's times come as how long before it answered: counted back from when the question left, on this clock.
+    const asked = Date.now();
+    const r = await hubCall<HubQuery>(c.env, 'query', { asker: uid, ids: results.map((f) => f.id), seen: true });
     if (r?.limited) fail(429, 'rate_limited', 'too many status requests; slow down');
     live = r?.presence ?? {};
+    for (const [id, ago] of Object.entries(r?.seenAgo ?? {})) seen[id] = asked - ago;
   }
+  const now = Date.now();
   const presence: Record<string, PresenceState> = {};
-  for (const f of results) presence[f.id] = applyMode(f.mode, live[f.id] ?? 'offline');
-  return c.json({ presence } satisfies FriendsPresenceDto);
+  const lastOnline: Record<string, number> = {};
+  for (const f of results) {
+    const state = applyMode(f.mode, live[f.id] ?? 'offline');
+    presence[f.id] = state;
+    const at = Math.min(Math.max(seen[f.id] ?? 0, f.lastOnline ?? 0), now);
+    if (state === 'offline' && at > 0) lastOnline[f.id] = Math.floor(at / 60_000) * 60_000;
+  }
+  return c.json({ presence, ...(Object.keys(lastOnline).length ? { lastOnline } : {}) } satisfies FriendsPresenceDto);
 });
 
 type FriendRow = {

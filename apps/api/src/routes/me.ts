@@ -191,7 +191,7 @@ export const meRoutes = new Hono<AppEnv>()
     const mine = await c.var.db.query.handPlayers.findFirst({ where: and(eq(schema.handPlayers.handId, handId), eq(schema.handPlayers.userId, uid)) });
     if (!mine) fail(404, 'not_found', 'hand not found');
     const [row] = await c.var.db
-      .select({ h: schema.hands, t: { name: schema.tables.name, sb: schema.tables.smallBlind, bb: schema.tables.bigBlind, maxSeats: schema.tables.maxSeats } })
+      .select({ h: schema.hands, t: { name: schema.tables.name, maxSeats: schema.tables.maxSeats } })
       .from(schema.hands)
       .innerJoin(schema.tables, eq(schema.tables.id, schema.hands.tableId))
       .where(eq(schema.hands.id, handId))
@@ -215,8 +215,6 @@ export const meRoutes = new Hono<AppEnv>()
       board: JSON.parse(hand.board) as string[],
       potTotal: hand.potTotal,
       endedAt: hand.endedAt,
-      smallBlind: t.sb,
-      bigBlind: t.bb,
       maxSeats: t.maxSeats,
       ...replayLog(hand.eventLog, players.map((p) => p.hp)),
       players: players

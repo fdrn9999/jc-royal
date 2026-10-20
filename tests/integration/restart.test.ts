@@ -1,3 +1,4 @@
+import type { ServerMessage } from '@jc/types';
 import { resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Client, PASSWORD, signupBody, WEB_ORIGIN } from '../support/client';
@@ -28,12 +29,12 @@ async function runCron(base: string) {
 }
 
 /**
- * An administrator closes or pauses these; at the third a buy-in's outcome is unknown; at the last the time bank is used
- * across a restart (heads-up, long turns so the clock never acts).
+ * An administrator closes or pauses these; at the third a buy-in's outcome is unknown; at the fourth the time bank is
+ * used across a restart; at the last an automatic top-up waits out a crash (heads-up, long turns so the clock never acts).
  */
 const tables = [
   ...TABLES,
-  ...['it-restart-close', 'it-restart-pause', 'it-restart-pending', 'it-restart-tb'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  ...['it-restart-close', 'it-restart-pause', 'it-restart-pending', 'it-restart-tb', 'it-restart-auto'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
 ];
 
 describe('server restart recovery', () => {
@@ -160,6 +161,73 @@ describe('server restart recovery', () => {
     // A second restart does not take the chips again.
     [a, b] = await restart();
     expect(a.state!.you.topUpQueued).toBeNull();
+    expect(await topUps()).toHaveLength(1);
+    for (const x of [a, b]) expect(await x.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+    for (const x of [a, b]) await x.waitState((s) => s.you.seatIndex === null, 30_000, 'stood up');
+    expect(await topUps()).toHaveLength(1);
+    expect((await wallet(ca)) + (await wallet(cb))).toBe(20000);
+    a.close();
+    b.close();
+  }, 300_000);
+
+  it('an automatic top-up policy outlives a crash mid-hand, charges once when the hand settles, and another restart does not repeat it', async () => {
+    if (!worker) {
+      await prepareState(state, tables);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const ca = await user('aa', base);
+    const cb = await user('ab', base);
+    const T = 'it-restart-auto';
+    const restart = async () => {
+      await worker!.stop();
+      worker = await startWorker(port, state);
+      return [await TableSocket.open(ca, T, { base }), await TableSocket.open(cb, T, { base })] as const;
+    };
+    const topUps = async () => ((await ca.get('/api/me/ledger?limit=100')).body as { type: string; amount: number; memo: string | null }[]).filter((l) => l.type === 'top_up');
+    const wallet = async (c: Client) => (await c.get('/api/auth/me')).body.balance as number;
+
+    let a = await TableSocket.open(ca, T, { base });
+    let b = await TableSocket.open(cb, T, { base });
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 300, autoBuy: { mode: 'topup', target: 500, cap: 2500, consent: true } })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 300 })).toMatchObject({ t: 'ack' });
+    await a.waitState((s) => s.status === 'playing' && !!s.hand && s.hand.stage !== 'settled', 15_000, 'hand start');
+    const handId = a.state!.hand!.id;
+    const policy = a.state!.you.autoBuy;
+    expect(policy).toEqual({ mode: 'topup', target: 500, trigger: 500, partial: false, cap: 2500, spent: 0 });
+    a.close();
+    b.close();
+
+    // The policy survives the crash; nothing has been taken for it yet.
+    [a, b] = await restart();
+    expect(a.state!.hand!.id).toBe(handId);
+    expect(a.state!.you.autoBuy).toEqual(policy);
+    expect(b.state!.you.autoBuy).toBeNull();
+    expect(await wallet(ca)).toBe(9700);
+    expect(await topUps()).toEqual([]);
+
+    for (let guard = 0; guard < 200; guard++) {
+      if (a.state!.hand?.id !== handId || a.state!.hand.stage === 'settled') break;
+      const actor = [a, b].find((x) => x.state && isMyTurn(x.state));
+      if (!actor) {
+        await new Promise((res) => setTimeout(res, 100));
+        continue;
+      }
+      await actor.act(actor.state!.you.legal.some((o) => o.type === 'check') ? 'check' : 'call');
+    }
+    const settled = (await a.wait((m) => m.t === 'state' && m.state.hand?.id === handId && m.state.hand.stage === 'settled', 15_000, 'settled')) as Extract<ServerMessage, { t: 'state' }>;
+    const want = 500 - settled.state.seats[0]!.stack;
+    await a.wait((m) => m.t === 'notice' && m.code === 'autotopup_applied', 15_000, 'automatic top-up');
+    expect(a.messages.filter((m) => m.t === 'notice').map((m) => m.t === 'notice' && [m.code, m.amount])).toEqual([['autotopup_applied', want]]);
+    expect(await topUps()).toEqual([expect.objectContaining({ amount: -want, memo: 'auto top-up' })]);
+    expect(await wallet(ca)).toBe(9700 - want);
+    await a.waitState((s) => s.you.autoBuy?.spent === want, 15_000, 'spent counted');
+    a.close();
+    b.close();
+
+    // A second restart neither takes the chips again nor forgets what the policy has used.
+    [a, b] = await restart();
+    expect(a.state!.you.autoBuy).toEqual({ ...policy, spent: want });
     expect(await topUps()).toHaveLength(1);
     for (const x of [a, b]) expect(await x.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
     for (const x of [a, b]) await x.waitState((s) => s.you.seatIndex === null, 30_000, 'stood up');

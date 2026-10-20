@@ -24,7 +24,7 @@ import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { setPrefs, usePrefs } from '../lib/prefs';
-import { setPresenceView, sortFriends, useFriendsPresence } from '../lib/presence';
+import { setPresenceView, sortFriends, useFriendsLastOnline, useFriendsPresence } from '../lib/presence';
 import { closeReadPushes } from '../lib/push';
 import { blockUser, loadBlocks, unblockUser } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
@@ -180,6 +180,7 @@ export function FriendsPage() {
   useVisiblePoll(() => void load(), 15_000);
   const prefs = usePrefs();
   const presence = useFriendsPresence(data?.friends.map((f) => f.id).join(','));
+  const lastOnline = useFriendsLastOnline();
 
   async function act(fn: () => Promise<unknown>) {
     setNote(null);
@@ -273,7 +274,7 @@ export function FriendsPage() {
                         {/* The status goes under the name when both do not fit (a phone, beside the time and the invite). */}
                         <span className="flex min-w-0 flex-wrap items-center gap-x-2">
                           <MemberName name={f.nickname} role={f.role} vip={f.vip} badge="wide" className="font-semibold text-ivory" />
-                          {presence?.[f.id] && <PresenceLabel state={presence[f.id]!} className="min-w-0 max-w-full" />}
+                          {presence?.[f.id] && <PresenceLabel state={presence[f.id]!} lastOnline={lastOnline?.[f.id]} className="min-w-0 max-w-full" />}
                         </span>
                         <span className={cx('block truncate text-xs', f.unread ? 'font-semibold text-ink-100' : 'text-ink-400')}>
                           {f.lastMessage
@@ -538,6 +539,7 @@ export function ConversationPage() {
   current.current = userId;
   const polling = useRef(false);
   const presence = useFriendsPresence(userId);
+  const lastOnline = useFriendsLastOnline();
   // While this conversation is on screen the server skips a push of a message from them (lib/presence.ts).
   useEffect(() => (/^[A-Za-z0-9_-]{1,64}$/.test(userId) ? setPresenceView(`dm:${userId}`) : undefined), [userId]);
 
@@ -723,7 +725,7 @@ export function ConversationPage() {
           <h1 className="flex min-w-0 text-lg font-bold text-ivory" data-testid="dm-title">
             <MemberName name={conv.user.nickname} role={conv.user.role} vip={conv.user.vip} badge="wide" />
           </h1>
-          {peerState && <PresenceLabel state={peerState} className="-mt-0.5" />}
+          {peerState && <PresenceLabel state={peerState} lastOnline={lastOnline?.[userId]} className="-mt-0.5" />}
         </div>
         {conv.isFriend && (
           <Button size="sm" variant="ghost" className="text-ink-300" onClick={unfriend} data-testid="unfriend">{t('friends.remove')}</Button>

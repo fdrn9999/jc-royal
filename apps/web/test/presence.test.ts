@@ -1,8 +1,8 @@
 // This page's side of friends' status (src/lib/presence.ts): when it beats, what it sends, what it never sends. The
 // server's side is apps/game-worker/src/presence.test.ts and tests/integration/presence.test.ts.
-import { PRESENCE_ACTIVITY_BEAT_MS, PRESENCE_AWAY_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_IDLE_STOP_MS } from '@jc/types';
+import { PRESENCE_ACTIVITY_BEAT_MS, PRESENCE_AWAY_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_IDLE_STOP_MS, PRESENCE_POLL_MS } from '@jc/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { friendsPresence, setPresenceView, sortFriends, startPresence, watchFriendsPresence } from '../src/lib/presence';
+import { friendsLastOnline, friendsPresence, setPresenceView, sortFriends, startPresence, watchFriendsPresence } from '../src/lib/presence';
 
 interface Call {
   url: string;
@@ -181,6 +181,28 @@ describe("friends' status", () => {
     release(new Response(JSON.stringify({ presence: { f1: 'away' } }), { status: 200 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(friendsPresence()).toEqual({ f1: 'away' });
+    unwatch();
+  });
+
+  it('when friends were last online comes and goes with their status; an answer without it is no time at all', async () => {
+    let body: unknown = { presence: { f1: 'offline', f2: 'online' }, lastOnline: { f1: Date.UTC(2026, 9, 19, 2, 55) } };
+    vi.stubGlobal('fetch', async (url: string) =>
+      new Response(JSON.stringify(url === '/api/friends/presence' ? body : { mode: 'auto', state: 'online' }), { status: 200 }),
+    );
+    stop = startPresence('u1');
+    const unwatch = watchFriendsPresence();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(friendsLastOnline()).toEqual({ f1: Date.UTC(2026, 9, 19, 2, 55) });
+    // An older server: no times, not the ones read before.
+    body = { presence: { f1: 'offline' } };
+    await vi.advanceTimersByTimeAsync(PRESENCE_POLL_MS);
+    expect(friendsPresence()).toEqual({ f1: 'offline' });
+    expect(friendsLastOnline()).toEqual({});
+    // Signed out: gone with the status.
+    stop();
+    stop = null;
+    expect(friendsPresence()).toBeNull();
+    expect(friendsLastOnline()).toBeNull();
     unwatch();
   });
 });

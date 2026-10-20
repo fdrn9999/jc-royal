@@ -1,4 +1,4 @@
-import { mergePresence, PRESENCE_AWAY_MS, PRESENCE_EXPIRE_MS, PRESENCE_MAX_DEVICES, type PresenceState } from '@jc/types';
+import { mergePresence, PRESENCE_AWAY_MS, PRESENCE_EXPIRE_MS, PRESENCE_MAX_DEVICES, PRESENCE_STAMP_MS, type PresenceState } from '@jc/types';
 
 /** One device of a member, as the hub (presence.ts) keeps it. */
 interface Conn {
@@ -22,6 +22,10 @@ const WINDOW_MS = 60_000;
 const SWEEP_MS = 60_000;
 /** Sign-outs of every device (each sparing a different sign-in, or none) one member's refusals hold at once. */
 const MAX_CUTS = 16;
+/** The closest a device closing asks the api to save the last-online time again (a page reloaded over and over). */
+const LEAVE_STAMP_MS = 60_000;
+/** Last-online times the hub keeps after a member goes; past that, the api's saved one (users.last_online_at) answers. */
+const SEEN_KEEP_MS = 30 * 86_400_000;
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const VIEW_RE = /^[a-z]+:[A-Za-z0-9_-]{1,64}$/;
@@ -37,6 +41,26 @@ export interface Beat {
   until?: number;
   /** When the sign-in was made (the api's clock), to tell it from sign-ins a sign-out of every device ended. */
   since?: number;
+  /**
+   * Friends can see the member (their mode is not invisible). Absent: false (an api from before last-online times, which
+   * cannot tell: its beats never move the time).
+   */
+  mark?: boolean;
+  /**
+   * How long before sending it the api read the member's mode for this beat (ms, on the api's own clock): friends could
+   * see them then, not necessarily when the beat arrives (its body may have been slow, or on its way while they switched
+   * to invisible). The hub takes it off its own clock, so no two servers' clocks are compared. Absent: 0.
+   */
+  age?: number;
+}
+
+/**
+ * A recorded beat or a leave. `stampAgo`: the api is to save the last-online time this long before it sent the call (ms,
+ * on the hub's clock alone: the api counts back from its own, so the hub's clock never reaches users.last_online_at).
+ */
+export interface Seen {
+  state: PresenceState;
+  stampAgo?: number;
 }
 
 export interface Leave {
@@ -63,16 +87,29 @@ export class PresenceBook {
    * are kept, whatever order they arrive in: one arriving late never undoes a later one.
    */
   private cuts = new Map<string, { at: number; except: string | null; until: number }[]>();
+  /**
+   * When each member was last confirmed online with friends able to see it: a marked device's recorded beat. One time
+   * per member, overwritten; never sent anywhere but to the api's friends query.
+   */
+  private seen = new Map<string, number>();
+  /**
+   * When the hub last had the api save a member's last-online time, and the time saved (none since the hub started:
+   * the next beat does). Kept as long as the time is, so a time already saved is never asked again.
+   */
+  private stamped = new Map<string, { at: number; time: number }>();
   private sweptAt = 0;
 
   /**
    * Records a beat. Null: too many from this member this minute (the device backs off). A beat of a sign-in that has
-   * run out or was signed out (it was on its way when the sign-out came) is answered but not recorded.
+   * run out or was signed out (it was on its way when the sign-out came) is answered but not recorded. A recorded,
+   * marked beat moves the last-online time to when the api read the mode (now less the beat's `age`, never back), and
+   * asks the api to save it at most every PRESENCE_STAMP_MS. One the api held longer than a device lasts moves nothing:
+   * so old a read says nothing of now.
    */
-  beat(now: number, b: Beat): PresenceState | null {
+  beat(now: number, b: Beat): Seen | null {
     this.sweep(now);
     if (!allow(this.beats, b.user, HUB_BEATS_PER_MIN, now)) return null;
-    if (this.refused(now, b)) return this.stateOf(b.user, now);
+    if (this.refused(now, b)) return { state: this.stateOf(b.user, now) };
     let conns = this.users.get(b.user);
     if (!conns) this.users.set(b.user, (conns = new Map()));
     // Keyed by the sign-in too: a device id sent with another sign-in is another device.
@@ -89,11 +126,32 @@ export class PresenceBook {
       for (const [k, c] of conns) if (c.expiresAt < at) [oldest, at] = [k, c.expiresAt];
       if (oldest) conns.delete(oldest);
     }
-    return this.stateOf(b.user, now);
+    const state = this.stateOf(b.user, now);
+    const age = b.age ?? 0;
+    if (!b.mark || age > PRESENCE_EXPIRE_MS) return { state };
+    this.seen.set(b.user, Math.max(now - age, this.seen.get(b.user) ?? 0));
+    return { state, ...this.stamp(now, b.user, PRESENCE_STAMP_MS) };
   }
 
-  /** Forgets devices that signed out; a sign-out (not a page closing) also refuses that sign-in's beats still on their way. */
-  leave(now: number, l: Leave): void {
+  /**
+   * Whether the api saves the member's last-online time now: one it has not saved yet, and not within `gap` of the last
+   * save. Never moves the time itself.
+   */
+  private stamp(now: number, user: string, gap: number): { stampAgo?: number } {
+    const time = this.seen.get(user);
+    const last = this.stamped.get(user);
+    if (time === undefined || (last !== undefined && (time <= last.time || now - last.at < gap))) return {};
+    this.stamped.set(user, { at: now, time });
+    return { stampAgo: Math.max(0, now - time) };
+  }
+
+  /**
+   * Forgets devices that signed out; a sign-out (not a page closing) also refuses that sign-in's beats still on their way.
+   * It has the api save a last-online time not saved yet sooner (at most once a minute), whatever the devices showed
+   * when they left (a member who switched to invisible and then left still has their last marked beat saved), but
+   * never moves it: it stays the last marked beat, so such a member is not shown later than that.
+   */
+  leave(now: number, l: Leave): { stampAgo?: number } {
     const until = now + PRESENCE_EXPIRE_MS;
     if (l.conn === undefined && l.session !== undefined) this.ended.set(l.session, until);
     else if (l.conn === undefined) {
@@ -117,12 +175,14 @@ export class PresenceBook {
       this.cuts.set(l.user, cuts);
     }
     const conns = this.users.get(l.user);
-    if (!conns) return;
-    for (const [k, c] of conns) {
-      const gone = l.conn !== undefined ? k === `${l.session}:${l.conn}` : l.session !== undefined ? c.session === l.session : l.except !== undefined ? c.session !== l.except : true;
-      if (gone) conns.delete(k);
+    if (conns) {
+      for (const [k, c] of conns) {
+        const gone = l.conn !== undefined ? k === `${l.session}:${l.conn}` : l.session !== undefined ? c.session === l.session : l.except !== undefined ? c.session !== l.except : true;
+        if (gone) conns.delete(k);
+      }
+      if (!conns.size) this.users.delete(l.user);
     }
-    if (!conns.size) this.users.delete(l.user);
+    return this.stamp(now, l.user, LEAVE_STAMP_MS);
   }
 
   private refused(now: number, b: Beat): boolean {
@@ -145,6 +205,26 @@ export class PresenceBook {
     if (!allow(this.asks, asker, HUB_QUERIES_PER_MIN, now)) return null;
     const out: Record<string, PresenceState> = {};
     for (const id of ids.slice(0, HUB_QUERY_MAX)) out[id] = this.stateOf(id, now);
+    return out;
+  }
+
+  /** The last-online times the hub knows of these members, on its clock. */
+  seenOf(ids: readonly string[]): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const id of ids.slice(0, HUB_QUERY_MAX)) {
+      const at = this.seen.get(id);
+      if (at !== undefined) out[id] = at;
+    }
+    return out;
+  }
+
+  /**
+   * The same as the api is sent them (asked with query, so under its limit): how long before `now` each was, on the
+   * hub's clock alone. The api counts back from its own clock, so the two servers' clocks are never compared.
+   */
+  seenAgo(now: number, ids: readonly string[]): Record<string, number> {
+    const out = this.seenOf(ids);
+    for (const id of Object.keys(out)) out[id] = Math.max(0, now - out[id]!);
     return out;
   }
 
@@ -176,6 +256,12 @@ export class PresenceBook {
     }
     for (const m of [this.beats, this.asks]) for (const [k, w] of m) if (now - w.start >= WINDOW_MS) m.delete(k);
     for (const [k, until] of this.ended) if (until <= now) this.ended.delete(k);
+    // A stamp goes with its time (one is made only for a member with a time).
+    for (const [k, at] of this.seen) {
+      if (now - at < SEEN_KEEP_MS) continue;
+      this.seen.delete(k);
+      this.stamped.delete(k);
+    }
     for (const [k, cuts] of this.cuts) {
       const live = cuts.filter((c) => c.until > now);
       if (live.length) this.cuts.set(k, live);
@@ -203,7 +289,8 @@ export function parseBeat(v: Record<string, unknown>): Beat | null {
   if (!id(v.user) || !id(v.session) || !id(v.conn) || typeof v.idleMs !== 'number' || !Number.isFinite(v.idleMs) || typeof v.visible !== 'boolean' || view === undefined) return null;
   const until = time(v.until);
   const since = time(v.since);
-  if (until === null || since === null) return null;
+  const age = time(v.age);
+  if (until === null || since === null || age === null || (v.mark !== undefined && typeof v.mark !== 'boolean')) return null;
   return {
     user: v.user,
     session: v.session,
@@ -213,10 +300,13 @@ export function parseBeat(v: Record<string, unknown>): Beat | null {
     view,
     ...(until !== undefined ? { until } : {}),
     ...(since !== undefined ? { since } : {}),
+    ...(typeof v.mark === 'boolean' ? { mark: v.mark } : {}),
+    // Never ahead of the hub; never cut short (that would make the read later): beat() ignores one held too long.
+    ...(age !== undefined ? { age: Math.max(0, age) } : {}),
   };
 }
 
-/** An optional moment (ms): undefined when absent, null when it is not a finite number. */
+/** An optional moment or span (ms): undefined when absent, null when it is not a finite number. */
 export function time(v: unknown): number | undefined | null {
   if (v === undefined) return undefined;
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
