@@ -433,12 +433,14 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
         </div>
         <div ref={controlsRef} className={cx('flex min-w-0 flex-col gap-2 rounded-xl border border-gold-500/30 bg-ink-850 p-3', side && 'col-start-2 row-start-2')} data-testid="replay-controls" data-mode={mode}>
           {/* The step's line and the view's buttons on one row; where the row leaves the line too little room (a side
-              column), the buttons take a row of their own above it. */}
+              column, a phone narrower than 360 px), the buttons take a row of their own above it. A 360 px phone keeps the
+              one row (the line 156 px wide): a second row there costs the table the room that keeps the controls above
+              the bottom navigation as the replay opens. */}
           <div className="flex flex-wrap-reverse items-start gap-2">
             {/* What this step did, the part of the hand first, in as many lines as the hand's longest takes (three at most,
                 two folded: a long payout is in full in the settlement below, and read out whole), so the table keeps its
                 size throughout. */}
-            <div className="grid min-w-40 flex-1">
+            <div className="grid min-w-36 flex-1">
               <p className={cx('min-h-10 break-words text-sm font-semibold text-ivory [grid-area:1/1]', mode === 'focus' ? 'line-clamp-2' : 'line-clamp-3')} aria-live="polite" data-testid="replay-step">
                 <span className="text-gold-300">{phaseName(phase)}</span>
                 {did[i]!.length > 0 && ` · ${did[i]!.join(' · ')}`}
