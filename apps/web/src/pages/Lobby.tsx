@@ -308,8 +308,10 @@ export function LobbyPage() {
           const full = tb.seated >= tb.maxSeats;
           const entry = entryOf(tb);
           const fav = favs.has(tb.id);
+          // min-w-0: in the one-column list of a phone a long name (up to 40 characters) ends in an ellipsis, instead of
+          // widening every card, and with them the page, past the screen.
           return (
-            <article key={tb.id} className="jc-panel group flex flex-col gap-4 p-5 transition hover:border-gold-500/40" data-testid="lobby-table" data-table={tb.id}>
+            <article key={tb.id} className="jc-panel group flex min-w-0 flex-col gap-4 p-5 transition hover:border-gold-500/40" data-testid="lobby-table" data-table={tb.id}>
               <header className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="truncate text-lg font-bold text-ivory">{tb.name}</h2>
