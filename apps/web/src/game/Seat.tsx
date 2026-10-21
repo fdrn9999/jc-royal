@@ -5,7 +5,7 @@
  */
 import type { SeatView } from '@jc/types';
 import { cx, PlayingCard } from '@jc/ui';
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import type { Density } from './layout';
@@ -161,7 +161,13 @@ export interface SeatProps {
   style: CSSProperties;
 }
 
-export function Seat(p: SeatProps) {
+/**
+ * Drawn again only when its props change (TableScene keeps them the same objects from draw to draw): the table draws
+ * at every step of a staged street, and nine seats drawn each time were most of its work (TEST_REPORT).
+ */
+export const Seat = memo(SeatPlace);
+
+function SeatPlace(p: SeatProps) {
   const { t } = useI18n();
   const s = p.seat;
   const z = SIZE[p.density];

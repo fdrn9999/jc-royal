@@ -66,15 +66,19 @@ export async function signUp(browser: Browser, opts: { mobile?: boolean; ref?: s
   return { page, email, nickname };
 }
 
-/** Clicks check or call when it is this page's turn. Returns true if it acted. */
+/**
+ * Clicks check or call when it is this page's turn. Returns true if it acted. The buttons stay disabled while this
+ * page's last action waits for its answer: a click then would wait for them to come back, and once the answer passes
+ * the turn on, they come back only after the other page acts — which the caller, waiting on this click, never gets to.
+ */
 export async function checkOrCall(page: Page): Promise<boolean> {
   const bar = page.getByTestId('action-bar');
   if (!(await bar.isVisible().catch(() => false))) return false;
   const check = bar.getByRole('button', { name: /^(체크|Check)$/ });
   const call = bar.getByRole('button', { name: /^(콜|Call)/ });
-  if (await check.isVisible().catch(() => false)) await check.click();
-  else if (await call.isVisible().catch(() => false)) await call.click();
-  else return false;
+  const button = (await check.isVisible().catch(() => false)) ? check : (await call.isVisible().catch(() => false)) ? call : null;
+  if (!button || !(await button.isEnabled().catch(() => false))) return false;
+  await button.click();
   await page.waitForTimeout(250);
   return true;
 }

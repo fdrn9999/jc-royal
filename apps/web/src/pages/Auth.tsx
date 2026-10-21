@@ -1,6 +1,6 @@
 import { ageOn, isoDate, MIN_SIGNUP_AGE, NICKNAME_RE, normalizeReferralCode, passwordOk, type MeDto, type SignupOptionsDto } from '@jc/types';
 import { Button, Field, Input } from '@jc/ui';
-import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Suspense, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AuthLayout } from '../components/AppShell';
 import { EmailVerify } from '../components/EmailVerify';
@@ -9,6 +9,7 @@ import { NO_AGREEMENTS, SignupConsent, type Agreements } from '../components/Sig
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { lazyPart } from '../lib/lazyPart';
 
 function useAfterLogin() {
   const nav = useNavigate();
@@ -86,7 +87,8 @@ export function LoginPage() {
 }
 
 // The referral code field and its text load on their own chunk, so the entry chunk stays within its budget.
-const ReferralField = lazy(() => import('../components/ReferralField').then((m) => ({ default: m.ReferralField })));
+// A code from an invitation link is still sent if the field will not load (lazyPart): only the box to change it is missing.
+const ReferralField = lazyPart(() => import('../components/ReferralField').then((m) => m.ReferralField));
 
 export function RegisterPage() {
   const { t, err, locale } = useI18n();

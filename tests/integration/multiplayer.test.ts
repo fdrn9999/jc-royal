@@ -360,4 +360,15 @@ describe('table room over WebSocket (real workerd + Durable Objects)', () => {
     a.ws.send({ t: 'chat', text: 'two' });
     expect(await fast).toBeTruthy();
   });
+
+  it('keeps one player to a chat line a second, also across a new connection', async () => {
+    const a = await player('it-six-4');
+    expect(await a.ws.request({ t: 'chat', text: 'first' })).toMatchObject({ t: 'ack' });
+    // A new tab (it replaces the old connection) does not start the wait again.
+    const again = await TableSocket.open(a.client, 'it-six-4');
+    open.push(again);
+    expect(await again.request({ t: 'chat', text: 'second' })).toMatchObject({ t: 'error', code: 'rate_limited' });
+    await new Promise((r) => setTimeout(r, 1_100));
+    expect(await again.request({ t: 'chat', text: 'third' })).toMatchObject({ t: 'ack' });
+  });
 });

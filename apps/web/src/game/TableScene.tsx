@@ -5,7 +5,7 @@
  */
 import { handLabelKey, type Card, type SeatView, type TableView } from '@jc/types';
 import { ChipStack, cx, Logo, PlayingCard } from '@jc/ui';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts, type AmountUnit } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { Flights, useCueStaging } from './CueLayer';
@@ -211,7 +211,22 @@ export function useTableLayout(area: { w: number; h: number }, maxSeats: number 
 
 const CHIPS = chipAmounts('chips', 0);
 
-export function TableScene({
+/**
+ * A board card keeps the delay it was first drawn with. Its staging plan ends while it is still turning (60ms after the
+ * last card is drawn), and a delay changed then puts a running turn back: the river vanished 50ms into its turn and
+ * turned again, the flop's second and third cards with it (TEST_REPORT).
+ */
+function BoardCard({ delay, ...card }: Omit<ComponentProps<typeof PlayingCard>, 'style'> & { delay: number }) {
+  const [at] = useState(delay);
+  return <PlayingCard {...card} style={{ animationDelay: `${at}ms` }} />;
+}
+
+/**
+ * Drawn again only when its props change (the real table keeps them the same between its draws): a press, a chat line
+ * or a toast draws the table page, and the board, the plates and the header's table under it were most of that draw
+ * (TEST_REPORT). A staged street redraws itself at each of its steps (CueLayer).
+ */
+export const TableScene = memo(function TableScene({
   s,
   layout,
   mySeat,
@@ -289,8 +304,35 @@ export function TableScene({
   // Chips already gathered in the middle; after settlement they have been paid out.
   const collected = staged?.pot ?? collectedOf(s);
   const boardShown = staged?.board ?? hand?.board.length ?? 0;
+  // The board cards drawn last time (this hand's): the ones drawn now for the first time are the ones that turn.
+  const drawn = useRef({ hand: '', n: 0 });
+  const before = drawn.current.hand === hand?.id ? drawn.current.n : 0;
+  useLayoutEffect(() => {
+    drawn.current = { hand: hand?.id ?? '', n: boardShown };
+  });
   const boardSize = `${plan.board}px`;
   const { status, sidePots } = useTableStatus(s, nextIn, amounts);
+  // Each seat's place and handlers stay the same objects from one draw to the next, so a seat is drawn again only when
+  // what it shows changes (a staged chip or card moving drew every seat; TEST_REPORT). The handlers call the latest props.
+  const latest = useRef({ s, onSit, onSeatClick, onShow });
+  latest.current = { s, onSit, onSeatClick, onShow };
+  const places = useMemo(() => geometry.map((g) => ({ left: `${g.seat.x}%`, top: `${g.seat.y}%` })), [geometry]);
+  const handlers = useRef(new Map<number, { sit: () => void; pick: () => void }>());
+  const handlersOf = (i: number) => {
+    let h = handlers.current.get(i);
+    if (!h) {
+      h = {
+        sit: () => latest.current.onSit(i),
+        pick: () => {
+          const seat = latest.current.s.seats.find((x) => x.seatIndex === i);
+          if (seat) latest.current.onSeatClick?.(seat);
+        },
+      };
+      handlers.current.set(i, h);
+    }
+    return h;
+  };
+  const show = useCallback((card: 0 | 1) => latest.current.onShow?.(card), []);
 
   return (
     <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'} data-density={density}>
@@ -314,15 +356,15 @@ export function TableScene({
         <div className="flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
           {Array.from({ length: 5 }, (_, i) => {
             const c = i < boardShown ? (hand?.board[i] as Card | undefined) : undefined;
-            // A staged card turns when it is drawn; the cards of a street that arrived at once turn one after another.
+            // A staged card turns when it is drawn; cards drawn at once (a street that arrived unstaged) one after another.
             return c ? (
-              <PlayingCard
+              <BoardCard
                 key={`${hand!.id}-${c}`}
                 card={c}
                 size={boardSize}
                 animate={arrival?.still?.has(c) ? false : 'flip'}
                 highlight={winningFive.includes(c)}
-                style={{ animationDelay: `${staged?.board != null ? 0 : (i % 3) * 120}ms` }}
+                delay={staged?.board != null ? 0 : Math.max(0, i - before) * 120}
               />
             ) : (
               <div key={i} className="jc-card border border-dashed border-white/10 bg-black/10" style={{ ['--card-size' as string]: boardSize, boxShadow: 'none' }} />
@@ -362,6 +404,8 @@ export function TableScene({
         const label = sd ? t(`hand.${handLabelKey(sd.rankClass, sd.bestFive)}` as MsgKey) : null;
         const bet = staged?.bets[seat.seatIndex] ?? (hand?.stage !== 'settled' ? seat.streetBet : 0);
         const held = staged?.stacks[seat.seatIndex];
+        // The turn's clock goes only to the seat whose turn it is, the only one that reads it.
+        const isActor = !!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled';
         // Other players' showdown cards stay face down until the hands show; a winner's stack until its chips arrive.
         const hide = !reveal && seat.seatIndex !== mySeat && !!seat.holeCards?.length;
         const shownSeat = held !== undefined || hide ? { ...seat, ...(held !== undefined && { stack: held }), ...(hide && { holeCards: null }) } : seat;
@@ -370,10 +414,10 @@ export function TableScene({
             <Seat
               seat={shownSeat}
               isMe={seat.seatIndex === mySeat}
-              isActor={!!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled'}
-              turnNote={seat.seatIndex === mySeat && hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled' ? turnNote : undefined}
-              deadline={hand?.deadline ?? null}
-              turnMs={s.table.turnSeconds * 1000 + (hand?.extraMs ?? 0)}
+              isActor={isActor}
+              turnNote={seat.seatIndex === mySeat && isActor ? turnNote : undefined}
+              deadline={isActor ? (hand.deadline ?? null) : null}
+              turnMs={isActor ? s.table.turnSeconds * 1000 + (hand.extraMs ?? 0) : 0}
               isDealer={hand?.buttonSeat === seat.seatIndex}
               isHost={!!s.table.hostId && seat.userId === s.table.hostId}
               blind={hand && hand.stage === 'preflop' ? (hand.sbSeat === seat.seatIndex ? 'SB' : hand.bbSeat === seat.seatIndex ? 'BB' : null) : null}
@@ -384,16 +428,16 @@ export function TableScene({
               deal={arrival?.deal?.[seat.seatIndex] ?? null}
               still={arrival?.still ?? null}
               canSit={canSit}
-              onSit={() => onSit(seat.seatIndex)}
-              onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? () => onSeatClick(seat) : undefined}
-              onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? onShow : undefined}
+              onSit={handlersOf(seat.seatIndex).sit}
+              onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? handlersOf(seat.seatIndex).pick : undefined}
+              onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? show : undefined}
               showOver={showOnCards}
               reveal={spots?.get(seat.seatIndex) ?? null}
               reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
               react={seat.seatIndex === mySeat ? react : undefined}
               density={density}
               amounts={amounts}
-              style={{ left: `${g.seat.x}%`, top: `${g.seat.y}%` }}
+              style={places[seat.seatIndex]!}
             />
             {bet > 0 && (
               <div className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
@@ -407,4 +451,4 @@ export function TableScene({
       <Flights flights={flights} start={start} geometry={geometry} pot={layout.pot} box={box} amounts={amounts} />
     </div>
   );
-}
+});

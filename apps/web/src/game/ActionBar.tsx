@@ -288,7 +288,8 @@ export function ActionBar({
               step={1}
               value={clampAmt(amount)}
               onChange={(e) => pick(snap(Number(e.target.value)))}
-              aria-label="amount"
+              aria-label={amountLabel}
+              aria-valuetext={a.fmt(clampAmt(amount))}
             />
             <button type="button" className={stepBtn} disabled={amount >= window_.max} onClick={() => pick(clampAmt(amount + bb))} aria-label={`+ ${a.fmt(bb)}`}>
               +

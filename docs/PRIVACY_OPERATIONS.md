@@ -38,7 +38,7 @@
 | `academy_progress`, `academy_gto_progress`, `user_badges` | 회원 ID, 진도(초급·고급 GTO 따로), 배지 | `academy_stats`에는 회원 ID가 없다(익명 집계) |
 | `admin_audit_log` | 운영자 ID, 조치, 대상, 상세, **운영자 IP** | 5절 |
 | `admin_notes` | 대상 회원 ID, 작성한 운영자 ID, 본문(500자), 작성 시각 | 운영자 인수인계용 내부 메모, 회원에게 보이지 않음. 이메일·전화번호·주민등록번호·카드 번호처럼 보이는 본문은 거절(5절) |
-| `ops_metrics` | 없음. 1분 단위 시각, 지표 이름(`ws_retry`·`ws_drop`·`room_error`·`api_error`·`cashout_fail`·`autobuy_stop`·`autobuy_dup`·`autobuy_invalid`), 횟수만 | 관리자 대시보드의 오류·연결 추이. 회원 ID·IP·테이블 ID를 넣지 않는다 |
+| `ops_metrics` | 없음. 1분 단위 시각, 지표 이름(`ws_retry`·`ws_drop`·`room_error`·`api_error`·`cashout_fail`·`autobuy_stop`·`autobuy_dup`·`autobuy_invalid`·`action_dup`·`recover_fail`·`web_error`), 횟수만 | 관리자 대시보드의 오류·연결 추이. 회원 ID·IP·테이블 ID를 넣지 않는다 |
 | `active_days` | 회원 ID와 날짜(한국 시간 기준 하루)만. 시각·IP·기기·본 화면은 없다 | 운영 통계의 일간·주간·월간 활성 회원 수와 재방문 회원 수. 그날 처음 로그인할 때나, 전날까지 쓰던 세션으로 그날 처음 요청할 때 한 행을 쓴다(`lib/session.ts`) |
 | `daily_stats` | 없음. 날짜, 지표 이름, 수치만 | 운영 통계(`lib/stats.ts`): 매일 집계한 날짜별 수치와 아카데미 일별 카운터. 회원 ID를 넣지 않는다 |
 | `referral_codes` | 회원 ID, 추천 코드(`JC` + 5자), 만든 시각 | 내 정보의 추천 카드를 처음 열 때 만든다 |

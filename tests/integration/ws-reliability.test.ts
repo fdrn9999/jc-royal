@@ -104,7 +104,9 @@ describe('command delivery over WebSocket', () => {
     const p2 = answer(s2, msg.reqId);
     s2.send(msg);
     expect(await p2).toMatchObject({ t: 'ack' });
-    // A different id is a different line, even with the same text.
+    // A different id is a different line, even with the same text. It goes once the player's second between lines has
+    // passed: a new connection does not start that wait again (multiplayer.test.ts).
+    await new Promise((r) => setTimeout(r, 1_000));
     const p3 = answer(s2, 'link-chat-0002');
     s2.send({ ...msg, reqId: 'link-chat-0002' });
     expect(await p3).toMatchObject({ t: 'ack' });

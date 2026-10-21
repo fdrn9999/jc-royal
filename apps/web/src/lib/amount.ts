@@ -5,6 +5,7 @@
  * console stay in chips: they never ask for big blinds.
  */
 import { formatBB, formatChips } from '@jc/ui';
+import { useMemo } from 'react';
 import { usePrefs, type AmountUnit } from './prefs';
 
 export { AMOUNT_UNITS, type AmountUnit } from './prefs';
@@ -57,7 +58,11 @@ export function amounts(unit: AmountUnit, bigBlind: number): Amounts {
   };
 }
 
-/** Amounts at a table (or a replayed hand) with this big blind, as the player chose to read them. */
+/**
+ * Amounts at a table (or a replayed hand) with this big blind, as the player chose to read them. The same object until
+ * either changes, so the seats it is handed to are not drawn again for it.
+ */
 export function useAmounts(bigBlind: number): Amounts {
-  return amounts(usePrefs().amountUnit, bigBlind);
+  const unit = usePrefs().amountUnit;
+  return useMemo(() => amounts(unit, bigBlind), [unit, bigBlind]);
 }

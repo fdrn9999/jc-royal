@@ -6,20 +6,30 @@
  * in the player's unit, in big blinds of this hand's table when chosen (hands recorded without blinds stay in chips).
  */
 import { handLabelKey } from '@jc/types';
-import { Button, cardLabel, cx } from '@jc/ui';
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { Button, cardLabel, cx, Modal } from '@jc/ui';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { LoadFailed } from '../components/Loading';
 import { MemberName } from '../components/MemberName';
 import { amounts, useAmounts, type Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { lazyPart } from '../lib/lazyPart';
 import { usePrefs } from '../lib/prefs';
 import { buildReplay, REPLAY_PHASES, replayParts, replayPhase, wonLessReturned, type ReplayInput, type ReplayLinePart, type ReplayPhase } from './replay';
 import { ReplayCapture } from './ReplayCapture';
 import { SHARE_DEFAULTS, shareFileName, shareSnap, type ShareOptions, type SnapAt } from './shareSnap';
 import { TableScene, useBoxSize, useTableLayout } from './TableScene';
 
-/** The share image's dialog and drawing, loaded only when asked for. */
-const ShareDialog = lazy(() => import('./ShareDialog'));
+/** The share image's dialog and drawing, loaded only when asked for; if they will not load, its window says so. */
+const ShareDialog = lazyPart(() => import('./ShareDialog').then((m) => m.default), ShareUnavailable);
+function ShareUnavailable({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
+  return (
+    <Modal open onClose={onClose} title={t('shareImg.title')} closeLabel={t('replay.captureClose')}>
+      <LoadFailed onRetry={() => location.reload()} />
+    </Modal>
+  );
+}
 
 const STEP_MS = 1400;
 const SPEEDS = [0.5, 1, 2] as const;

@@ -76,11 +76,12 @@ export type SettingsMetric = (typeof SETTINGS_METRICS)[number];
 
 /**
  * Time bank (apps/game-worker/src/room.ts): uses and seconds added, uses refused for an empty bank, turns that timed out
- * although time was added, turn timeouts the room ran more than a few seconds after the deadline (late timer), and
- * administrators' timer recoveries. Counted per hand and written with the hand record (once, also when it is written
- * again), never per member. Kept by the daily rollup.
+ * although time was added, turn timeouts the room ran more than a few seconds after the deadline (late timer),
+ * administrators' timer recoveries, and every turn that timed out (the room checked or folded for the player). Counted
+ * per hand and written with the hand record (once, also when it is written again), never per member. Kept by the daily
+ * rollup.
  */
-export const TIME_BANK_METRICS = ['tb_use', 'tb_sec', 'tb_empty', 'tb_expired', 'tb_late', 'tb_recover'] as const;
+export const TIME_BANK_METRICS = ['tb_use', 'tb_sec', 'tb_empty', 'tb_expired', 'tb_late', 'tb_recover', 'tb_timeout'] as const;
 export type TimeBankMetric = (typeof TIME_BANK_METRICS)[number];
 
 /**

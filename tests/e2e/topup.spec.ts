@@ -133,6 +133,20 @@ test('auto top-up: chosen with the first buy-in, it fills the stack back to the 
   await setRange(dialog.locator('input[type="range"]'), 300);
   await expect(confirm).toContainText('300');
   await expect(confirm).toBeEnabled();
+  // The amount can be typed beside the slider too; the button always shows what it will send, within the table's range.
+  const typed = dialog.getByTestId('buyin-input');
+  await expect(typed).toHaveValue('300');
+  await typed.fill('5000');
+  await expect(typed).toHaveAttribute('aria-invalid', 'true');
+  await expect(confirm).toContainText('1,000');
+  await typed.fill('');
+  await typed.pressSequentially('350');
+  await expect(confirm).toContainText('350');
+  await expect(dialog.getByTestId('buyin-amount')).toHaveText('350');
+  await typed.fill('300');
+  await typed.press('Enter');
+  await expect(typed).not.toBeFocused();
+  await expect(confirm).toContainText('300');
   await auto.getByTestId('autobuy-mode-rebuy').click();
   await expect(auto.getByTestId('rebuy-range')).toBeVisible();
   await expect(confirm).toBeDisabled();
@@ -146,6 +160,17 @@ test('auto top-up: chosen with the first buy-in, it fills the stack back to the 
   await expect(auto.getByTestId('autotop-trigger-amount')).toHaveText('500');
   await setRange(auto.getByTestId('autotop-trigger'), 400);
   await expect(auto.getByTestId('autotop-trigger-amount')).toHaveText('400');
+  // A typed target: the numbers on the way to it (4, 45: below the table's minimum) do not pull the trigger down.
+  const target = auto.getByTestId('autotop-target-input');
+  await target.fill('');
+  await target.pressSequentially('450');
+  await expect(auto.getByTestId('autotop-target-amount')).toHaveText('450');
+  await expect(auto.getByTestId('autotop-trigger-amount')).toHaveText('400');
+  await target.fill('500');
+  await target.blur();
+  await expect(target).toHaveValue('500');
+  await expect(auto.getByTestId('autotop-trigger-amount')).toHaveText('400');
+  await expect(auto.getByTestId('autotop-trigger-input')).toHaveValue('400');
   // No consent, no buy-in with the policy; changing the terms withdraws the consent given for the old ones.
   await auto.getByTestId('autotop-times-2').click();
   await expect(confirm).toBeDisabled();
