@@ -8,6 +8,7 @@ import { badgesFor } from '../lib/badges';
 import { replayLog, replayPlayer, replayUser } from '../lib/community';
 import { countNote, failureMetric, isFiltered, listHands, readNote, savedMetrics, saveNote } from '../lib/handNotes';
 import { fail, parseBody } from '../lib/http';
+import { countOps } from '../lib/ops';
 import { rateLimit } from '../lib/rate-limit';
 import { referralMe } from '../lib/referral';
 import { claimRefill, REFILL_RATE, refillSnapshot } from '../lib/refill';
@@ -288,4 +289,13 @@ export const meRoutes = new Hono<AppEnv>()
       await countSettings(c.env.DB, { [saveFailure(e)]: 1 });
       throw e;
     }
+  })
+  /**
+   * An error the member's page ran into (lib/webErrors.ts in the web app): only counted, as `web_error` on the admin
+   * dashboard. Nothing about it is stored; the page reports a few at most.
+   */
+  .post('/web-error', async (c) => {
+    await rateLimit(c, `web-error:${c.var.user!.id}`, 10, 60 * 60_000);
+    countOps(c, 'web_error');
+    return c.body(null, 204);
   });

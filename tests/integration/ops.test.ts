@@ -4,11 +4,11 @@ import { connect } from 'node:net';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BASE, Client, newUser, sharedAdmin, uniq, WEB_ORIGIN } from '../support/client';
 import { d1, holdD1WriteLock } from '../support/d1';
-import { TableSocket } from '../support/ws';
+import { isMyTurn, TableSocket } from '../support/ws';
 
 /** The admin dashboard's live figures (GET /api/admin/ops/live) and the counters behind them (ops_metrics). */
 
-type Counts = { ws_retry: number; ws_drop: number; room_error: number; api_error: number };
+type Counts = { ws_retry: number; ws_drop: number; room_error: number; api_error: number; action_dup: number; recover_fail: number; web_error: number };
 interface Live {
   tables: Record<'official' | 'member', { tables: number; connections: number; seated: number; occupied: number; playing: number }>;
   top: { id: string; status: string; connections: number; seated: number; lastIssue: string | null; liveUpdatedAt: number | null }[];
@@ -164,6 +164,47 @@ describe('admin live dashboard', () => {
     expect(await counted('room_error', from)).toBeGreaterThanOrEqual(1);
     expect(d.ops.lastHour.room_error).toBeGreaterThanOrEqual(1);
     expect(d.top.find((t) => t.id === 'it-ops-1')!.lastIssue).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z command failed: D1_ERROR/);
+  });
+
+  it('counts an action sent again after it was applied: only the answer is repeated, the hand does not move twice', async () => {
+    const from = minute(Date.now());
+    const before = (await live()).ops.lastHour.action_dup;
+    // (Other files send an action again too, multiplayer's in the same minute as this one at times.)
+    const minuteBefore = await counted('action_dup', from);
+    const [x, y] = await Promise.all([newUser(), newUser()]);
+    const a = await TableSocket.open(x.client, 'it-ops-2');
+    const b = await TableSocket.open(y.client, 'it-ops-2');
+    sockets.push(a, b);
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 300 })).toMatchObject({ t: 'ack' });
+    await Promise.all([a, b].map((w) => w.waitState((s) => !!s.hand && s.hand.stage === 'preflop', 20_000, 'a hand')));
+    const me = [a, b].find((w) => isMyTurn(w.state!))!;
+    // Heads-up, preflop: the small blind calls, and the hand goes on to the big blind.
+    const type = me.state!.you.legal.some((l) => l.type === 'check') ? 'check' : 'call';
+    const { result, intentId, seq, handId } = await me.act(type);
+    expect(result).toMatchObject({ t: 'state' });
+    const moved = me.state!.hand!.seq;
+    const again = me.waitNext((m) => (m.t === 'ack' || m.t === 'error') && 'reqId' in m && m.reqId === intentId, 15_000, 'ack again');
+    me.send({ t: 'action', intentId, handId, seq, type });
+    expect(await again).toMatchObject({ t: 'ack' });
+    expect(me.state!.hand!.seq).toBe(moved);
+    const d = await eventually(live, (v) => v.ops.lastHour.action_dup >= before + 1, 'action_dup +1');
+    expect(d.ops.lastHour.action_dup).toBe(before + 1);
+    expect(await counted('action_dup', from)).toBe(minuteBefore + 1);
+  });
+
+  it('counts errors a member page reports, nothing about them, and only from signed-in members', async () => {
+    const from = minute(Date.now());
+    const before = (await live()).ops.lastHour.web_error;
+    expect((await new Client(WEB_ORIGIN).post('/api/me/web-error', {})).status).toBe(401);
+    const u = await newUser();
+    expect((await u.client.post('/api/me/web-error', {})).status).toBe(204);
+    const d = await eventually(live, (v) => v.ops.lastHour.web_error >= before + 1, 'web_error +1');
+    expect(d.ops.lastHour.web_error).toBe(before + 1);
+    expect(await counted('web_error', from)).toBe(1);
+    // A page in a loop of errors is cut off well before it costs anything.
+    for (let i = 1; i < 10; i++) expect((await u.client.post('/api/me/web-error', {})).status).toBe(204);
+    expect((await u.client.post('/api/me/web-error', {})).status).toBe(429);
   });
 
   it('warns about open mismatches, unfinished closes and seats left on closed tables, and lists open reports', async () => {

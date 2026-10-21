@@ -21,7 +21,7 @@ interface Policy extends Settings { version: number }
 interface Version extends Policy { change: string; actorId: string | null; actorNickname: string | null; reason: string | null; createdAt: number }
 type Range = { min: number; max: number };
 type Limits = Record<'initialMs' | 'maxMs' | 'unitMs' | 'refillHands' | 'refillMs', Range>;
-const METRICS = ['tb_use', 'tb_sec', 'tb_empty', 'tb_expired', 'tb_late', 'tb_recover'] as const;
+const METRICS = ['tb_use', 'tb_sec', 'tb_empty', 'tb_expired', 'tb_late', 'tb_recover', 'tb_timeout'] as const;
 type Metric = (typeof METRICS)[number];
 interface Overview {
   now: number;
@@ -39,8 +39,8 @@ interface Preview { from: Policy | null; to: Policy; appliesFrom: 'next_hand'; t
 
 const td = 'px-2 py-1.5';
 const PERIODS = [7, 30] as const;
-const METRIC: Record<Metric, Key> = { tb_use: 'tbUses', tb_sec: 'tbSecondsUsed', tb_empty: 'tbEmpty', tb_expired: 'tbExpired', tb_late: 'tbLate', tb_recover: 'tbRecovered' };
-const METRIC_HINT: Record<Metric, Key> = { tb_use: 'tbUsesHint', tb_sec: 'tbSecondsUsedHint', tb_empty: 'tbEmptyHint', tb_expired: 'tbExpiredHint', tb_late: 'tbLateHint', tb_recover: 'tbRecoveredHint' };
+const METRIC: Record<Metric, Key> = { tb_use: 'tbUses', tb_sec: 'tbSecondsUsed', tb_empty: 'tbEmpty', tb_expired: 'tbExpired', tb_late: 'tbLate', tb_recover: 'tbRecovered', tb_timeout: 'tbTimeout' };
+const METRIC_HINT: Record<Metric, Key> = { tb_use: 'tbUsesHint', tb_sec: 'tbSecondsUsedHint', tb_empty: 'tbEmptyHint', tb_expired: 'tbExpiredHint', tb_late: 'tbLateHint', tb_recover: 'tbRecoveredHint', tb_timeout: 'tbTimeoutHint' };
 /** Defaults offered when there is no policy yet (the migration's seed). */
 const FIRST: Settings = { enabled: true, memberRooms: true, initialMs: 30_000, maxMs: 60_000, unitMs: 10_000, refillHands: 10, refillMs: 5_000 };
 
@@ -303,7 +303,7 @@ function Usage({ o, days, setDays, loading }: { o: Overview; days: number; setDa
       }
     >
       <div className={`flex flex-col gap-4 text-sm transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading} data-testid="tb-usage">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
           {METRICS.map((m) => (
             <Stat key={m} label={t(METRIC[m])} value={<span data-testid={`tb-${m}`}>{o.usage[m] ?? 0}</span>} sub={t(METRIC_HINT[m])} />
           ))}

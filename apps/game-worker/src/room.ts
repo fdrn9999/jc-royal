@@ -289,9 +289,11 @@ export class TableRoom extends DurableObject<Env> {
   private chat: ChatMessage[] = [];
   private loaded = false;
   private queue: Promise<unknown> = Promise.resolve();
-  private buckets = new Map<string, { tokens: number; at: number; lastChat: number }>();
+  private buckets = new Map<string, { tokens: number; at: number }>();
   /** When each player last sent quick reactions (by player, so a second tab does not double the rate). Memory only. */
   private reactedAt = new Map<string, number[]>();
+  /** When each player last posted a chat line (by player, as quick reactions: a new connection does not start the wait again). Memory only. */
+  private chattedAt = new Map<string, number>();
   private lastStats = '';
   /** Operations counters (packages/db/src/ops.ts) and the latest problem, not written yet (see `publishStats`). */
   private ops = new OpsCounter();
@@ -386,6 +388,7 @@ export class TableRoom extends DurableObject<Env> {
       try {
         await this.recoverPendingSeats();
       } catch (e) {
+        this.ops.add('recover_fail');
         this.fault('recovery failed; will retry', e);
       }
       if (this.hand?.isSettled && this.room.settledHandId !== this.hand.handId) await this.settle([]);
@@ -817,7 +820,7 @@ export class TableRoom extends DurableObject<Env> {
 
   private allow(connId: string): boolean {
     const now = Date.now();
-    const b = this.buckets.get(connId) ?? { tokens: MSG_RATE.capacity, at: now, lastChat: 0 };
+    const b = this.buckets.get(connId) ?? { tokens: MSG_RATE.capacity, at: now };
     b.tokens = Math.min(MSG_RATE.capacity, b.tokens + ((now - b.at) / 1000) * MSG_RATE.refillPerSec);
     b.at = now;
     this.buckets.set(connId, b);
@@ -845,10 +848,10 @@ export class TableRoom extends DurableObject<Env> {
         const id = msg.reqId ? await chatLineId(a.userId, msg.reqId) : crypto.randomUUID();
         // Sent again after its answer was lost: the line is already posted.
         if (msg.reqId && this.chat.some((l) => l.id === id)) return this.ack(ws, msg.reqId);
-        const b = this.buckets.get(a.connId)!;
         const now = Date.now();
-        if (now - b.lastChat < 1_000) throw new CommandError('rate_limited', 'slow down');
-        b.lastChat = now;
+        if (now - (this.chattedAt.get(a.userId) ?? 0) < 1_000) throw new CommandError('rate_limited', 'slow down');
+        this.chattedAt.set(a.userId, now);
+        if (this.chattedAt.size > 100) for (const [u, at] of this.chattedAt) if (now - at >= 1_000) this.chattedAt.delete(u);
         const isSeated = this.seatIndexOf(a.userId) !== null;
         if (!isSeated && !t.allowSpectators) throw new CommandError('forbidden', 'spectator chat is disabled');
         const role = publicRole(a.role);
@@ -1482,7 +1485,11 @@ export class TableRoom extends DurableObject<Env> {
   private async action(ws: WebSocket, userId: string, msg: Extract<ClientMessage, { t: 'action' }>) {
     const h = this.hand;
     // Sent again because its answer was lost: it already counted, so only the answer is repeated.
-    if (h && h.handId === msg.handId && h.hasApplied(msg.intentId)) return this.ack(ws, msg.intentId);
+    if (h && h.handId === msg.handId && h.hasApplied(msg.intentId)) {
+      this.ops.add('action_dup');
+      void this.publishStats();
+      return this.ack(ws, msg.intentId);
+    }
     if (!h || h.isSettled || h.handId !== msg.handId) throw new CommandError('conflict', 'no such hand in progress');
     if (msg.seq !== h.version) throw new CommandError('stale_version', 'table state changed; refresh and retry');
     await this.applyAction(userId, { type: msg.type, amount: msg.amount }, msg.intentId);
@@ -2212,7 +2219,8 @@ export class TableRoom extends DurableObject<Env> {
     const extended = h.turnExtraMs > 0;
     const r = await h.timeout(actor, now);
     if (!r.ok) return false;
-    // For the time bank statistics: a turn that ran out although time was added, and a timer that ran late.
+    // For the time bank statistics: a turn that ran out, one that did although time was added, and a timer that ran late.
+    this.countTimeBank(handId, 'tb_timeout', 1);
     if (extended) this.countTimeBank(handId, 'tb_expired', 1);
     if (now - d > OVERDUE_MS) this.countTimeBank(handId, 'tb_late', 1);
     const seat = this.room.seats[this.seatIndexOf(actor) ?? -1];

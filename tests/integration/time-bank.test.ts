@@ -58,7 +58,7 @@ afterAll(async () => {
 /** The service's time bank counters, all days together. */
 async function tbStats() {
   const rows = await d1<{ metric: string; n: number }>(`SELECT metric, SUM(n) AS n FROM daily_stats WHERE metric GLOB 'tb_*' GROUP BY metric`);
-  const out = { tb_use: 0, tb_sec: 0, tb_empty: 0, tb_expired: 0, tb_late: 0, tb_recover: 0 };
+  const out = { tb_use: 0, tb_sec: 0, tb_empty: 0, tb_expired: 0, tb_late: 0, tb_recover: 0, tb_timeout: 0 };
   for (const r of rows) if (r.metric in out) out[r.metric as keyof typeof out] = Number(r.n);
   return out;
 }
@@ -176,6 +176,7 @@ describe('time bank', () => {
     // Counted once, with the hand record (the refused use too).
     const counted = await until(tbStats, (s) => s.tb_use - before.tb_use >= 3 && s.tb_empty - before.tb_empty >= 1, 'counters');
     await sleep(1_000);
+    // (Not `tb_timeout`: every table's timed-out turns count there, and other files' tables still play.)
     expect(delta(before, await tbStats())).toMatchObject({ tb_use: 3, tb_sec: 30, tb_empty: 1, tb_expired: 0 });
     expect(delta(before, counted)).toMatchObject({ tb_use: 3, tb_sec: 30, tb_empty: 1 });
   }, 90_000);
@@ -304,7 +305,9 @@ describe('time bank', () => {
     const waited = Date.now() - used;
     expect(waited).toBeGreaterThanOrEqual(deadline - used - 250);
     expect(waited).toBeGreaterThan(6_000);
-    await until(tbStats, (s) => s.tb_expired - before.tb_expired >= 1, 'expired counted', 40_000);
+    // Counted as a turn that timed out too (one that was given time is part of them).
+    const counted = await until(tbStats, (s) => s.tb_expired - before.tb_expired >= 1, 'expired counted', 40_000);
+    expect(counted.tb_timeout - before.tb_timeout).toBeGreaterThanOrEqual(counted.tb_expired - before.tb_expired);
   }, 120_000);
 
   it('only the super admin changes the policy, with a fresh password and a reason; conflicts, unchanged and invalid policies are refused and audited', async () => {

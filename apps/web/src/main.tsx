@@ -1,7 +1,7 @@
-import { Logo, Spinner } from '@jc/ui';
+import { Button, Logo, Spinner } from '@jc/ui';
 import { lazy, StrictMode, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, Navigate, Outlet, useLocation } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, useLocation, useRouteError } from 'react-router';
 // The react-dom build of the provider: it honours `flushSync` on a navigation (the hand filters use it).
 import { RouterProvider } from 'react-router/dom';
 import { startAcademySync } from './academy/sync';
@@ -13,6 +13,7 @@ import { startInstallWatch } from './lib/install';
 import { applyInitialTheme, closeAccount, openAccount, setSyncState } from './lib/prefs';
 import { startPresence } from './lib/presence';
 import { followPushTaps } from './lib/push-nav';
+import { reportWebError, watchWebErrors } from './lib/webErrors';
 import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
 import { LobbyPage } from './pages/Lobby';
 
@@ -36,7 +37,12 @@ const academyPages = new Map<AcademyPageName, ComponentType>();
 function Academy({ page }: { page: AcademyPageName }) {
   let C = academyPages.get(page);
   if (!C) {
-    C = lazy(() => loadAcademy().then((m) => ({ default: m[page] })));
+    C = lazy<ComponentType>(() =>
+      loadAcademy().then(
+        (m) => ({ default: m[page] }),
+        (error: unknown) => ({ default: () => <ReloadFor error={error} /> }),
+      ),
+    );
     academyPages.set(page, C);
   }
   return (
@@ -46,8 +52,13 @@ function Academy({ page }: { page: AcademyPageName }) {
   );
 }
 
-/** The full policy texts are long and rarely read, so they load on demand like the Academy. */
-const LegalPage = lazy(() => import('./pages/Legal').then((m) => ({ default: m.LegalPage })));
+/** The full policy texts are long and rarely read, so they load on demand like the Academy (and, like it, see ReloadFor). */
+const LegalPage = lazy<ComponentType<{ kind: 'privacy' | 'terms' }>>(() =>
+  import('./pages/Legal').then(
+    (m) => ({ default: m.LegalPage }),
+    (error: unknown) => ({ default: () => <ReloadFor error={error} /> }),
+  ),
+);
 function Legal({ kind }: { kind: 'privacy' | 'terms' }) {
   return (
     <Suspense fallback={<Splash />}>
@@ -216,68 +227,97 @@ function NotFound() {
   return <div className="py-20 text-center text-ink-300">{t('notFound')}</div>;
 }
 
+/**
+ * In place of a page that broke, or whose code would not load again within the minute (ReloadFor): says so, with a way
+ * to load it again, rather than the router's bare error text.
+ */
+function RouteError() {
+  const { t } = useI18n();
+  const error = useRouteError();
+  useEffect(() => {
+    console.error('[route] the page broke', error);
+    reportWebError();
+  }, [error]);
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center" style={{ background: 'var(--t-bg)' }} role="alert" data-testid="route-error">
+      <Logo size={64} />
+      <p className="text-sm text-ink-200">{t('common.error')}</p>
+      <Button variant="outline" onClick={() => location.reload()} data-testid="route-error-retry">
+        {t('common.retry')}
+      </Button>
+    </div>
+  );
+}
+
 const router = createBrowserRouter([
-  { path: '/login', element: <GuestOnly><LoginPage /></GuestOnly> },
-  { path: '/register', element: <GuestOnly><RegisterPage /></GuestOnly> },
-  { path: '/reset', element: <ResetPage /> },
-  // Public: sign-up links here before anyone has an account.
-  { path: '/privacy', element: <Legal kind="privacy" /> },
-  { path: '/terms', element: <Legal kind="terms" /> },
-  // Public as well: sign-in may be paused while it runs.
-  { path: '/maintenance', element: onDemand(loadMaintenance, 'MaintenancePage') },
-  { path: '/table/:id', element: <RequireAuth>{onDemand(loadTable, 'TableRoute')}</RequireAuth> },
-  { path: '/academy/practice/free', element: <RequireAuth><Academy page="FreePracticePage" /></RequireAuth> },
-  { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },
   {
-    element: (
-      <RequireAuth>
-        <PrefetchTable />
-        <AppShell>
-          <Outlet />
-        </AppShell>
-      </RequireAuth>
-    ),
+    errorElement: <RouteError />,
     children: [
-      { path: '/', element: <LobbyPage /> },
-      { path: '/me', element: onDemand(loadMe, 'MePage') },
-      { path: '/me/hands', element: onDemand(loadHands, 'HandsPage') },
-      { path: '/me/hands/:id', element: onDemand(loadMe, 'HandDetailPage') },
-      { path: '/tournaments', element: onDemand(loadTournaments, 'TournamentsPage') },
-      { path: '/tournaments/:id', element: onDemand(loadTournaments, 'TournamentPage') },
-      { path: '/board', element: onDemand(loadBoard, 'BoardPage') },
-      { path: '/board/write', element: onDemand(loadBoard, 'PostEditorPage') },
-      { path: '/board/:id', element: onDemand(loadBoard, 'PostPage') },
-      { path: '/board/:id/edit', element: onDemand(loadBoard, 'PostEditorPage') },
-      { path: '/messages', element: onDemand(loadMessages, 'MessagesPage') },
-      { path: '/friends', element: onDemand(loadFriends, 'FriendsPage') },
-      { path: '/friends/settings', element: onDemand(loadFriends, 'FriendSettingsPage') },
-      { path: '/friends/:userId', element: onDemand(loadFriends, 'ConversationPage') },
-      { path: '/academy', element: <Academy page="AcademyPage" /> },
-      { path: '/academy/cards', element: <Academy page="CardsLesson" /> },
-      { path: '/academy/hands', element: <Academy page="HandsLesson" /> },
-      { path: '/academy/holdem', element: <Academy page="HoldemLesson" /> },
-      { path: '/academy/actions', element: <Academy page="ActionsLesson" /> },
-      { path: '/academy/practice', element: <Academy page="PracticeListPage" /> },
-      { path: '/academy/progress', element: <Academy page="ProgressPage" /> },
-      { path: '/academy/review', element: <Academy page="ReviewPage" /> },
+      { path: '/login', element: <GuestOnly><LoginPage /></GuestOnly> },
+      { path: '/register', element: <GuestOnly><RegisterPage /></GuestOnly> },
+      { path: '/reset', element: <ResetPage /> },
+      // Public: sign-up links here before anyone has an account.
+      { path: '/privacy', element: <Legal kind="privacy" /> },
+      { path: '/terms', element: <Legal kind="terms" /> },
+      // Public as well: sign-in may be paused while it runs.
+      { path: '/maintenance', element: onDemand(loadMaintenance, 'MaintenancePage') },
+      { path: '/table/:id', element: <RequireAuth>{onDemand(loadTable, 'TableRoute')}</RequireAuth> },
+      { path: '/academy/practice/free', element: <RequireAuth><Academy page="FreePracticePage" /></RequireAuth> },
+      { path: '/academy/practice/:id', element: <RequireAuth><Academy page="PracticeTablePage" /></RequireAuth> },
       {
-        path: '/academy/gto',
-        element: onDemand(loadGto, 'GtoLayout'),
+        element: (
+          <RequireAuth>
+            <PrefetchTable />
+            <AppShell>
+              <Outlet />
+            </AppShell>
+          </RequireAuth>
+        ),
         children: [
-          { index: true, element: onDemand(loadGto, 'GtoHome') },
-          { path: 'quiz', element: onDemand(loadGto, 'GtoQuizPage') },
-          { path: 'hands', element: onDemand(loadGto, 'GtoHandsPage') },
-          { path: 'glossary', element: onDemand(loadGto, 'GtoGlossaryPage') },
-          { path: 'review', element: onDemand(loadGto, 'GtoReviewPage') },
-          { path: ':module', element: onDemand(loadGto, 'GtoModulePage') },
+          { path: '/', element: <LobbyPage /> },
+          { path: '/me', element: onDemand(loadMe, 'MePage') },
+          { path: '/me/hands', element: onDemand(loadHands, 'HandsPage') },
+          { path: '/me/hands/:id', element: onDemand(loadMe, 'HandDetailPage') },
+          { path: '/tournaments', element: onDemand(loadTournaments, 'TournamentsPage') },
+          { path: '/tournaments/:id', element: onDemand(loadTournaments, 'TournamentPage') },
+          { path: '/board', element: onDemand(loadBoard, 'BoardPage') },
+          { path: '/board/write', element: onDemand(loadBoard, 'PostEditorPage') },
+          { path: '/board/:id', element: onDemand(loadBoard, 'PostPage') },
+          { path: '/board/:id/edit', element: onDemand(loadBoard, 'PostEditorPage') },
+          { path: '/messages', element: onDemand(loadMessages, 'MessagesPage') },
+          { path: '/friends', element: onDemand(loadFriends, 'FriendsPage') },
+          { path: '/friends/settings', element: onDemand(loadFriends, 'FriendSettingsPage') },
+          { path: '/friends/:userId', element: onDemand(loadFriends, 'ConversationPage') },
+          { path: '/academy', element: <Academy page="AcademyPage" /> },
+          { path: '/academy/cards', element: <Academy page="CardsLesson" /> },
+          { path: '/academy/hands', element: <Academy page="HandsLesson" /> },
+          { path: '/academy/holdem', element: <Academy page="HoldemLesson" /> },
+          { path: '/academy/actions', element: <Academy page="ActionsLesson" /> },
+          { path: '/academy/practice', element: <Academy page="PracticeListPage" /> },
+          { path: '/academy/progress', element: <Academy page="ProgressPage" /> },
+          { path: '/academy/review', element: <Academy page="ReviewPage" /> },
+          {
+            path: '/academy/gto',
+            element: onDemand(loadGto, 'GtoLayout'),
+            children: [
+              { index: true, element: onDemand(loadGto, 'GtoHome') },
+              { path: 'quiz', element: onDemand(loadGto, 'GtoQuizPage') },
+              { path: 'hands', element: onDemand(loadGto, 'GtoHandsPage') },
+              { path: 'glossary', element: onDemand(loadGto, 'GtoGlossaryPage') },
+              { path: 'review', element: onDemand(loadGto, 'GtoReviewPage') },
+              { path: ':module', element: onDemand(loadGto, 'GtoModulePage') },
+            ],
+          },
+          { path: '*', element: <NotFound /> },
         ],
       },
-      { path: '*', element: <NotFound /> },
     ],
   },
 ]);
 // From the start, before the sign-in is known: a tapped push that brought this window forward opens its page here.
 followPushTaps((url) => void router.navigate(url));
+
+watchWebErrors();
 
 // English is a separate chunk: load it first for someone who chose it, so the first screen is not Korean.
 const render = () =>

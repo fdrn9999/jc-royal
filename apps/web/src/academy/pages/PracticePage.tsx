@@ -285,10 +285,9 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
             onSit={() => {}}
             nextIn={null}
             cues={winnerPending ? cues.filter((c) => c.cue.kind !== 'payout') : cues}
-            consumeCues={(up) => {
-              s.consumeCues(up);
-              setCues([...s.cues]);
-            }}
+            // The cues played leave with the next refresh: taken out now, they drew the page again before its frame was
+            // painted (as the real table, useTableSocket).
+            consumeCues={(up) => s.consumeCues(up)}
             reducedMotion={reducedMotion}
           />
         </div>

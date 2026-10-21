@@ -177,7 +177,7 @@ function FreeTable({ cfg, back, onSetup, onRestart }: { cfg: FreeConfig; back: R
       </header>
       <div ref={room.colRef} className="jc-game-surface relative flex min-h-0 flex-1 flex-col">
         <div ref={areaRef} className="relative mx-2 mt-2 flex min-h-0 flex-1 items-center justify-center sm:mx-6" style={room.style}>
-          <TableScene s={view} layout={layout} mySeat={0} canSit={false} onSit={() => {}} nextIn={null} cues={cues} consumeCues={(up) => (s.consumeCues(up), setCues([...s.cues]))} reducedMotion={reducedMotion} onResultShown={onResultShown} />
+          <TableScene s={view} layout={layout} mySeat={0} canSit={false} onSit={() => {}} nextIn={null} cues={cues} consumeCues={(up) => s.consumeCues(up)} reducedMotion={reducedMotion} onResultShown={onResultShown} />
         </div>
         <div ref={room.stackRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6">
           {fault && (

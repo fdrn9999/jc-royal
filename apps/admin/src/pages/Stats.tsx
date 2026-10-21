@@ -16,6 +16,8 @@ type RoomPlay = { hands: number; tablesAvg: number | null; seats: number; seatMs
 type AcademyKey = 'ac_lesson_start' | 'ac_lesson_done' | 'ac_scenario_start' | 'ac_scenario_done' | 'ac_answer' | 'ac_correct';
 type HandNoteKey = 'hn_bookmark' | 'hn_tag' | 'hn_memo' | 'hn_fail_conflict' | 'hn_fail_invalid' | 'hn_fail_notfound' | 'hn_fail_limit' | 'hn_fail_error';
 type TimeBankKey = 'tb_use' | 'tb_sec' | 'tb_empty' | 'tb_expired' | 'tb_late' | 'tb_recover';
+/** `tb_timeout` is absent from an API older than it. */
+type TimeBankTotals = Record<TimeBankKey, number> & { tb_timeout?: number };
 type SettingsKey = 'ss_save' | 'ss_legacy' | 'ss_conflict' | 'ss_stale' | 'ss_epoch' | 'ss_fail_invalid' | 'ss_fail_limit' | 'ss_fail_busy' | 'ss_fail_error' | 'ss_load_fail' | 'ss_client_fail' | 'ss_reset' | 'ss_restore';
 interface Period {
   from: string;
@@ -31,7 +33,7 @@ interface Period {
   /** Account settings sync (absent from an older API). */
   settings?: Record<SettingsKey, number>;
   /** Time bank use and timer problems (absent from an older API). */
-  timeBank?: Record<TimeBankKey, number>;
+  timeBank?: TimeBankTotals;
 }
 interface OpsStats {
   unit: Unit;
@@ -258,7 +260,7 @@ export function StatsPage() {
         <Panel title={t('tbTitle')} actions={<Link to="/tables/time-bank" className="text-sm text-gold-300 hover:underline">{t('tbManage')} →</Link>}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="stats-time-bank">
             <Stat label={t('tbUses')} value={<span data-testid="stats-tb-use">{num(tb.tb_use)}</span>} sub={t('osTbUseSub', { s: num(tb.tb_sec), e: num(tb.tb_empty) })} />
-            <Stat label={t('tbExpired')} value={num(tb.tb_expired)} sub={t('tbExpiredHint')} />
+            <Stat label={t('tbTimeout')} value={<span data-testid="stats-tb-timeout">{num(tb.tb_timeout)}</span>} sub={t('osTbTimeoutSub', { e: num(tb.tb_expired) })} />
             <Stat label={t('tbLate')} value={<span data-testid="stats-tb-late">{num(tb.tb_late)}</span>} sub={t('osTbLateSub', { r: num(tb.tb_recover) })} />
           </div>
         </Panel>

@@ -63,6 +63,22 @@ test('mobile: with big blinds chosen, the table, the buy-in and the replay read 
   await expect(dialog).toContainText('10 BB – 100 BB');
   await expect(a.page.getByTestId('buyin-amount')).toHaveText('100 BB2,000');
   await expect(a.page.getByTestId('buyin-confirm')).toHaveText(/100 BB \(2,000\)$/);
+  // The amount typed in BB (a decimal keyboard) becomes whole chips; one outside the range (0 included) shows the
+  // nearest amount it will pay.
+  const typed = a.page.getByTestId('buyin-input');
+  await expect(typed).toHaveAttribute('inputmode', 'decimal');
+  await expect(typed).toHaveValue('100');
+  await typed.fill('55.55');
+  await expect(a.page.getByTestId('buyin-amount')).toHaveText('55.55 BB1,111');
+  await expect(a.page.getByTestId('buyin-confirm')).toHaveText(/55\.55 BB \(1,111\)$/);
+  await typed.fill('0');
+  await expect(typed).toHaveAttribute('aria-invalid', 'true');
+  await expect(a.page.getByTestId('buyin-confirm')).toHaveText(/10 BB \(200\)$/);
+  await typed.fill('500');
+  await expect(typed).toHaveAttribute('aria-invalid', 'true');
+  await expect(a.page.getByTestId('buyin-confirm')).toHaveText(/100 BB \(2,000\)$/);
+  await typed.blur();
+  await expect(typed).toHaveValue('100');
   expect(await widerThanDevice(a.page)).toBe(false);
   await a.page.screenshot({ path: test.info().outputPath('bb-buyin-360.png') });
   await a.page.getByTestId('buyin-confirm').tap();

@@ -1,7 +1,7 @@
 import { sound } from '@jc/audio';
 import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { updateProgress, useProgress } from '../academy/progress';
@@ -33,18 +33,24 @@ import { pullSettings, usePrefs } from '../lib/prefs';
 import { useAmounts } from '../lib/amount';
 import { when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
+import { LoadFailed } from '../components/Loading';
+import { lazyPart } from '../lib/lazyPart';
 
-// Opened on a tap (a player's card, a report, the hand chart): loaded then, not with the table.
+// Opened on a tap (a player's card, a report, the hand chart): loaded then, not with the table. One that will not load
+// is left out (lazyPart) and the hand plays on; the chart says so in its window.
 const loadSocial = () => import('../components/Social');
-const PlayerCard = lazy(() => loadSocial().then((m) => ({ default: m.PlayerCard })));
-const BotCard = lazy(() => loadSocial().then((m) => ({ default: m.BotCard })));
-const ReportModal = lazy(() => loadSocial().then((m) => ({ default: m.ReportModal })));
-const HandRankingChart = lazy(() => import('../academy/HandChart').then((m) => ({ default: m.HandRankingChart })));
+const PlayerCard = lazyPart(() => loadSocial().then((m) => m.PlayerCard));
+const BotCard = lazyPart(() => loadSocial().then((m) => m.BotCard));
+const ReportModal = lazyPart(() => loadSocial().then((m) => m.ReportModal));
+const HandRankingChart = lazyPart(
+  () => import('../academy/HandChart').then((m) => m.HandRankingChart),
+  () => <LoadFailed className="py-6" onRetry={() => location.reload()} />,
+);
 // Only tournament tables show these, so they (and their text) stay out of the entry chunk; a tournament table's id
 // starts with sng- (docs/TOURNAMENT.md), which lets the page fetch them before the room's first state arrives.
 const loadTournamentHud = () => import('../game/TournamentHud');
-const TournamentBar = lazy(() => loadTournamentHud().then((m) => ({ default: m.TournamentBar })));
-const TournamentResult = lazy(() => loadTournamentHud().then((m) => ({ default: m.TournamentResult })));
+const TournamentBar = lazyPart(() => loadTournamentHud().then((m) => m.TournamentBar));
+const TournamentResult = lazyPart(() => loadTournamentHud().then((m) => m.TournamentResult));
 
 /** Nobody still in is dealt a hand: everyone left is away, and the level clock waits with them (not an operator's pause). */
 function tournamentStalled(s: TableView): boolean {
@@ -340,11 +346,6 @@ export function TablePage() {
     }
   }
 
-  if (sock.status === 'unauthorized') {
-    nav('/login', { replace: true, state: { from: `/table/${id}` } });
-    return null;
-  }
-
   const banner =
     sock.status === 'locked'
       ? t('table.locked')
@@ -383,6 +384,25 @@ export function TablePage() {
   const autoPolicy = s ? seatPolicy(s.you) : null;
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
+
+  // What the table is given stays the same objects from draw to draw (TableScene is drawn again only when it changes): a
+  // press, a chat line or a toast draws this page, not the table with it.
+  const onSeatClick = useCallback(
+    (seat: SeatView) =>
+      seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}), ...(seat.vip ? { vip: seat.vip } : {}) }),
+    [],
+  );
+  const onShow = useCallback((card: 0 | 1) => send({ t: 'show', card }), [send]);
+  const deadline = hand?.deadline ?? null;
+  const turnNote = useMemo(() => (inTable && myTurn ? <TurnBanner deadline={deadline} inSeat /> : undefined), [inTable, myTurn, deadline]);
+  const handNoteOn = inTable && !room.open && !prefs.beginner && prefs.showHand && seated;
+  const handNote = useMemo(() => (handNoteOn && s ? <CurrentHandPill s={s} inline /> : undefined), [handNoteOn, s]);
+
+  // After every hook: a draw that returned before them would run fewer hooks than the one before, which React refuses.
+  if (sock.status === 'unauthorized') {
+    nav('/login', { replace: true, state: { from: `/table/${id}` } });
+    return null;
+  }
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }}>
@@ -526,10 +546,8 @@ export function TablePage() {
                 mySeat={mySeat}
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
-                onSeatClick={(seat) =>
-                  seat.bot ? setPickedBot(seat) : seat.userId && setPicked({ id: seat.userId, nickname: seat.nickname ?? '', avatarUrl: seat.avatarUrl ?? null, ...(seat.role ? { role: seat.role } : {}), ...(seat.vip ? { vip: seat.vip } : {}) })
-                }
-                onShow={(card) => sock.send({ t: 'show', card })}
+                onSeatClick={onSeatClick}
+                onShow={onShow}
                 showOnCards={short}
                 reactions={reactions}
                 react={seated && reactOn ? reactSender : undefined}
@@ -538,9 +556,9 @@ export function TablePage() {
                 consumeCues={sock.consumeCues}
                 reducedMotion={reducedMotion}
                 amounts={amt}
-                turnNote={inTable && myTurn ? <TurnBanner deadline={hand!.deadline} inSeat /> : undefined}
+                turnNote={turnNote}
                 // Steps aside while the raise panel is open, as the stack's line does: the table has no room to spare then.
-                handNote={inTable && !room.open && !prefs.beginner && prefs.showHand && seated ? <CurrentHandPill s={s} inline /> : undefined}
+                handNote={handNote}
               />
             )}
           </div>

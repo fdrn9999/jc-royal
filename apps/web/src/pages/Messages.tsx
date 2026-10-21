@@ -46,7 +46,7 @@ export function MessagesPage() {
           {list.map((m) => (
             <li key={m.id} data-testid="message">
               <button className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03]" onClick={() => expand(m)} aria-expanded={open === m.id}>
-                {!m.readAt && <span className="size-2 shrink-0 rounded-full bg-gold-400" aria-label="unread" />}
+                {!m.readAt && <span className="size-2 shrink-0 rounded-full bg-gold-400" role="img" aria-label={t('msg.unread')} />}
                 <Badge tone={tone[m.category]}>{t(`msg.cat.${m.category}` as MsgKey)}</Badge>
                 <span className={`min-w-0 flex-1 truncate ${m.readAt ? 'text-ink-200' : 'font-bold text-ivory'}`}>{m.title}</span>
                 <span className="shrink-0 text-xs text-ink-400">{formatDate(m.createdAt, locale)}</span>

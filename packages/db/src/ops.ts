@@ -13,8 +13,26 @@
  *   the charge would pass the player's limit or the table's range). A failed D1 call is a `room_error` instead.
  * - `autobuy_dup`: an automatic rebuy or top-up whose ledger key was already committed, so nothing was taken again.
  * - `autobuy_invalid`: a policy request (or a buy-in carrying one) the room refused as out of range.
+ * - `action_dup`: a player's action sent again after it had already counted (its answer was lost on the way): only the
+ *   answer is repeated. Many of them point at connections that drop answers.
+ * - `recover_fail`: a table room waking up that could not finish the seats a restart left half way (it retries). Also
+ *   counted as `room_error`.
+ * - `web_error`: an error a signed-in member's page reported (a script error, a part of the page that did not load).
+ *   Only the count is kept, at most a few per page.
  */
-export const OPS_METRICS = ['ws_retry', 'ws_drop', 'room_error', 'api_error', 'cashout_fail', 'autobuy_stop', 'autobuy_dup', 'autobuy_invalid'] as const;
+export const OPS_METRICS = [
+  'ws_retry',
+  'ws_drop',
+  'room_error',
+  'api_error',
+  'cashout_fail',
+  'autobuy_stop',
+  'autobuy_dup',
+  'autobuy_invalid',
+  'action_dup',
+  'recover_fail',
+  'web_error',
+] as const;
 export type OpsMetric = (typeof OPS_METRICS)[number];
 
 export const OPS_BUCKET_MS = 60_000;

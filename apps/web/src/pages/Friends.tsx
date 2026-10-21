@@ -686,7 +686,14 @@ export function ConversationPage() {
 
   async function unfriend() {
     if (!conv || !confirm(t('friends.removeConfirm', { name: conv.user.nickname }))) return;
-    await api(`/api/friends/${userId}`, { method: 'DELETE' }).catch(() => {});
+    setError(null);
+    try {
+      await api(`/api/friends/${userId}`, { method: 'DELETE' });
+    } catch (x) {
+      // Not friends any more (removed elsewhere) is what was asked; anything else leaves the friend listed, so it says so
+      // here instead of going back to a list that still shows them.
+      if (!(x instanceof ApiError && x.code === 'not_found')) return setError(err(x instanceof ApiError ? x.code : null));
+    }
     nav('/friends');
   }
 

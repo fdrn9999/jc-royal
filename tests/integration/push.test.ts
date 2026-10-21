@@ -10,7 +10,6 @@ import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client'
 import { d1 } from '../support/d1';
 import { browserSubscription, decrypt, eventually, received, runPushCron, subscribe, type BrowserSubscription } from '../support/push';
 import type { SinkRecord } from '../support/push-sink';
-import { TABLES } from '../support/worker';
 import { isMyTurn, TableSocket } from '../support/ws';
 
 type Member = Awaited<ReturnType<typeof newUser>>;
@@ -123,11 +122,13 @@ describe('what each event sends', () => {
   it('an invite opens the conversation with its join card (the table still decides who may sit)', async () => {
     const [a, b] = await Promise.all([member(), member()]);
     await befriend(a, b);
-    const r = await a.client.post(`/api/friends/${b.me.id}/invite`, { tableId: TABLES[0]!.id });
+    // A table kept open for invites: admin.test.ts closes the first table, and the files share one server.
+    const tableId = 'it-invite-0';
+    const r = await a.client.post(`/api/friends/${b.me.id}/invite`, { tableId });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     const [x] = await waitGot(b.sub, 'invite');
     expect(x?.p).toMatchObject({ t: 'invite', url: `/friends/${a.me.id}`, to: b.me.id, tag: `invite:${a.me.id}` });
-    expect(JSON.stringify(x?.p)).not.toContain(TABLES[0]!.id);
+    expect(JSON.stringify(x?.p)).not.toContain(tableId);
   });
 
   it('a friend request, only when it is made; the same request again is not told twice', async () => {

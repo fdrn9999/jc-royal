@@ -8,7 +8,7 @@ import { InstallSettingsLazy } from '../components/InstallLazy';
 import { RefillHintLazy } from '../components/RefillHintLazy';
 import { MemberName, RoleBadge } from '../components/MemberName';
 import { PresenceModePicker } from '../components/Presence';
-import { useAmounts } from '../lib/amount';
+import { useAmounts, type Amounts } from '../lib/amount';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { AMOUNT_UNITS, pullSettings, setPrefs, usePrefs, useSettingsSync } from '../lib/prefs';
@@ -105,7 +105,10 @@ export function BuyInModal({
         </div>
         {affordable ? (
           <>
-            <input type="range" min={minBuyIn} max={cap} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('table.buyIn')} />
+            <div className="flex items-center gap-3">
+              <input type="range" min={minBuyIn} max={cap} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('table.buyIn')} className="min-w-0 flex-1" />
+              <AmountInput a={a} value={amount} min={minBuyIn} max={cap} onChange={setAmount} label={t('table.buyIn')} testId="buyin-input" />
+            </div>
             <div className="text-center font-mono text-3xl font-semibold text-gold-300 tabular-nums" data-testid="buyin-amount">
               {a.fmt(amount)}
               {a.unit === 'bb' && <span className="block text-xs font-normal text-ink-400">{formatChips(amount)}</span>}
@@ -141,6 +144,70 @@ export function BuyInModal({
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+/** Typed text that holds a number (0 included), not an empty field or a lone point. */
+const hasDigit = (s: string) => /\d/.test(s);
+
+/**
+ * An amount typed beside a slider, in the player's unit (a big-blind amount becomes whole chips). What it hands on is
+ * always within [min, max], so the button that pays shows what it will send; the field keeps what was typed (outlined
+ * when outside them) until it is left. `onTyping` says when typing starts and stops.
+ */
+function AmountInput({
+  a,
+  value,
+  min,
+  max,
+  onChange,
+  onTyping,
+  label,
+  testId,
+}: {
+  a: Amounts;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (chips: number) => void;
+  onTyping?: (on: boolean) => void;
+  label: string;
+  testId: string;
+}) {
+  const { t } = useI18n();
+  const [typed, setTyped] = useState<string | null>(null);
+  const n = typed === null ? value : a.fromInput(typed);
+  const outside = typed !== null && hasDigit(typed) && (n < min || n > max);
+  return (
+    <span className={cx('flex h-10 w-28 shrink-0 items-center gap-1 rounded-lg border bg-ink-850 px-2 focus-within:border-gold-400', outside ? 'border-danger' : 'border-white/10')}>
+      {/* 16px text, or iOS zooms the page in when the field takes focus. */}
+      <input
+        inputMode={a.unit === 'bb' ? 'decimal' : 'numeric'}
+        enterKeyHint="done"
+        autoComplete="off"
+        className="w-full min-w-0 bg-transparent text-right font-mono text-base font-semibold text-gold-300 tabular-nums outline-none"
+        value={typed ?? a.toInput(value)}
+        onFocus={(e) => {
+          e.currentTarget.select();
+          onTyping?.(true);
+        }}
+        onChange={(e) => {
+          const s = a.clean(e.target.value);
+          setTyped(s);
+          // Nothing typed yet (an empty field, a lone point) keeps the amount; leaving the field shows it again. A 0 is
+          // a number below the range like any other: the amount goes to the minimum and the field is outlined.
+          if (hasDigit(s)) onChange(clamp(a.fromInput(s), min, max));
+        }}
+        onBlur={() => {
+          setTyped(null);
+          onTyping?.(false);
+        }}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+        aria-label={t('amount.typed', { label })}
+        aria-invalid={outside || undefined}
+        data-testid={testId}
+      />
+      {a.unit === 'bb' && <span className="text-xs text-ink-400">BB</span>}
+    </span>
+  );
+}
 
 /**
  * The controls of an automatic chip policy: the mode, its terms, the total limit and the player's consent to them
@@ -166,9 +233,19 @@ function AutoBuyFields({
   const topup = d.mode === 'topup';
   const per = topup ? d.target : d.amount;
   const id = topup ? 'autotop' : 'rebuy';
-  const range = (value: number, min: number, max: number, set: (n: number) => void, testId: string, label: string) => (
-    <input type="range" min={min} max={max} step={1} value={value} onChange={(e) => set(Number(e.target.value))} aria-label={label} data-testid={testId} />
+  const range = (value: number, min: number, max: number, set: (n: number) => void, testId: string, label: string, inputId: string, onTyping?: (on: boolean) => void) => (
+    <div className="flex items-center gap-3">
+      <input type="range" min={min} max={max} step={1} value={value} onChange={(e) => set(Number(e.target.value))} aria-label={label} className="min-w-0 flex-1" data-testid={testId} />
+      <AmountInput a={a} value={value} min={min} max={max} onChange={set} onTyping={onTyping} label={label} testId={inputId} />
+    </div>
   );
+  // A typed target is weighed against the terms as they were when typing began, so the numbers passing through the field
+  // on the way to the one typed do not move a trigger the player set (one that was the target follows it, as on the slider).
+  const typingFrom = useRef<AutoBuyDraft | null>(null);
+  const setTarget = (target: number) => {
+    const s = typingFrom.current;
+    edit(s ? { target, trigger: s.trigger === s.target ? target : s.trigger } : { target });
+  };
   return (
     <div className="flex flex-col gap-3">
       {modes.length > 1 && (
@@ -189,30 +266,31 @@ function AutoBuyFields({
         </div>
       )}
       {d.mode === 'rebuy' && (
-        <label className="flex flex-col gap-1.5 text-xs text-ink-300">
+        // Not a <label>: it holds two controls (the slider and the typed amount), each named on its own.
+        <div className="flex flex-col gap-1.5 text-xs text-ink-300">
           <span className="flex justify-between">
             {t('rebuy.amount')}
             <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="rebuy-amount">{a.exact(d.amount)}</span>
           </span>
-          {range(d.amount, minBuyIn, maxBuyIn, (amount) => edit({ amount }), 'rebuy-range', t('rebuy.amount'))}
-        </label>
+          {range(d.amount, minBuyIn, maxBuyIn, (amount) => edit({ amount }), 'rebuy-range', t('rebuy.amount'), 'rebuy-input')}
+        </div>
       )}
       {topup && (
         <>
-          <label className="flex flex-col gap-1.5 text-xs text-ink-300">
+          <div className="flex flex-col gap-1.5 text-xs text-ink-300">
             <span className="flex justify-between">
               {t('autotop.target')}
               <span className="font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="autotop-target-amount">{a.exact(d.target)}</span>
             </span>
-            {range(d.target, minBuyIn, maxBuyIn, (target) => edit({ target }), 'autotop-target', t('autotop.target'))}
-          </label>
-          <label className="flex flex-col gap-1.5 text-xs text-ink-300">
+            {range(d.target, minBuyIn, maxBuyIn, setTarget, 'autotop-target', t('autotop.target'), 'autotop-target-input', (on) => (typingFrom.current = on ? d : null))}
+          </div>
+          <div className="flex flex-col gap-1.5 text-xs text-ink-300">
             <span className="flex justify-between gap-2">
               {t('autotop.trigger')}
               <span className="shrink-0 font-mono text-sm font-semibold text-ivory tabular-nums" data-testid="autotop-trigger-amount">{a.exact(d.trigger)}</span>
             </span>
-            {range(d.trigger, 1, d.target, (trigger) => edit({ trigger }), 'autotop-trigger', t('autotop.trigger'))}
-          </label>
+            {range(d.trigger, 1, d.target, (trigger) => edit({ trigger }), 'autotop-trigger', t('autotop.trigger'), 'autotop-trigger-input')}
+          </div>
           <label className="flex items-start gap-2 text-xs text-ink-200">
             <input type="checkbox" checked={d.partial} onChange={(e) => edit({ partial: e.target.checked })} className="mt-0.5 size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="autotop-partial" />
             {t('autotop.partial')}
@@ -410,7 +488,12 @@ export function TopUpModal({
         ) : (
           <div className="flex flex-col gap-3">
             {inHand && <p className="text-xs text-ink-300">{t('topup.afterHand')}</p>}
-            {hi > lo && <input type="range" min={lo} max={hi} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('topup.open')} data-testid="topup-range" />}
+            {hi > lo && (
+              <div className="flex items-center gap-3">
+                <input type="range" min={lo} max={hi} step={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} aria-label={t('topup.open')} className="min-w-0 flex-1" data-testid="topup-range" />
+                <AmountInput a={a} value={amount} min={lo} max={hi} onChange={setAmount} label={t('topup.open')} testId="topup-input" />
+              </div>
+            )}
             <div className="flex items-center justify-between gap-3">
               <span className="font-mono text-2xl font-semibold text-gold-300 tabular-nums" data-testid="topup-amount">+{a.fmt(amount)}</span>
               <span className="font-mono text-xs text-ink-400">→ {a.fmt(stack + amount)}</span>

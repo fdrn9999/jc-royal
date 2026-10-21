@@ -6,7 +6,9 @@ import { useData } from '../lib';
 import { Table } from './Console';
 
 type Metric = 'ws_retry' | 'ws_drop' | 'room_error' | 'api_error';
-type Counts = Record<Metric, number>;
+/** Absent from an API older than these counters. */
+type Later = 'action_dup' | 'recover_fail' | 'web_error';
+type Counts = Record<Metric, number> & Partial<Record<Later, number>>;
 /** `seated` is members; table bots are `bots`. */
 interface TypeStats { tables: number; closing: number; blocked: number; occupied: number; playing: number; seated: number; bots?: number; waitlist: number; spectators: number; connections: number }
 interface BusyTable {
@@ -223,6 +225,8 @@ function OpsPanel({ d }: { d: Live }) {
         <Stat label={t('errors1h')} value={formatChips(err60)} sub={t('errorSplit', { room: lastHour.room_error, api: lastHour.api_error })} />
         <Stat label={t('drops1h')} value={formatChips(lastHour.ws_drop)} />
         <Stat label={t('retries1h')} value={formatChips(lastHour.ws_retry)} />
+        <Stat label={t('actionDup1h')} value={<span data-testid="ops-action-dup">{formatChips(lastHour.action_dup ?? 0)}</span>} sub={t('recoverFailN', { n: lastHour.recover_fail ?? 0 })} />
+        <Stat label={t('webErrors1h')} value={<span data-testid="ops-web-error">{formatChips(lastHour.web_error ?? 0)}</span>} sub={t('webErrorsSub')} />
       </div>
       <figure className="mt-4" data-testid="ops-trend">
         <div

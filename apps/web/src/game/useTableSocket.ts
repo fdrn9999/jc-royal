@@ -1,5 +1,6 @@
 import type { ActionType, AutoBuyRequest, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ReactionId, ServerMessage, TableCue, TableView } from '@jc/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { keepSeats } from './keepSeats';
 import { Heartbeat, Outbox, type Outgoing } from './link';
 import { preActionSpot } from './preAction';
 import { REACTION_SHOW_MS, type SeatReaction } from './Reactions';
@@ -118,6 +119,8 @@ export function useTableSocket(tableId: string): TableSocketApi {
   /** Hand and seq of the action in flight: one action per betting turn until the server answers. */
   const sentFor = useRef<string | null>(null);
   const cueSeq = useRef(0);
+  /** The last cue the table has played (consumeCues). */
+  const played = useRef(0);
   const stop = useRef(false);
   const kick = useRef<() => void>(() => {});
   const fresh = useRef<() => void>(() => {});
@@ -134,6 +137,16 @@ export function useTableSocket(tableId: string): TableSocketApi {
       for (const o of box.drain()) o.h.reject?.(new RequestError('internal', 'connection closed'));
       sentFor.current = null;
       setActing(false);
+    };
+
+    /**
+     * The last view goes, and its cues with it: played ones stay queued until the next batch, and the table drawn for a
+     * later view (reopened with a join code) starts counting cues from none, so it would play them again.
+     */
+    const dropView = () => {
+      stateRef.current = null;
+      setState(null);
+      setCues([]);
     };
 
     /** No answer in time: a request fails; anything else gives up quietly (the caller then fetches the state). */
@@ -176,8 +189,9 @@ export function useTableSocket(tableId: string): TableSocketApi {
             const prev = stateRef.current;
             // Ignore out-of-order snapshots (version is monotonic per room).
             if (prev && m.state.version < prev.version) return;
-            stateRef.current = m.state;
-            setState(m.state);
+            const view = keepSeats(prev, m.state);
+            stateRef.current = view;
+            setState(view);
             setActing(false);
             // An action whose turn has passed was applied or overtaken: either way nothing is waiting for it.
             const turn = m.state.hand ? `${m.state.hand.id}:${m.state.hand.seq}` : null;
@@ -185,8 +199,8 @@ export function useTableSocket(tableId: string): TableSocketApi {
             // A state of the version already shown carries cues already played (a settled hand sent again): the table
             // takes the state, the cues are not played twice.
             if (m.cues.length && !(prev && m.state.version <= prev.version)) {
-              const evs = m.cues.map((cue) => ({ id: ++cueSeq.current, cue, state: m.state }));
-              setCues((q) => [...q, ...evs].slice(-60));
+              const evs = m.cues.map((cue) => ({ id: ++cueSeq.current, cue, state: view }));
+              setCues((q) => [...q.filter((c) => c.id > played.current), ...evs].slice(-60));
             }
             return;
           }
@@ -214,8 +228,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
               // An admin ended this connection (the close, 4004, follows): the page says so instead of a toast, and
               // the last view goes (it showed my turn and its buttons, which the room no longer takes).
               stop.current = true;
-              stateRef.current = null;
-              setState(null);
+              dropView();
               setStatus('kicked');
               return;
             }
@@ -250,8 +263,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
           // (the code may have changed while connected) is dropped.
           failAll();
           stop.current = true;
-          stateRef.current = null;
-          setState(null);
+          dropView();
           setChat([]);
           setStatus('locked');
           return;
@@ -260,8 +272,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
           // Ended by an admin: no retry. Signing in again is checked anew (a suspended account cannot).
           failAll();
           stop.current = true;
-          stateRef.current = null;
-          setState(null);
+          dropView();
           setStatus('kicked');
           return;
         }
@@ -281,7 +292,9 @@ export function useTableSocket(tableId: string): TableSocketApi {
           });
         }
         setStatus('reconnecting');
-        const delay = Math.min(10_000, 800 * 2 ** attempt++);
+        // Spread a quarter either way: when a room restarts (a deploy), everyone at it would otherwise call back at the
+        // same instants. The same waits on average.
+        const delay = Math.min(10_000, 800 * 2 ** attempt++ * (0.75 + Math.random() * 0.5));
         timer = setTimeout(() => !stop.current && connect(true), delay);
       };
       ws.onclose = (ev) => {
@@ -413,7 +426,11 @@ export function useTableSocket(tableId: string): TableSocketApi {
     [box],
   );
 
-  const consumeCues = useCallback((upToId: number) => setCues((q) => q.filter((c) => c.id > upToId)), []);
+  // The table keeps track of the cues it has played (CueLayer); they leave the queue with the next batch. Taken out at
+  // once, they drew the whole page a second time before the frame that brought them was painted (TEST_REPORT).
+  const consumeCues = useCallback((upToId: number) => {
+    played.current = Math.max(played.current, upToId);
+  }, []);
   const reconnect = useCallback(() => kick.current(), []);
   const reopen = useCallback(() => fresh.current(), []);
 
