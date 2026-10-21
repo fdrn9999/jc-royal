@@ -114,8 +114,10 @@ test('replay modes: folded controls give the table their room, and the capture s
       for (let k = 1; k <= total; k++) {
         if (k > 1) await p.keyboard.press('ArrowRight');
         await expect(index).toHaveText(`${k}/${total}`);
+        // The table follows its area a frame after the step is drawn (the result's lines under it take some of the area's
+        // height on the last step): measured once it has.
+        await expect.poll(async () => (await outside(p)).out, `${where} · step ${k}`).toEqual([]);
         const o = await outside(p);
-        expect(o.out, `${where} · step ${k}`).toEqual([]);
         expect(o.seats, `${where} · step ${k}`).toBe(hand.maxSeats);
         // Every name, stack, card, bet, pot and line on the table readable: nothing overlaps, is cut off, drawn over or
         // off the screen.

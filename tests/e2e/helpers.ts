@@ -35,16 +35,18 @@ export async function widerThanDevice(page: Page) {
 
 /**
  * Signs up through the real UI and lands on the lobby. `ref` opens a referral link (/register?ref=…) instead, and
- * `beforeSubmit` looks at the filled form before it is sent.
+ * `beforeSubmit` looks at the filled form before it is sent. `nick`: what the nickname starts with (8 letters at most:
+ * a nickname is 16 at most, and the rest makes it unique).
  */
-export async function signUp(browser: Browser, opts: { mobile?: boolean; ref?: string; beforeSubmit?: (page: Page) => Promise<void> } = {}) {
+export async function signUp(browser: Browser, opts: { mobile?: boolean; ref?: string; nick?: string; beforeSubmit?: (page: Page) => Promise<void> } = {}) {
   const ctx = await browser.newContext(opts.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
-  const nickname = uid('p');
-  const email = `${nickname}@e2e.dev`;
+  const nickname = uid(opts.nick ?? 'p');
+  const local = opts.nick ? uid('p') : nickname;
+  const email = `${local}@e2e.dev`;
   await page.goto(opts.ref ? `/register?ref=${encodeURIComponent(opts.ref)}` : '/register');
   // Split email field: local part + domain picker ("직접입력" for other domains).
-  await page.getByLabel(/이메일 아이디|Email name/).fill(nickname);
+  await page.getByLabel(/이메일 아이디|Email name/).fill(local);
   await page.getByLabel(/이메일 도메인|Email domain/).selectOption('__custom__');
   await page.getByLabel(/도메인 직접 입력|^Domain$/).fill('e2e.dev');
   // Email code step: outside production the API returns the code and the page shows it.
@@ -90,8 +92,24 @@ export async function playOneHand(a: Page, b: Page) {
     await expect(a.getByText(/승리|Winner/).first()).toBeVisible({ timeout: 500 });
   }).toPass({ timeout: 60_000 });
   const before = await Promise.all([a, b].map((p) => balanceOf(p)));
-  for (const p of [a, b]) await p.getByTestId('leave').click();
+  for (const p of [a, b]) await standUp(p);
   for (const [i, p] of [a, b].entries()) await expect.poll(() => balanceOf(p), { timeout: 45_000 }).toBeGreaterThan(before[i]!);
+}
+
+/**
+ * Stands up from the table. While this page's hand is still being played, standing up folds it, so the button asks
+ * first and the answer is yes; folded, all in or between hands, it stands up at once. Should the hand end while it
+ * asks, the question goes away and the button is pressed again.
+ */
+export async function standUp(page: Page) {
+  const leave = page.getByTestId('leave');
+  const fold = page.getByTestId('leave-fold');
+  await leave.click();
+  const asked = await fold.waitFor({ timeout: 1_000 }).then(
+    () => true,
+    () => false,
+  );
+  if (asked && !(await fold.click({ timeout: 2_000 }).then(() => true, () => false))) await leave.click();
 }
 
 /** Moves a range input the way a drag does (React only sees an input event from the native value setter). */

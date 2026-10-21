@@ -89,6 +89,8 @@ export async function sit(page, id) {
 export async function leave(page, id) {
   await page.goto(`${base}/table/${id}`);
   await page.getByTestId('leave').click().catch(() => {});
+  // Mid-hand, standing up folds the hand and the button asks first.
+  await page.getByTestId('leave-fold').click({ timeout: 1_000 }).catch(() => {});
   await page.waitForTimeout(1_500);
   await page.goto(`${base}/`);
 }

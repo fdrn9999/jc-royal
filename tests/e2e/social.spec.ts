@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { signUp, test } from './helpers';
+import { signUp, standUp, test } from './helpers';
 
 /** Same-origin JSON call with the page's session. */
 async function call<T>(page: Page, path: string, body?: unknown): Promise<T> {
@@ -145,7 +145,7 @@ test('reports: a post, a comment and a player at the table; the author card offe
   await expect(a.page.getByTestId('player-card')).toContainText(b.nickname);
   await a.page.keyboard.press('Escape');
 
-  await b.page.getByTestId('leave').click();
+  await standUp(b.page);
   await expect(b.page.locator('[data-testid^=seat-]').filter({ hasText: b.nickname })).toHaveCount(0);
 });
 

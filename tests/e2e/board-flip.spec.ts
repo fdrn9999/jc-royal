@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, sitWith, test } from './helpers';
+import { checkOrCall, signUp, sitWith, standUp, test } from './helpers';
 
 /**
  * Counts the board cards' turns (jc-flip-in) starting (window.__flips): the cards that turned, the ones that started
@@ -44,5 +44,5 @@ test('보드 카드: 플롭·턴·리버의 카드는 한 번만 뒤집히고, �
   const f = await flips(page);
   expect(f.restarts, 'board cards that started turning again mid-turn').toBe(0);
 
-  await page.getByTestId('leave').click();
+  await standUp(page);
 });

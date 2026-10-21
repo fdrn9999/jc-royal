@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DIMS, planHeight, planTable, seatLayout, type Density, type PlanInput, type TablePlan } from '../src/game/layout';
+import { DIMS, drawnOver, planForText, planHeight, planTable, scalePlan, seatLayout, type Density, type PlanInput, type TablePlan } from '../src/game/layout';
 
 const SMALL: Density[] = ['compact', 'dense'];
 const ALL: Density[] = ['full', 'compact', 'dense'];
@@ -131,12 +131,13 @@ describe('table layout: every seat, bet and the board in a place of its own', ()
 
   it('narrows the table, within what it is let, where that keeps every bet by its own seat', () => {
     const p = input(9, { meTop: 4 });
-    // At its full width nine seats fit, but a bet lies nearer a neighbour; 8px narrower each lies by its own.
-    const full = planTable(608, 308, p, SMALL);
+    // At its full width nine seats fit, but bets lie nearer a neighbour; 8px narrower each lies by its own. (At 608×308,
+    // where this was once so, the board drawn in the middle now leaves each by its own at the full width: TEST_REPORT.)
+    const full = planTable(640, 268, p, SMALL);
     expect(full.overlap).toBe(0);
     expect(astray(full, p)).not.toEqual([]);
-    const narrow = planTable(608, 308, p, SMALL, Math.round(0.85 * 608));
-    expect(narrow.w).toBeLessThan(608);
+    const narrow = planTable(640, 268, p, SMALL, Math.round(0.85 * 640));
+    expect(narrow.w).toBeLessThan(640);
     expect(narrow.overlap).toBe(0);
     expect(problems(narrow, p)).toEqual([]);
     expect(astray(narrow, p)).toEqual([]);
@@ -243,5 +244,71 @@ describe('table layout: every seat, bet and the board in a place of its own', ()
     const g = seatLayout(6, 0, false);
     expect(g).toHaveLength(6);
     expect(g[0]!.seat.y).toBeGreaterThan(g[3]!.seat.y);
+  });
+});
+
+describe('table layout with the text larger: the seats are sized in rem', () => {
+  // As useTableLayout lays the real table out for text at u times 16px: in the area u times smaller, drawn u times larger
+  // (short: a phone on its side, realTableOptions).
+  const at = (aw: number, ah: number, n: number, short = false) => (u: number) => {
+    const w = aw / u;
+    const h = ah / u;
+    const bw = Math.min(w, 2.1 * h);
+    const p = input(n, short ? { meTop: 4 } : { meTop: 28, footer: true });
+    return scalePlan(planTable(bw, Math.min(h, 1.9 * w), p, w < 640 || h < 520 ? SMALL : ALL, Math.round((short ? 0.85 : 1) * bw)), u);
+  };
+  const unit = (plan: TablePlan) => plan.dims.cardMe / DIMS[plan.density].cardMe;
+  // What a plan costs drawn at k: what it left overlapping itself and what its seats drawn larger add (planForText).
+  const cost = (plan: TablePlan, k: number) => plan.overlap + drawnOver(plan, k / unit(plan)).all - drawnOver(plan, 1).all;
+
+  it('draws a plan k times larger, every part with it', () => {
+    const p = at(340, 493, 6)(1);
+    const q = scalePlan(p, 1.25);
+    expect([q.w, q.h, q.seats[2]!.x, q.block.w, q.dims.cardMe]).toEqual([p.w, p.h, p.seats[2]!.x, p.block.w, p.dims.cardMe].map((x) => x * 1.25));
+    expect(drawnOver(q, 1).all).toBeCloseTo(drawnOver(p, 1).all * 1.25 ** 2);
+  });
+
+  it('keeps the larger text where its seats keep off the board', () => {
+    // Six seats on a 360×640 phone at 125%: the table has 340×493.
+    const plan = planForText(1.25, at(340, 493, 6));
+    expect(unit(plan)).toBeCloseTo(1.25);
+    expect(drawnOver(plan, 1).board).toBe(0);
+  });
+
+  it('where the seats at the larger text would reach over the board, takes the plan that costs least so drawn', () => {
+    // Nine seats on a 320×568 phone at 125%: the table has 300×344, where no way has room for nine seats that size. Laid
+    // out for 125%, they lay over the board and up to 81px past the screen (TEST_REPORT).
+    const lay = at(300, 344, 9);
+    const big = lay(1.25);
+    expect(drawnOver(big, 1).board).toBeGreaterThan(0);
+    const plan = planForText(1.25, lay);
+    expect(unit(plan)).toBeLessThan(1.25);
+    expect(cost(plan, 1.25)).toBeLessThan(big.overlap);
+  });
+
+  it('counts the bets a plan leaves off the table, not only its seats', () => {
+    // Nine seats on a 667×375 phone on its side at 125%: the table has 393×311. Laid out for 125%, two bets lie off the
+    // table (one drawn 47px past the screen) and the board over a seat's name; laid out for 16px, the seats drawn 25%
+    // larger crowd each other a little more but leave the board and the bets clear (TEST_REPORT).
+    const lay = at(393, 311, 9, true);
+    const big = lay(1.25);
+    expect(big.bets.some((b) => b.x < 0 || b.x > big.w)).toBe(true);
+    const plan = planForText(1.25, lay);
+    expect(unit(plan)).toBeCloseTo(1);
+    expect(drawnOver(plan, 1.25).all).toBeGreaterThan(drawnOver(big, 1).all);
+    expect(cost(plan, 1.25)).toBeLessThan(big.overlap);
+  });
+
+  it('keeps the larger text where what it leaves over the board costs less than the others drawn larger', () => {
+    // Six seats on a 667×375 phone on its side at 125%: a seat's room meets the board's corner (none of its cards).
+    const lay = at(393, 311, 6, true);
+    expect(drawnOver(lay(1.25), 1).board).toBeGreaterThan(0);
+    expect(unit(planForText(1.25, lay))).toBeCloseTo(1.25);
+  });
+
+  it('lays out at 16px and smaller text without trying another', () => {
+    const tried: number[] = [];
+    for (const k of [1, 0.875]) planForText(k, (u) => (tried.push(u), at(300, 344, 9)(u)));
+    expect(tried).toEqual([1, 0.875]);
   });
 });

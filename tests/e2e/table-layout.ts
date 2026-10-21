@@ -96,7 +96,7 @@ export function measureTable(page: Page, dense?: RegExp): Promise<TableReport> {
     };
     for (const seat of Array.from(scene.querySelectorAll('[data-testid^="seat-"][data-state]'))) {
       const i = seat.getAttribute('data-testid')!.slice(5);
-      // The plate carries a button over itself (a seat's card, my reactions): what is hit there is still the seat.
+      // The plate carries a button over itself (a seat's card): what is hit there is still the seat.
       const o = { owner: seat, group: `seat-${i}` };
       add(`name-${i}`, seat.querySelector('[data-testid=member-name]'), { ...o, text: true });
       add(`stack-${i}`, seat.querySelector(`[data-testid="stack-${i}"]`), { ...o, text: true });
@@ -128,7 +128,10 @@ export function measureTable(page: Page, dense?: RegExp): Promise<TableReport> {
     const describe = (e: Element | null) => {
       if (!e) return 'nothing';
       const t = e.closest('[data-testid]')?.getAttribute('data-testid') ?? '';
-      return `${t}>${e.tagName.toLowerCase()}${typeof e.className === 'string' && e.className ? `.${e.className.split(' ')[0]}` : ''}`;
+      // A piece of a seat named for itself (its player's name, the dealer button) is still that seat's.
+      const seat = e.closest('[data-testid^="seat-"][data-state]')?.getAttribute('data-testid');
+      const at = seat && seat !== t ? `${seat}>${t}` : t;
+      return `${at}>${e.tagName.toLowerCase()}${typeof e.className === 'string' && e.className ? `.${e.className.split(' ')[0]}` : ''}`;
     };
     /** What a piece's content takes: its text and the boxes inside it, without its own padding, within its own box (a
      * name cut short with an ellipsis lays out its whole text past it). */

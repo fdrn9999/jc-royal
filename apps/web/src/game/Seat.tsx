@@ -5,14 +5,14 @@
  */
 import type { SeatView } from '@jc/types';
 import { cx, PlayingCard } from '@jc/ui';
-import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import type { Density } from './layout';
 import { cardsToShow } from './olderRooms';
 import type { RevealSpot } from './reveal';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { ReactionBubble, ReactionTray, type ReactionSender, type SeatReaction } from './Reactions';
+import { ReactionBubble, type SeatReaction } from './Reactions';
 
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now());
@@ -150,10 +150,8 @@ export interface SeatProps {
    * room clear by the board) they turn where they lie.
    */
   reveal?: RevealSpot | null;
-  /** The quick reaction this player sent, while it shows. */
+  /** The quick reaction this player sent, while it shows (sent from the status line under the table, Reactions.tsx). */
   reaction?: SeatReaction | null;
-  /** My seat at a real table, with reactions on: tapping the plate opens the reaction tray. */
-  react?: ReactionSender;
   /** Said in the status line in place of the rest (my turn's label on a phone upright, where the stack keeps no line). */
   turnNote?: ReactNode;
   density: Density;
@@ -173,10 +171,6 @@ function SeatPlace(p: SeatProps) {
   const z = SIZE[p.density];
   const compact = p.density !== 'full';
   const cardSize = p.isMe ? z.me : z.other;
-  const [tray, setTray] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const opener = useRef<HTMLButtonElement>(null);
-  const trayOpen = tray && !!p.react;
   // Cards asked to be shown, until the room's answer shows them (a second tap sends nothing): cleared when what is
   // shown changes, at the next hand, or after a while when the answer never came (the request was refused).
   const [showing, setShowing] = useState<readonly number[]>([]);
@@ -191,32 +185,23 @@ function SeatPlace(p: SeatProps) {
     const id = setTimeout(() => setShowing([]), 5_000);
     return () => clearTimeout(id);
   }, [showing]);
-  // My turn needs the space above my seat (and my attention): the tray gives way.
-  useEffect(() => {
-    if (p.isActor) setTray(false);
-  }, [p.isActor]);
-  useEffect(() => {
-    if (!trayOpen) return;
-    const outside = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setTray(false);
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      setTray(false);
-      opener.current?.focus();
-    };
-    document.addEventListener('pointerdown', outside);
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.removeEventListener('pointerdown', outside);
-      document.removeEventListener('keydown', esc);
-    };
-  }, [trayOpen]);
 
   if (s.state === 'empty') {
     return (
       <div className="absolute -translate-x-1/2 -translate-y-1/2" style={p.style}>
-        {p.canSit ? (
+        {s.held ? (
+          // Its player folded and stood up: the hand they were dealt into is still played, so nobody sits here until it
+          // ends (the room refuses it too).
+          <div
+            role="img"
+            className={cx('grid place-items-center rounded-full border border-dashed border-white/20 bg-black/30 text-xs text-ink-400', z.empty)}
+            title={t('table.heldSeat')}
+            aria-label={t('table.heldSeat')}
+            data-testid={`held-${s.seatIndex}`}
+          >
+            <span aria-hidden>⏳</span>
+          </div>
+        ) : p.canSit ? (
           <button
             onClick={p.onSit}
             data-testid={`sit-${s.seatIndex}`}
@@ -262,15 +247,13 @@ function SeatPlace(p: SeatProps) {
 
   return (
     <div
-      ref={root}
-      // Open, the tray goes above the bets, the board and the effects. My own seat is above the board and the bets: where
-      // a cramped table (a raise panel open on a small phone) cannot keep them apart, my cards stay in sight.
-      className={cx('absolute -translate-x-1/2 -translate-y-1/2', trayOpen ? 'z-40' : p.isMe ? 'z-[25]' : 'z-10')}
+      // My own seat is above the board and the bets: where a cramped table (a raise panel open on a small phone) cannot
+      // keep them apart, my cards stay in sight.
+      className={cx('absolute -translate-x-1/2 -translate-y-1/2', p.isMe ? 'z-[25]' : 'z-10')}
       style={p.style}
       data-testid={`seat-${s.seatIndex}`}
       data-state={s.state}
     >
-      {trayOpen && <ReactionTray sender={p.react!} onClose={() => setTray(false)} />}
       {/* A folded hand fades back in when its owner shows a card (quieter than a winner's: it stays where it is). */}
       <div className={cx('relative flex flex-col items-center transition-opacity duration-300', folded && !shown && 'opacity-55')}>
         {/* hole cards */}
@@ -420,22 +403,6 @@ function SeatPlace(p: SeatProps) {
           )}
           {p.onPick && (
             <button type="button" className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400" onClick={p.onPick} aria-label={s.nickname} data-testid={`seat-pick-${s.seatIndex}`} />
-          )}
-          {p.react && (
-            <>
-              <button
-                ref={opener}
-                type="button"
-                className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400"
-                onClick={() => setTray((o) => !o)}
-                aria-label={t('react.open')}
-                aria-expanded={trayOpen}
-                data-testid="react-open"
-              />
-              <span aria-hidden className="pointer-events-none absolute -bottom-1 -right-1 grid size-[1.125rem] place-items-center rounded-full border border-gold-500/50 bg-ink-950 text-[10px] leading-none">
-                😊
-              </span>
-            </>
           )}
         </div>
         {/* status line: no wider than the seat (layout.ts); what does not fit is cut short, whole in its title */}

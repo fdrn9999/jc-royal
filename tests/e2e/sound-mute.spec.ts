@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, sitWith, test } from './helpers';
+import { checkOrCall, signUp, sitWith, standUp, test } from './helpers';
 
 /**
  * Counts the sounds the page starts (window.__sounds): every oscillator and buffer started on an AudioContext, but the
@@ -78,5 +78,5 @@ test('음소거: 켜면 테이블이 어떤 소리도 내지 않고, 새로고�
   await expect.poll(() => sounds(page), { message: 'sounds after mute is turned off' }).toBeGreaterThan(0);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('jc.audio') ?? '{}').muted)).toBe(false);
 
-  await page.getByTestId('leave').click();
+  await standUp(page);
 });

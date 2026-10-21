@@ -25,11 +25,13 @@ export function LegalLinks({ className = '' }: { className?: string }) {
   );
 }
 
+// Named in both languages, so someone who cannot read the page's language still finds the way to the other; and not
+// "언어" / "Language", the settings dialog's language field, which this switch stays in the page under.
 export function LangToggle() {
-  const { t, locale } = useI18n();
+  const { locale } = useI18n();
   const { chooseLocale } = useAuth();
   return (
-    <div className="flex rounded-full border border-white/10 p-0.5 text-[11px] font-semibold" role="group" aria-label={t('settings.language')}>
+    <div className="flex rounded-full border border-white/10 p-0.5 text-[11px] font-semibold" role="group" aria-label="한국어 / English">
       {(['ko', 'en'] as const).map((l) => (
         <button key={l} onClick={() => chooseLocale(l)} className={`rounded-full px-2.5 py-1 transition ${locale === l ? 'bg-gold-500 text-ink-950' : 'text-ink-300 hover:text-ivory'}`} aria-pressed={locale === l}>
           {l === 'ko' ? '한국어' : 'EN'}

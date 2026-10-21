@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, sitWith, test, widerThanDevice } from './helpers';
+import { checkOrCall, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 import { measureTable, smallTargets, type TableReport } from './table-layout';
 
 /**
@@ -118,5 +118,5 @@ test('9인 실시간 테이블: 휴대폰(세로·가로)·태블릿·노트북�
   // Back at the table to stand up, so the seat is free for the next run.
   await page.goto('/table/e2e-nine');
   await expect(page.locator('[data-testid=table] [data-testid^="seat-"][data-state]')).toHaveCount(9);
-  await page.getByTestId('leave').click();
+  await standUp(page);
 });

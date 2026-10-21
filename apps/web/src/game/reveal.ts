@@ -5,7 +5,7 @@
  * by (layout.ts), so the spot is where the seats and the board really are at any size; nowhere that clear, the cards
  * turn where they lie, as they did before.
  */
-import { DIMS, type Point, type Rect, type TablePlan } from './layout';
+import type { Point, Rect, TablePlan } from './layout';
 
 /** The move from the middle of the seat's cards to their resting spot (px), and the size they rest at (a scale). */
 export interface RevealSpot {
@@ -40,7 +40,7 @@ const apart = (a: Box, b: Box) => Math.hypot(Math.max(b.l - a.r, 0, a.l - b.r), 
 export function cardsCentre(plan: TablePlan, seat: number, mine: boolean): Point | null {
   const a = plan.seats[seat];
   if (!a) return null;
-  const d = DIMS[plan.density];
+  const d = plan.dims;
   const card = mine ? d.cardMe : d.cardOther;
   const h = 1.4 * card - d.overlap + d.plateH + d.statusH;
   return { x: a.x, y: a.y - h / 2 + 0.7 * card };
@@ -52,7 +52,7 @@ export function cardsCentre(plan: TablePlan, seat: number, mine: boolean): Point
  */
 export function revealSpots(plan: TablePlan, seats: readonly { seat: number; mine: boolean }[]): Map<number, RevealSpot> {
   const out = new Map<number, RevealSpot>();
-  const d = DIMS[plan.density];
+  const d = plan.dims;
   // The board and the status line under it. The pot's row above them is empty once the hand is over (its chips paid
   // out), and free to rest in.
   const k = plan.block;

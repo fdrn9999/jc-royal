@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { balanceOf, PASSWORD, signUp, test, widerThanDevice } from './helpers';
+import { balanceOf, PASSWORD, signUp, standUp, test, widerThanDevice } from './helpers';
 import { promoteSql } from '../support/grants';
 
 const ADMIN = 'http://localhost:5174';
@@ -171,7 +171,7 @@ test('service notices and maintenance: an admin posts a bilingual notice and pla
     await expect(phone.page.locator('[data-testid^=sit-]')).toHaveCount(0);
     expect(await widerThanDevice(phone.page)).toBe(false);
     await phone.page.screenshot({ path: 'test-results/table-maintenance-mobile.png' });
-    await member.page.getByTestId('leave').click();
+    await standUp(member.page);
     await expect(member.page.locator('[data-testid^=seat-]').filter({ hasText: member.nickname })).toHaveCount(0);
     expect(await balanceOf(member.page)).toBe(10_000);
 

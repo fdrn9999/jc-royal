@@ -9,7 +9,7 @@ import { ActionBar } from '../game/ActionBar';
 import { seatPolicy } from '../game/autoBuy';
 import { JoinCodeModal } from '../components/JoinCode';
 import { LinkShare } from '../components/Share';
-import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
+import { ANY, parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
 import type { ReportSubject } from '../components/Social';
 import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
@@ -18,7 +18,7 @@ import { PreActions } from '../game/PreActions';
 import { TimeBankButton } from '../game/TimeBank';
 import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { legacyMuckStep } from '../game/olderRooms';
-import { useReactionSender } from '../game/Reactions';
+import { ReactionButton, ReactionTray, useReactionSender, useReactionTray } from '../game/Reactions';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useAreaSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
@@ -57,6 +57,9 @@ function tournamentStalled(s: TableView): boolean {
   const tn = s.tournament;
   return !!tn && tn.status === 'running' && !tn.paused && tn.levelEndsAt === null && tn.levelLeftMs !== null && !s.nextHandAt && !s.hand;
 }
+
+/** Free to sit in now: a seat whose player folded and stood up mid-hand stays out of reach until that hand ends. */
+const isFree = (x: SeatView) => x.state === 'empty' && !x.held;
 
 const secondsTo = (target: number) => Math.max(0, Math.ceil((target - Date.now()) / 1000));
 
@@ -127,6 +130,13 @@ export function TablePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [topUpOpen, setTopUpOpen] = useState(false);
+  // Standing up mid-hand folds it, so the player says so first, beside the button (no dialog over the game).
+  const [leaveAsk, setLeaveAsk] = useState(false);
+  const [leaveBusy, setLeaveBusy] = useState(false);
+  const leaveBox = useRef<HTMLSpanElement>(null);
+  // I asked to stand up (the room did not send me away): once I have, what next is offered as for a missed quick seat.
+  const leaveAsked = useRef(false);
+  const [leftHere, setLeftHere] = useState(false);
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => sound.installAutoUnlock(), []);
@@ -185,7 +195,7 @@ export function TablePage() {
   }, [id, setParams, reopen, err]);
 
   // After the code dialog on this page: the new connection carries the ticket, then ?sit / ?wait below go on.
-  const codeThen = s && s.seats.every((x) => x.state !== 'empty') ? 'wait' : 'sit';
+  const codeThen = s && !s.seats.some(isFree) ? 'wait' : 'sit';
   const onCodeGranted = useCallback(() => {
     setParams(
       (p) => {
@@ -201,12 +211,12 @@ export function TablePage() {
   useEffect(() => {
     if (!s || params.get('sit') !== '1' || s.you.needsCode) return;
     if (s.you.seatIndex === null && s.you.canSit) {
-      const free = s.seats.find((x) => x.state === 'empty');
+      const free = s.seats.find(isFree);
       if (free) setBuySeat(free.seatIndex);
       else if (quick) setQuickMissed(true);
     } else if (s.you.seatIndex === null && quick) {
       setQuickMissed(true);
-    } else if (s.you.seatIndex === null && s.seats.every((x) => x.state !== 'empty')) {
+    } else if (s.you.seatIndex === null && !s.seats.some(isFree)) {
       setToast(t('invite.fullNow'));
     }
     params.delete('sit');
@@ -217,7 +227,7 @@ export function TablePage() {
   useEffect(() => {
     if (!s || params.get('wait') !== '1' || s.you.needsCode) return;
     if (s.you.seatIndex === null) {
-      const free = s.you.canSit ? s.seats.find((x) => x.state === 'empty') : undefined;
+      const free = s.you.canSit ? s.seats.find(isFree) : undefined;
       if (free) setBuySeat(free.seatIndex);
       else if (!s.you.inWaitlist) sock.send({ t: 'waitlist', join: true });
     }
@@ -252,18 +262,18 @@ export function TablePage() {
   const academy = useProgress(me?.id);
   const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${prefs.showHand}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
   const [areaRef, area] = useAreaSize<HTMLDivElement>(room.style);
+  const hand = s?.hand ?? null;
+  const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
   // Seated, my seat is at the bottom, with room above my cards for the show-card buttons unless the screen is short.
-  // The raise panel open (my turn, so no cards to show), that room goes to the table too.
+  // The raise panel open (my turn, so no cards to show), that room goes to the table too; the reaction tray (off my
+  // turn, when the buttons may be showing) leaves it.
   const tableOpts = realTableOptions(short);
   const layout = useTableLayout(area, s?.table.maxSeats, anchor, {
     me: s?.you.seatIndex != null,
     ...tableOpts,
-    meTop: room.open ? 0 : tableOpts.meTop,
+    meTop: room.open && myTurn ? 0 : tableOpts.meTop,
     chars: amountChars(amt.unit),
   });
-
-  const hand = s?.hand ?? null;
-  const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
   // A phone upright: every line of the stack costs the table its height (nine seats at 375×667 have none to spare), so
   // the turn label goes to my seat's status line, right above the bar, and my hand to the status line under the board,
   // both kept by the layout whatever they hold. Wider, and in a short screen's column, they are lines of the stack.
@@ -337,12 +347,20 @@ export function TablePage() {
   }
 
   async function leave() {
+    setLeaveAsk(false);
+    if (leaveBusy) return;
+    leaveAsked.current = true;
+    setLeaveBusy(true);
     try {
       await sock.request({ t: 'leave' });
       void refresh();
-      if (s?.you.seatIndex === null) nav(lobbyHref());
     } catch (e) {
-      setToast(err(e instanceof RequestError ? e.code : null));
+      const code = e instanceof RequestError ? e.code : null;
+      // A cash-out that failed is tried again by the room, the seat leaving meanwhile: I still stand up when it is paid.
+      if (code !== 'internal') leaveAsked.current = false;
+      setToast(err(code));
+    } finally {
+      setLeaveBusy(false);
     }
   }
 
@@ -375,6 +393,8 @@ export function TablePage() {
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
+  // The reaction button is in the status line, which my turn's action bar replaces: the tray closes then.
+  const reactTray = useReactionTray(myTurn || !seated || !reactOn);
   // Seated, a page about something else opens in a new tab: leaving this one would leave the game behind (the
   // connection, then the hand), as the player's 1:1 chat does.
   const away = seated ? ({ target: '_blank', rel: 'noopener' } as const) : {};
@@ -382,6 +402,39 @@ export function TablePage() {
   // by leaving the screen; the way out goes to the tournament's page.
   const tn = s?.tournament ?? null;
   const autoPolicy = s ? seatPolicy(s.you) : null;
+  // Standing up folds my hand while I am still in it (not folded, not all in): at once on my turn, else when it comes,
+  // so I am asked first. Folded, all in (I stand up once it is settled) or between hands, it folds nothing.
+  const myState = mySeat !== null ? s?.seats[mySeat]?.state : undefined;
+  const liveHand = !!hand && hand.stage !== 'settled';
+  const leaveFolds = !tn && liveHand && myState === 'active' && !s?.you.leaving;
+  useEffect(() => {
+    if (!leaveFolds) setLeaveAsk(false);
+  }, [leaveFolds]);
+  useEffect(() => {
+    if (!leaveAsk) return;
+    const away = (e: PointerEvent) => {
+      if (!leaveBox.current?.contains(e.target as Node)) setLeaveAsk(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setLeaveAsk(false);
+      leaveBox.current?.querySelector('button')?.focus();
+    };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', key);
+    };
+  }, [leaveAsk]);
+  // Standing up as I asked (at once, or when my fold came): what next is offered.
+  useEffect(() => {
+    if (seated) setLeftHere(false);
+    else if (leaveAsked.current) {
+      leaveAsked.current = false;
+      setLeftHere(true);
+    }
+  }, [seated]);
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 
@@ -409,7 +462,10 @@ export function TablePage() {
       {/* top bar */}
       <header
         className={cx(
-          'jc-game-surface z-40 flex shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 backdrop-blur-md',
+          'jc-game-surface flex shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 backdrop-blur-md',
+          // The stand-up question hangs below the header, over the lines that follow it (each at z-40) and over the chat
+          // beside the table (z-50, the phone's drawer it also is, and later on the page).
+          leaveAsk ? 'z-[60]' : 'z-40',
           // Short, every pixel of height goes to the seats; the notch's side (a phone on its side) stays clear.
           short ? 'h-11 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]' : 'h-14 px-3',
         )}
@@ -466,10 +522,45 @@ export function TablePage() {
               <span className="hidden sm:inline">{t('tn.toTournament')}</span>
             </Button>
           ) : (
-            <Button size="icon" variant="outline" onClick={seated ? leave : () => nav(lobbyHref())} data-testid="leave" aria-label={seated ? t('table.standUp') : t('table.leave')}>
-              <span aria-hidden className="sm:hidden">⏏</span>
-              <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
-            </Button>
+            <span ref={leaveBox} className="relative">
+              <Button
+                size="icon"
+                variant="outline"
+                loading={leaveBusy}
+                onClick={seated ? (leaveFolds ? () => setLeaveAsk((o) => !o) : leave) : () => nav(lobbyHref())}
+                data-testid="leave"
+                aria-label={seated ? t('table.standUp') : t('table.leave')}
+                aria-expanded={leaveFolds ? leaveAsk : undefined}
+              >
+                <span aria-hidden className="sm:hidden">⏏</span>
+                <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
+              </Button>
+              {leaveAsk && (
+                // Not a dialog: the hand goes on beside it, and it closes on a tap elsewhere or Esc.
+                <div role="group" aria-label={t('table.standUp')} className="absolute right-0 top-full mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-xl border border-white/10 bg-ink-900 p-3 text-sm shadow-panel" data-testid="leave-ask">
+                  <p className="text-ivory">{myTurn ? t('table.leaveFoldNow') : t('table.leavingAtTurn')}</p>
+                  <p className="mt-1 text-xs text-ink-300">{t('table.leaveFoldNote')}</p>
+                  <div className="mt-3 flex justify-end gap-2">
+                    {/* A finger's height (40 px) on a phone too. */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="min-h-10"
+                      onClick={() => {
+                        setLeaveAsk(false);
+                        leaveBox.current?.querySelector('button')?.focus();
+                      }}
+                      data-testid="leave-cancel"
+                    >
+                      {t('common.cancel')}
+                    </Button>
+                    <Button size="sm" className="min-h-10" onClick={leave} data-testid="leave-fold">
+                      {t('table.foldAndLeave')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </span>
           )}
         </div>
       </header>
@@ -502,8 +593,9 @@ export function TablePage() {
           )}
         </div>
       )}
-      {quick && quickMissed && !seated && (
-        <div className="z-40 flex flex-col gap-2 bg-gold-500/15 px-4 py-2 text-sm text-gold-300 sm:items-center" role="status" data-testid="quick-missed">
+      {/* A quick-play seat gone on arrival, or I just stood up here: where next (another table, this one, the lobby). */}
+      {!seated && ((quick && quickMissed) || leftHere) && (
+        <div className="z-40 flex flex-col gap-2 bg-gold-500/15 px-4 py-2 text-sm text-gold-300 sm:items-center" role="status" data-testid={leftHere ? 'left-next' : 'quick-missed'}>
           {quickPlay.miss ? (
             <>
               <QuickMissNote miss={quickPlay.miss} filtered={false} />
@@ -513,14 +605,42 @@ export function TablePage() {
             </>
           ) : (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
-              <span>{t('quick.missed')}</span>
-              <span className="flex gap-2">
-                <Button size="sm" loading={quickPlay.busy} disabled={!!s?.maintenance?.active} onClick={() => quickPlay.run(quick.filters, [...new Set([...quick.tried, id])])} data-testid="quick-another">
-                  {t('quick.another')}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setQuickMissed(false)}>
+              {leftHere ? (
+                <span>
+                  {t('table.leftNext')}{' '}
+                  {!tn && (
+                    <span className="whitespace-nowrap text-xs text-ink-200" data-testid="wallet">
+                      {t('table.wallet')} <span className="font-mono">{formatChips(me?.balance ?? 0)}</span>
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span>{t('quick.missed')}</span>
+              )}
+              {/* Each a finger's height (40 px) on a phone too. */}
+              <span className="flex flex-wrap items-center justify-center gap-2">
+                {!tn && (
+                  <Button size="sm" className="min-h-10" loading={quickPlay.busy} disabled={!!s?.maintenance?.active} onClick={() => quickPlay.run(quick?.filters ?? ANY, [...new Set([...(quick?.tried ?? []), id])])} data-testid="quick-another">
+                    {t('quick.another')}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="min-h-10"
+                  onClick={() => {
+                    setQuickMissed(false);
+                    setLeftHere(false);
+                  }}
+                  data-testid="stay-here"
+                >
                   {s?.table.allowSpectators === false ? t('quick.stayHere') : t('quick.stay')}
                 </Button>
+                {leftHere && (
+                  <Link to={lobbyHref()} className="jc-tap inline-flex min-h-10 items-center rounded-lg px-2 text-xs font-semibold text-gold-300 underline underline-offset-2" data-testid="left-lobby">
+                    {t('nav.lobby')}
+                  </Link>
+                )}
               </span>
             </div>
           )}
@@ -550,7 +670,6 @@ export function TablePage() {
                 onShow={onShow}
                 showOnCards={short}
                 reactions={reactions}
-                react={seated && reactOn ? reactSender : undefined}
                 nextIn={nextIn}
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}
@@ -569,9 +688,9 @@ export function TablePage() {
             className={cx(
               'group/stack pointer-events-none absolute z-40 flex flex-col',
               // Short: a column of one width at the right edge, every line as wide as it, scrolled rather than cut if a
-              // beginner's notes make it taller than the screen.
+              // beginner's notes make it taller than the screen. Closer lines with the raise panel open (ActionBar).
               short
-                ? 'inset-y-0 right-0 w-[calc(12.5rem+max(0.5rem,env(safe-area-inset-right)))] items-stretch justify-end-safe gap-1.5 overflow-y-auto pb-[max(0.375rem,env(safe-area-inset-bottom))] pl-2 pr-[max(0.5rem,env(safe-area-inset-right))] pt-1 *:w-full! *:max-w-none!'
+                ? 'inset-y-0 right-0 w-[calc(12.5rem+max(0.5rem,env(safe-area-inset-right)))] items-stretch justify-end-safe gap-1.5 has-[[data-raise-open]]:gap-1 overflow-y-auto pb-[max(0.375rem,env(safe-area-inset-bottom))] scroll-pb-[max(0.375rem,env(safe-area-inset-bottom))] pl-2 pr-[max(0.5rem,env(safe-area-inset-right))] pt-1 *:w-full! *:max-w-none!'
                 : 'inset-x-0 bottom-0 items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6',
             )}
             data-testid="table-stack"
@@ -647,10 +766,29 @@ export function TablePage() {
                 <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={short} />
               </>
             )}
-            {s && !myTurn && seated && <PreActions s={s} onPick={sock.preAct} column={short} />}
+            {/* Leaving, my next turn is a fold (the room plays it whatever was picked), so nothing is offered for it. */}
+            {s && !myTurn && seated && !s.you.leaving && <PreActions s={s} onPick={sock.preAct} column={short} />}
+            {/* A line of its own right above its button, the table making room while it is open: it covers nothing. */}
+            {s && reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={short} />}
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
-                {s.you.leaving && <span className="text-gold-300">{t('table.leavingAfterHand')}</span>}
+                {s.you.leaving && (
+                  // Still seated, leaving: still in the hand (folded at my turn), all in (once it is settled), or my
+                  // stack's way back to the wallet failed and the room tries again.
+                  <span className="text-gold-300" data-testid="leaving-note">
+                    {t(
+                      liveHand
+                        ? myState === 'active'
+                          ? 'table.leavingAtTurn'
+                          : myState === 'allin'
+                            ? 'table.leavingAllIn'
+                            : 'table.leavingRetry'
+                        : hand
+                          ? 'table.leavingAfterHand'
+                          : 'table.leavingRetry',
+                    )}
+                  </span>
+                )}
                 {!seated && (
                   <span className="text-ink-300" data-testid="viewer-status">
                     {s.you.inWaitlist && me && s.waitlist.includes(me.nickname)
@@ -662,7 +800,7 @@ export function TablePage() {
                   </span>
                 )}
                 {!seated && s.reservation && <span className="text-gold-300">{t('table.reserved', { name: s.reservation.nickname })}</span>}
-                {!tn && !seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && s.seats.every((x) => x.state !== 'empty') && (
+                {!tn && !seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && !s.seats.some(isFree) && (
                   <Button size="sm" variant="outline" onClick={() => sock.send({ t: 'waitlist', join: !s.you.inWaitlist })}>
                     {s.you.inWaitlist ? t('table.leaveWaitlist') : t('table.joinWaitlist')} ({s.waitlist.length})
                   </Button>
@@ -676,7 +814,16 @@ export function TablePage() {
                   </>
                 )}
                 {seated && tn && s.you.sittingOut && <span className="max-w-xs text-xs text-gold-300" data-testid="tn-away">{t('tn.awayHint')}</span>}
-                {seated && !tn && <span className={cx('font-mono text-xs text-ink-300')}>{t('common.balance')} {formatChips(me?.balance ?? 0)}</span>}
+                {seated && !tn && (
+                  // The wallet, not the stack at the table (that is on my seat): one line, shortened on a phone, whole in its
+                  // title and for a screen reader.
+                  <span className="whitespace-nowrap text-xs text-ink-300" title={t('table.walletTitle', { amount: formatChips(me?.balance ?? 0) })} data-testid="wallet">
+                    <span className="sr-only">{t('table.walletTitle', { amount: formatChips(me?.balance ?? 0) })}</span>
+                    <span aria-hidden>
+                      {t('table.walletShort')} <span className="font-mono text-ink-200">{formatChips(me?.balance ?? 0, short || room.narrow)}</span>
+                    </span>
+                  </span>
+                )}
                 {seated && !tn && s.you.topUpQueued !== null && (
                   <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
                     {t('topup.queued', { amount: amt.exact(s.you.topUpQueued) })}
@@ -694,6 +841,12 @@ export function TablePage() {
                   <Button size="sm" variant="outline" onClick={() => setTopUpOpen(true)} data-testid="topup-open">
                     {t('topup.open')}
                   </Button>
+                )}
+                {/* A finger's size, reaching into the line's padding so the line is no taller for it. */}
+                {seated && reactOn && (
+                  <span className="-my-1.5 flex">
+                    <ReactionButton tray={reactTray} />
+                  </span>
                 )}
               </div>
             )}

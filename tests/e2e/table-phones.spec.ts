@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, sitWith, test, widerThanDevice } from './helpers';
+import { checkOrCall, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 import type { LayoutIssue } from './replay-layout';
 import { measureTable, smallTargets, tablePlaces, type TableReport } from './table-layout';
 
@@ -121,7 +121,7 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
         if (/^(name-\d+|status-\d+-\d+)$/.test(x.item)) return true;
         const back = /^card-(\d+)-\d+$/.exec(x.item);
         if (back) return back[1] !== mine;
-        if (x.item === `bet-${mine}`) return by(x).every((b) => b.startsWith(`seat-${mine}>`) || b.startsWith(`card-${mine}-`) || b.startsWith('react-open'));
+        if (x.item === `bet-${mine}`) return by(x).every((b) => b.startsWith(`seat-${mine}>`) || b.startsWith(`card-${mine}-`));
         return /^stack-\d+$/.test(x.item) && by(x).every((b) => b === 'pot' || b.startsWith('pot>'));
       }
       if (x.kind !== 'overlap') return false;
@@ -146,5 +146,5 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
   // Back at the table to stand up, so the seat is free for the next run.
   await page.goto('/table/e2e-phones');
   await expect(page.locator('[data-testid=table] [data-testid^="seat-"][data-state]')).toHaveCount(6);
-  await page.getByTestId('leave').click();
+  await standUp(page);
 });
