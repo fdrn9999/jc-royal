@@ -282,9 +282,15 @@ describe('table bots', () => {
     await ws.waitState(empty, 90_000, 'the table to empty');
     await stop();
     expect(Math.max(...states(ws).map((s) => botSeats(s).length))).toBe(3);
+    // The limit sends exactly the two latest away, and the last bot leaves with the member. The cards may also break a
+    // bot: easy bots play each other for whole stacks at times (about one hand in 140 in an engine simulation of this
+    // table), and one that loses its chips stands up 'busted' and another sits down in its place.
     const left = await events(T, 'leave');
-    expect(left.map((e) => e.code).sort()).toEqual(['limit', 'limit', 'no_members']);
-    expect((await events(T, 'join')).length).toBe(3);
+    expect(left.map((e) => e.code).filter((c) => c !== 'busted').sort()).toEqual(['limit', 'limit', 'no_members']);
+    // Each bot that sat down stood up once.
+    const joined = await events(T, 'join');
+    expect(joined.map((e) => e.bot_id).sort()).toEqual(left.map((e) => e.bot_id).sort());
+    expect(joined.length).toBe(3 + left.filter((e) => e.code === 'busted').length);
     await balanced(T, [m.me.id], before);
   }, 300_000);
 
@@ -613,7 +619,9 @@ describe('table bots', () => {
     expect(joins.items.every((e) => e.kind === 'join')).toBe(true);
     expect(joins.hasMore).toBe(true);
     const atTable = (await admin.get('/api/admin/bots/events?table=it-bot-six')).body as { items: { tableId: string; kind: string }[] };
-    expect(atTable.items.length).toBe(6);
+    // All of that table's log: three joins and three leaves, and a leave and a join more for each bot that lost its chips.
+    expect(atTable.items.length).toBe((await events('it-bot-six')).length);
+    expect(atTable.items.length).toBeGreaterThanOrEqual(6);
     expect(atTable.items.every((e) => e.tableId === 'it-bot-six')).toBe(true);
     expect((await admin.get('/api/admin/bots/events?kind=nope')).status).toBe(400);
     const overview = (await admin.get('/api/admin/bots?days=7')).body;
