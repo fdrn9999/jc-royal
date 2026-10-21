@@ -34,7 +34,8 @@ writeFileSync(
    ('e2e-role', 'E2E Role', 6, 5, 10, 100, 1000, 60), ('e2e-bb', 'E2E Big Blinds', 2, 10, 20, 200, 2000, 60),
   ('e2e-react', 'E2E Reactions', 6, 5, 10, 100, 1000, 60), ('e2e-refill', 'E2E Refill', 2, 5, 10, 100, 1000, 60), ('e2e-tb', 'E2E Time bank', 2, 5, 10, 100, 1000, 60);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, allow_spectators) VALUES
-   ('e2e-lobby-full', 'E2E Lobby Hidden', 2, 3, 6, 60, 600, 30, 0), ('e2e-lobby-fav', 'E2E Lobby Fav', 6, 3, 6, 60, 600, 30, 1), ('e2e-lobby-m', 'E2E Lobby Mobile', 2, 3, 6, 60, 600, 30, 0);
+   ('e2e-lobby-full', 'E2E Lobby Hidden', 2, 3, 6, 60, 600, 30, 0), ('e2e-lobby-fav', 'E2E Lobby Fav', 6, 3, 6, 60, 600, 30, 1), ('e2e-lobby-m', 'E2E Lobby Mobile', 2, 3, 6, 60, 600, 30, 0),
+   ('e2e-lobby-long', 'E2E 이름이 아주 긴 테이블은 휴대폰 로비에서 말줄임표로 끝납니다', 2, 3, 6, 60, 600, 30, 1);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash, allow_spectators) VALUES
    ('e2e-secret', 'E2E Secret', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-secret:secret-77').digest('base64url')}', 1),
    ('e2e-vault', 'E2E Vault', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-vault:vault-88').digest('base64url')}', 0);
