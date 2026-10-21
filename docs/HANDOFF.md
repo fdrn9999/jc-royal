@@ -43,16 +43,22 @@
 - **접속 상태·웹 푸시·알림 설정·색각 보조 브랜치 `feat/presence-push-a11y`(main에 병합: PR #13, `d817311`. 그 main CI는 실패했고, 뒤이은 PR #14 `fix/settings-e2e-pref-count`(`cf76b7f`)의 main CI 39222736280이 성공해 운영에 배포됨, GitHub Actions 기록으로만 확인)**:
   - main(`810eb14`)에서 갈라졌다. 마이그레이션 `0029_presence_push`·`0030_push_sent_idx`(인덱스 하나)와 game-worker의 DO 마이그레이션 `v2`(`PresenceHub`, 메모리만)를 더한다. 배포 순서는 마이그레이션 → game-worker → api(web 포함) → admin(`docs/DEPLOYMENT.md` 3절).
   - 친구에게만 보이는 온라인·자리 비움·오프라인, 계정의 표시 모드, DM·초대·친구 요청·수락·대회 시작·취소·결과의 웹 푸시(계정 동의·야간 동의·기기 권한 분리, 야간 21:00–08:00 KST 서버 판단), 발송 큐, 색각 모드 다섯 가지. 테이블 채팅 푸시는 만들지 않았다. 설계와 결정은 `docs/PRESENCE.md`.
-  - **운영 VAPID 키를 넣지 않았다**. 키가 없으면 운영에서 푸시는 꺼져 있다(설정 저장은 됨). 키 등록은 오너가 직접 한다(`docs/DEPLOYMENT.md` 2절, `node tools/vapid-keys.mjs`).
+  - **운영 VAPID 키는 2026-10-21에 오너의 요청으로 넣었다**(`node tools/vapid-keys.mjs`로 한 쌍을 만들어 운영 API Worker `play`의 시크릿 `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`에 등록, `wrangler secret list`로 확인. 개인 키는 파일·로그에 남기지 않았다). 그 전까지 운영에서 푸시는 꺼져 있었다. 실기기에서 받기·누르기·배지는 아직 확인하지 않았다. 키를 바꾸는 절차와 영향은 `docs/DEPLOYMENT.md` 2절.
   - 검증과 한계는 `docs/TEST_REPORT.md` '접속 상태·웹 푸시·알림 설정·색각 보조'와 `docs/STATUS.md` 45번에 있다. 실기기(푸시 수신·클릭·배지), 실제 색각 이상 사용자, 운영 환경에서는 확인하지 않았다. 야간 기준과 동의 문구는 법무 검토 전이다.
 - **그 뒤 병합된 PR과 main 배포**(GitHub Actions 기록으로만 확인, 운영 화면·D1·로그는 보지 않음):
   - PR #15 `feat/game-ux-vip-gto`(`aaa59ab`): main CI가 실패했고, PR #16 `fix/e2e-after-pr15`(`b0f5d15`)의 main CI 39277263962가 성공해 배포됐다(`docs/STATUS.md` 46번).
   - PR #17 `feat/bot-ai-2`(`3c4ef90`): main CI 39350714707이 성공해 배포됐다(`docs/STATUS.md` 47번).
   - PR #18 `feat/quality-replay`(`677a487`): main CI의 E2E가 실패했고, PR #19 `fix/e2e-after-pr18`(`ee379c0`)의 main CI 39462692675가 성공해 배포됐다(`docs/STATUS.md` 48번).
-- **베팅 라인 이미지·마지막 접속·자동 리바이/스택 보충 브랜치 `feat/betline-rebuy`(배포 안 함, PR로 검토)**:
+- **베팅 라인 이미지·마지막 접속·자동 리바이/스택 보충 브랜치 `feat/betline-rebuy`(main에 병합: PR #20, `f5ee1ec`. 그 main CI와 PR #21 `fix/e2e-after-pr20`(`bb16adf`)의 main CI는 실패했고, PR #22 `fix/bots-test-bust`(`e985f1e`)의 main CI 39532997483이 성공해 마이그레이션 0033과 함께 배포됨, GitHub Actions 기록으로만 확인)**:
   - main(`677a487`)에서 갈라졌고 `ee379c0`를 병합했다. 마이그레이션 `0033_presence_last_online`(`users.last_online_at` 열 하나)을 더한다. 배포 순서는 마이그레이션 → game-worker → api(web 포함) → admin(`docs/DEPLOYMENT.md` 3절, 이전 버전과 섞인 동안의 동작도 거기에).
   - 공유 이미지의 기본 템플릿이 베팅 라인(스트리트별 액션·금액·보드, 결과는 보조)이 됐다. 친구가 오프라인일 때 마지막 접속 시각('N분 전 접속')을 보인다(`docs/PRESENCE.md` '마지막 접속 시각'). 첫 바이인 창에서 자동 칩 정책(사용 안 함·자동 리바이·자동 스택 보충) 하나를 고른다. 기존 수동 칩 추가의 원장 경로와 멱등 키 방식을 그대로 쓴다.
   - 검증과 한계는 `docs/TEST_REPORT.md` '베팅 라인 이미지·마지막 접속·자동 리바이/스택 보충'과 `docs/STATUS.md` 49번에 있다. 휴대폰은 에뮬레이션에서만, 운영 환경과 실기기에서는 확인하지 않았다. 개인정보 처리방침 버전(`PRIVACY_NOTICE_VERSION`)을 올릴지는 운영 전에 정해야 한다.
+- **그 뒤 병합된 PR과 main 배포**(GitHub Actions 기록으로만 확인, 운영 화면·D1·로그는 보지 않음):
+  - PR #23 `feat/perf-reveal`(`7f47deb`, `docs/STATUS.md` 51번): main CI가 E2E(언어 선택의 이름이 둘)로 실패했고, PR #24 `fix/lang-toggle-label`(`105b735`)의 main CI는 리플레이 E2E 하나로 실패했다. PR #25 `fix/replay-capture-settle`(`bd98776`)의 main CI 39590814896이 성공해 배포됐다.
+- **폴드 후 바로 일어서기·지갑/반응 겹침 브랜치 `feat/fold-leave`(배포 안 함, PR로 검토)**:
+  - main(`7f47deb`)에서 갈라졌고 `bd98776`을 병합한다. 마이그레이션은 없다. game-worker·api(web 포함)·admin을 모두 바꾸므로 배포 순서는 기존과 같다(`docs/DEPLOYMENT.md` 3절). 이전 버전의 화면은 `held` 좌석을 모르고 빈 자리로 보인다(앉기는 서버가 `seat_taken`으로 막는다).
+  - 폴드한 회원은 핸드 중이라도 바로 일어나 남은 스택을 지갑으로 받는다. 차례가 아니면 차례가 올 때 룸이 폴드하고 그 직후 일어나며, 올인은 정산 뒤 일어난다. 반응 버튼은 내 좌석 판에서 테이블 아래 상태 줄로 옮겼다. 보드를 펠트 가운데에 맞췄고, 브라우저 글자 125%에서 좌석이 커지던 것을 고쳤다.
+  - 검증과 한계는 `docs/TEST_REPORT.md` '폴드 후 바로 일어서기·지갑/반응 겹침'과 `docs/STATUS.md` 52번에 있다. 휴대폰은 Chrome 에뮬레이션에서만 쟀고 실기기·운영에서는 확인하지 않았다.
 
 ## 꼭 알아야 할 결정 사항
 
