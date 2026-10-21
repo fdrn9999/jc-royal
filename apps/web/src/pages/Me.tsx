@@ -17,6 +17,7 @@ import { RefillCard } from '../components/Refill';
 import { ReportModal, type ReportSubject } from '../components/Social';
 import { HandReplay } from '../game/HandReplay';
 import { oddsRatio, potOddsFor } from '../game/potOdds';
+import { spokenAmounts } from '../game/replay';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAmounts } from '../lib/amount';
@@ -55,6 +56,13 @@ function Failed({ x }: { x: { data: unknown; error: boolean; reload: () => Promi
 
 function signed(n: number) {
   return `${n > 0 ? '+' : ''}${formatChips(n)}`;
+}
+
+/** A top-up the room made on its own (room.ts autoDebit): its memo, written by the room and never by a player, says which. */
+const AUTO_TOP_UP: Record<string, MsgKey> = { 'auto rebuy': 'ledger.autoRebuy', 'auto top-up': 'ledger.autoTopUp' };
+
+function ledgerLabel(l: LedgerEntryDto): MsgKey {
+  return (l.type === 'top_up' && l.memo && AUTO_TOP_UP[l.memo]) || (`ledger.${l.type}` as MsgKey);
 }
 
 export function MePage() {
@@ -235,7 +243,7 @@ export function MePage() {
             {ledger.data?.map((l) => (
               <li key={l.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                 <div>
-                  <Badge tone={l.amount >= 0 ? 'green' : 'neutral'}>{t(`ledger.${l.type}` as MsgKey)}</Badge>
+                  <Badge tone={l.amount >= 0 ? 'green' : 'neutral'}>{t(ledgerLabel(l))}</Badge>
                   <div className="mt-1 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</div>
                 </div>
                 <div className="text-right">
@@ -377,6 +385,7 @@ export function HandDetailPage() {
   const name = (seat: number) => data.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const links = lessonLinksFor(data);
   const odds = potOddsFor(data);
+  const said = spokenAmounts(data.actions);
   const actionText = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   return (
     <div className="flex flex-col gap-6">
@@ -457,7 +466,7 @@ export function HandDetailPage() {
                   <span className="w-16 shrink-0 text-xs uppercase text-ink-400">{t(`stage.${a.stage}` as MsgKey)}</span>
                   <span className="min-w-0 flex-1 truncate" title={name(a.seatIndex)}>{name(a.seatIndex)}</span>
                   <span className="shrink-0 whitespace-nowrap text-ink-200">{actionText(a.type)}</span>
-                  <span className="w-20 shrink-0 text-right font-mono text-gold-300">{a.amount > 0 ? amt.fmt(a.amount) : ''}</span>
+                  <span className="w-20 shrink-0 text-right font-mono text-gold-300">{said[i]! > 0 ? amt.fmt(said[i]!) : ''}</span>
                   {o && (
                     <span className="basis-full pb-1 pl-[4.5rem] text-xs text-ink-300" data-testid="pot-odds">
                       {t('odds.line', { pot: amt.fmt(o.pot), call: amt.fmt(o.toCall), ratio: oddsRatio(o), need: o.need })}
@@ -467,6 +476,9 @@ export function HandDetailPage() {
               );
             })}
           </ol>
+          <p className="mt-3 text-xs text-ink-400" data-testid="amount-note">
+            {t('shareImg.legend')}
+          </p>
           {odds.size > 0 && (
             <p className="mt-3 text-xs text-ink-400" data-testid="pot-odds-note">
               {t('odds.note')}

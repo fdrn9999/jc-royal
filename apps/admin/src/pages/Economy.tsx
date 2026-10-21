@@ -27,9 +27,18 @@ interface Economy {
   issued: { signup: number; admin: number; reconcile: number; refill: number; bots?: number; referral?: number; total: number };
   ledger: { total: number; byType: Record<LedgerType, Flow> };
   gap: number;
-  period: { counts: Record<LedgerType | 'auto_rebuy', Flow>; moved: number; series: { date: string; n: number; moved: number; in: number; out: number }[] };
+  period: { counts: Record<LedgerType | 'auto_rebuy', Flow> & { auto_topup?: Flow }; moved: number; series: { date: string; n: number; moved: number; in: number; out: number }[] };
   reconciliation: { created: Record<Scope, number>; open: Record<Scope, number>; lastRun: { at: number; mismatches: number | null; created: number | null } | null };
-  failures: { from: number; cashout: number; room: number; api: number; cashoutDays: { date: string; n: number }[]; tables: { id: string; name: string; status: string; issue: string; at: number }[] };
+  failures: {
+    from: number;
+    cashout: number;
+    room: number;
+    api: number;
+    /** Absent from an API older than automatic top-ups. */
+    autoBuy?: { stop: number; dup: number; invalid: number };
+    cashoutDays: { date: string; n: number }[];
+    tables: { id: string; name: string; status: string; issue: string; at: number }[];
+  };
   anomalies: {
     rapidGrants: { userId: string; nickname: string | null; count: number; sum: number; from: number; to: number; actors: (string | null)[] }[];
     largeAdjustments: AdminRow[];
@@ -43,13 +52,14 @@ interface Economy {
 const PERIODS = [7, 30, 90] as const;
 const HOUR = 3_600_000;
 const signed = (n: number) => `${n > 0 ? '+' : ''}${formatChips(n)}`;
-/** Period rows: automatic rebuys are top-ups the server made, counted apart from the ones players asked for. */
-const FLOWS: [LedgerType | 'auto_rebuy', Key][] = [
+/** Period rows: automatic rebuys and top-ups are top-ups the server made, counted apart from the ones players asked for. */
+const FLOWS: [LedgerType | 'auto_rebuy' | 'auto_topup', Key][] = [
   ['signup_grant', 'ledgerSignupGrant'],
   ['free_refill', 'ledgerFreeRefill'],
   ['buy_in', 'ledgerBuyIn'],
   ['top_up', 'econTopUpManual'],
   ['auto_rebuy', 'memoAutoRebuy'],
+  ['auto_topup', 'memoAutoTopUp'],
   ['cash_out', 'ledgerCashOut'],
   ['admin_adjust', 'ledgerAdminAdjust'],
   ['reconcile', 'ledgerReconcile'],
@@ -131,7 +141,7 @@ export function EconomyPage() {
           <div data-testid="economy-flows">
             <Table head={[t('colKind'), t('econCount'), t('econIn'), t('econOut'), t('econNet')]}>
               {FLOWS.map(([k, label]) => {
-                const f = d.period.counts[k];
+                const f = d.period.counts[k] ?? { n: 0, sum: 0, plus: 0, minus: 0 };
                 return (
                   <tr key={k} data-flow={k}>
                     <td className={td}>{t(label)}</td>
@@ -190,6 +200,13 @@ export function EconomyPage() {
             <Stat label={t('econRoomError')} value={formatChips(d.failures.room)} />
             <Stat label={t('econApiError')} value={formatChips(d.failures.api)} />
           </div>
+          {d.failures.autoBuy && (
+            <div className="grid grid-cols-3 gap-3" data-testid="economy-autobuy">
+              <Stat label={t('econAutoBuyStop')} value={formatChips(d.failures.autoBuy.stop)} />
+              <Stat label={t('econAutoBuyDup')} value={formatChips(d.failures.autoBuy.dup)} />
+              <Stat label={t('econAutoBuyInvalid')} value={formatChips(d.failures.autoBuy.invalid)} />
+            </div>
+          )}
           {d.failures.cashoutDays.length > 0 && (
             <p className="text-xs text-ink-300">{d.failures.cashoutDays.map((x) => t('econFailDay', { date: x.date, n: x.n })).join(' · ')}</p>
           )}

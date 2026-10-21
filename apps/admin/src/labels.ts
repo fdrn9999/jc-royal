@@ -34,6 +34,7 @@ const SYSTEM_MEMOS: Record<string, Key> = {
   'welcome chips': 'memoWelcome',
   'top-up': 'memoTopUp',
   'auto rebuy': 'memoAutoRebuy',
+  'auto top-up': 'memoAutoTopUp',
   'recorded difference': 'memoRecorded',
   'balance corrected': 'memoCorrected',
   'free refill': 'memoFreeRefill',

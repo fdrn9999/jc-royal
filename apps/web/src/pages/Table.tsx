@@ -1,11 +1,12 @@
 import { sound } from '@jc/audio';
-import type { ActionType, PublicUserDto, SeatView, TableView } from '@jc/types';
+import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView } from '@jc/types';
 import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
+import { seatPolicy } from '../game/autoBuy';
 import { JoinCodeModal } from '../components/JoinCode';
 import { LinkShare } from '../components/Share';
 import { parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
@@ -309,12 +310,12 @@ export function TablePage() {
     updateProgress(me.id, (p) => (coachActive(p, true) ? { ...p, coach: { ...p.coach, hands: p.coach.hands + 1 } } : p));
   }, [me, hand, s]);
 
-  async function sit(amount: number) {
+  async function sit(amount: number, autoBuy?: AutoBuyRequest) {
     if (buySeat === null) return;
     setBuyBusy(true);
     setBuyErr(null);
     try {
-      await sock.request({ t: 'sit', seatIndex: buySeat, buyIn: amount });
+      await sock.request(autoBuy ? { t: 'sit', seatIndex: buySeat, buyIn: amount, autoBuy } : { t: 'sit', seatIndex: buySeat, buyIn: amount });
       setBuySeat(null);
       setQuickMissed(false);
       void refresh();
@@ -379,6 +380,7 @@ export function TablePage() {
   // A tournament table: no wallet chips here (no buy-in, top-up, rebuy or waiting list), and its seat is not given up
   // by leaving the screen; the way out goes to the tournament's page.
   const tn = s?.tournament ?? null;
+  const autoPolicy = s ? seatPolicy(s.you) : null;
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 
@@ -665,9 +667,9 @@ export function TablePage() {
                     </button>
                   </span>
                 )}
-                {seated && !tn && s.you.autoRebuy && (
-                  <span className="rounded-full border border-white/10 px-2.5 py-0.5 font-mono text-xs text-ink-200" data-testid="rebuy-badge">
-                    {t('rebuy.badge', { spent: amt.fmt(s.you.autoRebuy.spent), cap: amt.fmt(s.you.autoRebuy.cap) })}
+                {seated && !tn && autoPolicy && (
+                  <span className="rounded-full border border-white/10 px-2.5 py-0.5 font-mono text-xs text-ink-200" data-testid={autoPolicy.mode === 'rebuy' ? 'rebuy-badge' : 'autotop-badge'}>
+                    {t(autoPolicy.mode === 'rebuy' ? 'rebuy.badge' : 'autotop.badge', { spent: amt.fmt(autoPolicy.spent), cap: amt.fmt(autoPolicy.cap) })}
                   </span>
                 )}
                 {seated && !tn && !s.you.leaving && (

@@ -1,6 +1,6 @@
 import type { HandPotDto } from '@jc/types';
 import { describe, expect, it } from 'vitest';
-import { replayLog, replaySettlement, type SettlementRow } from './community';
+import { replayBlinds, replayLog, replayPlayer, replaySettlement, type SettlementRow } from './community';
 
 const pot = (amount: number, eligibleSeats: number[], winners: [seat: number, amount: number][], uncalled = false): HandPotDto => ({
   amount,
@@ -83,10 +83,83 @@ describe('replayLog', () => {
     expect(replayLog(log, [row(0, 450, 200), row(1, 0), row(2, 0)])).toEqual({
       actions: [{ seatIndex: 0, stage: 'preflop', type: 'raise', amount: 300 }],
       buttonSeat: 0,
+      smallBlind: null,
+      bigBlind: null,
       pots: [pot(250, [0], [[0, 250]]), pot(200, [0], [[0, 200]], true)],
       returned: { seatIndex: 0, amount: 200 },
     });
     // A log from before the button and pots were stored.
-    expect(replayLog(JSON.stringify({ actions: [] }), [row(0, 450, 200), row(1, 0)])).toEqual({ actions: [], buttonSeat: null, pots: null, returned: { seatIndex: 0, amount: 200 } });
+    expect(replayLog(JSON.stringify({ actions: [] }), [row(0, 450, 200), row(1, 0)])).toEqual({
+      actions: [],
+      buttonSeat: null,
+      smallBlind: null,
+      bigBlind: null,
+      pots: null,
+      returned: { seatIndex: 0, amount: 200 },
+    });
+  });
+
+  it('gives the blinds the hand was dealt at, stored with it', () => {
+    const log = JSON.stringify({ actions: [], button: 0, blinds: { sb: 200, bb: 400 }, pots: null, engine: 'x' });
+    expect(replayLog(log, [row(0, 0), row(1, 0)])).toMatchObject({ smallBlind: 200, bigBlind: 400 });
+  });
+});
+
+describe('replayPlayer', () => {
+  const hp = (o: { userId: string; wentToShowdown: boolean; shown: boolean | null }) => ({
+    handId: 'h',
+    seatIndex: 1,
+    holeCards: '["Ah","Kd"]',
+    stackStart: 1000,
+    stackEnd: 0,
+    net: -1000,
+    won: 0,
+    rankClass: 'pair',
+    rankValue: 1,
+    bestFive: '["Ah","Ad","Kd","9c","7s"]',
+    endedAt: 1,
+    position: null,
+    vpip: null,
+    pfr: null,
+    sawFlop: null,
+    potWon: null,
+    ...o,
+  });
+  const user = { nickname: 'x', role: 'user', status: 'active', isBot: false, vipColor: null };
+
+  it('says a hand went in face down at the showdown, never what it held, to everyone but its player', () => {
+    const other = replayPlayer(hp({ userId: 'u1', wentToShowdown: true, shown: false }), user, 'viewer');
+    expect(other).toMatchObject({ mucked: true, holeCards: null, rankClass: null, bestFive: null });
+    const own = replayPlayer(hp({ userId: 'u1', wentToShowdown: true, shown: false }), user, 'u1');
+    expect(own).toMatchObject({ mucked: true, holeCards: ['Ah', 'Kd'], rankClass: 'pair' });
+  });
+
+  it('flags no hand shown down, folded, or recorded before mucking existed', () => {
+    for (const row of [hp({ userId: 'u1', wentToShowdown: true, shown: true }), hp({ userId: 'u1', wentToShowdown: false, shown: false }), hp({ userId: 'u1', wentToShowdown: true, shown: null })])
+      expect(replayPlayer(row, user, 'viewer')).not.toHaveProperty('mucked');
+  });
+});
+
+describe('replayBlinds', () => {
+  const sb = { seatIndex: 1, type: 'post-sb', amount: 50 };
+  const bb = { seatIndex: 2, type: 'post-bb', amount: 100 };
+
+  it('prefers the stored blinds, and ignores stored values that are no chip counts', () => {
+    expect(replayBlinds({ sb: 25, bb: 50 }, [sb, bb], [])).toEqual({ smallBlind: 25, bigBlind: 50 });
+    expect(replayBlinds({ sb: 0, bb: 50 }, [], [])).toEqual({ smallBlind: null, bigBlind: null });
+    expect(replayBlinds({ sb: '25', bb: 50.5 }, [], [])).toEqual({ smallBlind: null, bigBlind: null });
+  });
+
+  it('reads an older hand blinds off posts made by players who had chips left', () => {
+    const rows = [{ seatIndex: 1, stackStart: 5_000 }, { seatIndex: 2, stackStart: 5_000 }];
+    expect(replayBlinds(null, [sb, bb], rows)).toEqual({ smallBlind: 50, bigBlind: 100 });
+  });
+
+  it('does not guess a blind a short stack posted all in, nor one without a starting stack', () => {
+    // The big blind had 60 and posted all of it: the blind was 60 or more, which is not known.
+    const shortBb = { seatIndex: 2, type: 'post-bb', amount: 60 };
+    expect(replayBlinds(null, [sb, shortBb], [{ seatIndex: 1, stackStart: 5_000 }, { seatIndex: 2, stackStart: 60 }])).toEqual({ smallBlind: 50, bigBlind: null });
+    expect(replayBlinds(undefined, [sb, bb], [{ seatIndex: 1 }])).toEqual({ smallBlind: null, bigBlind: null });
+    expect(replayBlinds(undefined, [], [])).toEqual({ smallBlind: null, bigBlind: null });
   });
 });

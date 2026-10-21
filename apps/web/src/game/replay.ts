@@ -36,6 +36,7 @@ export type ReplayLinePart =
   | { kind: 'act'; seat: number; type: string; amount: number }
   | { kind: 'board'; cards: Card[] }
   | { kind: 'shows'; seat: number; rankClass: string; bestFive: Card[] }
+  | { kind: 'mucks'; seat: number }
   | { kind: 'wins'; seat: number; amount: number };
 
 export interface ReplayStep {
@@ -71,6 +72,24 @@ const BLINDS = new Set(['post-sb', 'post-bb']);
 const FOLDS = new Set(['fold', 'timeout-fold']);
 /** Actions read to their street total ("raises to 300"); the rest by what they put in ("calls 200"). */
 const TO_TOTAL = new Set(['bet', 'raise', 'allin']);
+
+/**
+ * Each action's amount as the replay's line says it: a bet, raise or all-in to its street total, a blind or a call by
+ * what it put in. For a list of the hand's actions beside the replay, so the two never read the same raise two ways.
+ */
+export function spokenAmounts(actions: readonly ReplayAction[]): number[] {
+  const street = new Map<number, number>();
+  let stage: HandStage = 'preflop';
+  return actions.map((a) => {
+    if (STREETS.includes(a.stage as HandStage) && a.stage !== stage) {
+      stage = a.stage as HandStage;
+      street.clear();
+    }
+    const on = (street.get(a.seatIndex) ?? 0) + a.amount;
+    street.set(a.seatIndex, on);
+    return TO_TOTAL.has(a.type) ? on : a.amount;
+  });
+}
 
 /** The action shown on a seat plate: posted blinds show none, a time-out shows what it became. */
 function plateAction(type: string): ActionType | null {
@@ -260,19 +279,25 @@ export function buildReplay(h: ReplayInput, heroSeat: number | null): ReplayStep
     snap('action', [a], [apply(a)], { actor: a.seatIndex });
   }
 
-  // Ranks come only for hands the viewer may see that went to showdown (the API leaves the rest null).
+  // Ranks come only for hands the viewer may see that went to showdown (the API leaves the rest null). A hand mucked
+  // there was not shown, the viewer's own included (they still see its cards, as at the table): it reads as mucked.
   const contenders = h.players.filter((p) => !folded.has(p.seatIndex));
   const showdown: HandResultView['showdown'] =
     contenders.length >= 2
       ? contenders
-          .filter((p) => p.rankClass && p.holeCards)
+          .filter((p) => p.rankClass && p.holeCards && !p.mucked)
           .map((p) => ({ seatIndex: p.seatIndex, cards: p.holeCards as Card[], rankClass: p.rankClass as HandResultView['showdown'][number]['rankClass'], bestFive: (p.bestFive ?? []) as Card[] }))
       : [];
   if (contenders.length >= 2) {
     // Streets dealt with nobody left to act (all in): the rest of the board, one street at a time.
     for (const s of STREETS) if (BOARD_AT[s] <= board.length && STREETS.indexOf(s) > STREETS.indexOf(stage)) dealTo(s);
     stage = 'showdown';
-    const shows = showdown.map((x): ReplayLinePart => ({ kind: 'shows', seat: x.seatIndex, rankClass: x.rankClass, bestFive: x.bestFive }));
+    const shown = new Map(showdown.map((x) => [x.seatIndex, x]));
+    const shows = contenders.flatMap((p): ReplayLinePart[] => {
+      const x = shown.get(p.seatIndex);
+      if (x) return [{ kind: 'shows', seat: x.seatIndex, rankClass: x.rankClass, bestFive: x.bestFive }];
+      return p.mucked ? [{ kind: 'mucks', seat: p.seatIndex }] : [];
+    });
     snap('showdown', [], shows, { reveal: true, result: { winners: [], showdown } });
   }
   stage = 'settled';

@@ -5,9 +5,13 @@ import type { Env } from './room';
 /**
  * Friends' status (docs/PRESENCE.md): which signed-in devices have beaten lately and when the member last did something
  * on each. Kept in memory only, never in D1 or storage: a restarted hub knows nobody until the next beat (at most
- * PRESENCE_HEARTBEAT_MS), which shows friends offline for that long. The api authenticates every call and asks only about
- * a member's own devices or their accepted friends; the hub never decides who may see whom, and knows nothing of modes
- * (auto / away / invisible), which the api applies from D1.
+ * PRESENCE_HEARTBEAT_MS), which shows friends offline for that long. The one thing that outlives it is each member's
+ * last-online time, which the hub asks the api to save (`stampAgo`, at most every PRESENCE_STAMP_MS while online, and as
+ * a device closes) and the api keeps in users.last_online_at. Its times reach the api only as how long ago (on its clock
+ * alone), never as moments, so the two servers' clocks are never compared. The api authenticates every call and asks
+ * only about a member's own devices or their accepted friends; the hub never decides who may see whom, and knows
+ * nothing of modes (auto / away / invisible), which the api applies from D1: it only hears whether friends can see the
+ * member (`mark`).
  */
 
 export { HUB_BEATS_PER_MIN, HUB_QUERIES_PER_MIN, HUB_QUERY_MAX, PresenceBook } from './presence-book';
@@ -37,8 +41,8 @@ export class PresenceHub extends DurableObject<Env> {
       case '/beat': {
         const b = parseBeat(body);
         if (!b) return bad();
-        const state = this.book.beat(now, b);
-        return Response.json(state ? { ok: true, state } : { ok: false, limited: true });
+        const seen = this.book.beat(now, b);
+        return Response.json(seen ? { ok: true, ...seen } : { ok: false, limited: true });
       }
       case '/leave': {
         const at = time(body.at);
@@ -55,13 +59,15 @@ export class PresenceHub extends DurableObject<Env> {
           if (!id(body.except)) return bad();
           l.except = body.except;
         }
-        this.book.leave(now, l);
-        return Response.json({ ok: true });
+        return Response.json({ ok: true, ...this.book.leave(now, l) });
       }
       case '/query': {
         if (!id(body.asker) || !Array.isArray(body.ids) || body.ids.length > HUB_QUERY_MAX || !body.ids.every(id)) return bad();
         const presence = this.book.query(now, body.asker, body.ids as string[]);
-        return Response.json(presence ? { ok: true, presence } : { ok: false, limited: true });
+        // `seen: true` asks for the last-online times too (the friends list; a member's own status never needs them).
+        return Response.json(
+          presence ? { ok: true, presence, ...(body.seen === true ? { seenAgo: this.book.seenAgo(now, body.ids as string[]) } : {}) } : { ok: false, limited: true },
+        );
       }
       case '/viewing': {
         if (!id(body.user) || typeof body.view !== 'string' || !VIEW_RE.test(body.view)) return bad();

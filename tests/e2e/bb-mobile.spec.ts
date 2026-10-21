@@ -133,8 +133,9 @@ test('mobile: with big blinds chosen, the table, the buy-in and the replay read 
   await a.page.goto(`/me/hands/${handId}`);
   await expect(a.page.getByTestId('hand-replay')).toBeVisible();
   await expect(a.page.getByTestId('replay-pot')).toHaveText(/ BB$/);
-  // The action list, and the step where the raise is in front of the seat.
-  await expect(a.page.locator('ol li').filter({ hasText: /레이즈|Raise|벳|Bet/ })).toHaveText([/ BB$/]);
+  // The action list reads the raise as the replay's line does, to the street total it reached; then the step where the
+  // raise is in front of the seat.
+  await expect(a.page.locator('ol li').filter({ hasText: /레이즈|Raise|벳|Bet/ })).toHaveText([/[^\d.]2\.5 BB$/]);
   const bet = a.page.getByTestId('hand-replay').getByTestId(`bet-${seatA}`);
   for (let k = 0; k < 30 && (await bet.textContent().catch(() => null)) !== '2.5 BB'; k++) await a.page.getByTestId('replay-next').tap();
   await expect(bet).toHaveText('2.5 BB');

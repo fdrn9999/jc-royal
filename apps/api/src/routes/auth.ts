@@ -378,7 +378,7 @@ export const authRoutes = new Hono<AppEnv>()
       db
         .update(schema.users)
         // A VIP name color goes too (the audit log keeps who gave it).
-        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, lastLoginAt: null, vipColor: null, updatedAt: Date.now() })
+        .set({ status: 'deleted', email: `${tomb}@deleted.invalid`, nickname: tomb.slice(0, 24), avatarUrl: null, passwordHash: 'disabled', birthDate: null, lastLoginAt: null, lastOnlineAt: null, vipColor: null, updatedAt: Date.now() })
         .where(eq(schema.users.id, me.id)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, me.id)),
       // Friends, pending requests and blocks (made by or against the account) go with it.

@@ -3,7 +3,10 @@ import type { PublicRole } from './social';
 import type { VipColor } from './vip';
 import type { TableCue, TableView } from './table';
 
-/** An automatic rebuy's total limit may cover at most this many rebuys of the chosen amount. */
+/**
+ * An automatic rebuy's total limit may cover at most this many rebuys of the chosen amount; an automatic top-up's, this
+ * many times its target stack.
+ */
 export const AUTO_REBUY_MAX_TIMES = 5;
 
 /** Quick reactions a seated player can send: shown for a moment over their avatar, never stored, no effect on play. */
@@ -43,6 +46,28 @@ export function reactionWait(times: readonly number[], now: number, rules: React
  * once, so a command whose answer a lost connection swallowed can be sent again unchanged.
  */
 const ReqId = z.string().min(8).max(64);
+const Chips = z.number().int().positive();
+
+/**
+ * The automatic chip policy a seated player asks for (one at a time, see AutoBuyPolicy): off; a rebuy of `amount` after
+ * busting; or, after a hand that left the stack below `trigger` (the target when absent), a top-up back to `target`
+ * (with `partial`, as much of it as the wallet holds). Turning one on needs the player's `consent` and a total limit
+ * (`cap`) on what it may take from the wallet at this seat.
+ */
+export const AutoBuyRequestSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('off') }),
+  z.object({ mode: z.literal('rebuy'), amount: Chips, cap: Chips, consent: z.literal(true) }),
+  z.object({ mode: z.literal('topup'), target: Chips, trigger: Chips.optional(), partial: z.boolean().optional(), cap: Chips, consent: z.literal(true) }),
+]);
+export type AutoBuyRequest = z.infer<typeof AutoBuyRequestSchema>;
+
+/**
+ * A seat's automatic chip policy as the room holds it (never both: one replaces the other). `spent` is what it has taken
+ * from the wallet at this seat so far, against `cap`; it lasts while the player keeps the seat.
+ */
+export type AutoBuyPolicy =
+  | { mode: 'rebuy'; amount: number; cap: number; spent: number }
+  | { mode: 'topup'; target: number; trigger: number; partial: boolean; cap: number; spent: number };
 
 /** Client → server WebSocket messages. Validated at runtime by the game worker. */
 export const ClientMessageSchema = z.discriminatedUnion('t', [
@@ -52,12 +77,17 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
     reqId: ReqId,
     seatIndex: z.number().int().min(0).max(8),
     buyIn: z.number().int().positive(),
+    /** The automatic chip policy chosen with the buy-in; checked before anything is taken. Off when absent. */
+    autoBuy: AutoBuyRequestSchema.optional(),
   }),
   z.object({ t: z.literal('leave'), reqId: ReqId }),
   /** Add chips from the wallet; applied between hands (queued while the player is in a hand). */
   z.object({ t: z.literal('topUp'), reqId: ReqId, amount: z.number().int().positive() }),
   z.object({ t: z.literal('cancelTopUp'), reqId: ReqId.optional() }),
-  /** Automatic rebuy after busting. Turning it on needs `consent: true`, an amount and a total limit. */
+  /**
+   * Automatic rebuy after busting, as pages before `autoBuy` set it. Turning it on needs `consent: true`, an amount and a
+   * total limit, and replaces an automatic top-up; turning it off leaves an automatic top-up as it is.
+   */
   z.object({
     t: z.literal('autoRebuy'),
     reqId: ReqId,
@@ -66,6 +96,8 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
     cap: z.number().int().positive().optional(),
     consent: z.literal(true).optional(),
   }),
+  /** Sets the seat's automatic chip policy (AutoBuyRequestSchema), replacing the one it had. */
+  z.object({ t: z.literal('autoBuy'), reqId: ReqId, policy: AutoBuyRequestSchema }),
   z.object({ t: z.literal('sitOut'), reqId: ReqId.optional() }),
   z.object({ t: z.literal('sitIn'), reqId: ReqId.optional() }),
   z.object({ t: z.literal('waitlist'), join: z.boolean(), reqId: ReqId.optional() }),
@@ -168,8 +200,8 @@ export type ErrorCode =
   | 'internal';
 
 /**
- * What happened to a top-up or automatic rebuy the room carried out after a hand (sent only to that player).
- * `amount` is what was taken from the wallet, for the `_applied` codes.
+ * What happened to a top-up, automatic rebuy or automatic top-up the room carried out after a hand (sent only to that
+ * player). `amount` is what was taken from the wallet, for the `_applied` codes.
  */
 export type NoticeCode =
   | 'topup_applied'
@@ -180,6 +212,10 @@ export type NoticeCode =
   /** Automatic rebuy turned itself off: the wallet was short, or the next rebuy would pass the limit. */
   | 'rebuy_insufficient'
   | 'rebuy_cap'
+  | 'autotopup_applied'
+  /** Automatic top-up turned itself off, nothing taken: the wallet was short, or the top-up would pass the limit (or the table's range has moved past the target). */
+  | 'autotopup_insufficient'
+  | 'autotopup_cap'
   /** A pre-action was dropped because the table changed (a bet came in, or it arrived too late): the player decides. */
   | 'preaction_cancelled';
 

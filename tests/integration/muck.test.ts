@@ -115,11 +115,15 @@ describe('showdown muck', () => {
     const lw = forWinner.players.find((p) => p.userId === loser.me.id)!;
     expect(lw.holeCards).toBeNull();
     expect(lw.rankClass).toBeNull();
+    // That it went in face down was the table's to see (the replay reads "Muck"); the hand shown down has no flag.
+    expect(lw.mucked).toBe(true);
     expect(forWinner.players.find((p) => p.isYou)!.holeCards).toHaveLength(2);
+    expect(forWinner.players.find((p) => p.isYou)).not.toHaveProperty('mucked');
     const forLoser = await recorded(loser, handId);
     const mine = forLoser.players.find((p) => p.isYou)!;
     expect(mine.holeCards).toHaveLength(2);
     expect(mine.rankClass).not.toBeNull();
+    expect(mine.mucked).toBe(true);
     expect(forLoser.players.find((p) => p.userId === winner.me.id)!.holeCards).toHaveLength(2);
     // The replay reads: the button, the table size and each pot with who could win it and who did. Best five only
     // for the hands the viewer may see.
@@ -149,12 +153,15 @@ describe('showdown muck', () => {
     expect(lr.holeCards).toBeNull();
     expect(lr.rankClass).toBeNull();
     expect(lr.bestFive).toBeNull();
+    expect(lr.mucked).toBe(true);
     expect(JSON.stringify(review)).not.toContain(JSON.stringify(mine.holeCards));
     expect(review).toMatchObject({ maxSeats: 2, buttonSeat: forWinner.buttonSeat, pots: forWinner.pots, actions: forWinner.actions });
 
     // Rows recorded before muck existed have no flag and read as shown down.
     await d1(`UPDATE hand_players SET shown = NULL WHERE hand_id = '${handId}'`);
-    expect((await recorded(winner, handId)).players.find((p) => p.userId === loser.me.id)!.holeCards).toEqual(mine.holeCards);
+    const older = (await recorded(winner, handId)).players.find((p) => p.userId === loser.me.id)!;
+    expect(older.holeCards).toEqual(mine.holeCards);
+    expect(older).not.toHaveProperty('mucked');
   });
 
   it('when the betting ended all in, every hand is shown although auto-muck applies', async () => {

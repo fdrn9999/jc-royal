@@ -8,7 +8,7 @@
  */
 import { VIP_COLORS, type Card, type PublicRole, type VipColor } from '@jc/types';
 import { chipTier, LOGO_SRC } from '@jc/ui';
-import { SHARE_SIZES, type ShareAmount, type ShareFormat, type ShareOptions, type ShareSeat, type ShareSnap } from './shareSnap';
+import { SHARE_SIZES, type ShareAct, type ShareAmount, type ShareFormat, type ShareOptions, type ShareSeat, type ShareShow, type ShareSnap } from './shareSnap';
 
 type Ctx = CanvasRenderingContext2D;
 type Stop = [at: number, color: string];
@@ -767,10 +767,10 @@ function header(pen: Pen, W: number) {
 const SEP = ' · ';
 /**
  * Items ("A raises to 800") run into lines no wider than `maxW` in the current font, whole items only, at most
- * `maxLines`: the latest kept, "… " in front where earlier ones are left out.
+ * `maxLines`: the latest kept, "… " in front where earlier ones are left out. `from`: the first item kept.
  */
-function wrap(ctx: Ctx, items: string[], maxW: number, maxLines: number): string[] {
-  if (items.length === 0 || maxLines <= 0) return [];
+function wrap(ctx: Ctx, items: string[], maxW: number, maxLines: number): { lines: string[]; from: number } {
+  if (items.length === 0 || maxLines <= 0) return { lines: [], from: items.length };
   const lay = (from: number) => {
     const lines: string[] = [];
     let cur = '';
@@ -788,9 +788,9 @@ function wrap(ctx: Ctx, items: string[], maxW: number, maxLines: number): string
   };
   for (let from = 0; from < items.length; from++) {
     const l = lay(from);
-    if (l.length <= maxLines) return l;
+    if (l.length <= maxLines) return { lines: l, from };
   }
-  return lay(items.length - 1).slice(0, maxLines);
+  return { lines: lay(items.length - 1).slice(0, maxLines), from: items.length - 1 };
 }
 
 const lineOf = (pen: Pen, l: { named: string; anon: string }) => (pen.opt.names ? l.named : l.anon);
@@ -803,22 +803,31 @@ function streetLog(snap: ShareSnap) {
 
 /**
  * The log street by street in `r`: each street's name, then its items in lines; when they do not all fit, each street
- * keeps fewer lines (its latest), then the earliest streets go. Returns the height used.
+ * keeps fewer lines (its latest), then the earliest streets go, and a line first says how many items were left out.
+ * Returns the height used.
  */
 function drawLog(pen: Pen, entries: ShareSnap['log'], r: Rect, size: number, id: string) {
-  const { ctx } = pen;
+  const { ctx, snap } = pen;
   const lh = size * 1.42;
   const hh = size * 1.3;
   setFont(ctx, size, 500);
-  const full = entries.map((e) => ({ e, lines: wrap(ctx, e.lines.map((l) => lineOf(pen, l)), r.w, 99) }));
-  const height = (xs: { lines: string[] }[]) => sum(xs.map((x) => hh + x.lines.length * lh + size * 0.5));
-  let shown = full;
-  for (let cap = 4; cap >= 1 && height(shown) > r.h; cap--) {
-    setFont(ctx, size, 500);
-    shown = full.map(({ e, lines }) => ({ e, lines: lines.length > cap ? wrap(ctx, e.lines.map((l) => lineOf(pen, l)), r.w, cap) : lines }));
+  const items = entries.map((e) => e.lines.map((l) => lineOf(pen, l)));
+  const lay = (cap: number) => entries.map((e, k) => ({ e, all: items[k]!.length, ...wrap(ctx, items[k]!, r.w, cap) }));
+  let shown = lay(99);
+  // Items left out: those of the streets gone, and the earlier ones of each street kept.
+  let gone = 0;
+  const left = () => gone + sum(shown.map((x) => x.from));
+  const height = () => (left() > 0 ? lh : 0) + sum(shown.map((x) => hh + x.lines.length * lh + size * 0.5));
+  for (let cap = 4; cap >= 1 && height() > r.h; cap--) shown = lay(cap);
+  while (shown.length > 0 && height() > r.h) {
+    gone += shown[0]!.all;
+    shown = shown.slice(1);
   }
-  while (shown.length > 1 && height(shown) > r.h) shown = shown.slice(1);
   let y = r.y;
+  if (left() > 0 && lh <= r.h + 0.5) {
+    put(pen, fit(ctx, snap.text.omitted.replace('{n}', String(left())), r.w, size, Math.min(size, 14), 600), r.x, y + lh / 2, INK_300, `${id}-omit`);
+    y += lh;
+  }
   for (const [k, { e, lines }] of shown.entries()) {
     if (y + hh > r.y + r.h + 0.5) break;
     heading(pen, e.label, r.x, y + hh / 2, r.w, `${id}-${k}`, size * 0.9);
@@ -1146,7 +1155,7 @@ function drawClassic(pen: Pen, W: number, H: number) {
     else {
       y += 16;
       setFont(ctx, 26, 600);
-      for (const [k, l] of wrap(ctx, lineOf(pen, snap.stepLine).split(SEP).filter(Boolean), side, 3).entries()) {
+      for (const [k, l] of wrap(ctx, lineOf(pen, snap.stepLine).split(SEP).filter(Boolean), side, 3).lines.entries()) {
         put(pen, { text: l, size: 26, w: width(ctx, l) }, sx, y, IVORY, `side-step-${k}`);
         y += 38;
       }
@@ -1164,10 +1173,12 @@ function drawClassic(pen: Pen, W: number, H: number) {
   pen.group = 'foot';
   let y = H - M - footH;
   if (log) {
-    heading(pen, log.label, M, y + 15, W - 2 * M, 'foot-phase');
+    setFont(ctx, 25, 500);
+    const { lines, from } = wrap(ctx, log.lines.map((x) => lineOf(pen, x)), W - 2 * M, 2);
+    heading(pen, from > 0 ? `${log.label}${SEP}${snap.text.omitted.replace('{n}', String(from))}` : log.label, M, y + 15, W - 2 * M, 'foot-phase');
     y += 30;
     setFont(ctx, 25, 500);
-    for (const [k, l] of wrap(ctx, log.lines.map((x) => lineOf(pen, x)), W - 2 * M, 2).entries()) {
+    for (const [k, l] of lines.entries()) {
       put(pen, { text: l, size: 25, w: width(ctx, l) }, M, y + 18, IVORY, `foot-log-${k}`, { weight: 500 });
       y += 36;
     }
@@ -1196,11 +1207,32 @@ function drawSummary(pen: Pen, W: number, H: number) {
   const left = M;
   const right = wide ? M + colW + G : M;
   let yl = HEAD + 22;
+  const won = winnerLines(pen, colW - 64, 36, 2, { rank: false, label: false });
+  const resH = 26 + (won.length > 0 ? linesHeight(won) : 44) + 12 + 34 + 26;
+
+  // The log (this template is the hand's history) keeps room for a street of two lines and the line saying what was
+  // left out at least: where the board and the hands above leave less, fewer hands shown show in full ("+N more"), then
+  // the board's and the hand's cards draw smaller.
+  const logSize = wide ? 23 : 22 * Math.min(z, 1.15);
+  const logNeed = opt.log && snap.log.length > 0 ? 22 + 32 + 10 + logSize * (1.3 + 3 * 1.42 + 0.5) + 22 : 0;
+  const most = Math.max(1, Math.min(shown.length, hero && shown.length > 0 ? 3 : 4));
+  const rowH = 30 + 10 + 58 * z + 12;
+  const shape = (rows: number, k: number) => {
+    const bw = Math.min(wide ? 132 : 112 * z, (colW - 64 - 4 * 14) / 5) * k;
+    const hw = Math.round((wide ? 108 : 92 * z) * k);
+    const boardH = 22 + 32 + 12 + bw * 1.4 + 26;
+    const heroH = 22 + 32 + 10 + hw * 1.4 + 12 + 34 + 22;
+    const handsH = hero || shown.length > 0 ? Math.max(hero ? heroH : 0, shown.length ? 22 + 32 + 10 + rows * rowH + 10 : 0) : 0;
+    const top = yl + boardH + G + (handsH ? handsH + G : 0);
+    const room = H - M - (wide ? HEAD + 22 + resH + G : top + resH + G);
+    return { rows, bw, hw, boardH, handsH, room };
+  };
+  const shapes = [1, 0.75].flatMap((k) => Array.from({ length: most }, (_, j) => shape(most - j, k)));
+  const S = shapes.find((s) => s.room >= logNeed) ?? shapes.at(-1)!;
 
   // The board.
   pen.group = 'board';
-  const bw = Math.min(wide ? 132 : 112 * z, (colW - 64 - 4 * 14) / 5);
-  const boardH = 22 + 32 + 12 + bw * 1.4 + 26;
+  const { bw, boardH } = S;
   panel(pen, { x: left, y: yl, w: colW, h: boardH });
   heading(pen, snap.text.board, left + 32, yl + 22 + 16, colW - 64, 'board-title');
   board(pen, left + (colW - boardW(bw, 14)) / 2, yl + 22 + 32 + 12, bw, 14, { lit: snap.best });
@@ -1209,14 +1241,8 @@ function drawSummary(pen: Pen, W: number, H: number) {
   // The viewer's hand and the hands shown.
   if (hero || shown.length > 0) {
     pen.group = 'hands';
-    const hw = Math.round((wide ? 108 : 92 * z) * 1);
-    const both = !!hero && shown.length > 0;
+    const { hw, rows, handsH: h } = S;
     const heroW = hero ? Math.max(2 * hw + 14, 220) : 0;
-    const rowH = 30 + 10 + 58 * z + 12;
-    const rows = Math.max(1, Math.min(shown.length, both ? 3 : 4));
-    const heroH = 22 + 32 + 10 + hw * 1.4 + 12 + 34 + 22;
-    const shownH = 22 + 32 + 10 + rows * rowH + 10;
-    const h = Math.max(hero ? heroH : 0, shown.length ? shownH : 0);
     panel(pen, { x: left, y: yl, w: colW, h });
     let x = left + 32;
     if (hero) {
@@ -1248,9 +1274,7 @@ function drawSummary(pen: Pen, W: number, H: number) {
   let yr = wide ? HEAD + 22 : yl;
   pen.group = 'result';
   const ws = winnersOf(snap);
-  const won = winnerLines(pen, colW - 64, 36, 2, { rank: false, label: false });
   const topH = won.length > 0 ? linesHeight(won) : 44;
-  const resH = 26 + topH + 12 + 34 + 26;
   panel(pen, { x: right, y: yr, w: colW, h: resH });
   if (won.length > 0) {
     drawLines(pen, won, right + 32, yr + 26, 'left', 'result-win');
@@ -1279,11 +1303,11 @@ function drawSummary(pen: Pen, W: number, H: number) {
   // What was done, street by street, in the room left.
   const y0 = wide ? yr : Math.max(yr, yl);
   const room = H - M - y0;
-  if (opt.log && snap.log.length > 0 && room > 120) {
+  if (opt.log && snap.log.length > 0 && room > 22 + 32 + 10 + logSize * 1.42 + 22) {
     pen.group = 'log';
     panel(pen, { x: right, y: y0, w: colW, h: room });
     heading(pen, snap.text.actions, right + 32, y0 + 22 + 16, colW - 64, 'log-title');
-    drawLog(pen, snap.log.filter((e) => e.phase !== 'result'), { x: right + 32, y: y0 + 22 + 32 + 10, w: colW - 64, h: room - 22 - 32 - 10 - 22 }, wide ? 23 : 22 * Math.min(z, 1.15), 'log');
+    drawLog(pen, snap.log.filter((e) => e.phase !== 'result'), { x: right + 32, y: y0 + 22 + 32 + 10, w: colW - 64, h: room - 22 - 32 - 10 - 22 }, logSize, 'log');
   }
 }
 
@@ -1504,6 +1528,472 @@ function drawMinimal(pen: Pen, W: number, H: number) {
   put(pen, fit(ctx, snap.text.hand, W / 2 - M, 22, 15, 600), W - M, fy - 18, INK_300, 'foot-hand', { align: 'right' });
 }
 
+// ------------------------------------------------------------------------------------------------ betting line
+
+/** A card as a chip the height of a line of `size` text, its rank and suit side by side; returns its width. */
+function inlineCard(pen: Pen, c: Card, x: number, cy: number, size: number, id: string, lit = false) {
+  const { ctx, pal } = pen;
+  const rank = c[0] === 'T' ? '10' : c[0]!;
+  const s = c[1] as keyof SharePalette['suits'];
+  const color = pal.suits[s];
+  const k = size * 0.66;
+  setFont(ctx, size * 0.92, 700, 'display');
+  const rw = width(ctx, rank);
+  const w = Math.max(size * 1.72, rw + size * 0.1 + k + size * 0.5);
+  const h = size * 1.3;
+  const y = cy - h / 2;
+  rr(ctx, x, y, w, h, h * 0.2);
+  ctx.fillStyle = linear(ctx, { x, y, w, h }, 165, [
+    [0, '#fffdf7'],
+    [1, '#f3ecdc'],
+  ]);
+  ctx.fill();
+  if (lit) {
+    ctx.lineWidth = Math.max(1.5, size * 0.1);
+    ctx.strokeStyle = '#e6c56b';
+    ctx.stroke();
+  }
+  const x0 = x + (w - rw - size * 0.1 - k) / 2;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(rank, x0, cy + size * 0.05);
+  suit(ctx, s, x0 + rw + size * 0.1, cy - k / 2, k, color);
+  record(pen, 'card', id, x, y, w, h, { card: c, ...(lit ? { lit: true } : {}) });
+  return w;
+}
+
+/** The showdown's section of the line, after the streets'. */
+const SD = -1;
+/**
+ * A row of the betting line: a street's heading (again at the top of a column the street runs on into), an action, a hand
+ * at the showdown, or how many of the section's rows were left out. `at` is the street's index, or SD.
+ */
+type BetRow =
+  | { kind: 'head'; at: number; again: boolean }
+  | { kind: 'act'; at: number; j: number; act: ShareAct }
+  | { kind: 'show'; at: number; j: number; show: ShareShow }
+  | { kind: 'omit'; at: number; n: number };
+
+const rowH = (r: BetRow, s: number) => s * (r.kind === 'head' ? 1.75 : r.kind === 'act' ? 1.5 : r.kind === 'show' ? 1.6 : 1.25);
+/** The rows' height in a column: a heading has room above it, but at the column's top. */
+const rowsH = (rows: BetRow[], s: number, top: boolean) => sum(rows.map((r, i) => rowH(r, s) + (r.kind === 'head' && !(top && i === 0) ? s * 0.45 : 0)));
+
+/**
+ * The rows that may be left out where the line does not fit, the least telling first (the earliest first of a kind):
+ * folds, checks, blinds, mucks, calls, shown hands, bets and raises; the viewer's and the winners' last of all.
+ */
+function betCuts(snap: ShareSnap) {
+  const pri = (a: ShareAct) => (a.hero ? 9 : a.allIn || a.kind === 'bet' || a.kind === 'raise' || a.kind === 'allin' ? 6 : a.kind === 'call' ? 4 : a.kind === 'sb' || a.kind === 'bb' ? 3 : a.kind === 'check' ? 2 : 1);
+  const cuts = snap.streets.flatMap((st, at) => st.acts.map((a, j) => ({ key: `${at}:${j}`, pri: pri(a) })));
+  for (const [j, x] of (snap.showdown ?? []).entries()) cuts.push({ key: `${SD}:${j}`, pri: snap.winners.includes(x.seat) || seatOf(snap, x.seat)?.hero ? 9 : x.muck ? 2 : 5 });
+  return cuts.sort((p, q) => p.pri - q.pri);
+}
+
+/** The line's sections, a street each and then the showdown, without the rows in `out` (counted at each section's end). */
+function betSections(snap: ShareSnap, out: Set<string>): BetRow[][] {
+  function section<T>(at: number, xs: T[], row: (x: T, j: number) => BetRow): BetRow[] {
+    const rows: BetRow[] = [{ kind: 'head', at, again: false }];
+    let n = 0;
+    xs.forEach((x, j) => {
+      if (out.has(`${at}:${j}`)) n++;
+      else rows.push(row(x, j));
+    });
+    if (n > 0) rows.push({ kind: 'omit', at, n });
+    return rows;
+  }
+  const secs = snap.streets.map((st, at) => section(at, st.acts, (act, j): BetRow => ({ kind: 'act', at, j, act })));
+  if (snap.showdown && snap.showdown.length > 0) secs.push(section(SD, snap.showdown, (show, j): BetRow => ({ kind: 'show', at: SD, j, show })));
+  return secs;
+}
+
+/**
+ * The sections in at most `n` columns `room` tall, or null where they do not fit: a section kept whole in a column where
+ * it fits in one, else run on into the next under its heading again (a heading never left alone at a column's foot).
+ */
+function flow(secs: BetRow[][], room: number, s: number, n: number): BetRow[][] | null {
+  const cols: BetRow[][] = [[]];
+  let used = 0;
+  const next = () => {
+    if (cols.length >= n) return false;
+    cols.push([]);
+    used = 0;
+    return true;
+  };
+  for (const sec of secs) {
+    let rest = sec;
+    while (rest.length > 0) {
+      const col = cols.at(-1)!;
+      const h = rowsH(rest, s, col.length === 0);
+      if (used + h <= room) {
+        col.push(...rest);
+        used += h;
+        break;
+      }
+      if (col.length > 0 && rowsH(rest, s, true) <= room) {
+        if (!next()) return null;
+        continue;
+      }
+      let k = 0;
+      while (k < rest.length && used + rowsH(rest.slice(0, k + 1), s, col.length === 0) <= room) k++;
+      if (k === 1 && rest[0]!.kind === 'head') k = 0;
+      if (k === 0) {
+        if (col.length === 0 || !next()) return null;
+        continue;
+      }
+      col.push(...rest.slice(0, k));
+      rest = [{ kind: 'head', at: sec[0]!.at, again: true }, ...rest.slice(k)];
+      if (!next()) return null;
+    }
+  }
+  return cols;
+}
+
+/**
+ * Two columns of whole sections as near the same height as they go (the left one first in reading order), or null where
+ * no split between sections fits `room`: filled in order, a long line would crowd the left column and leave the right
+ * one all but empty.
+ */
+function balance(secs: BetRow[][], room: number, s: number): BetRow[][] | null {
+  let best: BetRow[][] | null = null;
+  let tall = Infinity;
+  for (let k = 1; k < secs.length; k++) {
+    const left = secs.slice(0, k).flat();
+    const right = secs.slice(k).flat();
+    const h = Math.max(rowsH(left, s, true), rowsH(right, s, true));
+    if (h <= room && h < tall) [best, tall] = [[left, right], h];
+  }
+  return best;
+}
+
+interface BetLayout {
+  s: number;
+  cols: BetRow[][];
+}
+/** Between the line's columns. */
+const BET_GAP = 40;
+/**
+ * The line at the largest size that fits `room`: in one column (down to a little smaller), else in two `w` wide in all
+ * at a size that leaves the names their room (the longest whole, up to 8 em), else in one down to `min`, else in two at
+ * `min`; where none holds it, the least telling rows are left out one at a time until it fits, and marked so. With the
+ * actions off only the key line is drawn: no folds, checks, blinds or mucks but the viewer's (still counted).
+ */
+function betLayout(pen: Pen, w: number, room: number, max: number, min: number, all: boolean): BetLayout {
+  const { ctx, snap } = pen;
+  const ranked = betCuts(snap);
+  const cuts = ranked.map((c) => c.key);
+  const roomy = (s: number) => {
+    setFont(ctx, s, 700);
+    const want = Math.min(8 * s, Math.max(0, ...snap.seats.map((x) => width(ctx, who(pen, x).text))));
+    return betCols(pen, s, (w - BET_GAP) / 2).name >= want;
+  };
+  const tries: [s: number, n: number][] = [];
+  const near = Math.min(max, Math.round(max * 0.82));
+  for (let s = max; s >= near; s--) tries.push([s, 1]);
+  for (let s = max; s >= min; s--) if (roomy(s)) tries.push([s, 2]);
+  for (let s = near - 1; s >= min; s--) tries.push([s, 1]);
+  tries.push([min, 2]);
+  for (let k = all ? 0 : ranked.filter((c) => c.pri <= 3).length; k <= cuts.length; k++) {
+    const secs = betSections(snap, new Set(cuts.slice(0, k)));
+    for (const [s, n] of tries) {
+      const cols = flow(secs, room, s, n);
+      if (cols) return { s, cols: cols.length === 2 ? (balance(secs, room, s) ?? cols) : cols };
+    }
+  }
+  return { s: min, cols: [] };
+}
+
+interface BetCols {
+  pos: number;
+  name: number;
+  word: number;
+  amt: number;
+  gap: number;
+  /** The whole row's width. */
+  w: number;
+}
+/** The line's columns at size `s` in a column `cw` wide: the position, the name, the action and its amount (right-aligned). */
+function betCols(pen: Pen, s: number, cw: number): BetCols {
+  const { ctx, snap } = pen;
+  const acts = snap.streets.flatMap((st) => st.acts);
+  const gap = 0.6 * s;
+  setFont(ctx, s * 0.78, 800);
+  const pos = Math.max(0, ...snap.seats.map((x) => (x.pos ? width(ctx, x.pos) : 0)));
+  setFont(ctx, s, 800);
+  let word = Math.min(7 * s, Math.max(2 * s, ...acts.map((a) => width(ctx, a.word))));
+  setFont(ctx, s, 700);
+  let amt = Math.min(7 * s, Math.max(2 * s, ...acts.map((a) => (a.amount ? width(ctx, a.amount.full) : 0))));
+  const posCol = pos > 0 ? pos + gap : 0;
+  const name = Math.max(4.5 * s, Math.min(12 * s, cw - posCol - word - amt - 2 * gap));
+  const over = posCol + name + word + amt + 2 * gap - cw;
+  if (over > 0) {
+    const k = Math.max(0, 1 - over / (word + amt));
+    word *= k;
+    amt *= k;
+  }
+  return { pos, name, word, amt, gap, w: Math.min(cw, posCol + name + word + amt + 2 * gap) };
+}
+
+/** One row of the line, centred on `cy`, from `x0` across `m.w`; `c` is its column. */
+function betRow(pen: Pen, row: BetRow, x0: number, cy: number, s: number, m: BetCols, c: number) {
+  const { ctx, snap, pal } = pen;
+  pen.group = row.at === SD ? 'line-sd' : `line-${row.at}`;
+  const min = Math.max(11, Math.round(s * 0.7));
+  const posCol = m.pos > 0 ? m.pos + m.gap : 0;
+  if (row.kind === 'head') {
+    // The street's name, the cards it dealt and the pot it began with; under it a faint rule.
+    const st = row.at === SD ? null : snap.streets[row.at]!;
+    const id = `line-head-${row.at}-${c}`;
+    const lf = fit(ctx, st ? st.label : snap.text.showdown, m.w * 0.45, s * 0.95, min, 800);
+    put(pen, lf, x0, cy, pal.accent, id, { weight: 800 });
+    let x = x0 + lf.w + 0.6 * s;
+    if (st && !row.again) {
+      st.board.slice(st.board.length - st.dealt).forEach((card, k) => {
+        x += inlineCard(pen, card, x, cy, s * 0.85, `${id}-card-${k}`) + 0.22 * s;
+      });
+      const room = x0 + m.w - x - 0.4 * s;
+      if (st.pot && room > 2 * s) {
+        const parts: Part[] = [
+          { text: snap.text.pot, color: INK_300, weight: 600 },
+          { amount: st.pot, color: INK_200, weight: 700, gap: 0.4 },
+        ];
+        drawParts(pen, parts, fitParts(ctx, parts, room, s * 0.8, min), x0 + m.w, cy, 'right', `${id}-pot`);
+      }
+    }
+    ctx.fillStyle = 'rgba(212, 175, 55, 0.22)';
+    ctx.fillRect(x0, cy + 0.74 * s, m.w, 1);
+    return;
+  }
+  if (row.kind === 'omit') {
+    put(pen, fit(ctx, snap.text.omitted.replace('{n}', String(row.n)), m.w - posCol, s * 0.78, min, 600), x0 + posCol, cy, INK_300, `line-omit-${row.at}`);
+    return;
+  }
+  const seat = seatOf(snap, row.kind === 'act' ? row.act.seat : row.show.seat);
+  const id = row.kind === 'act' ? `line-${row.at}-${row.j}` : `line-sd-${row.j}`;
+  if (seat?.hero) {
+    // The viewer's rows on a gold band, marked at the left.
+    rr(ctx, x0 - 0.35 * s, cy - 0.68 * s, m.w + 0.7 * s, 1.36 * s, 0.3 * s);
+    ctx.fillStyle = 'rgba(212, 175, 55, 0.13)';
+    ctx.fill();
+    ctx.fillStyle = pal.accent;
+    ctx.fillRect(x0 - 0.35 * s, cy - 0.5 * s, 0.12 * s, s);
+  }
+  ctx.save();
+  // A fold is the quietest line.
+  if (row.kind === 'act' && row.act.kind === 'fold') ctx.globalAlpha = 0.72;
+  let x = x0;
+  if (seat?.pos && m.pos > 0) put(pen, fit(ctx, seat.pos, m.pos, s * 0.78, Math.round(s * 0.6), 800), x, cy, seat.hero ? pal.accent : INK_300, `${id}-pos`, { weight: 800 });
+  x += posCol;
+  if (seat) nameLine(pen, seat, x, cy, m.name, s, min, `${id}-name`, 'left');
+  x += m.name + m.gap;
+  if (row.kind === 'act') {
+    const a = row.act;
+    const strong = a.allIn || a.big;
+    const tone = a.allIn ? '#ff9c8a' : a.big ? GOLD_300 : a.kind === 'fold' ? INK_300 : a.kind === 'check' ? INK_200 : IVORY;
+    const parts: Part[] = [{ text: a.word, color: tone, weight: strong ? 800 : a.kind === 'fold' || a.kind === 'check' ? 600 : 700 }];
+    if (a.timeout) parts.push({ text: snap.text.timeout, color: INK_300, weight: 500, gap: 0.45 });
+    // A fold or check has no amount: its word may take the amount's room too.
+    drawParts(pen, parts, fitParts(ctx, parts, a.amount ? m.word : m.word + m.gap + m.amt, s, min), x, cy, 'left', `${id}-word`);
+    if (a.amount) put(pen, fitAmount(ctx, a.amount, m.amt, s, min, strong ? 800 : 700), x0 + m.w, cy, a.allIn ? '#ff9c8a' : GOLD_300, `${id}-amt`, { align: 'right', weight: strong ? 800 : 700 });
+  } else {
+    const sh = row.show;
+    if (sh.muck || sh.cards.length === 0) put(pen, fit(ctx, sh.muck ? snap.text.muck : snap.text.show, m.word + m.gap + m.amt, s, min, 600), x, cy, INK_300, `${id}-word`);
+    else {
+      const lit = litOf(snap, seat);
+      sh.cards.forEach((card, k) => {
+        x += inlineCard(pen, card, x, cy, s * 0.85, `${id}-card-${k}`, lit.has(card)) + 0.22 * s;
+      });
+      const room = x0 + m.w - x - 0.2 * s;
+      if (sh.rank && room > 1.5 * s) put(pen, fit(ctx, sh.rank, room, s * 0.88, min, 700), x + 0.2 * s, cy, seat?.win ? GOLD_300 : INK_200, `${id}-rank`, { weight: 700 });
+    }
+  }
+  ctx.restore();
+}
+
+/** The laid-out line in `r`: its columns side by side, BET_GAP apart, each row block centred in its column. */
+function drawBetLines(pen: Pen, r: Rect, L: BetLayout) {
+  const G = BET_GAP;
+  const n = Math.max(1, L.cols.length);
+  const cw = (r.w - G * (n - 1)) / n;
+  const m = betCols(pen, L.s, cw);
+  L.cols.forEach((col, c) => {
+    const x0 = r.x + c * (cw + G) + (cw - m.w) / 2;
+    let y = r.y;
+    col.forEach((row, i) => {
+      if (row.kind === 'head' && i > 0) y += L.s * 0.45;
+      const h = rowH(row, L.s);
+      betRow(pen, row, x0, y + h / 2, L.s, m, c);
+      y += h;
+    });
+  });
+}
+
+/**
+ * The viewer's two cards and beside them their seat's position, their name and (once shown) their hand: the position
+ * and the name on one line where the name fits there whole, else each on its own.
+ */
+function heroHand(pen: Pen, hero: ShareSeat, x: number, y: number, hw: number, maxW: number, z: number) {
+  const { ctx, snap, pal } = pen;
+  pen.group = 'strip-hero';
+  const used = cards(pen, hero.cards, x, y, hw, 10 * z, 'hero', litOf(snap, hero));
+  const tx = x + used + 24 * z;
+  const tw = x + maxW - tx;
+  if (tw < 80) return;
+  const h = hw * 1.4;
+  const size = 26 * z;
+  const pos = hero.pos ? fit(ctx, hero.pos, tw * 0.4, 24 * z, 14, 800) : null;
+  setFont(ctx, size, 700);
+  const p = who(pen, hero);
+  const nameW = width(ctx, p.text) + (p.role || p.vip ? size * 1.2 : 0) + (p.bot ? size * 2.2 : 0);
+  const apart = !!pos && pos.w + 12 * z + nameW > tw;
+  // The lines' heights, centred on the cards.
+  const rows = [apart ? 1.25 * pos!.size : 0, 1.3 * size, hero.rank ? 1.3 * 24 * z : 0];
+  const at = y + (h - sum(rows)) / 2;
+  const mid = (k: number) => at + sum(rows.slice(0, k)) + rows[k]! / 2;
+  let nx = tx;
+  if (pos) {
+    put(pen, pos, tx, apart ? mid(0) : mid(1), pal.accent, 'hero-pos', { weight: 800 });
+    if (!apart) nx += pos.w + 12 * z;
+  }
+  nameLine(pen, hero, nx, mid(1), tx + tw - nx, size, 15, 'hero-name', 'left');
+  if (hero.rank) put(pen, fit(ctx, hero.rank, tw, 24 * z, 14, 700), tx, mid(2), GOLD_300, 'hero-rank', { weight: 700 });
+}
+
+/**
+ * Under the line: who won what, each side pot and who took it, the bet handed back, then the pot and (smaller) the
+ * viewer's own result for the hand; before the payout, the pot so far.
+ */
+function betResult(pen: Pen, x: number, w: number, z: number, maxLines: number, align: 'left' | 'center'): Block {
+  const { ctx, snap, opt } = pen;
+  const ws = winnersOf(snap);
+  const paid = snap.phase === 'result';
+  // A pot shared or split into side pots names several: smaller, so the payout stays under the line it ends.
+  const won = winnerLines(pen, w, (ws.length > 1 ? 26 : 32) * z, maxLines, {
+    rank: false,
+    tail: ws.length === 1 && !ws[0]!.rank ? { text: snap.text.noShowdown, color: INK_200, weight: 600, gap: 0.5 } : undefined,
+  });
+  const name = (n: number, gap: number): Part[] => {
+    const s = seatOf(snap, n);
+    if (!s) return [];
+    const p = who(pen, s);
+    return [{ text: p.text, color: p.color, weight: 700, gap }];
+  };
+  const rows: Part[][] = [];
+  const pots = paid ? (snap.settle?.pots ?? []) : [];
+  if (pots.length > 1) {
+    const most = 3;
+    for (const p of pots.slice(0, most)) {
+      const head: Part[] = [{ text: p.label, color: INK_200, weight: 600 }];
+      if (opt.winAmount) head.push({ amount: p.amount, color: GOLD_300, weight: 700, gap: 0.4 });
+      const takers: Part[] = [];
+      p.winners.forEach((x, k) => {
+        if (k > 0) takers.push({ text: SEP.trim(), color: INK_300, weight: 600, gap: 0.4 });
+        takers.push(...name(x.seat, k > 0 ? 0.4 : 0.7));
+      });
+      // Who took it under the pot where the two on one line would be cut down to small print.
+      const one = [...head, ...takers];
+      if (fitParts(ctx, one, w, 22 * z, 13).size >= 22 * z * 0.8) rows.push(one);
+      else rows.push(head, takers.map((x, k) => (k === 0 ? { ...x, gap: 0 } : x)));
+    }
+    if (pots.length > most) rows.push([{ text: snap.text.more.replace('{n}', String(pots.length - most)), color: INK_300, weight: 600 }]);
+  }
+  const back = paid ? snap.settle?.returned : null;
+  if (back) rows.push([{ text: snap.text.returned, color: INK_200, weight: 600 }, ...name(back.seat, 0.5), { amount: back.amount, color: GOLD_300, weight: 700, gap: 0.4 }]);
+  const last: Part[] = [
+    { text: snap.text.pot, color: INK_200, weight: 600 },
+    { amount: snap.pot, color: GOLD_300, weight: 700, gap: 0.4 },
+  ];
+  if (snap.heroNet && opt.winAmount) {
+    const v = snap.heroNet.n;
+    last.push({ text: SEP.trim(), color: INK_300, weight: 600, gap: 0.6 }, { text: snap.text.net, color: INK_200, weight: 600, gap: 0.6 }, { amount: snap.heroNet, color: v > 0 ? WIN : v < 0 ? '#ff9c8a' : INK_200, weight: 700, gap: 0.4 });
+  }
+  rows.push(last);
+  const fitted = rows.map((parts, k) => ({ parts, f: fitParts(ctx, parts, w, (k === rows.length - 1 ? 24 : 22) * z, 13) }));
+  const wonH = linesHeight(won);
+  return {
+    h: wonH + (wonH ? 8 * z : 0) + sum(fitted.map((r) => r.f.size * 1.42)),
+    draw: (y) => {
+      pen.group = 'result';
+      const ax = align === 'center' ? x + w / 2 : x;
+      let at = y + drawLines(pen, won, ax, y, align, 'result-win');
+      if (wonH) at += 8 * z;
+      fitted.forEach((r, k) => {
+        drawParts(pen, r.parts, r.f, ax, at + r.f.size * 0.71, align, `result-${k}`);
+        at += r.f.size * 1.42;
+      });
+    },
+  };
+}
+
+const LEGEND = 17;
+/** Whether the line has an amount the legend explains: a call's, a bet's or a raise's (not only the blinds). */
+const needsLegend = (snap: ShareSnap) => snap.streets.some((st) => st.acts.some((a) => a.amount && a.kind !== 'sb' && a.kind !== 'bb'));
+function legend(pen: Pen, x: number, cy: number, w: number, align: 'left' | 'center') {
+  pen.group = 'legend';
+  put(pen, fit(pen.ctx, pen.snap.text.legend, w, LEGEND, 12, 500), align === 'center' ? x + w / 2 : x, cy, INK_300, 'legend', { align, weight: 500 });
+}
+
+/**
+ * The betting line: the viewer's cards and the board up top, then street by street every action with its amount (a bet
+ * or raise to its street total, a call by what it adds), the streets' cards and pots, the hands at the showdown; under
+ * it who won what and the viewer's own result, smaller. Where it does not all fit, the least telling actions are left
+ * out, and each street says how many.
+ */
+function drawBetline(pen: Pen, W: number, H: number) {
+  const { ctx, snap, opt } = pen;
+  header(pen, W);
+  const wide = opt.ratio === '16:9';
+  const z = opt.ratio === '9:16' ? 1.3 : opt.ratio === '4:5' ? 1.12 : 1;
+  const hero = snap.seats.find((s) => s.hero && s.cards.some((c) => c));
+  const top = HEAD + 22;
+  const legendH = needsLegend(snap) ? LEGEND * 1.24 : 0;
+  const max = Math.round(26 * z);
+  const min = Math.round(19 * z);
+  if (wide) {
+    // At the left the cards, the board, the payout and the legend; at the right the line.
+    const side = 560;
+    const cw = 92;
+    let y = top;
+    if (hero) {
+      heroHand(pen, hero, M, y, cw, side, 1.1);
+      y += cw * 1.4 + 28;
+    }
+    pen.group = 'strip-board';
+    board(pen, M, y, cw, 10, { lit: snap.best });
+    y += cw * 1.4 + 36;
+    betResult(pen, M, side, 1, 4, 'left').draw(y);
+    if (legendH) legend(pen, M, H - M - legendH / 2, side, 'left');
+    const r = { x: M + side + 48, y: top, w: W - 2 * M - side - 48, h: H - M - top };
+    drawBetLines(pen, r, betLayout(pen, r.w, r.h, max, min, opt.log));
+    return;
+  }
+  const hw = 78 * z;
+  const bw = 64 * z;
+  const bg = 8 * z;
+  const stripH = Math.max(hero ? hw * 1.4 : 0, bw * 1.4);
+  const res = betResult(pen, M, W - 2 * M, z, opt.ratio === '9:16' ? 4 : 2, 'center');
+  const g1 = 28 * z;
+  const g2 = 30 * z;
+  const foot = legendH ? legendH + 14 : 0;
+  const room = H - M - top - stripH - g1 - g2 - res.h - foot;
+  const L = betLayout(pen, W - 2 * M, room, max, min, opt.log);
+  const lineH = Math.max(0, ...L.cols.map((col) => rowsH(col, L.s, true)));
+  // What room is left goes a third above, two thirds below.
+  let y = top + Math.max(0, room - lineH) / 3;
+  if (hero) heroHand(pen, hero, M, y + (stripH - hw * 1.4) / 2, hw, W - 2 * M - boardW(bw, bg) - 32, z);
+  pen.group = 'strip-board';
+  board(pen, hero ? W - M - boardW(bw, bg) : (W - boardW(bw, bg)) / 2, y + (stripH - bw * 1.4) / 2, bw, bg, { lit: snap.best });
+  y += stripH + g1;
+  drawBetLines(pen, { x: M, y, w: W - 2 * M, h: lineH }, L);
+  y += lineH + g2;
+  if (lineH > 0) {
+    ctx.fillStyle = 'rgba(212, 175, 55, 0.25)';
+    ctx.fillRect(M, y - g2 / 2, W - 2 * M, 1);
+  }
+  res.draw(y);
+  if (legendH) legend(pen, M, y + res.h + 14 + legendH / 2, W - 2 * M, 'center');
+}
+
 // ------------------------------------------------------------------------------------------------ entry points
 
 /** Draws the image for `snap` with `opt` on `ctx`, whose units are the image's own pixels at the standard resolution. */
@@ -1512,7 +2002,8 @@ export function drawShare(ctx: Ctx, snap: ShareSnap, opt: ShareOptions, art: Sha
   const pen: Pen = { ctx, pal: art.pal, logo: art.logo, boxes, group: 'bg', opt, snap };
   ctx.save();
   background(pen, W, H);
-  if (opt.template === 'classic') drawClassic(pen, W, H);
+  if (opt.template === 'betline') drawBetline(pen, W, H);
+  else if (opt.template === 'classic') drawClassic(pen, W, H);
   else if (opt.template === 'summary') drawSummary(pen, W, H);
   else if (opt.template === 'highlight') drawHighlight(pen, W, H);
   else drawMinimal(pen, W, H);
@@ -1523,7 +2014,11 @@ export function drawShare(ctx: Ctx, snap: ShareSnap, opt: ShareOptions, art: Sha
 function shareText(snap: ShareSnap) {
   const seats = snap.seats.flatMap((s) => [s.nickname, s.label, s.action ?? '', s.rank ?? '', s.stack.full, s.stack.short, s.bet?.full ?? '', s.win?.full ?? '']);
   const log = snap.log.flatMap((e) => [e.label, ...e.lines.flatMap((l) => [l.named, l.anon])]);
-  return [...seats, ...log, snap.stepLine.named, snap.stepLine.anon, snap.phaseLabel, snap.blinds ?? '', snap.pot.full, snap.pot.short, ...Object.values(snap.text), '+0123456789·…'].join(' ');
+  const amounts = (a: ShareAmount | null | undefined) => (a ? [a.full, a.short] : []);
+  const line = snap.streets.flatMap((st) => [st.label, ...amounts(st.pot), ...st.acts.flatMap((a) => [a.word, ...amounts(a.amount)])]);
+  const settle = [...(snap.settle?.pots ?? []).flatMap((p) => [p.label, ...amounts(p.amount)]), ...amounts(snap.settle?.returned?.amount), ...amounts(snap.heroNet)];
+  const more = [...snap.seats.map((s) => s.pos ?? ''), ...(snap.showdown ?? []).map((x) => x.rank ?? ''), ...line, ...settle];
+  return [...seats, ...log, ...more, snap.stepLine.named,snap.stepLine.anon, snap.phaseLabel, snap.blinds ?? '', snap.pot.full, snap.pot.short, ...Object.values(snap.text), '+0123456789·…'].join(' ');
 }
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

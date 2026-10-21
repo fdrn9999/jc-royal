@@ -1,4 +1,4 @@
-import type { ActionType, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ReactionId, ServerMessage, TableCue, TableView } from '@jc/types';
+import type { ActionType, AutoBuyRequest, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ReactionId, ServerMessage, TableCue, TableView } from '@jc/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Heartbeat, Outbox, type Outgoing } from './link';
 import { preActionSpot } from './preAction';
@@ -23,7 +23,7 @@ export interface TableSocketApi {
   /** Quick reactions showing now: the latest per seat, each for REACTION_SHOW_MS. */
   reactions: SeatReaction[];
   lastError: { code: ErrorCode; message: string; at: number } | null;
-  /** Latest top-up / automatic rebuy outcome the room reported to this player. */
+  /** Latest top-up / automatic rebuy or top-up outcome the room reported to this player. */
   lastNotice: { code: NoticeCode; amount?: number; at: number } | null;
   /**
    * Sends a command and resolves on its ack. A connection lost on the way is replaced and the command sent again with
@@ -32,10 +32,11 @@ export interface TableSocketApi {
    */
   request: (
     msg:
-      | { t: 'sit'; seatIndex: number; buyIn: number }
+      | { t: 'sit'; seatIndex: number; buyIn: number; autoBuy?: AutoBuyRequest }
       | { t: 'leave' }
       | { t: 'topUp'; amount: number }
       | { t: 'autoRebuy'; on: boolean; amount?: number; cap?: number; consent?: true }
+      | { t: 'autoBuy'; policy: AutoBuyRequest }
       | { t: 'timeBank'; handId: string; seq: number; seen: number },
     reqId?: string,
   ) => Promise<void>;

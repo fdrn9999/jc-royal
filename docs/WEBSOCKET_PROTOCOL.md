@@ -24,11 +24,12 @@
 | t | 필드 | 설명 |
 |---|---|---|
 | `sync` | — | 현재 상태 재전송 요청 |
-| `sit` | `reqId, seatIndex, buyIn` | 착석과 바이인(지갑에서 차감). `reqId` 재전송은 멱등 처리 |
+| `sit` | `reqId, seatIndex, buyIn, autoBuy?` | 착석과 바이인(지갑에서 차감). `autoBuy`는 바이인과 함께 고른 자동 칩 정책(아래 `autoBuy`와 같은 모양, 없으면 꺼짐). 룸은 정책을 좌석 예약·차감보다 먼저 검사해, 잘못된 정책이면 아무것도 차감하지 않고 거절합니다. `reqId` 재전송은 멱등 처리 |
 | `leave` | `reqId` | 일어서기. 핸드 중이면 폴드 후 정산 시 환급 |
 | `topUp` | `reqId, amount` | 스택 충전(지갑에서 차감). 충전 후 스택이 테이블 바이인 범위 안이어야 함. 핸드에 참여 중이면 차감 없이 대기했다가 핸드가 끝난 뒤 적용(새 요청이 대기 중인 요청을 대체). `reqId` 재전송은 멱등 처리 |
 | `cancelTopUp` | `reqId?` | 대기 중인 충전 취소. 취소할 충전이 없어도(이미 취소됨) `ack` |
-| `autoRebuy` | `reqId, on, amount?, cap?, consent?` | 자동 리바이(기본 꺼짐). 켜려면 `consent: true`, 1회 금액 `amount`(바이인 범위), 총 한도 `cap`(`amount` 이상, `amount`×5 이하)이 모두 필요. 다시 켜면 사용액이 0부터 시작 |
+| `autoBuy` | `reqId, policy` | 좌석의 자동 칩 정책을 바꿈(한 번에 하나, 새 정책이 이전 정책을 대체, 기본 꺼짐). `policy`: `{mode:'off'}` / `{mode:'rebuy', amount, cap, consent:true}`(스택이 0으로 끝난 핸드 뒤 `amount` 리바이) / `{mode:'topup', target, trigger?, partial?, cap, consent:true}`(스택이 `trigger`(없으면 `target`) 미만으로 끝난 핸드 뒤 `target`까지 부족분만 충전, `partial`이면 지갑이 부족할 때 가진 만큼). `amount`·`target`은 바이인 범위, `trigger`는 `target` 이하, `cap`(이 좌석에서 쓸 총 한도)은 1회분(`amount`·`target`) 이상 5배 이하. 바꾸면 사용액이 0부터 시작. 착석한 플레이어만(`forbidden`), 토너먼트 테이블은 `tournament_table`. 정책은 좌석이 유지되는 동안(재접속·다른 탭 포함)만 있고 일어서면 사라짐 |
+| `autoRebuy` | `reqId, on, amount?, cap?, consent?` | 이전 페이지가 보내는 자동 리바이. 켜려면 `consent: true`, 1회 금액 `amount`(바이인 범위), 총 한도 `cap`(`amount` 이상, `amount`×5 이하)이 모두 필요하고 자동 충전을 대체. 끄면 자동 리바이만 끄고 자동 충전은 그대로. 다시 켜면 사용액이 0부터 시작 |
 | `sitOut` / `sitIn` | `reqId?` | 자리 비움과 복귀. `reqId` 재전송은 멱등 처리 |
 | `waitlist` | `join, reqId?` | 대기열 등록·취소. `reqId` 재전송은 멱등 처리 |
 | `action` | `intentId, handId, seq, type, amount?` | `type`: fold/check/call/bet/raise/allin. bet·raise의 `amount`는 이번 스트리트 총액("to"). `seq`는 현재 `hand.seq`와 같아야 함. 적용되면 `intentId`로 `ack` |
@@ -51,7 +52,7 @@
 | `react` | `{seatIndex, userId, reaction, at}`: 테이블의 모든 연결(보낸 사람·관전자 포함)에 보내는 빠른 반응. 좌석과 회원은 룸이 받을 때의 값 |
 | `ack` | `{reqId}`: `reqId`를 단 명령의 성공(대기열에 들어간 충전 포함). 액션은 `reqId` 자리에 `intentId`. 이미 처리한 명령을 다시 받아도 `ack`만 다시 보냄 |
 | `error` | `{code, message, reqId?}` |
-| `notice` | `{code, amount?}`: 해당 플레이어에게만 보냄. 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과: `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐). 사전 액션을 지키지 못했을 때: `preaction_cancelled` |
+| `notice` | `{code, amount?}`: 해당 플레이어에게만 보냄. 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과: `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐), `autotopup_applied`(`amount`=차감액), `autotopup_insufficient`·`autotopup_cap`(자동 충전이 꺼짐, 차감 없음). 자동 정책의 결과는 핸드마다 한 번만, 끄는 알림도 한 번만 보냅니다. 사전 액션을 지키지 못했을 때: `preaction_cancelled` |
 | `replaced` | 다른 탭에서 접속함 |
 | `pong` | 자동 응답은 `{"t":"pong"}` 그대로. 다른 모양의 `ping`을 룸이 직접 받으면 `{at}`이 붙음 |
 
@@ -64,7 +65,7 @@
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`(시간 은행으로 더한 시간 포함), `extraMs`(지금 차례에 시간 은행으로 더한 시간, 없으면 필드 없음), `result`(winners, showdown, returned).
   - `result.winners`는 엔진이 지급한 그대로입니다(콜되지 않아 돌려받은 칩 포함). `result.returned`(`{seatIndex, amount}`, 없으면 필드 없음)는 그중 콜되지 않아 돌려받은 칩입니다. 가장 많이 넣은 사람이 두 번째로 많이 넣은 사람보다 더 넣은 만큼이고, 그 사람이 받은 금액을 넘지 않습니다(`hand_players.pot_won`이 빼는 것과 같음). 화면은 이것을 뺀 금액만 '획득'으로 보입니다. 이전 룸은 보내지 않습니다.
 - **timeBank**(최상위): 이 테이블의 시간 은행 규칙 `{initialMs, maxMs, unitMs, refillHands, refillMs}`. 핸드 중에는 그 핸드를 시작할 때의 규칙, 핸드 사이에는 다음 핸드에 쓸 규칙. 꺼진 테이블은 null, 이전 룸은 보내지 않음.
-- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(`{amount, cap, spent}` 또는 null), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `canShow`(지금 `show`를 보낼 수 있음: 지금 앉은 자리에서 끝난 핸드에 카드를 받았고, 내 패가 쇼다운에서 공개되지 않음. 두 장을 다 보인 뒤에도 true라 화면이 '공개됨'을 계속 그림. 이전 룸은 자동 머크를 켠 사람에게만 보냄). 자동 머크는 항상 적용되므로 새 룸은 `autoMuck`을 보내지 않습니다(이전 룸은 착석한 사람에게 그 설정을 보냄), `timeBank`(착석했으면 내 시간 은행 `{ms, hands}`(`hands`는 다음 보충까지 센 핸드 수), 아직 받은 적 없거나 봇·꺼진 테이블이면 null. 다른 사람의 시간 은행은 어디에도 들어가지 않음. 이전 룸은 보내지 않음).
+- **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(자동 리바이일 때 `{amount, cap, spent}`, 아니면 null. 이전 페이지용), `autoBuy`(내 자동 칩 정책 `{mode:'rebuy', amount, cap, spent}` / `{mode:'topup', target, trigger, partial, cap, spent}` 또는 null. 착석한 본인에게만 보내고 다른 사람·관전자에게는 null. 이전 룸은 보내지 않음), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `canShow`(지금 `show`를 보낼 수 있음: 지금 앉은 자리에서 끝난 핸드에 카드를 받았고, 내 패가 쇼다운에서 공개되지 않음. 두 장을 다 보인 뒤에도 true라 화면이 '공개됨'을 계속 그림. 이전 룸은 자동 머크를 켠 사람에게만 보냄). 자동 머크는 항상 적용되므로 새 룸은 `autoMuck`을 보내지 않습니다(이전 룸은 착석한 사람에게 그 설정을 보냄), `timeBank`(착석했으면 내 시간 은행 `{ms, hands}`(`hands`는 다음 보충까지 센 핸드 수), 아직 받은 적 없거나 봇·꺼진 테이블이면 null. 다른 사람의 시간 은행은 어디에도 들어가지 않음. 이전 룸은 보내지 않음).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
 - **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음), `maintenance`(서비스 점검 `{startsAt, endsAt, active}` 또는 null. 이전 룸은 보내지 않음).
 
@@ -78,13 +79,13 @@
 
 - 클라이언트는 `version`이 줄어든 `state`를 무시합니다.
 - 액션은 `intentId`로 멱등 처리됩니다. 같은 핸드에서 이미 적용된 id(최근 500개)를 다시 보내면 다시 적용하지 않고 `ack`만 오며, 이 기록은 서버 재시작 뒤에도 유지됩니다. 핸드가 바뀐 뒤에 온 사본은 `conflict`입니다.
-- `sit`·`leave`·`topUp`·`autoRebuy`·`sitOut`·`sitIn`·`waitlist`는 룸이 최근 `reqId` 200개를 기억해, 다시 받으면 `ack`만 보냅니다. 늦게 도착한 이전 명령(예: `sitIn` 뒤의 `sitOut` 사본)이 나중 명령을 되돌리지 않습니다.
+- `sit`·`leave`·`topUp`·`autoRebuy`·`autoBuy`·`sitOut`·`sitIn`·`waitlist`는 룸이 최근 `reqId` 200개를 기억해, 다시 받으면 `ack`만 보냅니다. 늦게 도착한 이전 명령(예: `sitIn` 뒤의 `sitOut` 사본)이 나중 명령을 되돌리지 않습니다.
 - 채팅 줄의 id는 `SHA-256(userId:reqId)`에서 만들어, 최근 채팅 50개 안에 같은 id가 있으면 게시하지 않고 `ack`만 보냅니다.
 - 명령은 룸에서 한 번에 하나씩 처리되므로, 첫 사본이 D1 처리 중일 때 도착한 재전송은 첫 사본이 끝난 뒤 `ack`를 받습니다.
 - `seq`가 맞지 않으면 `stale_version`이 옵니다. 클라이언트는 이때 `sync`를 보내 상태를 다시 받습니다.
 - 재접속하면 서버가 즉시 `state`와 `chatHistory`를 보냅니다. 화면은 항상 서버 상태로 복구됩니다.
-- 충전·자동 리바이는 원장 `idempotency_key`(`topup:<세션>:<reqId>`, `rebuy:<세션>:<handId>`)로 한 번만 차감됩니다. 룸은 D1 호출 전에 시도를 기록하고, 재시작하거나 호출이 실패하면 원장을 조회해 원장이 실제로 차감한 만큼만 한 번 반영합니다. 원장에 이미 있는 키는 기록하지도 다시 쓰지도 않으므로, 룸이 기억하는 최근 `reqId` 200개 밖의 오래된 요청을 다시 보내도 `ack`만 오고 칩은 늘지 않습니다. 응답을 받지 못한 클라이언트는 같은 `reqId`로 다시 보냅니다.
-- 핸드 중에는 스택이 늘지 않습니다. 대기 중인 충전과 자동 리바이는 정산 직후(또는 다음 핸드 시작 직전)에 적용되며, 금액은 요청액과 `최대 바이인 − 스택` 중 작은 값입니다.
+- 충전·자동 리바이·자동 충전은 원장 `idempotency_key`(`topup:<세션>:<reqId>`, `rebuy:<세션>:<handId>`, `autotop:<세션>:<handId>`)로 한 번만 차감됩니다. 자동 정책은 핸드마다 한 키만 쓰고, 룸은 차감을 시도하기 전에 그 핸드를 시도와 함께 좌석에 기록해 같은 핸드를 두 번 처리하지 않습니다(그 사이 정책을 바꿔 키가 달라져도). D1 호출이 실패해 아무것도 기록되지 않았으면 다음 정산 기회(다음 핸드 직전 또는 다음 핸드 정산)에 다시 판단하며, 결과가 불확실한 차감은 원장 조회로만 정리하고 임의로 다시 차감하지 않습니다. 룸은 D1 호출 전에 시도를 기록하고, 재시작하거나 호출이 실패하면 원장을 조회해 원장이 실제로 차감한 만큼만 한 번 반영합니다. 원장에 이미 있는 키는 기록하지도 다시 쓰지도 않으므로, 룸이 기억하는 최근 `reqId` 200개 밖의 오래된 요청을 다시 보내도 `ack`만 오고 칩은 늘지 않습니다. 응답을 받지 못한 클라이언트는 같은 `reqId`로 다시 보냅니다.
+- 핸드 중에는 스택이 늘지 않습니다. 대기 중인 충전과 자동 리바이·자동 충전은 정산 직후(또는 다음 핸드 시작 직전)에 이 순서로 적용됩니다. 수동 충전 금액은 요청액과 `최대 바이인 − 스택` 중 작은 값, 자동 리바이는 정한 금액(최대 바이인 이하), 자동 충전은 `min(target, 최대 바이인) − 스택`(수동 충전 뒤의 스택 기준)입니다. 올인 중의 일시적인 0은 판단하지 않고 정산이 끝난 최종 스택만 봅니다. 일어나는 중인 좌석과 토너먼트 테이블은 자동 정책을 적용하지 않습니다.
 
 ## 사전 액션 (`preAction`)
 

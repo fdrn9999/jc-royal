@@ -3,6 +3,7 @@ import { cx } from '@jc/ui';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ApiError } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { lastOnlineAgo, useMinuteNow } from '../lib/lastOnline';
 import { choosePresenceMode, loadMyPresence, useMyPresence } from '../lib/presence';
 
 const TONE: Record<PresenceState, string> = { online: 'text-presence-online', away: 'text-presence-away', offline: 'text-presence-offline' };
@@ -31,13 +32,28 @@ export function PresenceIcon({ state, className = 'size-2.5' }: { state: Presenc
   );
 }
 
-/** A status in words, with its shape. Squeezed (`min-w-0` from the row), the words end in an ellipsis; the shape stays. */
-export function PresenceLabel({ state, className }: { state: PresenceState; className?: string }) {
+/**
+ * A status in words, with its shape. Squeezed (`min-w-0` from the row), the words end in an ellipsis; the shape stays.
+ * Offline with a known `lastOnline` (the server's, lib/presence.ts), the words say how long ago instead.
+ */
+export function PresenceLabel({ state, lastOnline, className }: { state: PresenceState; lastOnline?: number; className?: string }) {
   const { t } = useI18n();
   return (
     <span className={cx('inline-flex items-center gap-1.5 whitespace-nowrap text-xs', state === 'offline' ? 'text-ink-300' : 'text-ink-200', className)} data-presence={state}>
       <PresenceIcon state={state} />
-      <span className="truncate">{t(`presence.${state}` as MsgKey)}</span>
+      {state === 'offline' && lastOnline !== undefined ? <LastOnline at={lastOnline} /> : <span className="truncate">{t(`presence.${state}` as MsgKey)}</span>}
+    </span>
+  );
+}
+
+/** "Last online 5 min ago", moving with the minute; a screen reader hears "offline" first. */
+function LastOnline({ at }: { at: number }) {
+  const { t } = useI18n();
+  const ago = lastOnlineAgo(at, useMinuteNow());
+  return (
+    <span className="truncate" data-testid="last-online">
+      <span className="sr-only">{t('presence.offline')}, </span>
+      {t(`presence.last.${ago.key}`, 'n' in ago ? { n: ago.n } : undefined)}
     </span>
   );
 }

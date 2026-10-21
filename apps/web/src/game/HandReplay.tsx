@@ -10,12 +10,12 @@ import { Button, cardLabel, cx } from '@jc/ui';
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { MemberName } from '../components/MemberName';
-import { useAmounts, type Amounts } from '../lib/amount';
+import { amounts, useAmounts, type Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
 import { buildReplay, REPLAY_PHASES, replayParts, replayPhase, wonLessReturned, type ReplayInput, type ReplayLinePart, type ReplayPhase } from './replay';
 import { ReplayCapture } from './ReplayCapture';
-import { SHARE_DEFAULTS, shareFileName, shareSnap, type ShareOptions, type ShareSnap } from './shareSnap';
+import { SHARE_DEFAULTS, shareFileName, shareSnap, type ShareOptions, type SnapAt } from './shareSnap';
 import { TableScene, useBoxSize, useTableLayout } from './TableScene';
 
 /** The share image's dialog and drawing, loaded only when asked for. */
@@ -130,10 +130,10 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
   const [mode, setMode] = useState<ReplayMode>('normal');
   const [capturing, setCapturing] = useState(false);
   const { fourColor } = usePrefs();
-  // The share image's options, kept while the replay is open; the step it was asked for, taken then and kept (the
-  // dialog open on it); a quick save's progress.
-  const [shareOpt, setShareOpt] = useState<ShareOptions>(SHARE_DEFAULTS);
-  const [sharing, setSharing] = useState<{ snap: ShareSnap; failed: boolean } | null>(null);
+  // The share image's options, kept while the replay is open (its amounts at first as the player reads them); the step
+  // it was asked for, taken then and kept (the dialog open on it); a quick save's progress.
+  const [shareOpt, setShareOpt] = useState<ShareOptions>(() => ({ ...SHARE_DEFAULTS, unit: a.unit }));
+  const [sharing, setSharing] = useState<{ snapAt: SnapAt; failed: boolean } | null>(null);
   const [quick, setQuick] = useState<{ kind: 'making' } | { kind: 'saved'; name: string } | null>(null);
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
   const step = steps[Math.min(i, last)]!;
@@ -248,15 +248,17 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
   };
   const name = (seat: number) => hand.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
   const phaseName = (p: ReplayPhase) => (p === 'result' ? t('replay.result') : t(`stage.${p}` as MsgKey));
-  // What a part of a step's line did, in words, with the names `nameOf` gives (the share image can leave them out).
-  const sayAs = (x: ReplayLinePart, nameOf: (seat: number) => string) => {
+  // What a part of a step's line did, in words, with the names `nameOf` gives (the share image can leave them out) and
+  // the amounts as `fmt` reads them (the share image's own unit).
+  const sayIn = (fmt: Amounts['fmt']) => (x: ReplayLinePart, nameOf: (seat: number) => string) => {
     if (x.kind === 'deal') return t('replay.step.deal');
     if (x.kind === 'board') return t('replay.line.board', { cards: x.cards.map(cardLabel).join(' ') });
     if (x.kind === 'shows') return t('replay.line.shows', { name: nameOf(x.seat), hand: t(`hand.${handLabelKey(x.rankClass, x.bestFive)}` as MsgKey) });
-    if (x.kind === 'wins') return t('replay.line.wins', { name: nameOf(x.seat), amount: a.fmt(x.amount) });
-    return DOES.has(x.type) ? t(`replay.do.${x.type}` as MsgKey, { name: nameOf(x.seat), amount: a.fmt(x.amount) }) : `${nameOf(x.seat)} ${x.type}`;
+    if (x.kind === 'mucks') return t('replay.line.mucks', { name: nameOf(x.seat) });
+    if (x.kind === 'wins') return t('replay.line.wins', { name: nameOf(x.seat), amount: fmt(x.amount) });
+    return DOES.has(x.type) ? t(`replay.do.${x.type}` as MsgKey, { name: nameOf(x.seat), amount: fmt(x.amount) }) : `${nameOf(x.seat)} ${x.type}`;
   };
-  const said = (x: ReplayLinePart) => sayAs(x, name);
+  const said = (x: ReplayLinePart) => sayIn(a.fmt)(x, name);
   // "Flop · Q♣ 9♠ 5♦ dealt", "Turn · A bets 8 BB": the part of the hand, then what the step did.
   const did = steps.map((s) => {
     const words = s.line.map(said);
@@ -266,19 +268,27 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
   const lines = steps.map((s, k) => [phaseName(replayPhase(s)), ...did[k]!].join(' · '));
   const longest = lines.reduce((x, y) => (y.length > x.length ? y : x), '');
 
-  // The share image of the step on screen, taken now: stepping on while it is made changes nothing in it.
-  const snapNow = () => shareSnap({ hand, steps, index: Math.min(i, last), heroSeat, say: sayAs, fmt: a.fmt, t });
+  // The share image of the step on screen, taken now (stepping on while it is made changes nothing in it), or of the
+  // whole hand where that is chosen; its amounts in chips, or in this hand's own big blinds (chips where it has none).
+  const snapNow = (): SnapAt => {
+    const at = Math.min(i, last);
+    return ({ span, unit }) => {
+      const fmt = amounts(unit, hand.bigBlind ?? 0).fmt;
+      return shareSnap({ hand, steps, index: span === 'hand' ? last : at, heroSeat, say: sayIn(fmt), fmt, t });
+    };
+  };
   const openShare = () => {
     setPlaying(false);
-    setSharing({ snap: snapNow(), failed: false });
+    setSharing({ snapAt: snapNow(), failed: false });
   };
   // The options last chosen (the defaults at first), straight to a file; a failure opens the dialog to say so.
   const quickSave = async () => {
     if (quick?.kind === 'making') return;
     setPlaying(false);
-    const snap = snapNow();
+    const snapAt = snapNow();
     setQuick({ kind: 'making' });
     try {
+      const snap = snapAt(shareOpt);
       const { downloadShare, makeShare } = await import('./shareDraw');
       const { blob, format } = await makeShare(snap, shareOpt, fourColor);
       const file = shareFileName(snap, format);
@@ -286,14 +296,14 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
       setQuick({ kind: 'saved', name: file });
     } catch {
       setQuick(null);
-      setSharing({ snap, failed: true });
+      setSharing({ snapAt, failed: true });
     }
   };
   // Over the capture mode it goes beside it, outside the page that is inert meanwhile (ReplayCapture), so Tab stays
   // out of the page under them.
   const shareDialog = sharing && (
     <Suspense fallback={null}>
-      <ShareDialog snap={sharing.snap} failed={sharing.failed} fourColor={fourColor} opt={shareOpt} onOpt={setShareOpt} onClose={() => setSharing(null)} />
+      <ShareDialog snapAt={sharing.snapAt} bigBlind={hand.bigBlind} failed={sharing.failed} fourColor={fourColor} opt={shareOpt} onOpt={setShareOpt} onClose={() => setSharing(null)} />
     </Suspense>
   );
 
@@ -589,7 +599,7 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
               </Button>
               <Button onClick={quickSave} loading={quick?.kind === 'making'} data-testid="replay-share-quick" data-state={quick?.kind ?? 'idle'}>
                 {quick?.kind === 'saved' && <span aria-hidden="true">✓</span>}
-                {t('shareImg.quick')}
+                {t(shareOpt.span === 'hand' ? 'shareImg.quickHand' : 'shareImg.quick')}
               </Button>
             </>
           }

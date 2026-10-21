@@ -1,5 +1,5 @@
 import type { Card, HandRankClass } from './cards';
-import type { ReactionRules } from './protocol';
+import type { AutoBuyPolicy, ReactionRules } from './protocol';
 import type { PublicRole } from './social';
 import type { VipColor } from './vip';
 import type { TimeBankRules } from './timebank';
@@ -181,6 +181,11 @@ export interface TableView {
     topUpQueued: number | null;
     /** Automatic rebuy for this seat (off unless the player turned it on): chips per rebuy, total limit, used so far. */
     autoRebuy: { amount: number; cap: number; spent: number } | null;
+    /**
+     * The seat's automatic chip policy, rebuy or top-up (`autoRebuy` above is the rebuy alone, for older pages). Null
+     * when not seated; absent from older rooms, which have only `autoRebuy`.
+     */
+    autoBuy?: AutoBuyPolicy | null;
     /** The viewer's own pre-action for this street (nobody else is ever shown it). Absent from older rooms. */
     preAction?: PreActionKind | null;
     /**

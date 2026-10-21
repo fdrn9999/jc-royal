@@ -268,10 +268,10 @@ async function gzipBase64(text: string): Promise<string> {
 }
 
 /**
- * Persists a finished hand. The public action list, button seat and pot payouts
+ * Persists a finished hand. The public action list, button seat, blinds and pot payouts
  * (for replays) are stored in clear; the full engine log (hole cards, deck order)
  * is gzip-compressed for audits of finished hands only. Records queued before the
- * button and pots existed have neither.
+ * button, pots and blinds existed have none of them.
  *
  * The same batch reads the maintenance window back (and, with `botPolicy`, the bot switch: only tables that allow bots
  * ask), so a dealing room that was never told of a change (the admin's fan-out did not reach it, and its occupancy did
@@ -288,7 +288,13 @@ export async function recordHand(
   engineLog: unknown,
   opts: { bots?: number; botPolicy?: boolean; timeBank?: Partial<Record<TimeBankMetric, number>>; botStats?: { day: number; n: Record<string, number> }[] } = {},
 ): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null; timeBank: TimeBankPolicy | null; social: SocialPolicy | null }> {
-  const eventLog = JSON.stringify({ actions: rec.actions, button: rec.buttonSeat ?? null, pots: rec.pots ?? null, engine: await gzipBase64(JSON.stringify(engineLog)) });
+  const eventLog = JSON.stringify({
+    actions: rec.actions,
+    button: rec.buttonSeat ?? null,
+    blinds: rec.blinds ?? null,
+    pots: rec.pots ?? null,
+    engine: await gzipBase64(JSON.stringify(engineLog)),
+  });
   const policy = opts.botPolicy ? [d1.prepare(`SELECT (${BOT_POLICY_ON}) AS botPolicyOn`)] : [];
   const stmts: D1PreparedStatement[] = [
     maintenanceQuery(d1, Date.now()),

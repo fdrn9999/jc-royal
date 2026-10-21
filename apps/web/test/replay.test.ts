@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReplay, replayParts, replayPhase, replayPots, type ReplayInput } from '../src/game/replay';
+import { buildReplay, replayParts, replayPhase, replayPots, spokenAmounts, type ReplayInput } from '../src/game/replay';
 
 const a = (seatIndex: number, stage: string, type: string, amount = 0) => ({ seatIndex, stage, type, amount });
 const act = (seat: number, type: string, amount = 0) => ({ kind: 'act', seat, type, amount });
@@ -177,6 +177,15 @@ describe('buildReplay', () => {
         { kind: 'wins', seat: 2, amount: 400 },
       ],
     ]);
+  });
+
+  it("gives a list of the hand's actions the same amounts as the line, one for each action, the street's total starting over each street", () => {
+    const h = sidePotHand();
+    const line = buildReplay(h, 1).flatMap((s) => s.line.flatMap((x) => (x.kind === 'act' ? [x.amount] : [])));
+    expect(spokenAmounts(h.actions)).toEqual(line);
+    // The big blind's raise reads to 300 (10 posted + 290 added); the flop bet starts the street at 0 again.
+    expect(spokenAmounts(h.actions)).toEqual([5, 10, 100, 95, 300, 200, 0, 200, 0]);
+    expect(spokenAmounts([])).toEqual([]);
   });
 
   it('marks the part of the hand each step is in, and where each part the hand reached starts and ends', () => {

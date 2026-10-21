@@ -9,8 +9,12 @@
  * - `api_error`: an API request that ended in a server error (5xx).
  * - `cashout_fail`: a table room's attempt to pay a seat's chips back to the wallet that failed (the room retries; each
  *   failed attempt counts, so one stuck cash-out keeps counting until it goes through). Also counted as `room_error`.
+ * - `autobuy_stop`: a seat's automatic rebuy or top-up that turned itself off, nothing taken (the wallet was short, or
+ *   the charge would pass the player's limit or the table's range). A failed D1 call is a `room_error` instead.
+ * - `autobuy_dup`: an automatic rebuy or top-up whose ledger key was already committed, so nothing was taken again.
+ * - `autobuy_invalid`: a policy request (or a buy-in carrying one) the room refused as out of range.
  */
-export const OPS_METRICS = ['ws_retry', 'ws_drop', 'room_error', 'api_error', 'cashout_fail'] as const;
+export const OPS_METRICS = ['ws_retry', 'ws_drop', 'room_error', 'api_error', 'cashout_fail', 'autobuy_stop', 'autobuy_dup', 'autobuy_invalid'] as const;
 export type OpsMetric = (typeof OPS_METRICS)[number];
 
 export const OPS_BUCKET_MS = 60_000;

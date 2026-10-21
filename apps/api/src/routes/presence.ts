@@ -5,7 +5,7 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser, requireUserQuiet } from '../lib/auth';
 import { fail, parseBody } from '../lib/http';
-import { applyMode, hubCall, type HubBeat, type HubQuery } from '../lib/presence';
+import { applyMode, hubCall, stampLastOnline, type HubBeat, type HubLeave, type HubQuery } from '../lib/presence';
 import { rateLimit } from '../lib/rate-limit';
 
 /** What friends see of me now, by my mode and my devices' beats. */
@@ -19,7 +19,9 @@ async function myState(c: Context<AppEnv>, mode: PresenceMode): Promise<MyPresen
 /**
  * My status (docs/PRESENCE.md), mounted at /api/me before meRoutes: the beat and the leave come every half minute from
  * every open page, so they check the sign-in without sliding it (requireUserQuiet, no D1 write) and answer before
- * meRoutes' requireUser would run. Never rate limited in D1 (a write per call): the hub limits beats per member.
+ * meRoutes' requireUser would run. Never rate limited in D1 (a write per call): the hub limits beats per member. Their
+ * only D1 write is the last-online time when the hub asks for it (stampLastOnline: at most every PRESENCE_STAMP_MS per
+ * member while online, about once a minute as devices close), after the answer.
  */
 export const presenceRoutes = new Hono<AppEnv>()
   /**
@@ -27,11 +29,18 @@ export const presenceRoutes = new Hono<AppEnv>()
    * and what friends see, so a mode changed on another device shows here within a beat.
    */
   .post('/presence/heartbeat', requireUserQuiet, async (c) => {
+    // The sign-in check has just read the member's mode (a Worker's clock moves only with I/O: this is when that read
+    // came back), before the body, which may be slow.
+    const read = Date.now();
     const body = await parseBody(c, PresenceBeatSchema);
     const u = c.var.user!;
     const s = c.var.session!;
     // The sign-in's span goes along: the device shows no longer than the sign-in, and a beat still on its way when the
-    // member signed out (here or of every device) is not recorded (the hub's PresenceBook).
+    // member signed out (here or of every device) is not recorded (the hub's PresenceBook). `mark`: friends can see the
+    // member, so the beat moves their last-online time (shown as offline, it stays where it was); `age`: how long ago
+    // that was read, on this clock alone (the hub takes it off its own), so a beat still on its way after a switch to
+    // invisible moves the time no later, whatever the two servers' clocks say.
+    const sent = Date.now();
     const r = await hubCall<HubBeat>(c.env, 'beat', {
       user: u.id,
       session: s.id,
@@ -41,15 +50,21 @@ export const presenceRoutes = new Hono<AppEnv>()
       view: body.view ?? null,
       until: s.expiresAt,
       since: s.createdAt,
+      mark: u.presenceMode !== 'invisible',
+      age: sent - read,
     });
     if (r?.limited) fail(429, 'rate_limited', 'too many status updates; slow down');
     if (!r?.state) fail(503, 'presence_unavailable', 'status is unavailable right now');
+    stampLastOnline(c, u.id, sent, r.stampAgo);
     return c.json({ mode: u.presenceMode, state: applyMode(u.presenceMode, r.state) } satisfies MyPresenceDto);
   })
   /** This device closed (pagehide, keepalive): friends see the change without waiting for it to expire. */
   .post('/presence/leave', requireUserQuiet, async (c) => {
     const body = await parseBody(c, PresenceLeaveSchema);
-    await hubCall(c.env, 'leave', { user: c.var.user!.id, session: c.var.session!.id, conn: body.conn });
+    const uid = c.var.user!.id;
+    const sent = Date.now();
+    const r = await hubCall<HubLeave>(c.env, 'leave', { user: uid, session: c.var.session!.id, conn: body.conn });
+    stampLastOnline(c, uid, sent, r?.stampAgo);
     return c.json({ ok: true });
   })
   .get('/presence', requireUser, async (c) => c.json(await myState(c, c.var.user!.presenceMode)))

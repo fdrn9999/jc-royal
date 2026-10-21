@@ -2,6 +2,7 @@ import { handLabelKey, type Card, type HandReviewDto } from '@jc/types';
 import { Button, formatChips, formatDate, PlayingCard } from '@jc/ui';
 import { useState } from 'react';
 import { HandReplay } from '../game/HandReplay';
+import { spokenAmounts } from '../game/replay';
 import { useAmounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { MemberName } from './MemberName';
@@ -17,6 +18,8 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
   // The blinds stay in chips (they define the big blind); the pot and the bets read in the player's unit.
   const amt = useAmounts(hand.bigBlind ?? 0);
   const name = (seat: number) => hand.players.find((p) => p.seatIndex === seat)?.nickname ?? `#${seat + 1}`;
+  // Read as the replay reads them: a bet, raise or all-in to its street total, a call by what it added.
+  const said = spokenAmounts(hand.actions);
   const act = (type: string) => (['post-sb', 'post-bb', 'timeout-fold', 'timeout-check'].includes(type) ? t(`replay.${type}` as MsgKey) : t(`action.${type}` as MsgKey));
   return (
     <section className="rounded-xl border border-gold-500/20 bg-black/30 p-4" data-testid="hand-review">
@@ -25,7 +28,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
           {t('board.handReview')} · {hand.tableName} #{hand.handNumber}
         </h3>
         <span className="text-xs text-ink-400">
-          {hand.smallBlind !== null && `${formatChips(hand.smallBlind)}/${formatChips(hand.bigBlind ?? 0)} · `}
+          {hand.smallBlind !== null && hand.bigBlind !== null && `${formatChips(hand.smallBlind)}/${formatChips(hand.bigBlind)} · `}
           {t('table.pot')} {amt.fmt(hand.potTotal)} · {formatDate(hand.endedAt, locale)}
         </span>
       </header>
@@ -54,7 +57,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
       </ul>
       <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
         {STAGES.map((st) => {
-          const rows = hand.actions.filter((a) => a.stage === st);
+          const rows = hand.actions.flatMap((a, k) => (a.stage === st ? [{ ...a, amount: said[k]! }] : []));
           if (rows.length === 0) return null;
           return (
             <div key={st} className="rounded-lg bg-white/[0.03] p-2">
@@ -74,6 +77,7 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
           );
         })}
       </div>
+      {hand.actions.length > 0 && <p className="mt-2 text-[11px] text-ink-400">{t('shareImg.legend')}</p>}
     </section>
   );
 }

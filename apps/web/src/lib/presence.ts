@@ -239,13 +239,16 @@ export function sortFriends<T extends { id: string }>(list: readonly T[], presen
 const FRIENDS_STALE_MS = PRESENCE_POLL_MS * 2.5;
 
 let friends: Record<string, PresenceState> | null = null;
+/** When friends shown offline were last online (the server's, to the minute), read with `friends` and gone with it. */
+let lastOnlineOf: Record<string, number> | null = null;
 let friendsAt = 0;
 let friendsLoading = false;
 let watchers = 0;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 const friendListeners = new Set<() => void>();
-function setFriends(next: Record<string, PresenceState> | null) {
+function setFriends(next: Record<string, PresenceState> | null, lastOnline: Record<string, number> | null = null) {
   friends = next;
+  lastOnlineOf = next ? lastOnline : null;
   for (const l of friendListeners) l();
 }
 function resetFriends() {
@@ -264,7 +267,7 @@ async function pollFriends(force = false) {
     const res = await api<FriendsPresenceDto>('/api/friends/presence');
     if (run !== r) return;
     friendsAt = Date.now();
-    setFriends(res.presence);
+    setFriends(res.presence, res.lastOnline ?? {});
   } catch {
     // A status that could not be read again for a while is not shown as if it were current.
     if (run === r && friends && Date.now() - friendsAt > FRIENDS_STALE_MS) setFriends(null);
@@ -279,6 +282,8 @@ const onFriendsVisible = () => {
 
 /** Friends' status as known now: null until known, and when it was not read for a while. */
 export const friendsPresence = () => friends;
+/** When friends shown offline were last online, as known now (null with friendsPresence; no key when not known). */
+export const friendsLastOnline = () => lastOnlineOf;
 
 /** Asks for friends' status while a screen shows it (useFriendsPresence); the returned function stops watching. */
 export function watchFriendsPresence(): () => void {
@@ -311,5 +316,16 @@ export function useFriendsPresence(refreshKey?: unknown): Record<string, Presenc
       return () => friendListeners.delete(cb);
     },
     friendsPresence,
+  );
+}
+
+/** With useFriendsPresence on the same screen: when friends shown offline were last online (no key when not known). */
+export function useFriendsLastOnline(): Record<string, number> | null {
+  return useSyncExternalStore(
+    (cb) => {
+      friendListeners.add(cb);
+      return () => friendListeners.delete(cb);
+    },
+    friendsLastOnline,
   );
 }

@@ -41,6 +41,12 @@ export const users = sqliteTable(
      */
     presenceMode: text('presence_mode', { enum: ['auto', 'away', 'invisible'] }).notNull().default('auto'),
     /**
+     * When the member was last confirmed online with friends able to see it (docs/PRESENCE.md): one value overwritten
+     * at most every PRESENCE_STAMP_MS while online and as a page closes, never a log. Not moved while shown as offline
+     * (invisible), shown only to accepted friends, cleared on withdrawal. Null: never recorded.
+     */
+    lastOnlineAt: integer('last_online_at'),
+    /**
      * VIP (packages/types/src/vip.ts): the name color an administrator chose, a VIP_COLORS key; null for a member who
      * is not VIP. A look only: no game, chip or permission code reads it. Changed only by PATCH /api/admin/users/:id/vip,
      * which raises vip_version each time (a second administrator's stale change is refused) and audits it.

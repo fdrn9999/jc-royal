@@ -45,3 +45,36 @@ test('mobile: top-up and auto rebuy fit the phone, and an empty wallet is explai
   expect(await widerThanDevice(m.page)).toBe(false);
   await m.page.screenshot({ path: 'test-results/topup-short-mobile.png', animations: 'disabled' });
 });
+
+test('mobile: the buy-in dialog with an auto top-up chosen fits the phone, and so does the policy shown while seated', async ({ browser }) => {
+  const m = await signUp(browser, { mobile: true });
+  await m.page.goto('/table/e2e-autotop-m?sit=1');
+  const confirm = m.page.getByTestId('buyin-confirm');
+  const auto = m.page.getByTestId('buyin-autobuy');
+  await expect(auto).toBeVisible();
+  await setRange(m.page.getByRole('dialog').locator('input[type="range"]'), 400);
+  await auto.getByTestId('autobuy-mode-topup').scrollIntoViewIfNeeded();
+  await auto.getByTestId('autobuy-mode-topup').tap();
+  await setRange(auto.getByTestId('autotop-trigger'), 250);
+  await auto.getByTestId('autotop-times-5').tap();
+  await auto.getByTestId('autotop-partial').tap();
+  await auto.getByTestId('autotop-consent').tap();
+  await expect(auto.getByTestId('autotop-consent')).toBeChecked();
+  // Taking what the wallet holds is part of what is agreed to.
+  await expect(auto.getByTestId('autotop-consent').locator('..')).toContainText(/가진 만큼|what my wallet holds/);
+  expect(await widerThanDevice(m.page)).toBe(false);
+  await m.page.screenshot({ path: 'test-results/autotop-buyin-mobile.png', animations: 'disabled' });
+  await confirm.scrollIntoViewIfNeeded();
+  await confirm.tap();
+  await expect(confirm).toHaveCount(0);
+  await expect.poll(() => balanceOf(m.page)).toBe(9600);
+
+  await expect(m.page.getByTestId('autotop-badge')).toContainText('0/2,000');
+  await m.page.getByTestId('topup-open').tap();
+  const modal = m.page.getByTestId('topup-modal');
+  await modal.getByTestId('autotop-active').scrollIntoViewIfNeeded();
+  // At the target nothing is due.
+  await expect(modal.getByTestId('autotop-estimate')).toHaveText(/충전하지 않습니다|nothing is added/);
+  expect(await widerThanDevice(m.page)).toBe(false);
+  await m.page.screenshot({ path: 'test-results/autotop-status-mobile.png', animations: 'disabled' });
+});

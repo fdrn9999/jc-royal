@@ -1,5 +1,5 @@
 import type { Card, HandReplayPlayer } from '@jc/types';
-import { formatChips } from '@jc/ui';
+import { formatBB, formatChips } from '@jc/ui';
 import { describe, expect, it } from 'vitest';
 import { buildReplay, type ReplayInput, type ReplayLinePart } from '../src/game/replay';
 import { DEFAULT_PALETTE, drawShare, type ShareBox } from '../src/game/shareDraw';
@@ -80,6 +80,87 @@ function foldOut(): ReplayInput {
     actions: [a(1, 'preflop', 'post-sb', 50), a(2, 'preflop', 'post-bb', 100), a(0, 'preflop', 'raise', 300), a(1, 'preflop', 'fold'), a(2, 'preflop', 'fold')],
     // The record holds every player's cards; the replay shows only the viewer's (seat 1) and none of the folded others'.
     players: [0, 1, 2].map((s) => ({ seatIndex: s, nickname: `p${s}`, holeCards: [DECK[2 * s]!, DECK[2 * s + 1]!], stackStart: 10_000, net: s === 0 ? 150 : -50 * s, won: s === 0 ? 450 : 0, rankClass: null, bestFive: null })),
+  };
+}
+
+/**
+ * The line the brief draws: 6 seats, blinds 50/100, the viewer (seat 0) on the button. UTG and HJ fold, CO raises to
+ * 250, the viewer 3-bets to 800, the blinds fold, CO 4-bets to 2,000 (putting in 1,750) and the viewer calls 1,200; on
+ * the flop CO checks, the viewer bets 2,000 and CO calls; on the turn CO checks and the viewer is all in for 6,000,
+ * called; the river is dealt to the showdown, where the viewer's kings beat CO's queens.
+ */
+function brief(): ReplayInput {
+  const hole = [['As', 'Ks'], ['4h', '4c'], ['5h', '5d'], ['6s', '6d'], ['8s', '8d'], ['Qh', 'Qd']];
+  const net = [10_150, -50, -100, 0, 0, -10_000];
+  return {
+    id: 'brief',
+    tableName: 'T',
+    handNumber: 777,
+    board: ['Kh', '7s', '2d', 'Jc', '3s'],
+    potTotal: 20_150,
+    smallBlind: 50,
+    bigBlind: 100,
+    maxSeats: 6,
+    buttonSeat: 0,
+    pots: [{ amount: 20_150, eligibleSeats: [0, 5], winners: [{ seatIndex: 0, amount: 20_150 }], uncalled: false }],
+    returned: null,
+    actions: [
+      ...[a(1, 'preflop', 'post-sb', 50), a(2, 'preflop', 'post-bb', 100), a(3, 'preflop', 'fold'), a(4, 'preflop', 'fold'), a(5, 'preflop', 'raise', 250)],
+      ...[a(0, 'preflop', 'raise', 800), a(1, 'preflop', 'fold'), a(2, 'preflop', 'fold'), a(5, 'preflop', 'raise', 1750), a(0, 'preflop', 'call', 1200)],
+      ...[a(5, 'flop', 'check'), a(0, 'flop', 'bet', 2000), a(5, 'flop', 'call', 2000)],
+      ...[a(5, 'turn', 'check'), a(0, 'turn', 'allin', 6000), a(5, 'turn', 'call', 6000)],
+    ],
+    players: hole.map((h, s) => ({
+      seatIndex: s,
+      nickname: `p${s}`,
+      holeCards: h,
+      stackStart: 10_000,
+      net: net[s]!,
+      won: s === 0 ? 20_150 : 0,
+      rankClass: s === 0 || s === 5 ? 'pair' : null,
+      bestFive: s === 0 ? ['Ks', 'Kh', 'As', 'Jc', '7s'] : s === 5 ? ['Qh', 'Qd', 'Kh', 'Jc', '7s'] : null,
+    })),
+  };
+}
+
+/**
+ * A short stack all in preflop: seat 2 (500 behind) 3-bets all in over seat 0's raise to 300, both others call; seat 0
+ * bets 1,000 on the flop into seat 1, who calls; it is checked down. Seat 2's queens take the main pot (1,500), seat 0's
+ * aces the side pot (2,000); seat 1 mucks its kings.
+ */
+function sidePot(): ReplayInput {
+  const hole = [['As', 'Ad'], ['Kh', 'Kc'], ['Qs', 'Qd']];
+  return {
+    id: 'side',
+    tableName: 'T',
+    handNumber: 778,
+    board: ['Qh', '7c', '2d', '9s', '3c'],
+    potTotal: 3500,
+    smallBlind: 50,
+    bigBlind: 100,
+    maxSeats: 6,
+    buttonSeat: 0,
+    pots: [
+      { amount: 1500, eligibleSeats: [0, 1, 2], winners: [{ seatIndex: 2, amount: 1500 }], uncalled: false },
+      { amount: 2000, eligibleSeats: [0, 1], winners: [{ seatIndex: 0, amount: 2000 }], uncalled: false },
+    ],
+    returned: null,
+    actions: [
+      ...[a(1, 'preflop', 'post-sb', 50), a(2, 'preflop', 'post-bb', 100), a(0, 'preflop', 'raise', 300), a(1, 'preflop', 'call', 250), a(2, 'preflop', 'allin', 400), a(0, 'preflop', 'call', 200), a(1, 'preflop', 'call', 200)],
+      ...[a(1, 'flop', 'check'), a(0, 'flop', 'bet', 1000), a(1, 'flop', 'call', 1000)],
+      ...[a(1, 'turn', 'check'), a(0, 'turn', 'check'), a(1, 'river', 'check'), a(0, 'river', 'check')],
+    ],
+    players: hole.map((h, s) => ({
+      seatIndex: s,
+      nickname: `p${s}`,
+      holeCards: h,
+      stackStart: s === 2 ? 500 : 10_000,
+      net: [500, -1500, 1000][s]!,
+      won: [2000, 0, 1500][s]!,
+      rankClass: s === 2 ? 'three-of-a-kind' : 'pair',
+      bestFive: s === 2 ? ['Qs', 'Qd', 'Qh', '9s', '7c'] : s === 0 ? ['As', 'Ad', 'Qh', '9s', '7c'] : ['Kh', 'Kc', 'Qh', '9s', '7c'],
+      ...(s === 1 ? { mucked: true } : {}),
+    })),
   };
 }
 
@@ -254,6 +335,8 @@ describe('every template at every ratio lays out without cutting or covering', (
     ['6 seats, split pot', table(6, { split: true, long: true }), 1],
     ['fold-ended', foldOut(), 1],
     ['spectator', table(6), null],
+    ['3-bet, 4-bet and all in', brief(), 0],
+    ['side pot, a muck', sidePot(), 0],
   ];
   /** The faults of every template at every ratio, with the options on and off, at the start, flop, showdown and end. */
   const layoutFaults = (hand: ReplayInput, hero: number | null, measure?: typeof WIDE) => {
@@ -324,5 +407,214 @@ describe('every template at every ratio lays out without cutting or covering', (
       const off = draw(snap, { template: tpl, winAmount: false }).boxes.map((b) => b.text ?? '');
       expect(off.some((x) => x.includes('+30'))).toBe(false);
     }
+  });
+});
+
+describe('the betting line image', () => {
+  const texts = (boxes: ShareBox[]) => new Map(boxes.flatMap((b) => (b.text === undefined ? [] : [[b.id, b.text] as const])));
+  const all = (boxes: ShareBox[]) => boxes.map((b) => b.text ?? '').join(' ');
+  /** The rows drawn, as "street:index" ("sd:index" at the showdown). */
+  const drawn = (boxes: ShareBox[]) =>
+    new Set(
+      boxes.flatMap((b) => {
+        const m = /^line-(\d+|sd)-(\d+)-name$/.exec(b.id);
+        return m ? [`${m[1] === 'sd' ? -1 : m[1]}:${m[2]}`] : [];
+      }),
+    );
+  /** How many rows the image says it left out. */
+  const left = (boxes: ShareBox[]) => sumOf(boxes.filter((b) => b.id.startsWith('line-omit-')).map((b) => Number(/\d+/.exec(b.text ?? '')?.[0] ?? NaN)));
+  const sumOf = (xs: number[]) => xs.reduce((p, q) => p + q, 0);
+  const rowsOf = (snap: ShareSnap) => sumOf(snap.streets.map((st) => st.acts.length)) + (snap.showdown?.length ?? 0);
+
+  it('reads the hand street by street: what each action was, at what amount, each street’s cards and the pot it began with', () => {
+    const hand = brief();
+    const steps = buildReplay(hand, 0);
+    const snap = snapOf(hand, 0, steps.length - 1);
+    const { boxes } = draw(snap, { template: 'betline' });
+    const tx = texts(boxes);
+    const row = (id: string) => ['pos', 'word-0', 'amt'].map((k) => tx.get(`${id}-${k}`) ?? null);
+    // A raise reads as what it raised to: CO's 4-bet to 2,000, not the 1,750 it put in; a call as what it put in.
+    expect(row('line-0-2')).toEqual(['UTG', 'Fold', null]);
+    expect(row('line-0-4')).toEqual(['CO', 'Raise', '250']);
+    expect(row('line-0-5')).toEqual(['BTN', '3-Bet', '800']);
+    expect(row('line-0-8')).toEqual(['CO', '4-Bet', '2,000']);
+    expect(row('line-0-9')).toEqual(['BTN', 'Call', '1,200']);
+    expect(row('line-1-0')).toEqual(['CO', 'Check', null]);
+    expect(row('line-1-1')).toEqual(['BTN', 'Bet', '2,000']);
+    expect(row('line-2-1')).toEqual(['BTN', 'All-in', '6,000']);
+    // A call of a player's last chips is an all-in too.
+    expect(row('line-2-2')).toEqual(['CO', 'All-in', '6,000']);
+    const dealt = (at: number) => boxes.filter((b) => new RegExp(`^line-head-${at}-\\d+-card-`).test(b.id)).map((b) => b.card);
+    expect([0, 1, 2, 3].map(dealt)).toEqual([[], ['Kh', '7s', '2d'], ['Jc'], ['3s']]);
+    const pot = (at: number) => boxes.find((b) => new RegExp(`^line-head-${at}-\\d+-pot-1$`).test(b.id))?.text;
+    expect([1, 2, 3].map(pot)).toEqual(['4,150', '8,150', '20,150']);
+    // The showdown's hands, then the payout: the pot and, smaller than the win, the viewer's own result.
+    expect(boxes.filter((b) => b.id.startsWith('line-sd-') && b.card).map((b) => b.card)).toEqual(['As', 'Ks', 'Qh', 'Qd']);
+    const net = boxes.find((b) => b.text === '+10,150');
+    const win = boxes.find((b) => b.id.startsWith('result-win') && b.text === '20,150');
+    expect(net && win && net.h < win.h).toBe(true);
+    expect(faults({ boxes, ...SHARE_SIZES['1:1'] })).toEqual([]);
+  });
+
+  it('reads amounts in big blinds by the hand’s own blinds', () => {
+    const hand = brief();
+    const steps = buildReplay(hand, 0);
+    const snap = shareSnap({ hand, steps, index: steps.length - 1, heroSeat: 0, say, fmt: (n, c) => formatBB(n, 100, c), t });
+    const tx = texts(draw(snap, { template: 'betline' }).boxes);
+    expect(['line-0-4-amt', 'line-0-5-amt', 'line-0-8-amt', 'line-0-9-amt'].map((id) => tx.get(id))).toEqual(['2.5 BB', '8 BB', '20 BB', '12 BB']);
+  });
+
+  it('says nothing of what came after its step: no later street, action, hand or result', () => {
+    const hand = brief();
+    const steps = buildReplay(hand, 0);
+    const flop = steps.findIndex((s) => s.kind === 'street' && s.stage === 'flop');
+    const showdown = steps.findIndex((s) => s.kind === 'showdown');
+    for (const r of SHARE_RATIOS) {
+      const { boxes } = draw(snapOf(hand, 0, flop), { template: 'betline', ratio: r });
+      const words = all(boxes);
+      for (const later of ['Turn', 'River', 'All-in', '6,000', 'Showdown', 'My net', '20,150']) expect(words, `${r}: ${later}`).not.toContain(later);
+      expect(faces(boxes).filter((c) => ['Jc', '3s', 'Qh', 'Qd'].includes(c))).toEqual([]);
+      // Before the showdown nobody's cards but the viewer's, at any step.
+      for (let k = 0; k < showdown; k++) expect(faces(draw(snapOf(hand, 0, k), { template: 'betline', ratio: r }).boxes).filter((c) => c === 'Qh' || c === 'Qd')).toEqual([]);
+    }
+  });
+
+  it('shows the side pots and who took each, the short stack’s all-in raise, and a muck as a muck', () => {
+    const hand = sidePot();
+    const steps = buildReplay(hand, 0);
+    const snap = snapOf(hand, 0, steps.length - 1);
+    for (const r of SHARE_RATIOS) {
+      const { boxes } = draw(snap, { template: 'betline', ratio: r }, fakeCtx(WIDE));
+      const tx = texts(boxes);
+      const words = all(boxes);
+      expect(words).toContain('Main pot');
+      expect(words).toContain('Side pot 1');
+      expect([tx.get('line-0-4-word-0'), tx.get('line-0-4-amt')]).toEqual(['All-in', '500']);
+      expect([...tx].some(([id, x]) => id.startsWith('line-sd-') && x === 'Muck')).toBe(true);
+      expect(faces(boxes).filter((c) => c === 'Kh' || c === 'Kc')).toEqual([]);
+    }
+  });
+
+  it('ends a hand nobody called with the raise, the folds and the bet handed back, and no showdown', () => {
+    const hand = foldOut();
+    const steps = buildReplay(hand, 1);
+    const { boxes } = draw(snapOf(hand, 1, steps.length - 1), { template: 'betline' });
+    const tx = texts(boxes);
+    expect([tx.get('line-0-2-word-0'), tx.get('line-0-2-amt')]).toEqual(['Raise', '300']);
+    expect([tx.get('line-0-3-word-0'), tx.get('line-0-4-word-0')]).toEqual(['Fold', 'Fold']);
+    expect(boxes.some((b) => b.id.startsWith('line-sd') || b.id.startsWith('line-head--1'))).toBe(false);
+    expect(all(boxes)).toContain('Uncalled bet returned');
+    expect(all(boxes)).toContain('No showdown');
+  });
+
+  it('leaves out the least telling actions where the line does not fit, says how many, and keeps every one of the viewer’s', () => {
+    const hand = table(9, { long: true });
+    const steps = buildReplay(hand, 4);
+    const snap = snapOf(hand, 4, steps.length - 1);
+    const mine = [...snap.streets.flatMap((st, at) => st.acts.flatMap((x, j) => (x.hero ? [`${at}:${j}`] : []))), ...(snap.showdown ?? []).flatMap((x, j) => (x.seat === 4 ? [`-1:${j}`] : []))];
+    expect(mine.length).toBe(5);
+    for (const r of SHARE_RATIOS) {
+      const { boxes } = draw(snap, { template: 'betline', ratio: r }, fakeCtx(WIDE));
+      const rows = drawn(boxes);
+      expect(rows.size + left(boxes), r).toBe(rowsOf(snap));
+      for (const k of mine) expect(rows.has(k), `${r}: ${k}`).toBe(true);
+      if (r === '1:1') expect(left(boxes)).toBeGreaterThan(0);
+    }
+  });
+
+  it('splits a line too long for one column between whole streets, the two columns as near the same height as they go', () => {
+    const out: string[] = [];
+    let two = 0;
+    const cases: [string, ReplayInput, number][] = [
+      ['9 seats, long names', table(9, { long: true }), 4],
+      ['6 seats, a muck', table(6, { mucked: [5] }), 3],
+      ['3-bet, 4-bet and all in', brief(), 0],
+      ['side pots', sidePot(), 0],
+    ];
+    for (const [name, hand, hero] of cases)
+      for (const r of SHARE_RATIOS)
+        for (const m of [undefined, WIDE]) {
+          const steps = buildReplay(hand, hero);
+          const { boxes } = draw(snapOf(hand, hero, steps.length - 1), { template: 'betline', ratio: r }, fakeCtx(m));
+          // Each street's column (by its heading) and the height its rows take.
+          const heads = boxes.flatMap((b) => {
+            const x = /^line-head-(-?\d+)-(\d+)$/.exec(b.id);
+            return x ? [{ group: x[1] === '-1' ? 'line-sd' : `line-${x[1]}`, col: Number(x[2]) }] : [];
+          });
+          if (!heads.some((h) => h.col === 1)) continue;
+          two++;
+          const at = `${name} ${r}${m ? ' wide' : ''}`;
+          if (new Set(heads.map((h) => h.group)).size < heads.length) continue; // a street too long for a column runs on
+          const span = (bs: ShareBox[]) => [Math.min(...bs.map((b) => b.y)), Math.max(...bs.map((b) => b.y + b.h))] as const;
+          const secs = heads.map((h) => ({ ...h, y: span(boxes.filter((b) => b.group === h.group)) }));
+          const tall = Math.max(...secs.map((x) => x.y[1] - x.y[0]));
+          const [l, rt] = [0, 1].map((c) => span(boxes.filter((b) => secs.some((x) => x.col === c && x.group === b.group))))
+            .map(([top, bottom]) => bottom - top) as [number, number];
+          // Moving the street at the split to the shorter column would make that one the taller: no split is more even.
+          if (Math.abs(l - rt) > tall + 48) out.push(`${at}: columns ${Math.round(l)} and ${Math.round(rt)} tall, the tallest street ${Math.round(tall)}`);
+        }
+    expect(two).toBeGreaterThan(0);
+    expect(out).toEqual([]);
+  });
+
+  it('with the actions off draws the key line: no other player’s blinds, checks, folds or mucks, and says how many it left out', () => {
+    const hand = table(6, { mucked: [5] });
+    const steps = buildReplay(hand, 3);
+    const snap = snapOf(hand, 3, steps.length - 1);
+    const { boxes } = draw(snap, { template: 'betline', log: false });
+    const rows = [...drawn(boxes)].map((k) => k.split(':').map(Number) as [number, number]);
+    const quiet = new Set(['sb', 'bb', 'check', 'fold']);
+    for (const [at, j] of rows) {
+      if (at === -1) expect(snap.showdown![j]!.muck && snap.showdown![j]!.seat !== 3).toBe(false);
+      else {
+        const x = snap.streets[at]!.acts[j]!;
+        expect(x.hero || !quiet.has(x.kind), `${at}:${j} ${x.kind}`).toBe(true);
+      }
+    }
+    expect(rows.length + left(boxes)).toBe(rowsOf(snap));
+    expect(left(boxes)).toBeGreaterThan(0);
+  });
+});
+
+describe('the full hand history image', () => {
+  /** The actions its log draws, and how many it says it left out. */
+  const logOf = (boxes: ShareBox[]) => ({
+    items: boxes.filter((b) => /^log-\d+-\d+$/.test(b.id)).flatMap((b) => (b.text ?? '').replace(/^… /, '').split(' · ')),
+    left: Number(/\d+/.exec(boxes.find((b) => b.id === 'log-omit')?.text ?? '0')?.[0]),
+  });
+
+  it('keeps its log at every ratio with the hands shown, and says how many actions it left out', () => {
+    const cases: [string, ReplayInput, number][] = [
+      ['4 seats, three hands shown', table(4), 0],
+      ['9 seats, long names', table(9, { long: true }), 4],
+      ['3-bet, 4-bet and all in', brief(), 0],
+    ];
+    const out: string[] = [];
+    for (const [name, hand, hero] of cases) {
+      const steps = buildReplay(hand, hero);
+      const snap = snapOf(hand, hero, steps.length - 1);
+      const total = snap.log.filter((e) => e.phase !== 'result').reduce((n, e) => n + e.lines.length, 0);
+      for (const r of SHARE_RATIOS)
+        for (const m of [undefined, WIDE]) {
+          const d = draw(snap, { template: 'summary', ratio: r }, fakeCtx(m));
+          const { items, left } = logOf(d.boxes);
+          const at = `${name} ${r}${m ? ' wide' : ''}`;
+          if (items.length === 0) out.push(`${at}: no action drawn`);
+          if (items.length + left !== total) out.push(`${at}: ${items.length} drawn + ${left} left out of ${total}`);
+          out.push(...faults(d).map((f) => `${at}: ${f}`));
+        }
+    }
+    expect(out.slice(0, 20)).toEqual([]);
+  });
+
+  it('says nothing is left out when every action fits, and nothing of a log turned off', () => {
+    const hand = table(2);
+    const steps = buildReplay(hand, 0);
+    const snap = snapOf(hand, 0, steps.length - 1);
+    const total = snap.log.filter((e) => e.phase !== 'result').reduce((n, e) => n + e.lines.length, 0);
+    const on = logOf(draw(snap, { template: 'summary', ratio: '9:16' }).boxes);
+    expect([on.items.length, on.left]).toEqual([total, 0]);
+    const off = draw(snap, { template: 'summary', ratio: '1:1', log: false }).boxes;
+    expect(off.some((b) => b.id.startsWith('log'))).toBe(false);
   });
 });

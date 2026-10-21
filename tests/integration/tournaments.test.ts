@@ -352,6 +352,7 @@ describe('a heads-up tournament', () => {
       [{ t: 'topUp', amount: 100 }, wb],
       [{ t: 'leave' }, wa],
       [{ t: 'autoRebuy', on: false }, wb],
+      [{ t: 'autoBuy', policy: { mode: 'off' } }, wa],
       [{ t: 'waitlist', join: true }, wa],
     ] as const) {
       const r = await ws.request(msg as unknown as { t: string });
