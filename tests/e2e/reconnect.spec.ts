@@ -1,6 +1,6 @@
 import type { TableView } from '@jc/types';
 import { expect, type Page, type WebSocketRoute } from '@playwright/test';
-import { balanceOf, checkOrCall, signUp, test } from './helpers';
+import { balanceOf, checkOrCall, signUp, standUp, test } from './helpers';
 
 /**
  * Plays the network for a page's table socket: drop() cuts the live connection (the server sees it close
@@ -105,7 +105,7 @@ test('game reconnect: after the network drops, the seat, stack and own cards com
   expect(net.actions[1]!.length).toBeGreaterThan(0);
 
   // Both stand up: every chip is back in the two wallets.
-  await a.page.getByTestId('leave').click();
-  await b.page.getByTestId('leave').click();
+  await standUp(a.page);
+  await standUp(b.page);
   await expect.poll(async () => (await balanceOf(a.page)) + (await balanceOf(b.page)), { timeout: 45_000 }).toBe(20_000);
 });

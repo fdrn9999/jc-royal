@@ -4,7 +4,8 @@
  * policy (admin console) sets that rate, or turns them off: then the room sends `reactions: null` and none are offered.
  */
 import { DEFAULT_REACTION_RULES, REACTION_EMOJI, REACTIONS, reactionWait, type ReactionId, type ReactionRules } from '@jc/types';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { cx } from '@jc/ui';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
 /** How long a reaction stays over a seat (its animation, .jc-react, runs 2.4 s). */
@@ -59,8 +60,79 @@ export function ReactionBubble({ r, compact }: { r: SeatReaction; compact: boole
   );
 }
 
-/** The eight reactions, above my seat. Closes after a pick; the seat closes it on a tap elsewhere, Escape or my turn. */
-export function ReactionTray({ sender, onClose }: { sender: ReactionSender; onClose: () => void }) {
+/** The reaction button and its tray, open or not; `off` (my turn: the action bar takes the line) closes it. */
+export interface ReactionTrayState {
+  open: boolean;
+  toggle: () => void;
+  close: () => void;
+  opener: RefObject<HTMLButtonElement | null>;
+  tray: RefObject<HTMLDivElement | null>;
+}
+
+/**
+ * The button lies in the status line under the table and the tray is a line of its own above it (Table.tsx), not over my
+ * seat: the table makes room for it while it is open (useStackRoom's data-momentary) and comes back when it closes, so
+ * it covers neither my cards nor a seat nor the wallet beside the button. Closes after a pick, on a tap elsewhere, on
+ * Escape (the button gets its focus back) and on my turn.
+ */
+export function useReactionTray(off: boolean): ReactionTrayState {
+  const [open, setOpen] = useState(false);
+  const opener = useRef<HTMLButtonElement>(null);
+  const tray = useRef<HTMLDivElement>(null);
+  const shown = open && !off;
+  useEffect(() => {
+    if (off) setOpen(false);
+  }, [off]);
+  useEffect(() => {
+    if (!shown) return;
+    // The button toggles it itself: a tap on it is not one elsewhere.
+    const outside = (e: PointerEvent) => {
+      const at = e.target as Node;
+      if (!tray.current?.contains(at) && !opener.current?.contains(at)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setOpen(false);
+      opener.current?.focus();
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [shown]);
+  return useMemo(() => ({ open: shown, toggle: () => setOpen((o) => !o), close: () => setOpen(false), opener, tray }), [shown]);
+}
+
+/** Opens the tray: a finger's size (44px), in the status line. */
+export function ReactionButton({ tray }: { tray: ReactionTrayState }) {
+  const { t } = useI18n();
+  return (
+    <button
+      ref={tray.opener}
+      type="button"
+      onClick={tray.toggle}
+      className={cx(
+        'jc-tap grid size-11 shrink-0 place-items-center rounded-full border text-xl leading-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-gold-400',
+        tray.open ? 'border-gold-400/70 bg-gold-500/15' : 'border-white/10',
+      )}
+      aria-label={t('react.open')}
+      title={t('react.open')}
+      aria-expanded={tray.open}
+      aria-controls={tray.open ? 'react-tray' : undefined}
+      data-testid="react-open"
+    >
+      <span aria-hidden>😊</span>
+    </button>
+  );
+}
+
+/**
+ * The eight reactions, a line of the stack above the status line's button: four to a row on a phone and in a short
+ * screen's column (`column`, where each takes a quarter of its width), all eight in one row wider.
+ */
+export function ReactionTray({ state, sender, column }: { state: ReactionTrayState; sender: ReactionSender; column: boolean }) {
   const { t } = useI18n();
   const wait = sender.wait();
   const [, tick] = useState(0);
@@ -74,12 +146,15 @@ export function ReactionTray({ sender, onClose }: { sender: ReactionSender; onCl
 
   return (
     <div
+      ref={state.tray}
+      id="react-tray"
       role="group"
       aria-label={t('react.title')}
-      className="absolute bottom-full left-1/2 mb-2 w-max -translate-x-1/2 rounded-2xl border border-gold-500/30 bg-ink-950/95 p-1.5 shadow-2xl backdrop-blur"
+      className={cx('pointer-events-auto rounded-2xl border border-gold-500/30 bg-ink-950/95 shadow-2xl backdrop-blur sm:self-end', column ? 'p-1' : 'p-1.5')}
       data-testid="react-tray"
+      data-momentary
     >
-      <div className="grid grid-cols-4 gap-1">
+      <div className={cx('grid', column ? 'grid-cols-4 gap-0.5' : 'grid-cols-4 gap-1 sm:grid-cols-8')}>
         {REACTIONS.map((r, i) => (
           <button
             key={r}
@@ -88,9 +163,12 @@ export function ReactionTray({ sender, onClose }: { sender: ReactionSender; onCl
             disabled={wait > 0}
             onClick={() => {
               sender.send(r);
-              onClose();
+              state.close();
             }}
-            className="jc-tap grid size-11 place-items-center rounded-xl text-2xl leading-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-gold-400 disabled:opacity-35"
+            className={cx(
+              'jc-tap grid place-items-center rounded-xl text-2xl leading-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-gold-400 disabled:opacity-35',
+              column ? 'h-11 w-full' : 'size-11',
+            )}
             aria-label={t(`react.${r}` as MsgKey)}
             title={t(`react.${r}` as MsgKey)}
             data-testid={`react-${r}`}

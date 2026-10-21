@@ -23,7 +23,7 @@ function placed(page: Page, selector: string) {
   }, selector);
 }
 
-test('mobile: a seated player sends a quick reaction from their seat, everyone sees it over the avatar, and the setting turns it off', async ({ browser }) => {
+test('mobile: a seated player sends a quick reaction from the status line, everyone sees it over the avatar, and the setting turns it off', async ({ browser }) => {
   test.setTimeout(120_000);
   const a = await signUp(browser, { mobile: true });
   await a.page.setViewportSize({ width: 360, height: 740 });
@@ -32,7 +32,7 @@ test('mobile: a seated player sends a quick reaction from their seat, everyone s
   await a.page.getByTestId('buyin-confirm').tap();
   const opener = a.page.getByTestId('react-open');
   await expect(opener).toBeVisible();
-  const seat = a.page.locator('[data-testid^="seat-"][data-state]').filter({ has: opener });
+  const seat = a.page.locator('[data-testid^="seat-"][data-state]').filter({ hasText: a.nickname });
   const seatId = (await seat.getAttribute('data-testid'))!;
   const index = seatId.replace('seat-', '');
 
@@ -41,13 +41,25 @@ test('mobile: a seated player sends a quick reaction from their seat, everyone s
   await expect(b.page.getByTestId(seatId)).toHaveAttribute('data-state', /.+/);
   await expect(b.page.getByTestId('react-open')).toHaveCount(0);
 
-  // The tray: eight reactions above my seat, all on the 360px screen and tappable.
+  // The tray: eight reactions in a line of their own above the button, all on the 360px screen and tappable, the
+  // button, the wallet and my seat (its cards, its stack) not under them.
   await opener.tap();
   const tray = a.page.getByTestId('react-tray');
   await expect(tray).toBeVisible();
+  await expect(opener).toHaveAttribute('aria-expanded', 'true');
   await expect(tray.getByRole('button')).toHaveCount(8);
   await expect(tray.getByRole('button', { name: '불꽃' })).toBeVisible();
   expect(await placed(a.page, '[data-testid=react-tray] button')).toEqual(Array(8).fill(true));
+  expect(await placed(a.page, '[data-testid=react-open], [data-testid=wallet]')).toEqual([true, true]);
+  const apart = await a.page.evaluate((id) => {
+    const box = (el: Element | null) => el?.getBoundingClientRect() ?? null;
+    const t = box(document.querySelector('[data-testid=react-tray]'))!;
+    return [document.querySelector(`[data-testid=${id}]`), document.querySelector('[data-testid=wallet]')].map((el) => {
+      const r = box(el)!;
+      return r.right <= t.left + 1 || r.left >= t.right - 1 || r.bottom <= t.top + 1 || r.top >= t.bottom - 1;
+    });
+  }, seatId);
+  expect(apart).toEqual([true, true]);
   expect(await widerThanDevice(a.page)).toBe(false);
   await a.page.screenshot({ path: test.info().outputPath('reaction-tray-360.png') });
 
@@ -89,7 +101,13 @@ test('mobile: a seated player sends a quick reaction from their seat, everyone s
   await b.page.waitForTimeout(800);
   await expect(b.page.getByTestId(`reaction-${index}`)).toHaveCount(0);
 
-  // A turns them off: the seat no longer offers the tray.
+  // A tap elsewhere closes the tray too.
+  await opener.tap();
+  await expect(tray).toBeVisible();
+  await a.page.getByTestId('board').tap({ force: true });
+  await expect(tray).toHaveCount(0);
+
+  // A turns them off: the status line no longer offers the tray.
   await a.page.getByRole('button', { name: /^(설정|Settings)$/ }).tap();
   const mine = a.page.getByTestId('settings-reactions');
   await mine.scrollIntoViewIfNeeded();

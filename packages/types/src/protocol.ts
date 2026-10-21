@@ -197,6 +197,8 @@ export type ErrorCode =
   | 'tournament_table'
   /** Quick reactions are off service-wide (the social policy). */
   | 'reactions_off'
+  /** The player folded and left during the hand still being played here: they can sit down again once it ends. */
+  | 'hand_in_progress'
   | 'internal';
 
 /**
@@ -217,7 +219,12 @@ export type NoticeCode =
   | 'autotopup_insufficient'
   | 'autotopup_cap'
   /** A pre-action was dropped because the table changed (a bet came in, or it arrived too late): the player decides. */
-  | 'preaction_cancelled';
+  | 'preaction_cancelled'
+  /**
+   * The player's stand-up went through after a hand they were in (at once after their fold, or once an all-in hand
+   * settled), or once a cash-out that had failed was retried. `amount` is the stack paid back to the wallet.
+   */
+  | 'left_seat';
 
 /** Server → client WebSocket messages. */
 export type ServerMessage =

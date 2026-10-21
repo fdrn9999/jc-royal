@@ -268,7 +268,10 @@ describe('automatic rebuy and top-up policies (real workerd + Durable Objects)',
     }
     // (a's first hand always leaves it short of the target.)
     expect(notices(a, 'autotopup_applied').length).toBeGreaterThanOrEqual(1);
-    expect(notices(c)).toEqual([]);
+    // c rebuys at 0 only. Leaving the hand still being dealt confirms the stand-up (`left_seat`), at most once each:
+    // whoever is still in it when the others have gone wins it and stands up between hands, without one.
+    expect(notices(c).filter((m) => m.code !== 'left_seat')).toEqual([]);
+    for (const r of rules) expect(notices(r.p, 'left_seat').length).toBeLessThanOrEqual(1);
     await expectConserved([a, b, c]);
   }, 150_000);
 

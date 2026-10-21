@@ -30,11 +30,13 @@ async function runCron(base: string) {
 
 /**
  * An administrator closes or pauses these; at the third a buy-in's outcome is unknown; at the fourth the time bank is
- * used across a restart; at the last an automatic top-up waits out a crash (heads-up, long turns so the clock never acts).
+ * used across a restart; at the fifth an automatic top-up waits out a crash (heads-up, long turns so the clock never
+ * acts); at the last a player who folded and left mid-hand is paid across a crash while the others play on.
  */
 const tables = [
   ...TABLES,
   ...['it-restart-close', 'it-restart-pause', 'it-restart-pending', 'it-restart-tb', 'it-restart-auto'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  { id: 'it-restart-fold', maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 describe('server restart recovery', () => {
@@ -409,6 +411,72 @@ describe('server restart recovery', () => {
     await a.waitState((x) => x.you.seatIndex === null, 30_000, 'A stood up');
     expect((await balanceOf(ca)) + (await balanceOf(cb))).toBe(20_000);
     a.close();
+  }, 360_000);
+
+  it('a player who folded and left mid-hand while D1 was down, then a crash: after the restart they are paid once and the others finish the hand', async () => {
+    if (!worker) {
+      await prepareState(state, tables);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const cs = [await user('fa', base), await user('fb', base), await user('fc', base)];
+    let ws = await Promise.all(cs.map((c) => TableSocket.open(c, 'it-restart-fold', { base })));
+    await Promise.all(ws.map((w, i) => w.request({ t: 'sit', seatIndex: i, buyIn: [500, 400, 300][i]! }).then((r) => expect(r).toMatchObject({ t: 'ack' }))));
+    const live = (s: NonNullable<TableSocket['state']>) => !!s.hand && s.hand.stage !== 'settled' && s.hand.actorSeat !== null;
+    const s0 = await ws[0]!.waitState(live, 15_000, 'hand start');
+    const handId = s0.hand!.id;
+    for (const w of ws) await w.waitState((s) => s.hand?.id === handId && live(s));
+    const fi = ws.findIndex((w) => isMyTurn(w.state!));
+    expect(fi).toBeGreaterThanOrEqual(0);
+    expect((await ws[fi]!.act('fold')).result.t).toBe('state');
+    const stack = ws[fi]!.state!.seats[fi]!.stack;
+
+    // D1 refuses the cash-out: the leave fails, the seat waits 'cashing', and the process dies before any retry.
+    const release = holdD1WriteLock(state);
+    try {
+      expect(await ws[fi]!.request({ t: 'leave' })).toMatchObject({ t: 'error', code: 'internal' });
+      for (const w of ws) w.close();
+      await worker.stop();
+    } finally {
+      release();
+    }
+    // Read straight from D1 while the server is down: no cash-out, the leaver's seat session still open.
+    expect(await d1(`SELECT id FROM chip_ledger WHERE table_id = 'it-restart-fold' AND type = 'cash_out'`, state)).toEqual([]);
+    expect(await d1<{ status: string }>(`SELECT status FROM table_sessions WHERE table_id = 'it-restart-fold' AND seat_index = ${fi}`, state)).toEqual([{ status: 'seated' }]);
+
+    // After the restart the room pays it from storage, once, and the hand is still the same one, played on by the others.
+    worker = await startWorker(port, state);
+    ws = await Promise.all(cs.map((c) => TableSocket.open(c, 'it-restart-fold', { base })));
+    await until(() => cashOuts(cs[fi]!), (r) => r.length === 1, 'the cash-out', 60_000);
+    expect((await cashOuts(cs[fi]!))[0]!.amount).toBe(stack);
+    const back = await ws[fi]!.waitState((s) => s.you.seatIndex === null, 30_000, 'stood up');
+    expect(back.hand).toMatchObject({ id: handId });
+    expect(back.seats[fi]).toMatchObject({ state: 'empty', held: true });
+    const rest = ws.filter((_, i) => i !== fi);
+    for (let guard = 0; guard < 200; guard++) {
+      const s = rest[0]!.state!;
+      if (s.hand?.stage === 'settled' || s.hand?.id !== handId) break;
+      const actor = rest.find((x) => x.state && isMyTurn(x.state));
+      if (!actor) {
+        await new Promise((res) => setTimeout(res, 100));
+        continue;
+      }
+      await actor.act(actor.state!.you.legal.some((o) => o.type === 'check') ? 'check' : 'call');
+    }
+    const done = await rest[0]!.waitState((s) => s.hand?.id === handId && s.hand.stage === 'settled', 15_000, 'settled');
+    const stacks = done.seats.reduce((a, s) => a + s.stack, 0);
+    let wallets = 0;
+    for (const c of cs) wallets += await balanceOf(c);
+    expect(wallets + stacks).toBe(30_000);
+
+    // Another restart pays nothing more.
+    for (const w of ws) w.close();
+    await worker.stop();
+    worker = await startWorker(port, state);
+    const again = await TableSocket.open(cs[fi]!, 'it-restart-fold', { base });
+    expect(again.state!.you.seatIndex).toBeNull();
+    expect(await cashOuts(cs[fi]!)).toHaveLength(1);
+    again.close();
   }, 360_000);
 
   it('a member room only D1 knows about (its opening call never reached it) is woken by the daily sweep and closes itself', async () => {

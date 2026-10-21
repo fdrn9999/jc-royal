@@ -1094,6 +1094,9 @@ interface LiveSeat {
   connected: boolean;
   sittingOut: boolean;
   phase?: string;
+  /** Dealt into the hand being played; `folded`: folded in it at a cash table (a leave stands them up at once). */
+  inHand?: boolean;
+  folded?: boolean;
   leaveAfterHand?: boolean;
   timeouts?: number;
   topUp?: { state: string; amount: number; auto: boolean } | null;
@@ -1105,6 +1108,8 @@ interface LiveSeat {
 /** The room's admin status (never cards). Fields after `chipsOnTable` are absent from rooms older than B2. */
 interface LiveStatus {
   seats?: (LiveSeat | null)[];
+  /** Empty seats the hand being played still deals to: their players folded and left mid-hand (paid), free once it ends. */
+  heldSeats?: number[];
   handNumber?: number;
   handInProgress?: boolean;
   stage?: string | null;
@@ -1407,7 +1412,13 @@ export function TableDetailPage() {
             <div className="flex flex-col gap-2 text-sm">
               <div>{t('liveLine', { n: live.handNumber ?? 0, state: live.handInProgress ? stageLabel(t, live.stage) : t('idleState'), ws: live.connections ?? 0, chips: formatChips(live.chipsOnTable ?? 0) })}</div>
               <ul className="divide-y divide-white/5">
-                {live.seats?.map((s, i) => s && (
+                {live.seats?.map((s, i) => !s ? (
+                  live.heldSeats?.includes(i) && (
+                    <li key={i} className="flex items-center gap-1 py-1.5 text-ink-400" data-testid={`held-seat-${i}`}>
+                      #{i + 1} <Badge>{t('seatHeldByHand')}</Badge>
+                    </li>
+                  )
+                ) : (
                   <li key={i} className="flex justify-between gap-2 py-1.5">
                     <span className="flex min-w-0 flex-wrap items-center gap-1">
                       #{s.seatIndex + 1} {s.nickname}
@@ -1415,7 +1426,11 @@ export function TableDetailPage() {
                       {!s.connected && <Badge>{t('offline')}</Badge>}
                       {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}
                       {s.phase && s.phase !== 'seated' && <Badge tone="gold">{seatPhaseLabel(t, s.phase)}</Badge>}
-                      {s.leaveAfterHand && <Badge>{t('leaveAfterHand')}</Badge>}
+                      {/* Leaving: folded (stood up at once; still here, the cash-out is being retried), still to act in the hand
+                          (folds at their turn, or stands up after it all in), or between hands. */}
+                      {s.leaveAfterHand && (
+                        <Badge tone={s.folded ? 'gold' : undefined}>{t(s.folded ? 'leaveFolded' : s.inHand ? 'leaveAtTurn' : 'leaveAfterHand')}</Badge>
+                      )}
                       {!!s.timeouts && <Badge>{t('timeoutsN', { n: s.timeouts })}</Badge>}
                       {s.topUp && <Badge tone="blue">{t('topUpN', { amount: formatChips(s.topUp.amount), state: topUpStateLabel(t, s.topUp.state) })}</Badge>}
                       {s.timeBank && <Badge>{t('tbSeatBank', { n: Math.floor(s.timeBank.ms / 1000) })}</Badge>}

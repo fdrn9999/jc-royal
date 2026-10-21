@@ -9,8 +9,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { amounts as chipAmounts, type Amounts, type AmountUnit } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { Flights, useCueStaging } from './CueLayer';
-import { DIMS, planHeight, planTable, type Density, type PlanInput, type Point, type SeatGeometry, type TablePlan } from './layout';
-import type { ReactionSender, SeatReaction } from './Reactions';
+import { planForText, planHeight, planTable, scalePlan, type Density, type PlanInput, type Point, type SeatGeometry, type TablePlan } from './layout';
+import type { SeatReaction } from './Reactions';
 import { revealSpots } from './reveal';
 import { Seat } from './Seat';
 import { collected as collectedOf } from './staging';
@@ -168,7 +168,7 @@ const SMALL: Density[] = ['compact', 'dense'];
 
 /**
  * The last plans laid out, the latest last. A raise panel opening and closing upright gives the table two areas in
- * turn, and on a small phone with nine seats each plan costs some 13–18ms on a desktop CPU, more on a phone's
+ * turn, and on a small phone with nine seats each plan costs some 13–21ms on a desktop CPU, more on a phone's
  * (TEST_REPORT): a repeat costs nothing.
  */
 const plans = new Map<string, TablePlan>();
@@ -182,24 +182,40 @@ function planned(key: string, make: () => TablePlan) {
 }
 
 /**
+ * The root font over the 16px DIMS are given at: a browser's or phone's text size, which the seats' rem sizes follow
+ * (scalePlan). Read as the table is laid out: the header and the stack round the table are sized in rem too, so a text
+ * size changed with the page open changes the area and the table is laid out again.
+ */
+function textScale() {
+  const px = typeof document === 'undefined' ? 16 : Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return px > 0 ? px / 16 : 1;
+}
+
+/**
  * The table laid out in the available area (layout.ts): every seat, bet and the board in a place of its own, the
  * seats smaller when the area is. A fixed area is kept from stretching into a band, at most 2.1 times as wide as tall
- * and 1.9 times as tall as wide.
+ * and 1.9 times as tall as wide. With the text larger, it is laid out as if the area were that much smaller and drawn
+ * that much larger (scalePlan), or for text less large where the seats find no room at that size (planForText).
  */
 export function useTableLayout(area: { w: number; h: number }, maxSeats: number | undefined, anchor: number, opts: LayoutOptions = {}): TableLayout {
   const { me = false, meTop = 0, footer = false, grow = 0, narrow = 1 } = opts;
   const { stack, bet, pot } = opts.chars ?? amountChars('chips');
   const n = maxSeats ?? 0;
   return useMemo(() => {
-    // Narrow or short areas (phones, landscape phones, an open keyboard) start from the smaller seats. A free height
-    // (the replay) takes the largest seats that fit its budget, so only the width counts there.
-    const densities = area.w < 640 || (grow <= 0 && area.h < 520) ? SMALL : ALL;
     const input: PlanInput = { n, anchor, me, meTop, footer, chars: { stack, bet, pot } };
-    const w = Math.max(1, area.w);
-    const h = Math.max(1, area.h);
-    const bw = Math.min(w, 2.1 * h);
-    const key = [w, h, grow, narrow, n, anchor, me, meTop, footer, stack, bet, pot, densities.length].join();
-    const plan = planned(key, () => (grow > 0 ? planHeight(w, h, grow, input, densities) : planTable(bw, Math.min(h, 1.9 * w), input, densities, Math.round(narrow * bw))));
+    const lay = (u: number) => {
+      // Narrow or short areas (phones, landscape phones, an open keyboard) start from the smaller seats. A free height
+      // (the replay) takes the largest seats that fit its budget, so only the width counts there.
+      const densities = area.w / u < 640 || (grow <= 0 && area.h / u < 520) ? SMALL : ALL;
+      const w = Math.max(1, area.w) / u;
+      const h = Math.max(1, area.h) / u;
+      const bw = Math.min(w, 2.1 * h);
+      const key = [w, h, u, grow, narrow, n, anchor, me, meTop, footer, stack, bet, pot, densities.length].join();
+      return planned(key, () =>
+        scalePlan(grow > 0 ? planHeight(w, h, grow / u, input, densities) : planTable(bw, Math.min(h, 1.9 * w), input, densities, Math.round(narrow * bw)), u),
+      );
+    };
+    const plan = planForText(textScale(), lay);
     const pct = (q: Point): Point => ({ x: (q.x / plan.w) * 100, y: (q.y / plan.h) * 100 });
     const geometry = plan.seats.map((seat, i) => {
       const b = pct(plan.bets[i] ?? seat);
@@ -236,7 +252,6 @@ export const TableScene = memo(function TableScene({
   onShow,
   showOnCards = false,
   reactions,
-  react,
   nextIn,
   cues,
   consumeCues,
@@ -259,8 +274,6 @@ export const TableScene = memo(function TableScene({
   showOnCards?: boolean;
   /** Quick reactions showing now (the real table only), each at its sender's seat while that player still sits there. */
   reactions?: SeatReaction[];
-  /** Sending reactions from my seat (the real table only, while seated). */
-  react?: ReactionSender;
   nextIn: number | null;
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
@@ -277,7 +290,7 @@ export const TableScene = memo(function TableScene({
 }) {
   const { t } = useI18n();
   const { portrait, density, box, geometry, plan } = layout;
-  const d = DIMS[density];
+  const d = plan.dims;
   const hand = s.hand;
   // The server state, as the cues that brought it play out (CueLayer): bets land, then go to the pot, cards turn in
   // order, the hands show before the result, the result before the payouts.
@@ -339,7 +352,7 @@ export const TableScene = memo(function TableScene({
       {/* rail + felt, around the seats' middles */}
       <div className="absolute rounded-[50%] p-[1.2%] shadow-[0_30px_80px_rgba(0,0,0,0.7)]" style={{ left: plan.felt.x, top: plan.felt.y, width: plan.felt.w, height: plan.felt.h, background: 'var(--t-rail)' }}>
         <div className="relative size-full rounded-[50%] p-[0.6%]" style={{ background: 'var(--t-rail-inner)' }}>
-          <div className="relative size-full overflow-hidden rounded-[50%] shadow-[inset_0_6px_30px_rgba(0,0,0,0.7)]" style={{ background: 'var(--t-felt)' }}>
+          <div className="relative size-full overflow-hidden rounded-[50%] shadow-[inset_0_6px_30px_rgba(0,0,0,0.7)]" style={{ background: 'var(--t-felt)' }} data-testid="felt">
             <div className="absolute inset-[9%] rounded-[50%] border" style={{ borderColor: 'var(--t-felt-line)' }} />
             <div className="absolute inset-x-0 flex justify-center" style={{ top: portrait ? '16%' : '12%', opacity: 'var(--t-watermark-opacity)' }}>
               <Logo size={Math.min(plan.felt.w, plan.felt.h) * 0.18} />
@@ -434,7 +447,6 @@ export const TableScene = memo(function TableScene({
               showOver={showOnCards}
               reveal={spots?.get(seat.seatIndex) ?? null}
               reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
-              react={seat.seatIndex === mySeat ? react : undefined}
               density={density}
               amounts={amounts}
               style={places[seat.seatIndex]!}

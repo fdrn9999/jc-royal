@@ -631,6 +631,14 @@ export class HandEngine {
     return collectFoldedPlayers(this.snapshot.hand);
   }
 
+  /**
+   * Whether `playerId` folded in this hand. A folded player's stack is final from then on (`finalStacks`): nothing more
+   * goes in, and the pot pays only players still in, so the room may pay it back before the hand ends.
+   */
+  hasFolded(playerId: string): boolean {
+    return this.foldedSet().has(playerId);
+  }
+
   /** The cards dealt to `playerId`, or null when not dealt in. For the room's own use: views go through `seatInfo`. */
   holeCardsOf(playerId: string): Card[] | null {
     const c = this.snapshot.cards.holeCards[playerId];

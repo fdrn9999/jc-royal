@@ -1008,7 +1008,10 @@ export class TableRoom extends DurableObject<Env> {
     if (!codeOk) throw new CommandError('join_code_required', 'join code required');
     if (seatIndex < 0 || seatIndex >= t.maxSeats) throw new CommandError('bad_request', 'invalid seat');
     if (this.seatIndexOf(userId) !== null) throw new CommandError('already_seated', 'already seated');
-    if (this.room.seats[seatIndex]) throw new CommandError('seat_taken', 'seat taken');
+    // Someone who folded and left is still in the hand's record and its final stacks (`settle` copies them by player):
+    // a new seat of theirs would be overwritten.
+    if (this.handHasPlayer(userId)) throw new CommandError('hand_in_progress', 'the hand you left is still being played');
+    if (this.room.seats[seatIndex] || this.handHolds(seatIndex)) throw new CommandError('seat_taken', 'seat taken');
   }
 
   /** A held reservation or a waitlist that covers every open seat keeps others out. */
@@ -1025,7 +1028,7 @@ export class TableRoom extends DurableObject<Env> {
    * The wallet is not checked (the api compares it with the table's minimum) and nothing is held: `sit` re-checks.
    */
   private seatCheck(userId: string): { ok: true; seatIndex: number } | { ok: false; code: ErrorCode } {
-    const free = this.room.seats.findIndex((s, i) => !s && i < this.table!.maxSeats);
+    const free = this.room.seats.findIndex((s, i) => !s && i < this.table!.maxSeats && !this.handHolds(i));
     try {
       if (free < 0) throw new CommandError('seat_taken', 'no free seat');
       this.assertSeatFree(userId, !this.table!.isPrivate, free);
@@ -1109,17 +1112,24 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   private openSeats() {
-    return this.room.seats.filter((s) => !s).length;
+    return this.room.seats.filter((s, i) => !s && !this.handHolds(i)).length;
   }
 
   /**
    * On restart and on the retry alarm: confirm or roll back seats whose buy-in or top-up outcome is unknown, and finish
-   * the leaves and cash-outs a failed D1 call cut short.
+   * the leaves and cash-outs a failed D1 call cut short. Returns the seats it freed, and a notice for each member who
+   * asked to leave and was told it had not gone through (for the callers that can send them).
    */
   private async recoverPendingSeats() {
     // On load this runs before a settled hand's stacks reach the seats (`settle`): a leaver waits for that.
     const unsettled = !!this.hand?.isSettled && this.room.settledHandId !== this.hand.handId;
     let changed = false;
+    const cues: TableCue[] = [];
+    const notices: Notice[] = [];
+    const freed = (i: number, s: SeatState) => {
+      cues.push({ kind: 'leave', seatIndex: i });
+      if (s.leaveAfterHand && !s.bot && this.table?.roomType !== 'tournament') notices.push({ userId: s.userId, code: 'left_seat', amount: s.stack });
+    };
     for (let i = 0; i < this.room.seats.length; i++) {
       const s = this.room.seats[i];
       if (!s) continue;
@@ -1131,20 +1141,26 @@ export class TableRoom extends DurableObject<Env> {
         }
         s.phase = 'seated';
       }
-      if (this.handHasPlayer(s.userId)) continue;
+      // A player in the hand being played waits for it to end, except one who folded and left: their cash-out cut
+      // short is finished here (the seat kept the stack to pay, top-up included). One not begun is `standFolded`'s,
+      // which takes the stack from the hand.
+      if (this.handHasPlayer(s.userId) && !(s.phase === 'cashing' && this.foldedOut(s))) continue;
       if (await this.resolveTopUp(s)) changed = true;
       if (s.phase === 'cashing') {
         await this.cashOutSeat(s);
         this.keepBank(s);
         this.room.seats[i] = null;
+        freed(i, s);
         changed = true;
       } else if (s.leaveAfterHand && !unsettled) {
         // A player who left while D1 could not answer, or whose stand-up after a hand stopped before its cash-out began.
         await this.standUp(i);
+        freed(i, s);
         changed = true;
       }
     }
     if (changed) await this.save();
+    return { cues, notices };
   }
 
   /** Pays the seat's stack back to the wallet. A failure is counted for the chip economy page and passed on to the caller's retry. */
@@ -1163,6 +1179,60 @@ export class TableRoom extends DurableObject<Env> {
     return !!this.hand && !this.hand.isSettled && this.hand.startingSeats.some((s) => s.playerId === userId);
   }
 
+  /**
+   * A seat the hand being played was dealt to, now empty (its player folded and left): nobody sits there until the hand
+   * ends, so the hand's seats and the room's stay the same players.
+   */
+  private handHolds(i: number) {
+    const h = this.hand;
+    return !!h && !h.isSettled && h.startingSeats.some((p) => p.seatIndex === i);
+  }
+
+  /**
+   * A member at a cash table who folded in the hand being played: their stack is final (the pot pays only players
+   * still in), so their stand-up need not wait for the hand to end. Table bots play their hand out, and tournament
+   * chips stay in the tournament, so neither gets up early.
+   */
+  private foldedOut(s: SeatState) {
+    const h = this.hand;
+    return !!h && !h.isSettled && !s.bot && this.table?.roomType !== 'tournament' && h.hasFolded(s.userId);
+  }
+
+  /** A seat whose stand-up or cash-out waits for the hand being played to end. */
+  private waitsForHand(s: SeatState) {
+    return this.handHasPlayer(s.userId) && !this.foldedOut(s);
+  }
+
+  /**
+   * Stands up, mid-hand, the members who asked to leave and have folded: their final stack goes back to the wallet
+   * (the chips they put in stay in the pot for the others) and the hand plays on without them. Their seat stays out of
+   * reach until the hand ends (`handHolds`), and the hand's record keeps them. A failed cash-out leaves the seat
+   * 'cashing' for the retry alarm, which pays the stack saved with it (`recoverPendingSeats`); one whose stand-up did
+   * not begin is tried again here (`finishWorkSafely`) or stands up when the hand settles.
+   */
+  private async standFolded() {
+    const h = this.hand;
+    if (!h || h.isSettled) return;
+    const left: TableCue[] = [];
+    const notices: Notice[] = [];
+    for (let i = 0; i < this.room.seats.length; i++) {
+      const s = this.room.seats[i];
+      if (!s || s.phase !== 'seated' || !s.leaveAfterHand || !this.foldedOut(s)) continue;
+      const stack = h.finalStacks().get(s.userId);
+      if (stack === undefined) continue;
+      s.stack = stack;
+      try {
+        await this.standUp(i);
+        left.push({ kind: 'leave', seatIndex: i });
+        notices.push({ userId: s.userId, code: 'left_seat', amount: s.stack });
+      } catch (e) {
+        this.fault('cash-out failed; will retry', e);
+      }
+    }
+    if (left.length) this.broadcast(left);
+    this.notify(notices);
+  }
+
   private async leave(userId: string, reqId?: string) {
     const i = this.seatIndexOf(userId);
     if (i === null) {
@@ -1174,15 +1244,26 @@ export class TableRoom extends DurableObject<Env> {
     const seat = this.room.seats[i]!;
     if (reqId) this.remember(reqId);
     if (this.handHasPlayer(userId)) {
-      // Leaving mid-hand folds the hand (when it is still live) and stands up after settlement.
+      // Leaving mid-hand folds the hand: at once when it is the player's turn, else when their turn comes (`progress`).
+      // Once folded they stand up without waiting for the hand (`standFolded`); a player all in stays in it and stands
+      // up after settlement.
       seat.leaveAfterHand = true;
       seat.sittingOut = true;
       await this.save();
       if (this.hand!.actorId() === userId && !this.hand!.isStalled()) {
         await this.applyAction(userId, { type: 'fold' }, `leave-${reqId ?? crypto.randomUUID()}`);
       } else {
-        this.broadcast();
+        // Leaving again after a cash-out that failed mid-hand tries it again now, as it does between hands (with any
+        // other seat waiting on the same retry).
+        const retry = seat.phase === 'cashing' && this.foldedOut(seat) ? await this.recoverPendingSeats() : null;
+        this.broadcast(retry?.cues ?? []);
+        if (retry) this.notify(retry.notices);
+        await this.standFolded();
+        await this.schedule();
       }
+      // Their fold stood them up but the cash-out failed: the seat waits, 'cashing', for the retry alarm (or a leave
+      // sent again), and they are told it did not go through.
+      if (this.room.seats[i] === seat && seat.phase === 'cashing') throw new CommandError('internal', 'cash-out failed; will retry');
       return;
     }
     seat.leaveAfterHand = true;
@@ -1222,8 +1303,9 @@ export class TableRoom extends DurableObject<Env> {
     }
     this.keepBank(seat);
     this.room.seats[i] = null;
-    // During maintenance nobody could take it in time: the waitlist is offered the seat when it ends.
-    if (this.room.waitlist.length > 0 && !this.room.closing && !this.inMaintenance()) {
+    // During maintenance nobody could take it in time: the waitlist is offered the seat when it ends. A seat the hand
+    // still holds (its player folded and left) is offered when the hand ends (`settle`).
+    if (this.room.waitlist.length > 0 && !this.room.closing && !this.inMaintenance() && !this.handHolds(i)) {
       const head = this.room.waitlist[0]!;
       this.room.reservation = { userId: head.userId, nickname: head.nickname, seatIndex: i, until: Date.now() + RESERVATION_MS };
     }
@@ -1611,6 +1693,8 @@ export class TableRoom extends DurableObject<Env> {
     await this.save();
     this.broadcast(cues);
     this.notify(notices);
+    // A leaver whose fold just went in gets up now (the others saw the fold first).
+    await this.standFolded();
     await this.schedule();
   }
 
@@ -1639,7 +1723,9 @@ export class TableRoom extends DurableObject<Env> {
       await this.save();
     } else if (firstTime) {
       const stacks = h.finalStacks();
-      for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
+      // A seat already 'cashing' is a player who folded and left mid-hand whose cash-out is still to go through: it pays
+      // the stack saved with it (a top-up taken for them included), not the hand's.
+      for (const s of this.room.seats) if (s && s.phase !== 'cashing' && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
       this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
       this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
@@ -1688,6 +1774,8 @@ export class TableRoom extends DurableObject<Env> {
     else await this.retryUnrecorded();
     // Top-ups that waited for this hand and the automatic policy (rebuy, top-up) happen before busted players stand up.
     const notices = await this.applyTopUps(h.handId);
+    // Seats players folded and left during the hand were not offered to the waitlist then (`standUp`): they are below.
+    const heldFree = h.startingSeats.some((p) => !this.room.seats[p.seatIndex]);
     const left: TableCue[] = [];
     for (let i = 0; i < this.room.seats.length; i++) {
       const s = this.room.seats[i];
@@ -1696,6 +1784,8 @@ export class TableRoom extends DurableObject<Env> {
         try {
           await this.standUp(i);
           left.push({ kind: 'leave', seatIndex: i });
+          // The member who asked is told what went back to the wallet (an all-in leaver waited for this).
+          if (s.leaveAfterHand && !s.bot && this.table?.roomType !== 'tournament') notices.push({ userId: s.userId, code: 'left_seat', amount: s.stack });
           // (A bot that was asked to leave was logged then; one that lost its chips is logged here.)
           if (s.bot && !s.leaveAfterHand && s.stack === 0) await this.logBot('leave', s.userId, 'busted');
         } catch (e) {
@@ -1704,7 +1794,9 @@ export class TableRoom extends DurableObject<Env> {
         }
       }
     }
-    if (left.length || notices.length) this.broadcast(left);
+    const reserved = this.room.reservation;
+    if (heldFree && !this.inMaintenance()) await this.offerFreedSeat();
+    if (left.length || notices.length || this.room.reservation !== reserved) this.broadcast(left);
     this.notify(notices);
     if (this.room.closing) await this.continueCloseSafely();
     await this.schedule();
@@ -1752,7 +1844,7 @@ export class TableRoom extends DurableObject<Env> {
   /** A seat freed during maintenance, when the waitlist was not offered it (see `standUp`), is offered once it ends. */
   private async offerFreedSeat() {
     if (this.room.reservation || this.room.waitlist.length === 0 || this.room.closing) return;
-    const free = this.room.seats.findIndex((s) => !s);
+    const free = this.room.seats.findIndex((s, i) => !s && !this.handHolds(i));
     if (free < 0) return;
     const head = this.room.waitlist[0]!;
     this.room.reservation = { userId: head.userId, nickname: head.nickname, seatIndex: free, until: Date.now() + RESERVATION_MS };
@@ -2371,7 +2463,7 @@ export class TableRoom extends DurableObject<Env> {
    */
   private async seatBot() {
     const t = this.table!;
-    const seatIndex = this.room.seats.findIndex((s, i) => !s && i < t.maxSeats);
+    const seatIndex = this.room.seats.findIndex((s, i) => !s && i < t.maxSeats && !this.handHolds(i));
     if (seatIndex < 0) return;
     const amount = Math.min(t.maxBuyIn, Math.max(t.minBuyIn, BOT_BUY_IN_BB * t.bigBlind));
     let failure: string = 'busy';
@@ -2535,17 +2627,19 @@ export class TableRoom extends DurableObject<Env> {
     if (this.unrecorded.size > 0 || this.room.tourney?.dirty) return true;
     if (this.room.closing && !this.room.closed && !(this.hand && !this.hand.isSettled)) return true;
     return this.room.seats.some(
-      (s) => s && (s.phase === 'pending' || ((s.phase === 'cashing' || (s.phase === 'seated' && s.leaveAfterHand)) && !this.handHasPlayer(s.userId))),
+      (s) => s && (s.phase === 'pending' || ((s.phase === 'cashing' || (s.phase === 'seated' && s.leaveAfterHand)) && !this.waitsForHand(s))),
     );
   }
 
   private async finishWorkSafely() {
     try {
-      await this.recoverPendingSeats();
+      const { cues, notices } = await this.recoverPendingSeats();
+      await this.standFolded();
       await this.retryUnrecorded();
       await this.syncTourney();
       if (this.room.closing && !this.room.closed) await this.continueClose();
-      this.broadcast();
+      this.broadcast(cues);
+      this.notify(notices);
     } catch (e) {
       this.fault('retry failed; will retry', e);
     }
@@ -2671,10 +2765,11 @@ export class TableRoom extends DurableObject<Env> {
         await this.save();
       }
       if (i !== null) {
-        const inHand = this.handHasPlayer(userId);
         try {
           await this.leave(userId);
-          seat = this.seatIndexOf(userId) === null ? 'left' : inHand ? 'after_hand' : 'retrying';
+          // Still seated and in the hand: their fold waits for their turn, or they are all in (a fold stands them up at once).
+          const j = this.seatIndexOf(userId);
+          seat = j === null ? 'left' : this.room.seats[j]!.phase === 'seated' && this.handHasPlayer(userId) ? 'after_hand' : 'retrying';
         } catch (e) {
           // A cash-out cut short stays 'cashing' (a buy-in or top-up not confirmed stays as it was, marked as leaving):
           // the retry alarm finishes it.
@@ -2709,7 +2804,7 @@ export class TableRoom extends DurableObject<Env> {
     if (!live && dealing && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
     if (!live && dealing && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
     if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
-    if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.handHasPlayer(s.userId))) issues.push('cashing_seat');
+    if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.waitsForHand(s))) issues.push('cashing_seat');
     if (this.room.seats.some((s) => s?.topUp?.state === 'debiting')) issues.push('topup_debiting');
     if (this.unrecorded.size > 0) issues.push('unrecorded_hands');
     if (this.room.closing && !this.room.closed && !live) issues.push('close_unfinished');
@@ -2747,6 +2842,8 @@ export class TableRoom extends DurableObject<Env> {
               connected: connected.has(s.userId),
               buyIn: s.buyIn,
               inHand: this.handHasPlayer(s.userId),
+              // Folded in the hand being played at a cash table: a leave stands them up now, not once it ends.
+              folded: this.foldedOut(s),
               leaveAfterHand: s.leaveAfterHand,
               timeouts: s.timeouts,
               sitOutSince: s.sitOutSince,
@@ -2758,6 +2855,8 @@ export class TableRoom extends DurableObject<Env> {
             }
           : null,
       ),
+      // Empty seats the hand being played still deals to (their players folded and left, paid): free once it ends.
+      heldSeats: this.room.seats.flatMap((s, i) => (!s && this.handHolds(i) ? [i] : [])),
       // The running turn's clock: when it began, the table's turn time, time bank time added, the deadline, the alarm.
       timer:
         live && deadline
@@ -2823,6 +2922,8 @@ export class TableRoom extends DurableObject<Env> {
     const revealed = new Set((hv?.result?.showdown ?? []).map((x) => x.seatIndex));
     const shown = h && hv?.result && this.room.shown?.handId === h.handId ? this.room.shown.cards : {};
     const seats: SeatView[] = this.room.seats.map((s, i) => {
+      // A seat its player folded and left mid-hand: nobody, and no cards, only the chips they put in on this street.
+      if (!s && this.handHolds(i)) return { seatIndex: i, state: 'empty', held: true, stack: 0, streetBet: info?.get(i)?.streetBet ?? 0, connected: false, hasCards: false };
       if (!s) return { seatIndex: i, state: 'empty', stack: 0, streetBet: 0, connected: false, hasCards: false };
       const hi = info?.get(i);
       let state: SeatView['state'] = s.sittingOut ? 'sittingOut' : 'waiting';
@@ -2868,6 +2969,7 @@ export class TableRoom extends DurableObject<Env> {
       !t.entryBlocked &&
       !this.inMaintenance() &&
       !this.room.closing &&
+      !this.handHasPlayer(a.userId) &&
       this.openSeats() > 0 &&
       (!reservationLive || reservationLive.userId === a.userId) &&
       (this.room.waitlist.length === 0 || this.room.waitlist[0]!.userId === a.userId || this.openSeats() > this.room.waitlist.length);

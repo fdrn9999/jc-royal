@@ -1,6 +1,6 @@
 import type { HandDetailDto } from '@jc/types';
 import { expect, type Page } from '@playwright/test';
-import { balanceOf, signUp, test } from './helpers';
+import { balanceOf, signUp, standUp, test } from './helpers';
 
 /** Every chip flight the table draws from now on, in order, as `kind:seat:amount`. */
 async function recordFlights(page: Page) {
@@ -68,7 +68,7 @@ test('a raise everyone folds to: the raise above the call goes straight back, on
     await expect.poll(() => chipsIn(p, `stack-${seat}`)).toBe(buyIn + 10);
   }
   await r.screenshot({ path: 'test-results/uncalled-raise-fold.png' });
-  for (const p of [a.page, b.page]) await p.getByTestId('leave').click();
+  for (const p of [a.page, b.page]) await standUp(p);
 
   // The engine stores one pot of 110 (nobody was all in, so nothing marks the 90 as handed back). The server sends the
   // replay that pot as the table showed it, 20 won and 90 back, by what the hand's statistics say came back (filled

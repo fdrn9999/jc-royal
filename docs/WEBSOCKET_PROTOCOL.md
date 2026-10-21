@@ -25,7 +25,7 @@
 |---|---|---|
 | `sync` | — | 현재 상태 재전송 요청 |
 | `sit` | `reqId, seatIndex, buyIn, autoBuy?` | 착석과 바이인(지갑에서 차감). `autoBuy`는 바이인과 함께 고른 자동 칩 정책(아래 `autoBuy`와 같은 모양, 없으면 꺼짐). 룸은 정책을 좌석 예약·차감보다 먼저 검사해, 잘못된 정책이면 아무것도 차감하지 않고 거절합니다. `reqId` 재전송은 멱등 처리 |
-| `leave` | `reqId` | 일어서기. 핸드 중이면 폴드 후 정산 시 환급 |
+| `leave` | `reqId` | 일어서기. 아래 '핸드 중 일어서기' 참고 |
 | `topUp` | `reqId, amount` | 스택 충전(지갑에서 차감). 충전 후 스택이 테이블 바이인 범위 안이어야 함. 핸드에 참여 중이면 차감 없이 대기했다가 핸드가 끝난 뒤 적용(새 요청이 대기 중인 요청을 대체). `reqId` 재전송은 멱등 처리 |
 | `cancelTopUp` | `reqId?` | 대기 중인 충전 취소. 취소할 충전이 없어도(이미 취소됨) `ack` |
 | `autoBuy` | `reqId, policy` | 좌석의 자동 칩 정책을 바꿈(한 번에 하나, 새 정책이 이전 정책을 대체, 기본 꺼짐). `policy`: `{mode:'off'}` / `{mode:'rebuy', amount, cap, consent:true}`(스택이 0으로 끝난 핸드 뒤 `amount` 리바이) / `{mode:'topup', target, trigger?, partial?, cap, consent:true}`(스택이 `trigger`(없으면 `target`) 미만으로 끝난 핸드 뒤 `target`까지 부족분만 충전, `partial`이면 지갑이 부족할 때 가진 만큼). `amount`·`target`은 바이인 범위, `trigger`는 `target` 이하, `cap`(이 좌석에서 쓸 총 한도)은 1회분(`amount`·`target`) 이상 5배 이하. 바꾸면 사용액이 0부터 시작. 착석한 플레이어만(`forbidden`), 토너먼트 테이블은 `tournament_table`. 정책은 좌석이 유지되는 동안(재접속·다른 탭 포함)만 있고 일어서면 사라짐 |
@@ -52,14 +52,14 @@
 | `react` | `{seatIndex, userId, reaction, at}`: 테이블의 모든 연결(보낸 사람·관전자 포함)에 보내는 빠른 반응. 좌석과 회원은 룸이 받을 때의 값 |
 | `ack` | `{reqId}`: `reqId`를 단 명령의 성공(대기열에 들어간 충전 포함). 액션은 `reqId` 자리에 `intentId`. 이미 처리한 명령을 다시 받아도 `ack`만 다시 보냄(이미 반영된 액션이면 운영 지표 `action_dup` +1) |
 | `error` | `{code, message, reqId?}` |
-| `notice` | `{code, amount?}`: 해당 플레이어에게만 보냄. 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과: `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐), `autotopup_applied`(`amount`=차감액), `autotopup_insufficient`·`autotopup_cap`(자동 충전이 꺼짐, 차감 없음). 자동 정책의 결과는 핸드마다 한 번만, 끄는 알림도 한 번만 보냅니다. 사전 액션을 지키지 못했을 때: `preaction_cancelled` |
+| `notice` | `{code, amount?}`: 해당 플레이어에게만 보냄. 핸드가 끝난 뒤 룸이 처리한 충전·자동 리바이 결과: `topup_applied`·`rebuy_applied`(`amount`=차감액), `topup_dropped`(범위를 벗어나 취소, 차감 없음), `topup_insufficient`, `rebuy_insufficient`·`rebuy_cap`(자동 리바이가 꺼짐), `autotopup_applied`(`amount`=차감액), `autotopup_insufficient`·`autotopup_cap`(자동 충전이 꺼짐, 차감 없음). 자동 정책의 결과는 핸드마다 한 번만, 끄는 알림도 한 번만 보냅니다. 사전 액션을 지키지 못했을 때: `preaction_cancelled`. 핸드에 참여한 채 보낸 일어서기가 끝났을 때(폴드 직후, 올인 핸드의 정산 뒤, 실패한 환급을 다시 시도해 성공했을 때): `left_seat`(`amount`=지갑으로 돌아간 스택) |
 | `replaced` | 다른 탭에서 접속함 |
 | `pong` | 자동 응답은 `{"t":"pong"}` 그대로. 다른 모양의 `ping`을 룸이 직접 받으면 `{at}`이 붙음 |
 
 ### TableView (요약, 정의는 `packages/types/src/table.ts`)
 
 - **최상위 필드**: `version`(룸 상태 버전, 증가만 함), `table`(설정, 회원 방이면 `roomType:'member'`와 방장 `hostId`), `status`(waiting/playing/closing/closed).
-- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시'), `vip`(VIP 회원 좌석만, 아래 'VIP 표시').
+- **seats[]**: 각 좌석의 `state`(empty/waiting/active/folded/allin/sittingOut), `stack`, `streetBet`, `connected`, `lastAction`, `hasCards`, `holeCards`, `shown`, `role`(관리자 좌석만, 아래 '운영진 표시'), `vip`(VIP 회원 좌석만, 아래 'VIP 표시'), `held`(진행 중 핸드가 아직 세는 빈 자리: 그 플레이어가 폴드하고 떠남. 플레이어·카드 없이 이번 스트리트에 넣은 칩만 `streetBet`으로 보이고, 핸드가 끝날 때까지 아무도 앉을 수 없음. 이전 룸은 보내지 않음).
   - `holeCards`는 **본인 좌석이거나 쇼다운에서 공개된 경우에만** 들어갑니다. 쇼다운에서 공개되지 않은 패(폴드, 쇼다운 없이 이김, 머크)는 `hasCards: true`에 `holeCards`가 없어 뒷면으로 그려지고, `hand.result.showdown`에도 빠집니다.
   - `shown`은 핸드가 끝난 뒤 주인이 보이기로 고른 카드입니다. `[카드 또는 null, 카드 또는 null]`로 고른 자리에만 카드가 있고, 고르지 않은 카드는 누구에게도 보내지 않습니다. 쇼다운에서 이미 공개된 좌석과 고른 카드가 없는 좌석에는 이 필드가 없습니다.
 - **hand**: `id`, `number`, `seq`, `stage`, `buttonSeat`, `sbSeat`, `bbSeat`, `board`, `pots[]`, `potTotal`, `actorSeat`, `deadline`(시간 은행으로 더한 시간 포함), `extraMs`(지금 차례에 시간 은행으로 더한 시간, 없으면 필드 없음), `result`(winners, showdown, returned).
@@ -86,6 +86,20 @@
 - 재접속하면 서버가 즉시 `state`와 `chatHistory`를 보냅니다. 화면은 항상 서버 상태로 복구됩니다.
 - 충전·자동 리바이·자동 충전은 원장 `idempotency_key`(`topup:<세션>:<reqId>`, `rebuy:<세션>:<handId>`, `autotop:<세션>:<handId>`)로 한 번만 차감됩니다. 자동 정책은 핸드마다 한 키만 쓰고, 룸은 차감을 시도하기 전에 그 핸드를 시도와 함께 좌석에 기록해 같은 핸드를 두 번 처리하지 않습니다(그 사이 정책을 바꿔 키가 달라져도). D1 호출이 실패해 아무것도 기록되지 않았으면 다음 정산 기회(다음 핸드 직전 또는 다음 핸드 정산)에 다시 판단하며, 결과가 불확실한 차감은 원장 조회로만 정리하고 임의로 다시 차감하지 않습니다. 룸은 D1 호출 전에 시도를 기록하고, 재시작하거나 호출이 실패하면 원장을 조회해 원장이 실제로 차감한 만큼만 한 번 반영합니다. 원장에 이미 있는 키는 기록하지도 다시 쓰지도 않으므로, 룸이 기억하는 최근 `reqId` 200개 밖의 오래된 요청을 다시 보내도 `ack`만 오고 칩은 늘지 않습니다. 응답을 받지 못한 클라이언트는 같은 `reqId`로 다시 보냅니다.
 - 핸드 중에는 스택이 늘지 않습니다. 대기 중인 충전과 자동 리바이·자동 충전은 정산 직후(또는 다음 핸드 시작 직전)에 이 순서로 적용됩니다. 수동 충전 금액은 요청액과 `최대 바이인 − 스택` 중 작은 값, 자동 리바이는 정한 금액(최대 바이인 이하), 자동 충전은 `min(target, 최대 바이인) − 스택`(수동 충전 뒤의 스택 기준)입니다. 올인 중의 일시적인 0은 판단하지 않고 정산이 끝난 최종 스택만 봅니다. 일어나는 중인 좌석과 토너먼트 테이블은 자동 정책을 적용하지 않습니다.
+
+## 핸드 중 일어서기 (`leave`)
+
+룸은 `apps/game-worker/src/room.ts` `leave`·`standFolded`·`recoverPendingSeats`. 게임 경제의 정합성이 즉시 퇴장보다 먼저다.
+
+- **핸드 밖**: 바로 일어서고 스택 전부를 지갑에 돌려받는다(이전과 같음).
+- **이미 폴드함**(캐시 테이블의 회원): 핸드가 끝나기를 기다리지 않고 바로 일어선다. 돌려받는 것은 엔진이 계산한 그 핸드의 최종 스택(`finalStacks`, 넣은 칩을 뺀 나머지)이고, 넣은 칩은 팟에 남아 나머지 플레이어가 겨룬다. 자리는 핸드가 끝날 때까지 `held`로 막아 두고(핸드의 좌석과 룸의 좌석이 같은 사람으로 남도록), 대기열·봇·빠른 참가도 그 자리를 쓰지 않는다. 핸드 기록·리플레이·통계에는 그대로 남는다.
+- **내 차례**: 폴드를 적용한 뒤 바로 위처럼 일어선다.
+- **내 차례가 아님**: 좌석을 나가는 중(`leaving`·자리 비움)으로 저장하고 `ack`. 차례가 오면 룸이 시계를 기다리지 않고 바로 폴드하고(나가는 중인 좌석의 기존 규칙, 체크할 수 있어도 폴드), 그 폴드가 적용된 직후 일어선다. 화면은 이 동안 '차례에 폴드하고 일어섭니다'를 보인다. 예약을 취소하는 명령은 없다.
+- **올인**: 폴드로 취급하지 않는다. 핸드에 남아 정산을 받은 뒤 일어서고 `left_seat`가 온다.
+- **같은 핸드에 다시 앉기**: 폴드하고 떠난 플레이어는 그 핸드가 끝날 때까지 이 테이블에 다시 앉을 수 없다(`hand_in_progress`, `you.canSit: false`). 엔진의 핸드 기록이 그 플레이어를 아직 담고 있어서다.
+- **환급 실패**: D1이 실패하면 좌석은 `cashing`(저장된 스택 그대로)으로 남아 나가는 요청이 `internal`(`cash-out failed; will retry`)로 실패하고, 재시도 알람이 같은 스택을 한 번 환급한다(원장 `idempotency_key` `cashout:<세션>`과 `table_sessions`의 `status = 'seated'` 조건이 같은 세션의 이중 환급을 막는다). 다시 `leave`를 보내면 그 자리에서 다시 시도한다. 재시작 뒤에도 같다. 성공하면 `left_seat`가 온다.
+- **토너먼트·봇**: 토너먼트 칩은 대회 안에 있으므로(`tournament_table`) 이 규칙이 없고, 테이블 봇은 핸드를 끝까지 치고 일어선다.
+- **배포 순서**: game-worker를 먼저. 이전 룸은 폴드한 플레이어도 핸드 뒤에 일어세우고 `held`·`left_seat`를 보내지 않는다. 새 웹은 `left_seat`가 오지 않아도 좌석이 사라지면 떠난 것으로 그린다.
 
 ## 사전 액션 (`preAction`)
 
@@ -175,7 +189,7 @@
 
 ## 오류 코드
 
-`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, tournament_table, reactions_off, internal`
+`bad_request, unauthorized, forbidden, not_found, conflict, rate_limited, insufficient_balance, seat_taken, already_seated, buyin_out_of_range, table_closed, entry_blocked, maintenance, not_your_turn, illegal_action, stale_version, duplicate, spectators_disabled, join_code_required, suspended, disconnected, time_bank_off, time_bank_empty, tournament_table, reactions_off, hand_in_progress, internal`
 
 `suspended`·`disconnected`가 `reqId` 없이 오면 관리자가 연결을 끝낸 것이고 4004 종료가 뒤따릅니다. `reqId`가 붙은 `suspended`는 정지된 계정의 착석·충전을 지갑이 거절한 것입니다.
 

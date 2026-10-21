@@ -83,6 +83,10 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 5 }, (_, i) => ({ id: `it-conc-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Leaving mid-hand: three players, long turns so only the players (and the room's fold for a leaver) act.
   { id: 'it-leave-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Standing up at once after a fold (fold-leave.test.ts): long turns, so only the players and the room act; one
+  // heads-up table.
+  ...Array.from({ length: 15 }, (_, i) => ({ id: `it-fold-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  { id: 'it-fold-hu', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Administrator permissions: a table whose settings a plain administrator changes.
   { id: 'it-perm-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Staff marks: a member whose role changes while seated, heads-up so one fold ends a hand for the history.

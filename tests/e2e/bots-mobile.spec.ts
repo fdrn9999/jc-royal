@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { signUp, sitWith, test, widerThanDevice } from './helpers';
+import { signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
 /** The seats a table bot holds, by their BOT pill. */
 const botSeats = (page: Page) => page.locator('[data-testid^="seat-"]').filter({ has: page.getByTestId('bot-badge') });
@@ -81,6 +81,6 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
   await page.keyboard.press('Escape');
 
   // With the member gone, the bots leave too.
-  await page.getByTestId('leave').click();
+  await standUp(page);
   await expect(botSeats(page)).toHaveCount(0, { timeout: 60_000 });
 });

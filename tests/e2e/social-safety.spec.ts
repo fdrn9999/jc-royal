@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, test } from './helpers';
+import { checkOrCall, signUp, standUp, test } from './helpers';
 
 /** Same-origin JSON call with the page's session. */
 async function call<T = any>(page: Page, path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -114,7 +114,7 @@ test('table: mute hides one player’s chat for me only; after the hand, report 
     await expect(async () => {
       await checkOrCall(a.page);
       await checkOrCall(b.page);
-      await p.page.getByTestId('leave').click();
+      await standUp(p.page);
       await expect(p.page.locator('[data-testid^=seat-]').filter({ hasText: p.nickname })).toHaveCount(0, { timeout: 3000 });
     }).toPass({ timeout: 45_000 });
   }

@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { balanceOf, checkOrCall, signUp, test } from './helpers';
+import { balanceOf, checkOrCall, signUp, standUp, test } from './helpers';
 
 test('two browsers: join, buy in, play a hand to showdown, refresh, stand up with refund', async ({ browser }) => {
   const a = await signUp(browser);
@@ -60,7 +60,7 @@ test('two browsers: join, buy in, play a hand to showdown, refresh, stand up wit
   const walletBefore = await balanceOf(a.page);
 
   // Stand up → remaining stack returns to the wallet (immediately, or after the current hand).
-  await a.page.getByTestId('leave').click();
+  await standUp(a.page);
   await expect(async () => {
     expect(await balanceOf(a.page)).toBeGreaterThan(walletBefore);
   }).toPass({ timeout: 45_000 });

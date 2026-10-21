@@ -166,6 +166,8 @@ export interface TablePlan {
   /** The centre of the pot row, where chips fly to and from. */
   pot: Point;
   felt: Rect;
+  /** The sizes it was laid out by: DIMS at its density, times the text size where it was drawn larger (scalePlan). */
+  dims: Dims;
   /**
    * Area (px²) still drawn over something else or outside the box, and where nothing fits, a bet's area for each bet
    * nearer another seat than its own: 0 when every part has its own room.
@@ -359,6 +361,75 @@ function place(w: number, h: number, p: PlanInput, s: Parts, mask: number) {
   return s.tpl ? rows(w, h, p, s, mask) : ring(w, h, p, s);
 }
 
+/** From the block's top to the middle of the board's cards (the pot's row above them). */
+const cardsMid = (s: Parts) => s.blk.potRowH + 8 + (1.4 * s.way.card + 2 * s.d.boardPad) / 2;
+
+/**
+ * The block moved up or down so the board's cards lie on the box's middle (the felt is then drawn round them), as far
+ * as the seats above and below it leave room, 8px kept from each; or null where it is there already. Centred between
+ * those seats (or in its row), the cards lay off the middle: above it, the viewer's seat being the taller, and below it
+ * where the pot's row above them was the larger part of the block (TEST_REPORT).
+ */
+function centred(h: number, s: Parts, q: Placed): Box | null {
+  const k = q.block;
+  const mid = (k.t + k.b) / 2;
+  let top = 0;
+  let bottom = h;
+  for (const x of q.rects) {
+    if (x.l >= k.r || x.r <= k.l) continue;
+    if ((x.t + x.b) / 2 < mid) top = Math.max(top, x.b);
+    else bottom = Math.min(bottom, x.t);
+  }
+  const room = bottom - top - s.blk.h;
+  if (room <= 0) return null;
+  const keep = Math.min(room / 2, 8);
+  const t = clamp(h / 2 - cardsMid(s), top + keep, bottom - keep - s.blk.h);
+  return Math.abs(t - k.t) < 0.5 ? null : { ...k, t, b: t + s.blk.h };
+}
+
+/**
+ * TableScene's felt: inside the rail (1.2% of the table's width each side, then 0.6% of what is left), its line drawn 9%
+ * in from its edge. Change both together.
+ */
+const RAIL = 0.012;
+const RAIL_IN = 0.006;
+const LINE = 0.09;
+/** How far out the board's corners may reach on the felt's line (1: on it). */
+const REACH = 0.92;
+
+/** The half-axes of the line on a felt of half-axes fa×fb in a table w wide. */
+function feltLine(w: number, fa: number, fb: number) {
+  const rail = 2 * fa - 2 * RAIL * w;
+  return { a: rail * (1 - 2 * RAIL_IN) * (0.5 - LINE), b: (2 * fb - 2 * RAIL * w - 2 * RAIL_IN * rail) * (0.5 - LINE) };
+}
+
+/**
+ * The felt's half-axes grown (wider first, then taller, as far as the box allows) until the board, `u`×`v` from its
+ * middle to its corner, lies inside its line with room to spare: where the seats alone set it, the board took nearly all
+ * of a heads-up table's felt, and its corners lay over the line or past the felt (TEST_REPORT).
+ */
+function holdBoard(w: number, fa: number, fb: number, capA: number, capB: number, u: number, v: number) {
+  const reach = () => {
+    const l = feltLine(w, fa, fb);
+    return Math.hypot(u / l.a, v / l.b);
+  };
+  // Each axis depends a little on the other (the rail's inner part is a share of the felt's width): a pass or two.
+  for (let i = 0; i < 3 && reach() > REACH; i++) {
+    const l = feltLine(w, fa, fb);
+    if (v / l.b < REACH) {
+      const need = u / Math.sqrt(REACH ** 2 - (v / l.b) ** 2);
+      fa = Math.min(capA, Math.max(fa, (need / (0.5 - LINE) / (1 - 2 * RAIL_IN) + 2 * RAIL * w) / 2));
+    }
+    const m = feltLine(w, fa, fb);
+    if (Math.hypot(u / m.a, v / m.b) > REACH && u / m.a < REACH) {
+      const need = v / Math.sqrt(REACH ** 2 - (u / m.a) ** 2);
+      const rail = 2 * fa - 2 * RAIL * w;
+      fb = Math.min(capB, Math.max(fb, (need / (0.5 - LINE) + 2 * RAIL * w + 2 * RAIL_IN * rail) / 2));
+    }
+  }
+  return { fa, fb };
+}
+
 /** Overlap of the seats and the board with each other and the box's edges. */
 function seatCost(w: number, h: number, q: Placed) {
   let cost = outside(q.block, w, h);
@@ -464,24 +535,41 @@ function ways(n: number, densities: readonly Density[]): Way[] {
  */
 function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick: boolean, mode: Bets, crowded?: Set<number>): TablePlan | null {
   if (quick && crowded?.has(mask)) return null;
-  const q = place(w, h, p, s, mask);
-  const seats = seatCost(w, h, q);
-  if (quick && seats > 0) {
+  const at = place(w, h, p, s, mask);
+  const seatsAt = seatCost(w, h, at);
+  if (quick && seatsAt > 0) {
     crowded?.add(mask);
     return null;
   }
-  const { bets, cost } = placeBets(w, h, p, q, s, quick, mode);
-  if (quick && cost > 0) return null;
+  // The board's cards on the box's middle where that leaves the bets their room too; else where the seats put them
+  // (where nothing fits, whichever overlaps less, the middle on a tie).
+  const mid = centred(h, s, at);
+  let found: { q: Placed; seats: number; bets: Point[]; cost: number } | null = null;
+  for (const q of mid ? [{ ...at, block: mid }, at] : [at]) {
+    const seats = q === at ? seatsAt : seatCost(w, h, q);
+    if (quick && seats > 0) continue;
+    const { bets, cost } = placeBets(w, h, p, q, s, quick, mode);
+    if (quick && cost > 0) continue;
+    if (!found || seats + cost < found.seats + found.cost) found = { q, seats, bets, cost };
+    if (found.seats + found.cost === 0) break;
+  }
+  if (!found) return null;
+  const { q, seats, bets, cost } = found;
   const cx = w / 2;
-  const cy = h / 2;
+  // The felt round the board's cards: in the box's middle where the block could move there, else where they lie (a
+  // little off the seats' middle rather than the board off the felt's). It holds the block and reaches in under the seats.
+  const cy = q.block.t + cardsMid(s);
   let fa = s.blk.w / 2 + 16;
-  let fb = s.blk.h / 2 + 16;
+  let fb = Math.max(cy - q.block.t, q.block.b - cy) + 16;
   for (const a of q.anchors) {
     fa = Math.max(fa, 0.9 * Math.abs(a.x - cx));
     fb = Math.max(fb, 0.86 * Math.abs(a.y - cy));
   }
-  fa = Math.min(fa, w / 2 - 4);
-  fb = Math.min(fb, h / 2 - 4);
+  // Nearly as wide for its height as the box: heads-up, one seat above the board and one below, nothing else widened it.
+  fa = Math.max(fa, (0.8 * fb * w) / h);
+  const capA = w / 2 - 4;
+  const capB = Math.min(cy, h - cy) - 4;
+  ({ fa, fb } = holdBoard(w, Math.min(fa, capA), Math.min(fb, capB), capA, capB, (5 * s.way.card + 4 * s.d.boardGap) / 2 + s.d.boardPad, 0.7 * s.way.card + s.d.boardPad));
   return {
     density: s.way.density,
     family: s.tpl ? `rows${s.way.family}` : 'ring',
@@ -496,6 +584,7 @@ function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick
     block: { x: q.block.l, y: q.block.t, w: q.block.r - q.block.l, h: q.block.b - q.block.t },
     pot: { x: cx, y: q.block.t + s.blk.potRowH / 2 },
     felt: { x: cx - fa, y: cy - fb, w: 2 * fa, h: 2 * fb },
+    dims: s.d,
     overlap: seats + cost,
   };
 }
@@ -518,8 +607,8 @@ function fitBox(w: number, h: number, p: PlanInput, s: Parts, mode: Bets, crowde
 /**
  * Lays the table out in a box of a given size: the first way, largest first, with nothing overlapping and every bet
  * by its own seat; else, where it fits with some bet nearer another seat, that in a narrower box (down to `minW`, 8px at
- * a time: what fits is not monotonic in the width, the rows and the ellipse change with it, so nine seats on a phone on
- * its side may fit so in 600px but not in 608px), or that in the full box; else the one overlapping least.
+ * a time: what fits is not monotonic in the width, the rows and the ellipse change with it, so nine seats 268px high
+ * may fit so in 632px but not in 640px), or that in the full box; else the one overlapping least.
  */
 export function planTable(w: number, h: number, p: PlanInput, densities: readonly Density[], minW = w): TablePlan {
   const all = ways(p.n, densities).map((way) => parts(p, way));
@@ -627,4 +716,76 @@ export function planHeight(w: number, budget: number, cap: number, p: PlanInput,
     if (h <= best.h) best = { s, h };
   }
   return (best.s && fitBox(w, best.h, p, best.s, 'kept')) || planTable(w, Math.max(budget, cap), p, densities);
+}
+
+/**
+ * A plan made for a 16px root font, drawn at `unit` times that (the root font over 16px: a browser's or phone's text
+ * size). Seat.tsx sizes the seats in rem and DIMS gives them in px at 16px, so with the text at 125% the seats were
+ * drawn up to a quarter larger than the room kept for them: over the stack under the table and past the screen's sides
+ * (TEST_REPORT). Planned in a box `unit` times smaller and drawn `unit` times larger, every part keeps its room, as
+ * when zoomed.
+ */
+export function scalePlan(plan: TablePlan, unit: number): TablePlan {
+  if (unit === 1) return plan;
+  const pt = (q: Point) => ({ x: q.x * unit, y: q.y * unit });
+  const rect = (r: Rect) => ({ x: r.x * unit, y: r.y * unit, w: r.w * unit, h: r.h * unit });
+  const dims = Object.fromEntries(Object.entries(plan.dims).map(([k, v]) => [k, v * unit])) as unknown as Dims;
+  return {
+    ...plan,
+    w: plan.w * unit,
+    h: plan.h * unit,
+    board: plan.board * unit,
+    potRowH: plan.potRowH * unit,
+    potChip: plan.potChip * unit,
+    seats: plan.seats.map(pt),
+    bets: plan.bets.map(pt),
+    rooms: plan.rooms.map(rect),
+    block: rect(plan.block),
+    pot: pt(plan.pot),
+    felt: rect(plan.felt),
+    dims,
+    overlap: plan.overlap * unit * unit,
+  };
+}
+
+/**
+ * How far a plan's seats, drawn `f` times the size of their rooms about their centres, lie over the board block
+ * (`board`), and that with over each other and past the table (`all`), in px².
+ */
+export function drawnOver(plan: TablePlan, f: number): { board: number; all: number } {
+  const meet = (a: Rect, b: Rect) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const table = { x: 0, y: 0, w: plan.w, h: plan.h };
+  const rooms = plan.rooms.map((r, i) => {
+    const s = plan.seats[i]!;
+    return { x: s.x + (r.x - s.x) * f, y: s.y + (r.y - s.y) * f, w: r.w * f, h: r.h * f };
+  });
+  let board = 0;
+  let rest = 0;
+  rooms.forEach((r, i) => {
+    board += meet(r, plan.block);
+    rest += r.w * r.h - meet(r, table);
+    for (const q of rooms.slice(i + 1)) rest += meet(r, q);
+  });
+  return { board, all: board + rest };
+}
+
+/**
+ * The plan for the page's text at `k` times 16px, from `lay(u)`, the table laid out for text at u (scalePlan). Seat.tsx
+ * sizes the seats in rem, so a plan for u draws them k / u times their rooms. Where at k the seats would reach over the
+ * board (nine on a small phone at 125%: no way has room for them at that size, and the closest left them over the board
+ * and past the screen), the plan for text halfway there or at 16px that costs least: what it left overlapping itself,
+ * its bets too, and what its seats so drawn add over the board, each other and past the table; k where none costs less.
+ * What none of them leaves clear (six seats on phones 375px wide and less, nine on a phone held on its side) is in
+ * TEST_REPORT.
+ */
+export function planForText(k: number, lay: (u: number) => TablePlan): TablePlan {
+  let plan = lay(k);
+  if (k <= 1 || drawnOver(plan, 1).board === 0) return plan;
+  let least = plan.overlap;
+  for (const u of [(1 + k) / 2, 1]) {
+    const p = lay(u);
+    const over = p.overlap + drawnOver(p, k / u).all - drawnOver(p, 1).all;
+    if (over < least) [plan, least] = [p, over];
+  }
+  return plan;
 }

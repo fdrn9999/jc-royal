@@ -23,7 +23,7 @@
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
 import { cx, formatChips, Spinner } from '@jc/ui';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
@@ -81,6 +81,7 @@ export function ActionBar({
   const [unsent, setUnsent] = useState(false);
   const readyAt = useRef(Date.now() + APPEAR_GUARD_MS);
   const toggle = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const bb = Math.max(1, state.table.bigBlind);
   const mine = state.seats.find((x) => x.seatIndex === state.you.seatIndex);
   const myStack = mine?.stack ?? 0;
@@ -106,6 +107,15 @@ export function ActionBar({
     const h = setTimeout(() => setUnsent(false), 4_000);
     return () => clearTimeout(h);
   }, [unsent]);
+
+  // The column scrolls when what it holds is taller than the screen (the raise panel under a side-pot line, a phone on its
+  // side): the buttons acted on are kept whole at its end, what is above them scrolled up, instead of cut at the bottom.
+  // Only then: a column that just fits (its padding aside) keeps its top line in view.
+  useLayoutEffect(() => {
+    const el = root.current;
+    const box = el?.parentElement;
+    if (column && el && box && el.getBoundingClientRect().bottom > box.getBoundingClientRect().bottom + 0.5) el.scrollIntoView({ block: 'nearest' });
+  }, [column, open]);
 
   // A changed amount cancels an armed commit, even if it is moved back to the armed amount.
   useEffect(() => setArmed((a) => (a?.key === 'commit' ? null : a)), [amount]);
@@ -194,7 +204,7 @@ export function ActionBar({
     ? 'jc-tap jc-act flex h-12 min-w-0 flex-1 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
     : 'jc-tap jc-act flex h-12 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12 sm:min-w-[7.5rem] sm:flex-none';
   const commitBtn = column
-    ? 'jc-tap jc-act flex h-11 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50'
+    ? 'jc-tap jc-act flex h-10 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50'
     : 'jc-tap jc-act flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12';
   /** A button's amount, under its name in the column; there, pressed once, the press-again line stands alone. */
   const amountOf = (key: ArmKey, sig: string, v: number) => !(column && isArmed(key, sig)) && <span className={cx('font-mono', column && 'text-[11px] font-semibold')}>{a.fmt(v, true)}</span>;
@@ -260,12 +270,14 @@ export function ActionBar({
   );
 
   return (
-    <div className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1.5' : 'gap-2 sm:w-auto')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
+    <div ref={root} className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1' : 'gap-2 sm:w-auto')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
       {open && window_ && (
         // Open for a moment: the table makes way for it while it is open, then takes the room back (useStackRoom).
         // In the bar's own row three lines (steps and slider, presets, the amount beside the confirm button), so a phone
-        // held upright keeps as much of its table as it can while the panel is open.
-        <div className={cx('jc-panel flex flex-col', column ? 'gap-1 p-2' : 'gap-2 p-2 sm:w-[26rem] sm:gap-3 sm:p-3')} data-momentary data-raise-panel>
+        // held upright keeps as much of its table as it can while the panel is open. In the column four, each 40px (what
+        // a finger needs, no more) and close together: a phone on its side 360px high holds them, the turn line and the
+        // bar without scrolling.
+        <div className={cx('jc-panel flex flex-col', column ? 'gap-1 p-1.5' : 'gap-2 p-2 sm:w-[26rem] sm:gap-3 sm:p-3')} data-momentary data-raise-panel>
           {column && (
             <div className="flex items-center gap-2">
               <span className="flex min-w-0 flex-1 flex-col text-[10px] leading-tight">
