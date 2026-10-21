@@ -63,6 +63,11 @@ export interface SeatView {
   bot?: BotLevel | true;
   /** A bot that gives up its seat once the current hand ends (to a member waiting for one, or the bots were turned off). */
   botLeaving?: boolean;
+  /**
+   * An empty seat the hand being played still counts (its player folded and left during the hand): nobody can sit
+   * there until the hand ends. It shows no player and no cards, only the chips that player put in on this street.
+   */
+  held?: boolean;
   stack: number;
   /** Chips committed on the current street. */
   streetBet: number;

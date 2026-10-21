@@ -167,6 +167,24 @@ describe('blinds, positions and betting rules', () => {
     const w = Object.fromEntries(h.handView().result!.winners.map((x) => [x.seatIndex, x.amount]));
     expect(w[2]).toBe(18);
   });
+
+  it("a folded player's stack is final from the fold on: what they put in stays in the pot (also after a restore)", async () => {
+    const h = start([1000, 1000, 1000, 1000], { button: 0 });
+    await must(h, 'p3', 'raise', 30);
+    await must(h, 'p0', 'call');
+    await must(h, 'p1', 'fold'); // SB: 5 in the pot
+    expect(h.hasFolded('p1')).toBe(true);
+    expect(h.hasFolded('p0')).toBe(false);
+    expect(h.hasFolded('nobody')).toBe(false);
+    expect(h.finalStacks().get('p1')).toBe(995);
+    await must(h, 'p2', 'call');
+    const restored = HandEngine.restore(JSON.parse(JSON.stringify(h.persist())), 5_000);
+    expect(restored.hasFolded('p1')).toBe(true);
+    await checkDown(restored);
+    expect(restored.isSettled).toBe(true);
+    expect(restored.finalStacks().get('p1')).toBe(995);
+    expect(restored.totalChips()).toBe(4000);
+  });
 });
 
 describe('showdown muck', () => {
