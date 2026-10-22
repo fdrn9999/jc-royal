@@ -15,9 +15,23 @@ const URGENT_MS = 8_000;
 /**
  * `column`: in a short screen's column (short.ts) the pill takes its width and wraps instead of widening it. `turn`: a
  * line shown above the bank's own (the column's turn label, so the column is no taller for it), the pill edged in gold.
- * `fallback`: shown instead when this turn has no bank.
+ * `fallback`: shown instead when this turn has no bank. `className`: the pill's own, added (the dock hides it for a moment).
  */
-export function TimeBankButton({ s, onUse, column = false, turn, fallback = null }: { s: TableView; onUse: (handId: string, seq: number, seen: number) => Promise<void>; column?: boolean; turn?: ReactNode; fallback?: ReactNode }) {
+export function TimeBankButton({
+  s,
+  onUse,
+  column = false,
+  turn,
+  fallback = null,
+  className,
+}: {
+  s: TableView;
+  onUse: (handId: string, seq: number, seen: number) => Promise<void>;
+  column?: boolean;
+  turn?: ReactNode;
+  fallback?: ReactNode;
+  className?: string;
+}) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [urgent, setUrgent] = useState(false);
@@ -55,6 +69,7 @@ export function TimeBankButton({ s, onUse, column = false, turn, fallback = null
         'pointer-events-auto flex items-center border bg-ink-950/85 pl-3 pr-1 text-xs backdrop-blur',
         turn ? 'border-gold-400/60' : 'border-white/10',
         column ? 'flex-wrap gap-x-2 gap-y-1 rounded-2xl' : 'gap-2 rounded-full py-0.5 sm:self-end',
+        className,
       )}
       data-testid="time-bank"
     >

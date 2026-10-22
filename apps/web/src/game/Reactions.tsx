@@ -71,9 +71,10 @@ export interface ReactionTrayState {
 
 /**
  * The button lies in the status line under the table and the tray is a line of its own above it (Table.tsx), not over my
- * seat: the table makes room for it while it is open (useStackRoom's data-momentary) and comes back when it closes, so
- * it covers neither my cards nor a seat nor the wallet beside the button. Closes after a pick, on a tap elsewhere, on
- * Escape (the button gets its focus back) and on my turn.
+ * seat: the dock's band under the table holds it with the status line (the pre-actions step aside while it is open), so
+ * opening it moves nothing and it covers neither my cards nor a seat nor the wallet beside the button. Closes after a
+ * pick, on a tap elsewhere, on Escape (the button gets its focus back) and on my turn, when the button goes with the
+ * status line and the focus is left on the page rather than put on an action button.
  */
 export function useReactionTray(off: boolean): ReactionTrayState {
   const [open, setOpen] = useState(false);

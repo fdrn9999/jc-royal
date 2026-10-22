@@ -73,6 +73,9 @@ export function useAreaSize<T extends HTMLElement>(style: CSSProperties) {
  *
  * `open`: such a panel is open (the table may drop what only matters off the turn, such as room for the show-card buttons).
  * `narrow`: the column is a phone's width, where the stack spans it and every line of it costs the table its height.
+ *
+ * The Academy's practice tables use it. The real table keeps a band of one height for its dock instead (Table.tsx
+ * dockBand), so that nothing the dock holds moves the table.
  */
 export function useStackRoom(mode: string, side = false) {
   const [colRef, col] = useBoxSize<HTMLDivElement>();

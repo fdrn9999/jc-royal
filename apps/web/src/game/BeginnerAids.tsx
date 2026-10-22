@@ -49,26 +49,29 @@ export function CurrentHandPill({ s, compact = false, inline = false, className 
   );
 }
 
-export function StageNote({ s }: { s: TableView }) {
+export function StageNote({ s, className }: { s: TableView; className?: string }) {
   const { t } = useI18n();
   if (!s.hand) return null;
   return (
-    <div className="pointer-events-none rounded-full bg-black/50 px-3 py-1 text-center text-[11px] text-ink-100" data-testid="stage-note">
+    <div className={cx('pointer-events-none rounded-full bg-black/50 px-3 py-1 text-center text-[11px] text-ink-100', className)} data-testid="stage-note">
       {t(`stageInfo.${s.hand.stage}` as MsgKey)}
     </div>
   );
 }
 
-/** "You can: …" line plus a toggleable help panel; sits above the action bar, never over its buttons. */
-export function ActionHelp({ s }: { s: TableView }) {
+/**
+ * "You can: …" line plus a toggleable help panel; sits above the action bar, never over its buttons. The panel scrolls
+ * past a few lines, so it fits the band the table's dock keeps for a beginner's notes (Table.tsx).
+ */
+export function ActionHelp({ s, className }: { s: TableView; className?: string }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const types = s.you.legal.map((o) => o.type);
   if (types.length === 0) return null;
   return (
-    <div className="pointer-events-auto flex w-full flex-col items-stretch gap-1.5 sm:w-[26rem]">
+    <div className={cx('pointer-events-auto flex w-full flex-col items-stretch gap-1.5 sm:w-[26rem]', className)}>
       {open && (
-        <ul className="jc-panel flex flex-col gap-1 p-3 text-xs" data-testid="action-help">
+        <ul className="jc-panel flex max-h-24 flex-col gap-1 overflow-y-auto p-3 text-xs" data-testid="action-help">
           {types.map((k) => (
             <li key={k}>
               <b className="text-gold-300">{t(`action.${k}` as MsgKey)}</b> <span className="text-ink-100">{t(`help.${k}` as MsgKey)}</span>
