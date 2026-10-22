@@ -170,6 +170,30 @@ interface Found {
 }
 
 /**
+ * The table makes room for the tray a frame or two after it opens, once the stack is read again (on a slow machine those
+ * frames come well after the tap): it is measured when its box has held still for 300ms. Returns how long after the call
+ * it last moved (0: it never did, the tray fitting by it).
+ */
+function settle(p: Page): Promise<number> {
+  return p.evaluate(
+    () =>
+      new Promise<number>((done) => {
+        const box = () => JSON.stringify(document.querySelector('[data-testid=table]')?.getBoundingClientRect());
+        const start = performance.now();
+        let last = box();
+        let moved = 0;
+        const tick = (now: number) => {
+          const at = box();
+          if (at !== last) [last, moved] = [at, now - start];
+          if (now - start - moved >= 300 || now - start >= 5_000) done(Math.round(moved));
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+}
+
+/**
  * Sits down at `table` with `seats` taken (bots fill the rest), then opens it on each screen in turn and looks at it in
  * each state. Returns what was found, everything measured written next to the test's screenshots.
  */
@@ -229,6 +253,8 @@ async function walk(browser: Browser, table: string, seats: number, screens: Scr
       await offTurn('tray', async () => {
         if (!(await p.getByTestId('react-tray').isVisible())) await (touch ? opener.tap() : opener.click());
         await expect(p.getByTestId('react-tray')).toBeVisible({ timeout: 2_000 });
+        const moved = await settle(p);
+        test.info().annotations.push({ type: 'tray room', description: `${sc.name}${sc.locale ? `-${sc.locale}` : ''}: table moved until ${moved}ms after the tray showed` });
       });
       await p.keyboard.press('Escape');
       await expect(p.getByTestId('react-tray')).toHaveCount(0);
