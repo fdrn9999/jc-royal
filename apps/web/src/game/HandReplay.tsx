@@ -6,7 +6,7 @@
  * in the player's unit, in big blinds of this hand's table when chosen (hands recorded without blinds stay in chips).
  */
 import { handLabelKey } from '@jc/types';
-import { Button, cardLabel, cx, Modal } from '@jc/ui';
+import { ArrowDownIcon, Button, cardLabel, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, cx, Modal, PauseIcon, PlayIcon, RotateCcwIcon, SkipBackIcon, SkipForwardIcon } from '@jc/ui';
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { LoadFailed } from '../components/Loading';
@@ -62,6 +62,7 @@ const DOES = new Set(['post-sb', 'post-bb', 'fold', 'check', 'call', 'bet', 'rai
  */
 type ReplayMode = 'normal' | 'focus';
 
+// Drawn like the UI's line icons (icons.tsx): 18px, a 1.8 stroke, round ends.
 const icon = 'size-[18px]';
 /** Four corners: the capture mode. */
 const CaptureIcon = () => (
@@ -75,12 +76,6 @@ const ImageIcon = () => (
     <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
     <circle cx="9" cy="10" r="1.6" />
     <path d="m20.5 16-4.5-4.5-8.5 8" />
-  </svg>
-);
-/** A chevron: down to fold the controls, up to bring them back. */
-const FoldIcon = ({ up }: { up: boolean }) => (
-  <svg aria-hidden viewBox="0 0 24 24" className={icon} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d={up ? 'm6 15 6-6 6 6' : 'm6 9 6 6 6-6'} />
   </svg>
 );
 
@@ -361,14 +356,15 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
       title={t(dir < 0 ? 'replay.prev' : 'replay.next')}
       data-testid={dir < 0 ? 'replay-prev' : 'replay-next'}
     >
-      {dir < 0 ? '◀' : '▶'}
+      {/* One step; the bar-ended pair below goes to the first and last. */}
+      {dir < 0 ? <ChevronLeftIcon className="size-5" /> : <ChevronRightIcon className="size-5" />}
     </Button>
   );
   // Its width changes with the controls' (the first render guesses wide); animated, the row would wrap for a moment and
   // the table be sized for it.
   const playButton = (
     <Button variant="gold" size="md" className={cx('transition-colors!', roomy ? 'min-w-28' : 'min-w-12 px-3!')} onClick={toggle} aria-pressed={playing} data-testid="replay-play">
-      <span aria-hidden="true">{playing ? '❚❚' : i >= last ? '↺' : '▶'}</span>
+      {playing ? <PauseIcon className="size-5" /> : i >= last ? <RotateCcwIcon className="size-5" /> : <PlayIcon className="size-5" />}
       <span className={roomy ? undefined : 'sr-only'}>{playing ? t('replay.pause') : i >= last ? t('replay.again') : t('replay.play')}</span>
     </Button>
   );
@@ -404,7 +400,7 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
                 disabled={step.kind !== 'result'}
                 data-testid="replay-to-settlement"
               >
-                {t('replay.toSettlement')} <span aria-hidden="true">↓</span>
+                {t('replay.toSettlement')} <ArrowDownIcon className="inline size-3.5 align-[-2px]" />
               </button>
             </span>
             <span className="font-mono text-gold-300 tabular-nums" data-testid="replay-pot">
@@ -498,7 +494,8 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
                 title={t(mode === 'normal' ? 'replay.collapse' : 'replay.expand')}
                 data-testid="replay-fold"
               >
-                <FoldIcon up={mode === 'focus'} />
+                {/* A chevron: down to fold the controls, up to bring them back. */}
+                {mode === 'focus' ? <ChevronUpIcon /> : <ChevronDownIcon />}
               </Button>
             </div>
           </div>
@@ -566,11 +563,11 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1" role="group" aria-label={t('replay.player')}>
                   <Button variant="ghost" size="icon" className="h-10! min-w-10!" onClick={() => go(0)} disabled={i === 0} aria-label={t('replay.first')} title={t('replay.first')} data-testid="replay-first">
-                    ⏮
+                    <SkipBackIcon className="size-5" />
                   </Button>
                   {playButton}
                   <Button variant="ghost" size="icon" className="h-10! min-w-10!" onClick={() => go(last)} disabled={i >= last} aria-label={t('replay.last')} title={t('replay.last')} data-testid="replay-last">
-                    ⏭
+                    <SkipForwardIcon className="size-5" />
                   </Button>
                 </div>
                 <div className="flex items-center gap-1" role="group" aria-label={t('replay.speed')}>
@@ -608,7 +605,7 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
                 {t('shareImg.open')}
               </Button>
               <Button onClick={quickSave} loading={quick?.kind === 'making'} data-testid="replay-share-quick" data-state={quick?.kind ?? 'idle'}>
-                {quick?.kind === 'saved' && <span aria-hidden="true">✓</span>}
+                {quick?.kind === 'saved' && <CheckIcon />}
                 {t(shareOpt.span === 'hand' ? 'shareImg.quickHand' : 'shareImg.quick')}
               </Button>
             </>

@@ -6,7 +6,7 @@
  * Every control names the version the page showed: a change by someone else meanwhile is refused and the page loads
  * again. Nothing here edits a stack, a card, a winner or a place: the table decides them and the room reports them.
  */
-import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
+import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat, TrophyIcon, XIcon } from '@jc/ui';
 import {
   TIME_BANK_LIMITS,
   TOURNAMENT_LIMITS,
@@ -190,7 +190,12 @@ export function TournamentsPage() {
                 <td className={`${td} whitespace-nowrap font-mono text-xs`}>{clockLine(t, r, now)}</td>
                 <td className={`${td} text-xs text-ink-400 max-sm:text-right`}>
                   {formatDate(r.endedAt ?? r.startedAt ?? r.createdAt, locale)}
-                  {r.endReason && <span className="block">{tnEndReasonLabel(t, r.endReason)}{r.winner ? ` · 🏆 ${r.winner}` : ''}</span>}
+                  {r.endReason && <span className="block">{tnEndReasonLabel(t, r.endReason)}{r.winner && (
+                    <>
+                      {' · '}
+                      <TrophyIcon className="inline size-3 align-[-2px] text-gold-300" /> {r.winner}
+                    </>
+                  )}</span>}
                 </td>
               </tr>
             ))}
@@ -577,7 +582,10 @@ export function TournamentDetailPage() {
           <div className="flex flex-col gap-2 text-sm" data-testid="tn-result" data-end={r.endReason ?? ''}>
             <p className="flex flex-wrap items-center gap-2">
               <Badge tone={r.endReason === 'completed' ? 'gold' : r.endReason === 'aborted' ? 'red' : 'neutral'}>{tnEndReasonLabel(t, r.endReason ?? r.status)}</Badge>
-              {r.endReason === 'completed' && r.winner && <span className="font-semibold text-gold-300">🏆 {r.winner}</span>}
+              {r.endReason === 'completed' && r.winner && <span className="font-semibold text-gold-300">
+                  <TrophyIcon className="mr-1 inline size-3.5 align-[-2px]" />
+                  {r.winner}
+                </span>}
               {r.endedAt && <span className="text-xs text-ink-400">{formatDate(r.endedAt, locale)}</span>}
             </p>
             {r.endReason === 'aborted' && <p className="text-ink-200">{t('tnAbortedResult')}</p>}
@@ -1056,7 +1064,7 @@ function TemplateEditor({ tpl, onClose, onChanged }: { tpl: TournamentTemplateDt
                   <Input className="min-w-0 flex-1" inputMode="numeric" aria-label={t('tnLevelSb', { n: i + 1 })} value={l.sb} onChange={(e) => setLevel(i, 'sb', e.target.value)} data-testid={`tpl-sb-${i}`} />
                   <span className="text-ink-400">/</span>
                   <Input className="min-w-0 flex-1" inputMode="numeric" aria-label={t('tnLevelBb', { n: i + 1 })} value={l.bb} onChange={(e) => setLevel(i, 'bb', e.target.value)} data-testid={`tpl-bb-${i}`} />
-                  <Button type="button" size="icon" variant="ghost" disabled={d.levels.length <= L.levels.min} onClick={() => setD({ ...d, levels: d.levels.filter((_, j) => j !== i) })} aria-label={t('tnLevelRemove', { n: i + 1 })}>✕</Button>
+                  <Button type="button" size="icon" variant="ghost" disabled={d.levels.length <= L.levels.min} onClick={() => setD({ ...d, levels: d.levels.filter((_, j) => j !== i) })} aria-label={t('tnLevelRemove', { n: i + 1 })}><XIcon className="size-4" /></Button>
                 </li>
               ))}
             </ol>

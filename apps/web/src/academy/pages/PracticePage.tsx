@@ -5,7 +5,7 @@
  */
 import { sound } from '@jc/audio';
 import { handLabelKey, type ActionType, type TableView } from '@jc/types';
-import { Button, cx, Modal } from '@jc/ui';
+import { ArrowLeftIcon, Button, CheckIcon, cx, Modal } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ActionBar } from '../../game/ActionBar';
@@ -74,7 +74,7 @@ export function PracticeListPage() {
           const st = p.scenarioStats[s.id];
           return (
             <Link key={s.id} to={`/academy/practice/${s.id}`} className="jc-tap jc-panel flex items-center gap-3 p-4 transition hover:border-gold-500/40" data-testid={`scenario-${s.id}`}>
-              <span className={cx('grid size-11 shrink-0 place-items-center rounded-xl font-display text-lg font-bold', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-gold-300')}>{done ? '✓' : s.id}</span>
+              <span className={cx('grid size-11 shrink-0 place-items-center rounded-xl font-display text-lg font-bold', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-gold-300')}>{done ? <CheckIcon className="size-5 stroke-[3px]" /> : s.id}</span>
               <span className="min-w-0 flex-1">
                 <span className="block font-bold text-ivory">{tr(s.title)}</span>
                 <span className="block text-xs text-ink-300">{tr(s.goal)}</span>
@@ -253,7 +253,7 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }} data-testid="practice-table" data-scenario={sc.id}>
       <header className="jc-game-surface z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
         <Link to={back.to} onClick={back.onClick} className="jc-tap grid size-10 place-items-center rounded-lg text-ink-200" aria-label={tr(back.from ? UI.toHand : T.list)} data-testid="practice-back">
-          ←
+          <ArrowLeftIcon className="size-5" />
         </Link>
         <div className="min-w-0">
           <div className="truncate text-sm font-bold text-ivory">
@@ -328,7 +328,10 @@ function PracticeTable({ id, onAgain }: { id: ScenarioId; onAgain: () => void })
           )}
           {finished && (
             <div className="jc-panel jc-pop pointer-events-auto flex w-full max-w-md flex-col gap-2 p-4" data-testid="practice-done">
-              <div className="text-lg font-bold text-gold-300">✓ {tr(sc.title)}</div>
+              <div className="text-lg font-bold text-gold-300">
+                <CheckIcon className="mr-1 inline size-5 align-[-3px]" />
+                {tr(sc.title)}
+              </div>
               {stats && (
                 <p className="text-xs text-ink-300" data-testid="practice-stats">
                   {tr(T.stats, { tries: stats.tries, misses: stats.misses })}

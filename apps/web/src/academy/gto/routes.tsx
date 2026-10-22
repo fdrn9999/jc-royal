@@ -5,7 +5,7 @@
  * current step lives in the URL and the rest in component state, so switching the language keeps the learner's place.
  */
 import { sound } from '@jc/audio';
-import { Button, cx } from '@jc/ui';
+import { Button, CheckIcon, cx, RotateCcwIcon } from '@jc/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../../lib/auth';
@@ -239,7 +239,7 @@ export function GtoHome() {
             return (
               <Link key={x.id} to={x.to} className="jc-tap flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-ink-850 px-3 py-2 text-sm text-ivory hover:border-gold-500/50" data-prereq={x.id} data-done={done ? '1' : '0'}>
                 <span aria-hidden className={cx('grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-ink-300')}>
-                  {done ? '✓' : '·'}
+                  {done ? <CheckIcon className="size-3.5 stroke-[3px]" /> : '·'}
                 </span>
                 <span className="min-w-0 flex-1">{tr(x.title)}</span>
                 {done && <span className="text-xs text-gold-300">{tr(T.done)}</span>}
@@ -271,7 +271,7 @@ export function GtoHome() {
             const mp = p.modules[m.id];
             return (
               <Link key={m.id} to={`/academy/gto/${m.id}${mp && !done ? `?step=${mp.step}` : ''}`} className="jc-tap jc-panel flex items-center gap-3 p-4 transition hover:border-gold-500/40" data-testid={`gto-module-${m.id}`}>
-                <span className={cx('grid size-11 shrink-0 place-items-center rounded-xl font-mono text-lg font-bold', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-gold-300')}>{done ? '✓' : moduleNo(m.id)}</span>
+                <span className={cx('grid size-11 shrink-0 place-items-center rounded-xl font-mono text-lg font-bold', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-gold-300')}>{done ? <CheckIcon className="size-5 stroke-[3px]" /> : moduleNo(m.id)}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[11px] font-semibold uppercase tracking-wider text-ink-400">
                     Module {moduleNo(m.id)} · {tr(T.quizCount, { n: quizzesOf(m.id).length })}
@@ -406,7 +406,7 @@ function ModuleView({ id }: { id: GtoModuleId }) {
       <header className="flex flex-col gap-3">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">
           Module {moduleNo(id)} / {GTO_MODULES.length}
-          {moduleDone(p, id) && <span className="ml-2 rounded-full bg-gold-500/20 px-2 py-0.5 text-gold-300">✓ {tr(T.done)}</span>}
+          {moduleDone(p, id) && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-gold-500/20 px-2 py-0.5 text-gold-300"><CheckIcon className="size-3" />{tr(T.done)}</span>}
         </div>
         <h1 className="font-display text-xl font-bold tracking-[0.04em] text-gold-300 sm:text-2xl">{tr(m.title)}</h1>
         <ol className="flex gap-1.5" aria-label={tr(T.step)}>
@@ -455,9 +455,7 @@ function ModuleView({ id }: { id: GtoModuleId }) {
             <ul className="flex flex-col gap-2 text-sm text-ink-100">
               {m.review.map((x, i) => (
                 <li key={i} className="flex gap-2">
-                  <span aria-hidden className="text-gold-400">
-                    ✓
-                  </span>
+                  <CheckIcon className="mt-0.5 size-4 text-gold-400" />
                   <span>{tr(x)}</span>
                 </li>
               ))}
@@ -503,7 +501,8 @@ function ModuleView({ id }: { id: GtoModuleId }) {
           </Button>
           {isReview ? (
             <Button size="lg" onClick={finish} data-testid="gto-finish">
-              {tr(T.finish)} ✓
+              {tr(T.finish)}
+              <CheckIcon />
             </Button>
           ) : (
             <Button size="lg" onClick={() => go(step + 1)} data-testid="gto-next">
@@ -646,7 +645,8 @@ function QuizRun({ filter, onlyWrong }: { filter: GtoModuleId | null; onlyWrong:
               })
             }
           >
-            ↺ {tr(T.retry)}
+            <RotateCcwIcon />
+            {tr(T.retry)}
           </Button>
         </div>
       )}
@@ -770,7 +770,8 @@ function HandView({ h }: { h: GtoHandAnalysis }) {
             </p>
             <RecordLine a={p.hands[h.id]} />
             <Button size="sm" variant="ghost" className="self-start" onClick={() => setPicked(null)}>
-              ↺ {tr(T.retry)}
+              <RotateCcwIcon />
+              {tr(T.retry)}
             </Button>
           </div>
         )}
@@ -931,7 +932,7 @@ export function GtoReviewPage() {
             <summary className="jc-tap flex cursor-pointer items-center gap-2 text-sm font-bold text-ivory">
               <span className="font-mono text-gold-400">{moduleNo(m.id)}.</span>
               <span className="min-w-0 flex-1">{tr(m.title)}</span>
-              {moduleDone(p, m.id) && <span className="text-xs text-gold-300">✓ {tr(T.done)}</span>}
+              {moduleDone(p, m.id) && <span className="inline-flex items-center gap-1 text-xs text-gold-300"><CheckIcon className="size-3" />{tr(T.done)}</span>}
             </summary>
             <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-sm text-ink-100">
               {m.review.map((x, i) => (

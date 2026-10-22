@@ -18,7 +18,7 @@ import {
   type ReportStatus,
   type ReportTarget,
 } from '@jc/types';
-import { Badge, Button, Empty, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
+import { Badge, Button, ChevronDownIcon, ChevronUpIcon, Empty, formatChips, formatDate, Input, Panel, Stat, XIcon } from '@jc/ui';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
@@ -399,7 +399,8 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
       )}
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="subtle" aria-expanded={showLog} onClick={() => setShowLog(!showLog)} data-testid="report-timeline-toggle">
-          {t('reportLog')} {showLog ? '▲' : '▼'}
+          {t('reportLog')}
+          {showLog ? <ChevronUpIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
         </Button>
         {r.target.status === 'active' && (
           <Button size="sm" variant="danger" disabled={busy} onClick={() => setSuspend({ reason: '', error: null })} data-testid="report-suspend">{t('suspendFromReport')}</Button>
@@ -646,12 +647,12 @@ export function ReportsPage() {
           <div className="flex flex-wrap items-center gap-2">
             {userId && (
               <button className="rounded-full bg-gold-500/15 px-3 py-1 text-xs font-semibold text-gold-300" onClick={() => set('userId', null)} data-testid="report-user-filter">
-                {t('reportedUser')}: {data?.items[0]?.target.nickname ?? userId} ✕
+                {t('reportedUser')}: {data?.items[0]?.target.nickname ?? userId} <XIcon className="inline size-3 align-[-2px]" />
               </button>
             )}
             {reporterId && (
               <button className="rounded-full bg-gold-500/15 px-3 py-1 text-xs font-semibold text-gold-300" onClick={() => set('reporterId', null)} data-testid="report-reporter-filter">
-                {t('reporterFilter')}: {data?.items[0]?.reporter.nickname ?? reporterId} ✕
+                {t('reporterFilter')}: {data?.items[0]?.reporter.nickname ?? reporterId} <XIcon className="inline size-3 align-[-2px]" />
               </button>
             )}
             <select value={status} onChange={(e) => set('status', e.target.value)} className={selectCls} aria-label={t('status')} data-testid="report-status">

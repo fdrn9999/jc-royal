@@ -4,7 +4,7 @@
  */
 import { sound } from '@jc/audio';
 import type { ActionType, TableView } from '@jc/types';
-import { Button, cx, formatChips, Modal } from '@jc/ui';
+import { ArrowLeftIcon, Button, cx, formatChips, Modal } from '@jc/ui';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { ActionHelp, CurrentHandPill } from '../../game/BeginnerAids';
@@ -158,7 +158,7 @@ function FreeTable({ cfg, back, onSetup, onRestart }: { cfg: FreeConfig; back: R
     <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }} data-testid="free-table">
       <header className="jc-game-surface z-40 flex h-14 shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 px-3 backdrop-blur-md">
         <Link to={back.to} onClick={back.onClick} className="jc-tap grid size-10 place-items-center rounded-lg text-ink-200" aria-label={tr(back.from ? T.toStudy : UI.back)} data-testid="free-table-back">
-          ←
+          <ArrowLeftIcon className="size-5" />
         </Link>
         <div className="min-w-0">
           <div className="truncate text-sm font-bold text-ivory">{tr(T.title)}</div>

@@ -4,7 +4,7 @@
  * model. Pure arithmetic from ./math: no engine, no network, no solver.
  */
 import type { Card } from '@jc/types';
-import { Button, cx } from '@jc/ui';
+import { Button, CheckIcon, cx, DicesIcon, XIcon } from '@jc/ui';
 import { useMemo, useState } from 'react';
 import { l, useTr, type L } from '../content';
 import { cardText, calcSteps } from './explain';
@@ -352,7 +352,7 @@ function PositionTool() {
             return (
               <div key={s} className={cx('flex flex-col items-center rounded-lg border px-1 py-1.5 text-xs font-bold', on ? 'border-success/60 bg-success/10 text-success-soft' : 'border-white/10 bg-ink-850 text-ink-400')} data-seat={s} data-open={on ? '1' : '0'}>
                 <span>{s}</span>
-                <span aria-hidden>{on ? '✓' : '✗'}</span>
+                {on ? <CheckIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
                 <span className="sr-only">{tr(on ? l('오픈', 'opens') : l('폴드', 'folds'))}</span>
               </div>
             );
@@ -420,7 +420,8 @@ function TextureTool() {
           </Button>
         ))}
         <Button size="sm" variant="outline" onClick={() => setFlop(randomFlop())} data-testid="texture-random">
-          🎲 {tr(l('무작위 플랍', 'Random flop'))}
+          <DicesIcon />
+          {tr(l('무작위 플랍', 'Random flop'))}
         </Button>
       </div>
       <details className="rounded-xl border border-white/10 p-2">
@@ -653,7 +654,7 @@ function StreetWalkTool() {
         {w.streets.map((x, k) => (
           <li key={x.street} className="flex-1">
             <button type="button" onClick={() => setI(k)} aria-current={k === i ? 'step' : undefined} className={cx('jc-tap w-full rounded-lg border px-2 py-2 text-sm font-bold', k === i ? 'border-gold-400 bg-gold-500/15 text-gold-300' : 'border-white/10 bg-ink-850 text-ink-300')} data-street={x.street}>
-              {k < i ? '✓ ' : ''}
+              {k < i && <CheckIcon className="mr-1 inline size-3.5 align-[-2px]" />}
               {tr(STREET[x.street]!)}
             </button>
           </li>

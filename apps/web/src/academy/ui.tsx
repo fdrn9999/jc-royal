@@ -6,7 +6,7 @@
  */
 import { sound } from '@jc/audio';
 import type { Card } from '@jc/types';
-import { Button, cx, PlayingCard } from '@jc/ui';
+import { Button, CheckIcon, cx, PlayingCard, XIcon } from '@jc/ui';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../lib/auth';
@@ -146,7 +146,8 @@ export function LessonShell({ id, title, steps, next }: { id: LessonId; title: L
           </Button>
           {last ? (
             <Button size="lg" disabled={cur.locked} onClick={finish} data-testid="lesson-finish">
-              {tr(UI.finish)} ✓
+              {tr(UI.finish)}
+              <CheckIcon />
             </Button>
           ) : (
             <Button size="lg" disabled={cur.locked} onClick={() => go(step + 1)} data-testid="lesson-next">
@@ -204,11 +205,11 @@ export function CardRow({ cards, size, main = [], second = [], reveal = false }:
   );
 }
 
-/** ✓ or ✗ in a disc, so a right or wrong answer never rests on red and green alone. */
+/** A tick or a cross in a disc, so a right or wrong answer never rests on red and green alone. */
 export function ResultMark({ ok, className }: { ok: boolean; className?: string }) {
   return (
     <span aria-hidden className={cx('grid size-6 shrink-0 place-items-center rounded-full text-xs font-black text-ink-950 shadow ring-2 ring-ink-950', ok ? 'bg-success' : 'bg-danger', className)} data-mark={ok ? 'correct' : 'wrong'}>
-      {ok ? '✓' : '✗'}
+      {ok ? <CheckIcon className="size-3.5 stroke-[3px]" /> : <XIcon className="size-3.5 stroke-[3px]" />}
     </span>
   );
 }
@@ -224,7 +225,10 @@ function Feedback({ state, explain, why, onNext, nextLabel }: { state: 'correct'
       data-testid={state === 'correct' ? 'feedback-correct' : 'feedback-wrong'}
       className={cx('flex flex-col gap-2 rounded-xl border p-3 text-sm', state === 'correct' ? 'jc-pop border-success/40 bg-success/10 text-success-soft' : 'jc-shake border-danger/40 bg-danger/10 text-danger-soft')}
     >
-      <div className="font-bold">{state === 'correct' ? `✓ ${tr(UI.correct)}` : `✗ ${tr(UI.wrong)}`}</div>
+      <div className="flex items-center gap-1.5 font-bold">
+        {state === 'correct' ? <CheckIcon /> : <XIcon />}
+        {tr(state === 'correct' ? UI.correct : UI.wrong)}
+      </div>
       {state === 'wrong' && why && <p>{tr(why)}</p>}
       {state === 'correct' && <p className="text-ink-100">{tr(explain)}</p>}
       {state === 'correct' && onNext && (

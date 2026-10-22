@@ -1,6 +1,24 @@
 import { sound } from '@jc/audio';
 import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView } from '@jc/types';
-import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
+import {
+  ArrowDownIcon,
+  ArrowUpFromLineIcon,
+  Button,
+  ChevronDownIcon,
+  CrownIcon,
+  cx,
+  formatChips,
+  HandRanksIcon,
+  Logo,
+  LogOutIcon,
+  MessageCircleIcon,
+  Modal,
+  PauseIcon,
+  PlayIcon,
+  SettingsIcon,
+  TrophyIcon,
+  XIcon,
+} from '@jc/ui';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
@@ -497,12 +515,12 @@ export function TablePage() {
             <>
               <div className="flex min-w-0 items-center gap-1 text-sm font-bold text-ivory" data-testid="table-title">
                 <span className="truncate">{s?.table.name ?? '…'}</span>
-                {isHost && <span aria-hidden className="shrink-0 text-xs text-gold-300">▾</span>}
+                {isHost && <ChevronDownIcon className="size-3.5 text-gold-300" />}
               </div>
               {s && (
                 <div className="truncate font-mono text-[11px] text-ink-300">
                   {tn && <span className="font-sans">{t('tn.hud')} · </span>}
-                  {s.table.roomType === 'member' && <span className="font-sans">{isHost ? `👑 ${t('room.host')}` : t('room.member')} · </span>}
+                  {s.table.roomType === 'member' && <span className="font-sans">{isHost ? <><CrownIcon className="inline size-3 align-[-2px] text-gold-300" /> {t('room.host')}</> : t('room.member')} · </span>}
                   {formatChips(s.table.smallBlind)}/{formatChips(s.table.bigBlind)}
                   {hand && ` · ${t('table.handNo', { n: hand.number })} · ${t(`stage.${hand.stage}` as MsgKey)}`}
                 </div>
@@ -521,23 +539,31 @@ export function TablePage() {
         <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
           {seated && (
             <Button size="icon" variant="subtle" onClick={() => sock.send({ t: s!.you.sittingOut ? 'sitIn' : 'sitOut' })} data-testid="sitout-toggle" aria-label={s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}>
-              <span aria-hidden className="sm:hidden">{s!.you.sittingOut ? '▶' : '❚❚'}</span>
+              {/* What a tap does: play (come back) while away, pause (step away) while playing. */}
+              {s!.you.sittingOut ? <PlayIcon className="size-5 sm:hidden" /> : <PauseIcon className="size-5 sm:hidden" />}
               <span className="hidden sm:inline">{s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}</span>
             </Button>
           )}
-          <Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setChatOpen((o) => !o)} aria-label={t('table.chat')} aria-expanded={chatOpen}>
-            💬
+          <Button
+            size="icon"
+            variant="ghost"
+            className={cx('lg:hidden', chatOpen && 'bg-gold-500/15! text-gold-300!')}
+            onClick={() => setChatOpen((o) => !o)}
+            aria-label={t('table.chat')}
+            aria-expanded={chatOpen}
+          >
+            <MessageCircleIcon className="size-5" />
           </Button>
           <Button size="icon" variant="ghost" onClick={() => setChart(true)} aria-label={t('table.handChart')} data-testid="hand-chart-open">
-            <span aria-hidden className="sm:hidden">♠≡</span>
+            <HandRanksIcon className="size-5 sm:hidden" />
             <span className="hidden sm:inline">{t('table.handChart')}</span>
           </Button>
           <Button size="icon" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
-            ⚙
+            <SettingsIcon className="size-5" />
           </Button>
           {tn ? (
             <Button size="icon" variant="outline" onClick={() => nav(`/tournaments/${tn.id}`)} data-testid="leave" aria-label={t('tn.toTournament')}>
-              <span aria-hidden className="sm:hidden">🏆</span>
+              <TrophyIcon className="size-5 sm:hidden" />
               <span className="hidden sm:inline">{t('tn.toTournament')}</span>
             </Button>
           ) : (
@@ -551,7 +577,8 @@ export function TablePage() {
                 aria-label={seated ? t('table.standUp') : t('table.leave')}
                 aria-expanded={leaveFolds ? leaveAsk : undefined}
               >
-                <span aria-hidden className="sm:hidden">⏏</span>
+                {/* Standing up (rising from the seat, staying to watch) is not leaving the table (out the door). */}
+                {seated ? <ArrowUpFromLineIcon className="size-5 sm:hidden" /> : <LogOutIcon className="size-5 sm:hidden" />}
                 <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
               </Button>
               {leaveAsk && (
@@ -872,7 +899,7 @@ export function TablePage() {
                   <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
                     {t('topup.queued', { amount: amt.exact(s.you.topUpQueued) })}
                     <button type="button" className="jc-tap grid size-6 place-items-center rounded-full hover:bg-gold-500/20" onClick={() => sock.send({ t: 'cancelTopUp' })} aria-label={t('topup.cancel')} data-testid="topup-cancel">
-                      ✕
+                      <XIcon className="size-3.5" />
                     </button>
                   </span>
                 )}
@@ -908,13 +935,13 @@ export function TablePage() {
         >
           {chatOpen && myTurn && (
             <button className="jc-pulse-gold mb-2 rounded-xl border border-gold-400/60 bg-gold-500/20 px-3 py-2.5 text-sm font-bold text-gold-300 lg:hidden" onClick={() => setChatOpen(false)} data-testid="chat-your-turn">
-              {t('table.yourTurn')} · {t('table.backToTable')} ↓
+              {t('table.yourTurn')} · {t('table.backToTable')} <ArrowDownIcon className="inline size-4 align-[-3px]" />
             </button>
           )}
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-xs font-bold tracking-[0.08em] text-gold-300">{t('table.chat')}</h2>
             <button className="grid size-10 place-items-center text-ink-300 lg:hidden" onClick={() => setChatOpen(false)} aria-label={t('common.close')}>
-              ✕
+              <XIcon className="size-5" />
             </button>
           </div>
           <div className="min-h-0 flex-1">

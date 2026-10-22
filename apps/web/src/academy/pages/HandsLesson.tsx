@@ -1,5 +1,5 @@
 import { sound } from '@jc/audio';
-import { Button, cx } from '@jc/ui';
+import { Button, cx, RotateCcwIcon } from '@jc/ui';
 import { useState } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { l, useTr } from '../content';
@@ -58,7 +58,8 @@ function DetailStep() {
           </div>
         )}
         <Button size="sm" variant="ghost" onClick={() => choose(i)}>
-          ↻ {tr(l('다시 보기', 'Replay'))}
+          <RotateCcwIcon />
+          {tr(l('다시 보기', 'Replay'))}
         </Button>
       </div>
       <dl className="grid gap-2 text-sm sm:grid-cols-2">

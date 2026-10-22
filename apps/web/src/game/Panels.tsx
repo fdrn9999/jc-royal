@@ -1,6 +1,6 @@
 import { sound, type AudioSettings } from '@jc/audio';
 import { SETTINGS_COLOR_VISIONS, type AutoBuyPolicy, type AutoBuyRequest, type ChatMessage, type TableView } from '@jc/types';
-import { Button, cx, Field, formatChips, Modal, THEMES } from '@jc/ui';
+import { Button, cx, Field, formatChips, Modal, SendHorizontalIcon, THEMES } from '@jc/ui';
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
@@ -638,8 +638,8 @@ export function ChatPanel({
             data-testid="chat-input"
           />
           <EmojiPicker inputRef={field} value={text} onChange={setText} maxLength={200} small />
-          <Button size="sm" type="submit" className="h-11! sm:h-9!" aria-label={t('table.chat')}>
-            ↵
+          <Button size="sm" type="submit" className="h-11! sm:h-9!" aria-label={t('table.send')}>
+            <SendHorizontalIcon />
           </Button>
         </form>
       )}

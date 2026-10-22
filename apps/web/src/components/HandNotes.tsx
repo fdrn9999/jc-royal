@@ -3,7 +3,7 @@
  * hand list, and the note panel of a hand's detail. Only the member ever sees these; the server keeps them per member.
  */
 import { HAND_MEMO_MAX, HAND_TAGS, handLabelKey, type HandNoteDto, type HandSummaryDto, type HandTag } from '@jc/types';
-import { Button, cx, formatChips, formatDate, Panel, PlayingCard } from '@jc/ui';
+import { BookmarkIcon, Button, cx, formatChips, formatDate, Panel, PencilIcon, PlayingCard } from '@jc/ui';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { api, ApiError } from '../lib/api';
@@ -12,14 +12,6 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 type Card = Parameters<typeof PlayingCard>[0]['card'];
 
 export const saveNote = (handId: string, body: Record<string, unknown>) => api<HandNoteDto>(`/api/me/hands/${encodeURIComponent(handId)}/note`, { method: 'PUT', body });
-
-function BookmarkIcon({ on }: { on: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden className="size-5" fill={on ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} strokeLinejoin="round">
-      <path d="M6 3.5h12v17l-6-4.2-6 4.2z" />
-    </svg>
-  );
-}
 
 export function BookmarkToggle({ on, busy, onToggle }: { on: boolean; busy?: boolean; onToggle: () => void }) {
   const { t } = useI18n();
@@ -34,7 +26,7 @@ export function BookmarkToggle({ on, busy, onToggle }: { on: boolean; busy?: boo
       className={cx('jc-tap grid size-10 shrink-0 place-items-center rounded-lg transition hover:bg-white/5 disabled:opacity-60', on ? 'text-gold-300' : 'text-ink-400 hover:text-ink-200')}
       data-testid="hand-bookmark"
     >
-      <BookmarkIcon on={on} />
+      <BookmarkIcon className={cx('size-5', on && 'fill-current')} />
     </button>
   );
 }
@@ -94,8 +86,9 @@ export function HandRow({ hand, onChange }: { hand: HandSummaryDto; onChange: (h
               <TagChip key={tg} tag={tg} on />
             ))}
             {hand.hasMemo && (
-              <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-ink-300" data-testid="hand-memo-mark">
-                ✎ {t('hands.memoMark')}
+              <span className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-ink-300" data-testid="hand-memo-mark">
+                <PencilIcon className="size-3" />
+                {t('hands.memoMark')}
               </span>
             )}
           </div>

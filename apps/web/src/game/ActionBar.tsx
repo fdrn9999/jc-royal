@@ -27,7 +27,7 @@
  * and the raise panel above them is sized to it, so opening it moves neither the buttons nor the table.
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
-import { cx, formatChips, Spinner } from '@jc/ui';
+import { cx, formatChips, MinusIcon, PlusIcon, Spinner } from '@jc/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n } from '../lib/i18n';
@@ -284,7 +284,7 @@ export function ActionBar({
   const steps = window_ && (
     <div className={cx('flex items-center', column ? 'gap-1.5' : 'gap-2')}>
       <button type="button" className={stepBtn} disabled={amount <= window_.min} onClick={() => pick(clampAmt(amount - bb))} aria-label={`- ${a.fmt(bb)}`}>
-        −
+        <MinusIcon className="size-5" />
       </button>
       <input
         type="range"
@@ -298,7 +298,7 @@ export function ActionBar({
         aria-valuetext={a.fmt(clampAmt(amount))}
       />
       <button type="button" className={stepBtn} disabled={amount >= window_.max} onClick={() => pick(clampAmt(amount + bb))} aria-label={`+ ${a.fmt(bb)}`}>
-        +
+        <PlusIcon className="size-5" />
       </button>
       {/* In the card the amount ends the slider's line, so the buttons' row keeps fold, check and call. */}
       {inCard && (

@@ -4,7 +4,7 @@
  * keep them.
  */
 import { HAND_MIN_POTS, HAND_RESULTS, HAND_TAGS, POSITIONS, type HandSummaryDto } from '@jc/types';
-import { Button, cx, Empty, Field, Input, Panel } from '@jc/ui';
+import { Button, ChevronDownIcon, ChevronUpIcon, cx, Empty, Field, Input, Panel } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router';
 import { HandRow } from '../components/HandNotes';
@@ -170,7 +170,8 @@ export function HandsPage() {
             )}
             <button type="button" className="jc-tap rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-ink-200 sm:hidden" aria-expanded={open} aria-controls="hands-filters" onClick={() => setOpen(!open)} data-testid="hands-filters-toggle">
               {t('hands.filters')}
-              {active > 0 && ` (${active})`} {open ? '▲' : '▼'}
+              {active > 0 && ` (${active})`}{' '}
+              {open ? <ChevronUpIcon className="inline size-3.5 align-[-2px]" /> : <ChevronDownIcon className="inline size-3.5 align-[-2px]" />}
             </button>
           </div>
         }

@@ -30,7 +30,7 @@ test('play together: invite from the friends list; the card opens the table, say
   await a.page.goto('/friends');
   await a.page.getByTestId('friend-item').filter({ hasText: b.nickname }).getByTestId('friend-invite').click();
   const picker = a.page.getByTestId('invite-picker');
-  await expect(picker.getByTestId('invite-table').filter({ hasText: 'E2E Secret' })).toContainText('🔒');
+  await expect(picker.getByTestId('invite-table').filter({ hasText: 'E2E Secret' }).locator('svg.lucide-lock')).toBeVisible();
   await expect(picker.getByTestId('invite-table').filter({ hasText: 'E2E Together' })).toContainText('0/2');
   await a.page.screenshot({ path: 'test-results/invite-picker.png' });
   await picker.getByTestId('invite-table').filter({ hasText: 'E2E Together' }).click();

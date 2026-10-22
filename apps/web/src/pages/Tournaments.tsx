@@ -5,7 +5,7 @@
  * the tournament can still change.
  */
 import { blindsAt, type EntryStatus, type TournamentDetailDto, type TournamentStatus, type TournamentSummaryDto, type VipColor } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, Panel, Spinner } from '@jc/ui';
+import { Badge, Button, cx, Empty, formatChips, Panel, Spinner, TrophyIcon } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { MemberName } from '../components/MemberName';
@@ -109,13 +109,14 @@ function MyBadge({ me }: { me: TournamentSummaryDto['me'] }) {
   );
 }
 
-/** "🏆 Won by {name}", with the winner's VIP color and mark on the name only (the sentence comes from the translation). */
+/** A trophy and "Won by {name}", with the winner's VIP color and mark on the name only (the sentence comes from the translation). */
 function WonBy({ tr, name, vip, className }: { tr: Tn; name: string; vip?: VipColor; className?: string }) {
   const MARK = '\u0000';
   const [before = '', after = ''] = tr('wonBy', { name: MARK }).split(MARK);
   return (
     <p className={cx('flex min-w-0 items-center', className)} data-testid="tn-winner">
-      <span className="shrink-0 whitespace-pre">🏆 {before}</span>
+      <TrophyIcon className="mr-1 size-3.5 text-gold-300" />
+      <span className="shrink-0 whitespace-pre">{before}</span>
       <MemberName name={name} vip={vip} />
       {after && <span className="shrink-0 whitespace-pre">{after}</span>}
     </p>

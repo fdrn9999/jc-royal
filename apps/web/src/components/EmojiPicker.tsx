@@ -1,4 +1,4 @@
-import { cx } from '@jc/ui';
+import { cx, SmileIcon } from '@jc/ui';
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { insertAt, PICKER_EMOJI } from '../lib/emoji';
 import { useI18n } from '../lib/i18n';
@@ -81,7 +81,7 @@ export function EmojiPicker({
         aria-expanded={open}
         data-testid="emoji-open"
       >
-        <span aria-hidden>😊</span>
+        <SmileIcon className="size-5" />
       </button>
       {open && (
         <div

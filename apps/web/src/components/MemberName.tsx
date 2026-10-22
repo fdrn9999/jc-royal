@@ -3,10 +3,10 @@
  * own color and mark: a crown for the super admin, a shield for an admin, and where there is room the SUPER ADMIN /
  * ADMIN badge. A VIP member (`vip`, a palette key from the server, members only) gets the color an administrator chose
  * and always the VIP mark with it: the VIP pill where there is room, a small gold diamond where there is not. Other
- * members look exactly as before. The crown is drawn, so it never reads as the 👑 host mark.
+ * members look exactly as before. The crown is drawn filled, so it never reads as a seat's outlined host crown.
  */
 import type { BotLevel, PublicRole, VipColor } from '@jc/types';
-import { cx } from '@jc/ui';
+import { cx, UserIcon } from '@jc/ui';
 import { useI18n } from '../lib/i18n';
 
 const LABEL = { super_admin: 'role.superAdmin', admin: 'role.admin' } as const;
@@ -93,7 +93,7 @@ export function VipIcon({ className }: { className?: string }) {
 export const vipOf = (role: PublicRole | undefined, vip: VipColor | undefined) => (role ? undefined : vip);
 
 /**
- * "Host {name}" on a lobby room: 👤 for a member, the staff mark and color for staff, the VIP color and diamond for a
+ * "Host {name}" on a lobby room: a person icon for a member, the staff mark and color for staff, the VIP color and diamond for a
  * VIP member. The sentence comes from the translation, so only the name inside it is colored.
  */
 export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole; vip?: VipColor } }) {
@@ -103,7 +103,7 @@ export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole
   const vip = vipOf(host.role, host.vip);
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
-      {host.role ? <RoleIcon role={host.role} className="size-3" /> : vip ? <VipIcon className="size-3" /> : <span aria-hidden>👤</span>}
+      {host.role ? <RoleIcon role={host.role} className="size-3" /> : vip ? <VipIcon className="size-3" /> : <UserIcon className="size-3" />}
       <span className="min-w-0 truncate">
         {before}
         <span className={cx(host.role && 'jc-role-name', vip && 'jc-vip-name') || undefined} data-role={host.role} data-vip={vip}>

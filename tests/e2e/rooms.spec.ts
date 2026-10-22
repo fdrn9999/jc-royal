@@ -31,7 +31,7 @@ test('rooms: a member opens a private room from the lobby, is marked as host, re
   await guest.page.reload();
   const card = guest.page.getByTestId('lobby-table').filter({ hasText: 'E2E 친구 방' });
   await expect(card.getByTestId('member-badge')).toContainText(host.nickname);
-  await expect(card).toContainText('🔒');
+  await expect(card.locator('svg.lucide-lock')).toBeVisible();
   await guest.page.screenshot({ path: 'test-results/room-lobby.png' });
 
   // The shared link carries no code: the guest enters it on the table, then may sit. They see who the host is but get

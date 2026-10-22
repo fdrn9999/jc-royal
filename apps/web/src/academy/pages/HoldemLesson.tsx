@@ -1,7 +1,7 @@
 import { evaluateBest, evaluateKnown } from '@jc/poker-engine/evaluate';
 import { judgeShowdown } from '@jc/poker-engine';
 import type { TableView } from '@jc/types';
-import { Button, cx, PlayingCard } from '@jc/ui';
+import { ArrowLeftIcon, ArrowRightIcon, Button, cx, PlayingCard } from '@jc/ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActionBar } from '../../game/ActionBar';
 import { seatLayout } from '../../game/layout';
@@ -12,7 +12,7 @@ import { describeHand, l, useTr } from '../content';
 import { actingOrder, BEST_FIVE_DEMO, BOARD_PLAYS, POSITION_INFO, POSITION_QUIZ, positionNames, STAGES, TOUR, WALKTHROUGH } from '../data/holdem';
 import { PracticeSession } from '../practice/runner';
 import { buildScenarios } from '../practice/scenarios';
-import { CardRow, LessonShell, QuizRunner, type LessonStep } from '../ui';
+import { CardRow, LessonShell, QuizRunner, UI, type LessonStep } from '../ui';
 
 function GoalStep() {
   const tr = useTr();
@@ -127,11 +127,11 @@ function TourStep() {
         </div>
         <p className="text-sm text-ink-100">{tr(item.body)}</p>
         <div className="flex justify-between">
-          <Button variant="ghost" disabled={i === 0} onClick={() => setI(i - 1)}>
-            ←
+          <Button variant="ghost" disabled={i === 0} onClick={() => setI(i - 1)} aria-label={tr(UI.prev)}>
+            <ArrowLeftIcon className="size-5" />
           </Button>
-          <Button variant="outline" disabled={i === TOUR.length - 1} onClick={() => setI(i + 1)} data-testid="tour-next">
-            →
+          <Button variant="outline" disabled={i === TOUR.length - 1} onClick={() => setI(i + 1)} aria-label={tr(UI.next)} data-testid="tour-next">
+            <ArrowRightIcon className="size-5" />
           </Button>
         </div>
       </div>

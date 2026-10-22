@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
 import logo128 from '../../assets/logo-128.webp';
 import logo192 from '../../assets/logo-192.webp';
+import { XIcon } from '../icons';
 import { cx } from '../util';
 
 export const LOGO_SRC = { small: logo128, medium: logo192 };
@@ -200,7 +201,7 @@ export function Modal({ open, onClose, title, children, footer, wide, closeLabel
         <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
           <h3 className="text-base font-bold tracking-[0.04em] text-gold-300">{title}</h3>
           <button onClick={onClose} className="rounded p-1 text-ink-300 hover:text-ivory" aria-label={closeLabel}>
-            ✕
+            <XIcon />
           </button>
         </div>
         <div className="px-5 py-4">{children}</div>

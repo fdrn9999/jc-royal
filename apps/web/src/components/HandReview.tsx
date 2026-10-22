@@ -1,5 +1,5 @@
 import { handLabelKey, type Card, type HandReviewDto } from '@jc/types';
-import { Button, formatChips, formatDate, PlayingCard } from '@jc/ui';
+import { Button, formatChips, formatDate, PlayIcon, PlayingCard } from '@jc/ui';
 import { useState } from 'react';
 import { HandReplay } from '../game/HandReplay';
 import { spokenAmounts } from '../game/replay';
@@ -33,7 +33,14 @@ export function HandReview({ hand }: { hand: HandReviewDto }) {
         </span>
       </header>
       <Button variant={replaying ? 'ghost' : 'outline'} size="sm" className="mb-3" onClick={() => setReplaying(!replaying)} aria-expanded={replaying} data-testid="replay-toggle">
-        {replaying ? t('replay.close') : `▶ ${t('replay.open')}`}
+        {replaying ? (
+          t('replay.close')
+        ) : (
+          <>
+            <PlayIcon className="size-4" />
+            {t('replay.open')}
+          </>
+        )}
       </Button>
       {replaying && (
         <div className="-mx-3 mb-3 sm:mx-0">

@@ -4,7 +4,7 @@
  * policy (admin console) sets that rate, or turns them off: then the room sends `reactions: null` and none are offered.
  */
 import { DEFAULT_REACTION_RULES, REACTION_EMOJI, REACTIONS, reactionWait, type ReactionId, type ReactionRules } from '@jc/types';
-import { cx } from '@jc/ui';
+import { cx, SmileIcon } from '@jc/ui';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useI18n, type MsgKey } from '../lib/i18n';
 
@@ -124,7 +124,7 @@ export function ReactionButton({ tray }: { tray: ReactionTrayState }) {
       aria-controls={tray.open ? 'react-tray' : undefined}
       data-testid="react-open"
     >
-      <span aria-hidden>😊</span>
+      <SmileIcon className="size-[22px]" />
     </button>
   );
 }

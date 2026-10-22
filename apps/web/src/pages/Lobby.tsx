@@ -1,5 +1,5 @@
 import type { LobbyTableDto, TournamentSummaryDto } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, Input, Spinner } from '@jc/ui';
+import { Badge, Button, cx, Empty, formatChips, Input, LockIcon, PlusIcon, RefreshCwIcon, Spinner, SproutIcon, StarIcon, TrophyIcon } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
@@ -92,7 +92,7 @@ function TournamentCard() {
       className="jc-panel jc-tap flex items-center gap-3 p-4 transition hover:border-gold-400/60"
       data-testid="lobby-tournaments"
     >
-      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-xl text-gold-300">🏆</span>
+      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-gold-300"><TrophyIcon className="size-6" /></span>
       <span className="min-w-0 flex-1">
         <span className="block font-bold text-ivory">{t('tn.lobbyTitle')}</span>
         <span className="block truncate text-xs text-ink-300">
@@ -213,13 +213,14 @@ export function LobbyPage() {
             <p className="mt-1 text-sm text-ink-300">{t('app.virtual')}</p>
           </div>
           <Button size="sm" variant="outline" className="shrink-0 sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open">
-            ＋ {t('room.create')}
+            <PlusIcon />
+            {t('room.create')}
           </Button>
         </div>
         <div className="flex gap-2">
           <Input placeholder={t('lobby.search')} value={text} onChange={(e) => { setText(e.target.value); view({ q: e.target.value }); }} className="sm:w-64" aria-label={t('lobby.search')} />
           <Button variant="subtle" onClick={refresh} aria-label={t('lobby.refresh')} data-testid="lobby-refresh">
-            ↻
+            <RefreshCwIcon />
           </Button>
           <ShareButton size="md" data={{ title: 'JC ROYAL', text: t('share.siteText'), url: siteUrl(locale === 'en' ? '/?lang=en' : '/') }} label={t('share.site')} testId="site-share">
             <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -231,7 +232,8 @@ export function LobbyPage() {
           </ShareButton>
           {/* max-sm (not `hidden sm:inline-flex`): the button's own inline-flex would otherwise win and show it twice on phones. */}
           <Button variant="outline" className="max-sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open-wide">
-            ＋ {t('room.create')}
+            <PlusIcon />
+            {t('room.create')}
           </Button>
         </div>
       </div>
@@ -253,6 +255,7 @@ export function LobbyPage() {
                 data-testid={`lobby-filter-${f}`}
                 className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${filter === f ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory'}`}
               >
+                {f === 'fav' && <StarIcon className="mr-1 inline size-3.5 align-[-2px]" />}
                 {t(`lobby.filter.${f}` as MsgKey)}
                 {n > 0 && <span className="ml-1 tabular-nums opacity-70">{n}</span>}
               </button>
@@ -328,13 +331,13 @@ export function LobbyPage() {
                         </Badge>
                       </span>
                     )}
-                    {tb.beginner && <span data-testid="beginner-badge"><Badge tone="blue">🔰 {t('lobby.beginner')}</Badge></span>}
+                    {tb.beginner && <span data-testid="beginner-badge"><Badge tone="blue"><SproutIcon className="size-3" />{t('lobby.beginner')}</Badge></span>}
                     {tb.botLevel && (
                       <span data-testid="bot-table-badge" data-level={tb.botLevel} title={t('lobby.botTableHint')}>
                         <Badge>{t('lobby.botTable', { level: t(BOT_LEVEL_LABEL[tb.botLevel]) })}</Badge>
                       </span>
                     )}
-                    {tb.isPrivate && <Badge tone="red">🔒 {t('lobby.private')}</Badge>}
+                    {tb.isPrivate && <Badge tone="red"><LockIcon className="size-3" />{t('lobby.private')}</Badge>}
                     {!tb.allowSpectators && <Badge>{t('lobby.noSpectate')}</Badge>}
                     {tb.entryBlocked && <Badge tone="red">{t('lobby.blocked')}</Badge>}
                   </div>
@@ -357,10 +360,10 @@ export function LobbyPage() {
                     aria-pressed={fav}
                     aria-label={t(fav ? 'lobby.unfav' : 'lobby.fav', { name: tb.name })}
                     onClick={() => setFavourite(tb.id, !fav)}
-                    className={cx('jc-tap -mr-2 -mt-1.5 grid size-10 place-items-center rounded-lg text-xl transition hover:bg-white/5', fav ? 'text-gold-300' : 'text-ink-400 hover:text-ink-200')}
+                    className={cx('jc-tap -mr-2 -mt-1.5 grid size-10 place-items-center rounded-lg transition hover:bg-white/5', fav ? 'text-gold-300' : 'text-ink-400 hover:text-ink-200')}
                     data-testid="fav-toggle"
                   >
-                    {fav ? '★' : '☆'}
+                    <StarIcon className={cx('size-5', fav && 'fill-current')} />
                   </button>
                 </div>
               </header>

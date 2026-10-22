@@ -1,4 +1,5 @@
-import { Button, cx, PlayingCard } from '@jc/ui';
+import { Button, CheckIcon, cx, PlayIcon, PlayingCard } from '@jc/ui';
+import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuth } from '../../lib/auth';
 import { setPrefs, usePrefs } from '../../lib/prefs';
@@ -9,12 +10,12 @@ import { modulesDone, useGtoProgress } from '../gto/progress';
 import { GTO_MODULES } from '../gto/types';
 import { UI } from '../ui';
 
-export const LESSONS: Record<LessonId, { n: number; title: L; desc: L; to: string; icon: string }> = {
+export const LESSONS: Record<LessonId, { n: number; title: L; desc: L; to: string; icon: ReactNode }> = {
   cards: { n: 1, title: l('플레잉카드의 기초', 'Playing card basics'), desc: l('52장의 구성, 네 가지 문양, 카드의 높고 낮음', '52 cards, four suits, which card is higher'), to: '/academy/cards', icon: '♠' },
   hands: { n: 2, title: l('포커 족보', 'Hand rankings'), desc: l('로열 플러시부터 하이카드까지, 비교와 킥커', 'Royal flush to high card, ties and kickers'), to: '/academy/hands', icon: '♥' },
   holdem: { n: 3, title: l('텍사스 홀덤 규칙', "Texas hold'em rules"), desc: l('테이블 구성, 진행 단계, 포지션과 블라인드', 'The table, the streets, positions and blinds'), to: '/academy/holdem', icon: '♦' },
   actions: { n: 4, title: l('베팅 액션', 'Betting actions'), desc: l('폴드·체크·콜·벳·레이즈·올인과 사이드 팟', 'Fold, check, call, bet, raise, all-in and side pots'), to: '/academy/actions', icon: '♣' },
-  practice: { n: 5, title: l('연습 게임', 'Practice table'), desc: l('실제 테이블에서 시나리오 8개를 플레이 (칩 차감 없음)', 'Play eight scenarios on a real table (no chips used)'), to: '/academy/practice', icon: '▶' },
+  practice: { n: 5, title: l('연습 게임', 'Practice table'), desc: l('실제 테이블에서 시나리오 8개를 플레이 (칩 차감 없음)', 'Play eight scenarios on a real table (no chips used)'), to: '/academy/practice', icon: <PlayIcon className="size-5" /> },
 };
 
 const T = {
@@ -162,7 +163,7 @@ export function AcademyPage() {
             const sub = id === 'practice' ? `${SCENARIO_IDS.filter((s) => p.practice[s]).length}/${SCENARIO_IDS.length}` : null;
             return (
               <Link key={id} to={L.to} className="jc-tap jc-panel flex items-center gap-3 p-4 transition hover:border-gold-500/40" data-testid={`toc-${id}`}>
-                <span className={cx('grid size-11 shrink-0 place-items-center rounded-xl text-xl', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-gold-300')}>{done ? '✓' : L.icon}</span>
+                <span className={cx('grid size-11 shrink-0 place-items-center rounded-xl text-xl', done ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-gold-300')}>{done ? <CheckIcon className="size-5 stroke-[3px]" /> : L.icon}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[11px] font-semibold uppercase tracking-wider text-ink-400">Lesson {L.n}</span>
                   <span className="block font-bold text-ivory">{tr(L.title)}</span>
