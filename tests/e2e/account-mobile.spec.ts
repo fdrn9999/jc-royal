@@ -55,9 +55,17 @@ test('mobile: my page fits the phone, the header gear opens settings with logout
   expect(kept.expires * 1000 - Date.now()).toBeGreaterThan(29 * 24 * 3600_000);
   await page.reload();
   await expect(page.getByTestId('settings-open')).toBeVisible();
-  // My page also offers logout next to the account actions.
+  // My page also offers logout next to the account actions. The page's lists come in after it opens and push the
+  // button down (a tap at where it was reaches nothing): it is tapped once they are in and it holds still.
   await page.goto('/me');
-  await page.getByTestId('me-logout').tap();
+  await expect(page.getByText(/현재 기기|This device/)).toBeVisible();
+  const logout = page.getByTestId('me-logout');
+  await expect(async () => {
+    const at = await logout.boundingBox();
+    await page.waitForTimeout(300);
+    expect(await logout.boundingBox()).toEqual(at);
+  }).toPass();
+  await logout.tap();
   await expect(page).toHaveURL(/\/login$/);
   await expect(remember).toBeChecked();
 });
