@@ -16,6 +16,8 @@ jobs:
     # The same code (PR #6, 312 integration and 108 E2E tests) took 37.6 and 49.1 minutes on
     # 2026-10-17 on the same runner image: runner speed varies by about a third. PR #15 (381 integration and 123 E2E
     # tests; a hand a member was dealt into now waits 1.5 s more before the next) took 66.7 and 61.6 minutes.
+    # PR #26 (412 integration and 148 E2E tests) ran out of 90 minutes in one job: integration 33.1 minutes, E2E
+    # unfinished after 54.4. E2E now runs in its own job, beside this one.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -35,15 +37,29 @@ jobs:
         run: pnpm check:bundle
       - name: Integration tests (wrangler dev / workerd, local D1 + Durable Objects)
         run: pnpm test:integration
-      - name: Install Playwright Chromium
-        run: pnpm exec playwright install --with-deps chromium
-      - name: E2E (Playwright)
-        run: pnpm test:e2e
       - name: Dry-run production bundles
         run: |
           pnpm exec wrangler deploy --dry-run --env production -c apps/game-worker/wrangler.jsonc --outdir .dry/game
           pnpm exec wrangler deploy --dry-run --env production -c apps/api/wrangler.jsonc --outdir .dry/api
           pnpm exec wrangler deploy --dry-run --env production -c apps/admin/wrangler.jsonc --outdir .dry/admin
+
+  e2e:
+    runs-on: ubuntu-latest
+    # Its own runner: Playwright's web server builds the apps and tests/e2e/server.mjs starts from a fresh local state,
+    # so it needs nothing from the test job.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: E2E (Playwright)
+        run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -53,7 +69,7 @@ jobs:
 
   # Every green push to main ships to production (see deploy.yml).
   deploy:
-    needs: test
+    needs: [test, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/deploy.yml
     secrets: inherit

@@ -66,7 +66,7 @@ pnpm exec wrangler deploy --env production -c apps/api/wrangler.jsonc           
 pnpm exec wrangler deploy --env production -c apps/admin/wrangler.jsonc         # ③ 관리자 콘솔(admin, 서비스 바인딩)
 ```
 
-- **CI**: push와 PR마다 `CI` 워크플로가 실행된다. 타입 검사, 엔진·통합·E2E 테스트, 운영 번들 dry-run을 한다.
+- **CI**: push와 PR마다 `CI` 워크플로가 실행된다. `test` 작업은 타입 검사, 엔진·통합 테스트, 운영 번들 dry-run을 하고, `e2e` 작업은 같은 때 다른 러너에서 E2E를 돌린다(각자 90분 제한).
 - **자동 배포**: `main`에 push하고 CI가 모두 통과하면, 같은 실행의 `deploy` 작업(`.github/workflows/deploy.yml`)이 위 순서대로 운영에 배포한다.
   - 순서: 빌드 → D1 마이그레이션 → game → play → admin → `/api/health` 확인.
   - 확인 단계: 새 워커가 workers.dev 주소에서 `/api/health` `{"ok":true}`로, 사용자 화면 `/`와 관리자 화면 `/`는 정확히 200으로 답해야 한다(리디렉션 3xx도 실패다). 이어서 두 커스텀 도메인(`/api/health`, `/`, 관리자 `/`)이 200으로 답해야 하고, 커스텀 도메인의 `/api/health`도 본문이 `"ok":true`여야 한다. 커스텀 도메인은 영역(zone) 보안 설정 뒤에 있어, main 실행 39092482636·39128959502에서 GitHub 러너가 403을 받았다(배포는 끝났고, 같은 때 다른 곳에서는 200). 그래서 Cloudflare가 챌린지로 표시한 403(`cf-mitigated: challenge`)만 경고로 남기고, 그 밖의 응답은 헤더를 보여 주며 실패로 둔다. 러너가 받는 403이 챌린지가 아니면 이 단계는 계속 실패한다. 그때는 대시보드에서 `/api/health`를 보안 규칙에서 빼는 등 영역 설정을 운영자가 정한다(코드로 바꾸지 않는다).
