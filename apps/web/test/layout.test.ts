@@ -117,6 +117,46 @@ describe('table layout: every seat, bet and the board in a place of its own', ()
         if (!(name === 'iPhone SE' && n === 9)) expect(astray(plan, p)).toEqual([]);
       });
 
+  // Another player's bet once they fold, their cards gone (Seat.tsx keeps their room, empty), where TableScene draws it
+  // (`folds`): still nearer them than any other seat, and over nothing. And the viewer's own bet nearer their plate at
+  // its least width (a short name) than any other seat. CI's areas: nine seats on a 360×800 phone waiting for the hand
+  // (a folded seat's bet read as its neighbour's by 5px), six on a 412×839 one (the viewer's by 2px).
+  const folding: [string, number, number, number][] = [
+    // Nine seats on an iPhone SE have bets astray as it is (above).
+    ...live.flatMap(([name, w, h]) => [2, 6, 9].map((n): [string, number, number, number] => [name, w, h, n])).filter(([name, , , n]) => !(name === 'iPhone SE' && n === 9)),
+    ['Android 360×800, waiting', 344, 564, 9],
+    ['Pixel 7 412×839', 396, 603, 6],
+  ];
+  for (const [name, w, h, n] of folding)
+    it(`live table · ${name} · ${n} seats: a folded seat's bet, and the viewer's by a short name, by their own seat`, () => {
+      const p = input(n, { meTop: 28, footer: true });
+      const plan = planTable(Math.min(w, 2.1 * h), Math.min(h, 1.9 * w), p, w < 640 || h < 520 ? SMALL : ALL);
+      const d = DIMS[plan.density];
+      const all = parts(plan, p);
+      const seats = all.filter((x) => x.name.startsWith('seat-')).map((x, i) => ({ ...x, t: x.t + (i === p.anchor ? Math.max(4, p.meTop) : 6) }));
+      const away = (s: Box, x: number, y: number) => Math.hypot(Math.max(s.l - x, 0, x - s.r), Math.max(s.t - y, 0, y - s.b));
+      const out: string[] = [];
+      const bw = d.chip + 18 + p.chars.bet * 6.6;
+      const bh = Math.max(d.chip + 16, 21);
+      for (let i = 0; i < n; i++) {
+        const own =
+          i === p.anchor
+            ? { ...seats[i]!, l: plan.seats[i]!.x - d.plateMin / 2, r: plan.seats[i]!.x + d.plateMin / 2 }
+            : { ...seats[i]!, t: seats[i]!.t + 1.4 * d.cardOther - d.overlap };
+        const b = i === p.anchor ? plan.bets[i]! : plan.folds[i]!;
+        for (const s of seats) if (s.name !== `seat-${i}` && away(s, b.x, b.y) <= away(own, b.x, b.y)) out.push(`bet-${i} by ${s.name}`);
+        if (i === p.anchor) continue;
+        const c = { l: b.x - bw / 2, t: b.y - bh / 2, r: b.x + bw / 2, b: b.y + bh / 2 };
+        if (c.l < -0.5 || c.t < -0.5 || c.r > plan.w + 0.5 || c.b > plan.h + 0.5) out.push(`fold-${i} outside`);
+        for (const x of all) {
+          if (x.name === `bet-${i}`) continue;
+          const z = x.name === `seat-${i}` ? own : x;
+          if (Math.min(c.r, z.r) - Math.max(c.l, z.l) > 0.5 && Math.min(c.b, z.b) - Math.max(c.t, z.t) > 0.5) out.push(`fold-${i} × ${x.name}`);
+        }
+      }
+      expect(out).toEqual([]);
+    });
+
   // A phone held sideways (short.ts): the area beside the controls' column on a 844×390 screen, no status line under
   // the table, the cards' raised room cut to 4px, and the table free to narrow by 15%.
   for (const chars of [CHIPS, BB])

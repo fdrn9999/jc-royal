@@ -217,8 +217,10 @@ export function LobbyPage() {
             {t('room.create')}
           </Button>
         </div>
-        <div className="flex gap-2">
-          <Input placeholder={t('lobby.search')} value={text} onChange={(e) => { setText(e.target.value); view({ q: e.target.value }); }} className="sm:w-64" aria-label={t('lobby.search')} />
+        {/* The search gives way where the row is tight (640px in English: the icon buttons, a little wider than the
+            characters they replaced, pushed the page past the window on CI's fonts). */}
+        <div className="flex min-w-0 gap-2">
+          <Input placeholder={t('lobby.search')} value={text} onChange={(e) => { setText(e.target.value); view({ q: e.target.value }); }} className="min-w-0 sm:w-64" aria-label={t('lobby.search')} />
           <Button variant="subtle" onClick={refresh} aria-label={t('lobby.refresh')} data-testid="lobby-refresh">
             <RefreshCwIcon />
           </Button>
