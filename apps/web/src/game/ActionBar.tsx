@@ -78,8 +78,9 @@ const breakable = (text: string) =>
 
 /**
  * The line over Bet/Raise's lower edge (what comes from the stack, or the chips of an amount refused): as many lines as
- * it wraps to at its smallest face, and that height kept clear at the button's foot, so it covers neither the name nor
- * the amount and lies inside the button, which grows with it rather than cut it. One line is the button's own `pb-3.5`.
+ * it wraps to at its smallest face, and that height (with the gap it stands above the edge) kept clear at the button's
+ * foot, so it covers neither the name nor the amount and lies inside the button, which grows with it rather than cut
+ * it. One line is the button's own `pb-4`.
  */
 function Foot({ button, className, style, children }: { button: RefObject<HTMLButtonElement | null>; className: string; style: CSSProperties; children: ReactNode }) {
   const el = useRef<HTMLSpanElement>(null);
@@ -88,7 +89,7 @@ function Foot({ button, className, style, children }: { button: RefObject<HTMLBu
     const btn = button.current;
     if (!foot || !btn) return;
     const keep = () => {
-      btn.style.paddingBottom = `${foot.offsetHeight}px`;
+      btn.style.paddingBottom = `${foot.offsetHeight + (parseFloat(getComputedStyle(foot).bottom) || 0)}px`;
     };
     keep();
     const seen = new ResizeObserver(keep);
@@ -368,7 +369,7 @@ export function ActionBar({
   const caption = !column && !isArmed('commit', commitSig) && captionText && (
     <Foot
       button={commitEl}
-      className={cx('pointer-events-none absolute inset-x-0.5 bottom-1 flex justify-center text-center font-semibold leading-3.5 text-ink-950/75 [overflow-wrap:anywhere]', (!commit || (busy && sent?.key !== 'commit')) && 'opacity-50')}
+      className={cx('pointer-events-none absolute inset-x-0.5 bottom-0.5 flex justify-center text-center font-semibold leading-3.5 text-ink-950/75 [overflow-wrap:anywhere]', (!commit || (busy && sent?.key !== 'commit')) && 'opacity-50')}
       style={{ fontSize: captionFace(captionText) }}
     >
       {commit ? fromStack : inChips}
@@ -383,7 +384,7 @@ export function ActionBar({
         type="button"
         disabled={busy || !commit}
         onClick={doCommit}
-        className={cx(commitBtn, caption && 'pb-3.5', commitArmed && armedCls, sentCls('commit'))}
+        className={cx(commitBtn, caption && 'pb-4', commitArmed && armedCls, sentCls('commit'))}
         style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }}
         aria-busy={busy && sent?.key === 'commit'}
         data-testid="action-commit"

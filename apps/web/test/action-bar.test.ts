@@ -106,9 +106,11 @@ describe('the action bar', () => {
     const deep = markup(false, [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 8_332_500, max: 8_332_500 }], amounts('bb', 2_500), 2_500);
     expect(deep).toContain('data-testid="action-from-stack">스택에서 3,<wbr/>332 BB</span>');
     for (const html of [refused, deep]) {
-      const foot = /<span class="pointer-events-none absolute inset-x-0\.5 bottom-1[^"]*"/.exec(html)?.[0] ?? '';
+      const foot = /<span class="pointer-events-none absolute inset-x-0\.5 bottom-0\.5[^"]*"/.exec(html)?.[0] ?? '';
       expect(foot).toContain('[overflow-wrap:anywhere]');
       expect(foot).not.toMatch(/whitespace-nowrap|overflow-hidden/);
+      // One line of it and the gap under it (14px + 2px) kept clear at the button's foot before it is measured.
+      expect(/<button[^>]*data-testid="action-commit"[^>]*>/.exec(html)?.[0]).toMatch(/[\s"]pb-4[\s"]/);
     }
   });
 

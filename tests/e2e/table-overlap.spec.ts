@@ -396,7 +396,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
 
 /**
  * Where Bet/Raise's text lies past its own button, as drawn: the boxes of what is in it (and of the caption under it),
- * each line of text across, and what it would scroll. With the faces its amount lines took, and the container its face
+ * each line of text across, what it would scroll, and the caption over the name or the amount. With the faces its amount lines took, and the container its face
  * is sized against.
  */
 function spill(p: Page) {
@@ -418,6 +418,12 @@ function spill(p: Page) {
     if (btn.scrollWidth > btn.clientWidth + 1 || btn.scrollHeight > btn.clientHeight + 1) out.push(`scroll ${btn.scrollWidth}x${btn.scrollHeight} in ${btn.clientWidth}x${btn.clientHeight}`);
     const lines = Array.from(btn.querySelectorAll<HTMLElement>('span.font-mono'));
     const caption = Array.from(btn.parentElement!.children).find((c) => c !== btn) as HTMLElement | undefined;
+    // The line under it below the name and the amount, not over them (however many lines it wraps to).
+    if (caption) {
+      const top = caption.getBoundingClientRect().top;
+      const low = Math.max(...Array.from(btn.children).map((k) => k.getBoundingClientRect().bottom));
+      if (top < low - 0.5) out.push(`caption over the text by ${Math.round(low - top)}px`);
+    }
     return {
       text: btn.textContent!.replace(/\s+/g, ' ').trim(),
       size: `${Math.round(b.width)}x${Math.round(b.height)}`,
