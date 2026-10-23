@@ -3,6 +3,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ActionBar } from '../src/game/ActionBar';
+import { amounts, type Amounts } from '../src/lib/amount';
 import { I18nProvider } from '../src/lib/i18n';
 
 // The provider reads ?lang= from the address on its first render.
@@ -10,7 +11,7 @@ import { I18nProvider } from '../src/lib/i18n';
 // The settings store has no server snapshot: a player with the defaults.
 vi.mock('../src/lib/prefs', async (original) => ({ ...(await original<object>()), usePrefs: () => ({ confirmRisky: true, amountUnit: 'chips' }) }));
 
-/** My turn at a deep table: a raise from 12,500 to everything I have. */
+/** My turn at a deep table: a raise from 12,500 (or `min`) to everything I have. */
 function turn(legal: LegalOption[]): TableView {
   return {
     table: { bigBlind: 2_500 },
@@ -24,7 +25,8 @@ function turn(legal: LegalOption[]): TableView {
 }
 const raise: LegalOption[] = [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 12_500, max: 1_234_567 }];
 
-const markup = (column: boolean) => renderToStaticMarkup(h(I18nProvider, null, h(ActionBar, { state: turn(raise), onAct: () => true, busy: false, column })));
+const markup = (column: boolean, legal = raise, unit?: Amounts) =>
+  renderToStaticMarkup(h(I18nProvider, null, h(ActionBar, { state: turn(legal), onAct: () => true, busy: false, column, amounts: unit })));
 /** The text of the element with this test id (its tags dropped). */
 const textOf = (html: string, id: string) => {
   const m = new RegExp(`<(\\w+)[^>]*data-testid="${id}"[^>]*>([\\s\\S]*?)</\\1>`).exec(html);
@@ -39,6 +41,12 @@ describe('the action bar', () => {
       expect(textOf(html, 'action-dock-amount')).toBe('12,500');
       expect(html).not.toMatch(/12\.5K/);
     }
+  });
+
+  it('in big blinds, writes the chips Bet/Raise bets after the rounded blinds, in the column too', () => {
+    // 12,501 at a 2,500 blind reads 5 BB rounded: the chips say what is sent.
+    const odd: LegalOption[] = [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 12_501, max: 1_234_567 }];
+    for (const column of [false, true]) expect(textOf(markup(column, odd, amounts('bb', 2_500)), 'action-commit')).toBe('레이즈 5 BB (12,501)');
   });
 
   it('gives the sizing toggle a tip saying it sets the amount, and its key, in place of a bare title', () => {

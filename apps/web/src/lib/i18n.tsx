@@ -366,6 +366,7 @@ const ko = {
   'action.sizingClose': '베팅 금액 설정 접기',
   'action.sizingTip': '베팅 금액 조절',
   'action.tapAgain': '한 번 더 눌러 {type}',
+  'action.again': '한 번 더',
   'action.sending': '{action} 보내는 중…',
   'action.notSent': '연결이 끊겨 보내지 못했습니다. 다시 연결되면 한 번 더 눌러 주세요.',
   'action.fromStack': '스택에서 {amount}',

@@ -266,11 +266,12 @@ export function ActionBar({
   const isArmed = (key: ArmKey, sig: string) => armed?.key === key && armed.sig === sig;
   const label = (key: ArmKey, sig: string, text: string) => (isArmed(key, sig) ? t('action.tapAgain', { type: text }) : text);
   /**
-   * What Bet/Raise does: its name and the amount set, never shortened (12,500, not 12.5K), so what it bets reads on it
-   * (in the column in the unit read, its chips on the sizing's line).
+   * What Bet/Raise does: its name and the amount set, never shortened or rounded (12,500, not 12.5K; in big blinds the
+   * chips follow, 5 BB (12,501)), so what it bets reads on it. Pressed once in the column, too narrow for the whole
+   * press-again line and the amount, a short word stands for the name.
    */
   const commitName = isAllInAmount ? t('action.allin') : bet ? t('action.bet') : t('action.raiseBtn');
-  const commitAmount = column ? a.fmt(amount) : a.exact(amount);
+  const commitAmount = a.exact(amount);
   const commitAmountCls = cx('font-mono tabular-nums', compact && 'break-all text-[11px] font-semibold');
   const stepBtn = 'jc-tap grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-ink-850 text-lg font-bold text-ivory active:bg-ink-700 disabled:opacity-40';
   const amountLabel = bet ? t('action.betTo') : t('action.raiseTo');
@@ -330,7 +331,7 @@ export function ActionBar({
       >
         {pending('commit')}
         {/* The amount on it pressed once too: the second press bets what it says. */}
-        <span>{commitArmed ? t('action.tapAgain', { type: commitName }) : commitName}</span>{' '}
+        <span>{commitArmed ? (column ? t('action.again') : t('action.tapAgain', { type: commitName })) : commitName}</span>{' '}
         {commit ? <span className={commitAmountCls}>{commitAmount}</span> : <span className="text-[11px] font-semibold">{t('action.needAmount')}</span>}
       </button>
       {caption}
@@ -340,6 +341,8 @@ export function ActionBar({
   // Opens and closes the sizing, nothing else: no amount, no confirmation, nothing sent. Not held while a press is in
   // flight either, since it sends nothing. Its tip (hovered, or focused from the keyboard) says it sets the amount, and
   // its key: at its left on the same line, inside the card, so the dock's scroll does not cut it and it covers no button.
+  // Only while the sizing is shut: open, that line is the amount field and the slider, which it must not cover. Escape
+  // on the toggle puts it away.
   const toggleButton = (
     <span className="relative flex shrink-0">
       <button
@@ -351,6 +354,7 @@ export function ActionBar({
         }}
         onPointerLeave={() => setTipOff(false)}
         onFocus={() => setTipOff(false)}
+        onKeyDown={(e) => e.key === 'Escape' && setTipOff(true)}
         className="jc-tap peer grid size-10 shrink-0 place-items-center rounded-lg border border-gold-500/40 bg-ink-900/80 text-gold-300 transition-colors hover:border-gold-400 hover:bg-gold-500/15 aria-expanded:border-gold-400 aria-expanded:bg-gold-500/20"
         aria-expanded={open}
         aria-controls={panelId}
@@ -366,7 +370,7 @@ export function ActionBar({
         role="tooltip"
         className={cx(
           'pointer-events-none absolute right-full top-1/2 z-10 mr-2 flex -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gold-500/50 bg-ink-950/95 px-2 py-1 text-xs font-semibold text-gold-300 opacity-0 shadow-lg transition-opacity',
-          !tipOff && 'peer-hover:opacity-100 peer-hover:delay-300 peer-focus-visible:opacity-100',
+          !open && !tipOff && 'peer-hover:opacity-100 peer-hover:delay-300 peer-focus-visible:opacity-100',
         )}
         data-testid="action-dock-tip"
       >

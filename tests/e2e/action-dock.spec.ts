@@ -75,6 +75,11 @@ test('bet sizing toggle: opening and shutting sends nothing, Bet/Raise always be
   expect(await panel.getAttribute('id')).toBe(await toggle.getAttribute('aria-controls'));
   await expect(barA.getByRole('slider')).toBeVisible();
   await expect(barA.getByRole('button', { name: /^(최대|Max)$/ })).toBeVisible();
+  // Open, the tip stays away, hovered again or not: its line is the amount field and the slider now.
+  await a.page.mouse.move(0, 0);
+  await toggle.hover();
+  await a.page.waitForTimeout(600); // past the tip's delay
+  expect(await tip.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
   // An amount under the minimum: Bet/Raise is disabled and says an amount is wanted; nothing is sent.
   const field = barA.getByTestId('action-amount');
   await field.fill('3');
@@ -93,13 +98,23 @@ test('bet sizing toggle: opening and shutting sends nothing, Bet/Raise always be
   // Over the maximum, shut with Escape: the same. Its toggle, focused from the keyboard, shows its tip.
   await field.fill('99999');
   await expect(commit).toBeDisabled();
-  await expect(tip).toHaveCSS('opacity', '0'); // pressed, the pointer still on it: the tip stays away from the field
+  await expect(tip).toHaveCSS('opacity', '0'); // open: the tip stays away from the field
   await a.page.mouse.move(0, 0);
   await field.press('Escape');
   await expect(panel).toHaveCount(0);
   await expect(toggle).toBeFocused();
   await expect(tip).toHaveCSS('opacity', '1');
   await expect(commit).toBeDisabled();
+  await expect(commit).toHaveText(needAmount);
+  // R opens it with the focus (and the tip) on the toggle: the tip goes, not over the field.
+  await a.page.keyboard.press('r');
+  await expect(panel).toBeVisible();
+  await expect(tip).toHaveCSS('opacity', '0');
+  // Escape on the toggle shuts it, the focus stays, and the tip stays away (Escape puts it away).
+  await toggle.press('Escape');
+  await expect(panel).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await expect(tip).toHaveCSS('opacity', '0');
   await expect(commit).toHaveText(needAmount);
   await toggle.click();
   await expect(field).toHaveValue('99999');
