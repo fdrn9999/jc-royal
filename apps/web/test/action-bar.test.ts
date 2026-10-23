@@ -60,6 +60,17 @@ describe('the action bar', () => {
     ]);
     expect(lines(false)).toEqual([['5 BB (12,<wbr/>501)', 'max(9px, min(14px, 12.31cqi))']]);
     expect(markup(true)).not.toMatch(/break-all|whitespace-nowrap font-mono/);
+    // Sized to 96% of the width, the lines take no letter spacing (the button's would wrap them at a comma); in the
+    // column, the button's sides are thinner than the other buttons'.
+    for (const column of [false, true]) {
+      const html = markup(column, odd, amounts('bb', 2_500));
+      const spans = [...html.matchAll(/<span class="text-center font-mono[^"]*"/g)].map((m) => m[0]);
+      expect(spans).toHaveLength(column ? 2 : 1);
+      for (const cls of spans) expect(cls).toContain(' tracking-normal ');
+    }
+    const narrow = /<button[^>]*data-testid="action-commit"[^>]*>/.exec(markup(true))?.[0];
+    expect(narrow).toMatch(/[\s"]px-0\.5[\s"]/);
+    expect(narrow).not.toMatch(/[\s"]px-1[\s"]/);
   });
 
   it('a deep stack’s amount keeps the 9px face at least, the button free to grow rather than cut it', () => {
