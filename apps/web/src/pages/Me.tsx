@@ -430,13 +430,14 @@ export function HandDetailPage() {
         <Panel title={t('lobby.players')}>
           <ul className="divide-y divide-white/5">
             {data.players.map((p) => (
-              <li key={p.seatIndex} className="flex items-center gap-3 py-2.5">
+              <li key={p.seatIndex} className="flex items-center gap-2 py-2.5 sm:gap-3">
                 <span className="w-6 text-xs text-ink-400">#{p.seatIndex + 1}</span>
                 <span className="flex gap-0.5">{(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.7rem" />)}</span>
                 <span className="flex min-w-0 flex-1 text-sm">
                   <MemberName name={p.nickname} role={p.role} vip={p.vip} bot={p.bot} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
                 </span>
-                {/* Stacked, so an amount in big blinds ("+2.5 BB") leaves the name its room on a phone. */}
+                {/* Stacked, and the row's gaps narrower on a phone, so an amount in big blinds ("+2.5 BB") leaves the name its
+                    room there: a phone's monospace (0.6em a digit, no web font for it) is wider than a desktop's. */}
                 <span className="flex shrink-0 flex-col items-end leading-tight">
                   {p.rankClass && <span className="text-xs text-ink-300">{t(`hand.${handLabelKey(p.rankClass, [])}` as MsgKey)}</span>}
                   <span className={`font-mono text-sm tabular-nums ${p.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`} data-testid="hand-net">{p.net > 0 ? '+' : ''}{amt.fmt(p.net)}</span>
