@@ -86,11 +86,13 @@ async function rollupSpan(db: D1Database, a: number, b: number, activitySince: n
   const tz = STATS_TZ_OFFSET_MS;
   const actFrom = activitySince === null ? null : Math.max(a, activitySince);
   const stmts = [
-    // tables first (CROSS JOIN keeps the order), each table's hands of the span through hands_table_idx.
+    // tables first (CROSS JOIN keeps the order), each table's hands of the span through hands_table_idx. Grouped by
+    // `h.bots > 0`, not `bots`: in GROUP BY that name is the hands column (how many bots), which would give a day one
+    // row per bot count and so the same hands_bots twice.
     db
       .prepare(
         `SELECT CAST((h.ended_at + ?3) / 86400000 AS INTEGER) AS day, t.room_type AS room, h.bots > 0 AS bots, COUNT(*) AS n, COUNT(DISTINCT h.table_id) AS tables
-           FROM tables t CROSS JOIN hands h ON h.table_id = t.id AND h.ended_at >= ?1 AND h.ended_at < ?2 GROUP BY day, room, bots`,
+           FROM tables t CROSS JOIN hands h ON h.table_id = t.id AND h.ended_at >= ?1 AND h.ended_at < ?2 GROUP BY day, room, h.bots > 0`,
       )
       .bind(s, e, tz),
     // Members' seats only (table bots' are not play to count; the few bot accounts are read through users_bot_idx).

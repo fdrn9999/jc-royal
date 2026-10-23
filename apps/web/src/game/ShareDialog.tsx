@@ -85,9 +85,14 @@ export default function ShareDialog({
   const snap = useMemo(() => snapAt({ span: opt.span, unit: opt.unit }), [snapAt, opt.span, opt.unit]);
   const inBB = !!bigBlind && bigBlind > 0;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [art, setArt] = useState<ShareArt | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [drawn, setDrawn] = useState(false);
+  // The art and the preview each kept with what they were made for, and taken as made only for what is chosen now: an
+  // option changed reads as not drawn in the very render it changes, not a render later (from an effect), so saving
+  // straight after it neither finds the button still on nor takes the pixels drawn for the options before.
+  const [made, setMade] = useState<{ snap: typeof snap; fourColor: boolean; attempt: number; art: ShareArt } | null>(null);
+  const art = made && made.snap === snap && made.fourColor === fourColor && made.attempt === attempt ? made.art : null;
+  const [painted, setPainted] = useState<{ art: ShareArt; snap: typeof snap; opt: ShareOptions } | null>(null);
+  const drawn = !!art && painted?.art === art && painted.snap === snap && painted.opt === opt;
   const [status, setStatus] = useState<Status>(failed ? { kind: 'failed' } : { kind: 'idle' });
   const [canShare] = useState(canShareFiles);
   const [webp] = useState(webpEncodes);
@@ -102,9 +107,8 @@ export default function ShareDialog({
   // The fonts, the logo and the colours: once, and again on a retry.
   useEffect(() => {
     let live = true;
-    setArt(null);
     shareArt(snap, fourColor).then(
-      (a) => live && setArt(a),
+      (a) => live && setMade({ snap, fourColor, attempt, art: a }),
       () => live && setStatus({ kind: 'failed' }),
     );
     return () => {
@@ -123,12 +127,11 @@ export default function ShareDialog({
   useEffect(() => {
     const c = canvasRef.current;
     ready.current = null;
-    setDrawn(false);
     if (!c || !art) return;
     const id = requestAnimationFrame(() => {
       try {
         paintShare(c, snap, shown, art);
-        setDrawn(true);
+        setPainted({ art, snap, opt });
         if (canShare) {
           const made = make();
           made.catch(() => {});

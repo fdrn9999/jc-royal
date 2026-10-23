@@ -90,6 +90,27 @@ async function choose(p: Page, template: string, ratio: Ratio) {
   await expect(preview).toHaveAttribute('data-ready', '1');
 }
 
+/**
+ * Clicks an option not chosen yet, and checks the preview stops reading as drawn in the very render that chooses it:
+ * one render later, a save straight after the click would find the button still on, then off as the click lands.
+ */
+async function pick(p: Page, id: string) {
+  await p.evaluate((id) => {
+    const button = document.querySelector(`[data-testid="${id}"]`)!;
+    const w = window as unknown as { readyWhenPicked?: string | null };
+    w.readyWhenPicked = undefined;
+    const seen = new MutationObserver(() => {
+      if (button.getAttribute('aria-pressed') !== 'true') return;
+      w.readyWhenPicked = document.querySelector('[data-testid=share-preview]')!.getAttribute('data-ready');
+      seen.disconnect();
+    });
+    seen.observe(button, { attributes: true, attributeFilter: ['aria-pressed'] });
+  }, id);
+  await p.getByTestId(id).click();
+  await expect.poll(() => p.evaluate(() => (window as unknown as { readyWhenPicked?: string | null }).readyWhenPicked), { message: `the preview when ${id} is chosen` }).toBe('0');
+  await expect(p.getByTestId('share-preview')).toHaveAttribute('data-ready', '1');
+}
+
 async function save(p: Page, button = 'share-save'): Promise<{ d: Download; buf: Buffer }> {
   const [d] = await Promise.all([p.waitForEvent('download'), p.getByTestId(button).click()]);
   const path = await d.path();
@@ -218,9 +239,8 @@ test('share image: the betting line by default, up to the step or of the whole h
   await step.d.saveAs(test.info().outputPath('share-9-flop-betline-step.png'));
 
   // The whole hand: said so under the preview, named by its last step; the replay itself stays at the flop.
-  await p.getByTestId('share-span-hand').click();
+  await pick(p, 'share-span-hand');
   await expect(p.getByTestId('share-step')).toContainText(/핸드 전체|whole hand/);
-  await expect(p.getByTestId('share-preview')).toHaveAttribute('data-ready', '1');
   const whole = await save(p);
   expect(whole.d.suggestedFilename()).toBe('JC-ROYAL_Hand-42_Result.png');
   expect(dims(whole.buf)).toEqual({ type: 'png', w: 1080, h: 1080 });
@@ -229,8 +249,7 @@ test('share image: the betting line by default, up to the step or of the whole h
 
   // In big blinds: another picture of the same hand.
   await p.getByTestId('share-more').locator('summary').click();
-  await p.getByTestId('share-unit-bb').click();
-  await expect(p.getByTestId('share-preview')).toHaveAttribute('data-ready', '1');
+  await pick(p, 'share-unit-bb');
   const bb = await save(p);
   expect((await apart(p, whole.buf, 'image/png')).mean).toBeGreaterThan(0.01);
   expect((await apart(p, bb.buf, 'image/png')).mean).toBeLessThan(0.01);

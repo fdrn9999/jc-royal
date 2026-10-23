@@ -27,7 +27,7 @@ const W0 = today - 9;
 const D1 = W0 + 1;
 const D4 = D1 + 3;
 const tag = uniq('st');
-const id = { u1: `${tag}-u1`, u2: `${tag}-u2`, u3: `${tag}-u3`, off: `${tag}-off`, mem: `${tag}-mem`, idle: `${tag}-idle` };
+const id = { u1: `${tag}-u1`, u2: `${tag}-u2`, u3: `${tag}-u3`, off: `${tag}-off`, mem: `${tag}-mem`, bot: `${tag}-bot`, idle: `${tag}-idle` };
 
 type Rows = Map<string, number>;
 async function windowRows(): Promise<Rows> {
@@ -66,17 +66,19 @@ async function seed() {
   const user = (u: string, created: number) => `('${u}', '${u}@test.dev', '${u.slice(-14)}', 'x', ${created}, ${created})`;
   const table = (t: string, room: string) => `('${t}', '${t}', 6, 5, 10, 200, 2000, 'closed', '${room}')`;
   const seat = (s: string, t: string, u: string, a: number, b: number) => `('${tag}-${s}', '${t}', '${u}', 0, 300, 300, 'closed', ${a}, ${b})`;
-  const hand = (h: string, t: string, ended: number) => `('${tag}-${h}', '${t}', 1, ${ended - 60_000}, ${ended}, '[]', 30, 'test', '[]')`;
+  const hand = (h: string, t: string, ended: number, bots = 0) => `('${tag}-${h}', '${t}', 1, ${ended - 60_000}, ${ended}, '[]', 30, 'test', '[]', ${bots})`;
   await d1(
     `INSERT INTO users (id, email, nickname, password_hash, created_at, updated_at) VALUES ${user(id.u1, at(D1, 10))}, ${user(id.u2, at(D1, 11))}, ${user(id.u3, at(D1 + 1, 9))};` +
-      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, status, room_type) VALUES ${table(id.off, 'official')}, ${table(id.mem, 'member')};` +
+      `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, status, room_type) VALUES ${table(id.off, 'official')}, ${table(id.mem, 'member')}, ${table(id.bot, 'official')};` +
       // u1 sits within a day of signing up, u2 within a week, u3 (whose week is not over) the next day.
       `INSERT INTO table_sessions (id, table_id, user_id, seat_index, buy_in, cash_out, status, created_at, closed_at) VALUES
          ${seat('s1', id.off, id.u1, at(D1, 10, 30), at(D1, 11, 30))}, ${seat('s2', id.mem, id.u2, at(D4, 20), at(D4, 20, 30))},
          ${seat('s3', id.mem, id.u1, at(D4, 20, 10), at(D4, 21, 10))}, ${seat('s4', id.off, id.u3, at(D1 + 1, 13), at(D1 + 1, 13, 10))};` +
-      `INSERT INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log) VALUES
+      // Hands with table bots on D4: one, then two at the same table, three at another (bots sit at official tables only).
+      `INSERT INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log, bots) VALUES
          ${hand('h1', id.off, at(D1, 11))}, ${hand('h2', id.off, at(D1, 11, 5))}, ${hand('h3', id.off, at(D1, 11, 10))},
-         ${hand('h4', id.mem, at(D4, 20, 20))}, ${hand('h5', id.mem, at(D4, 20, 25))};` +
+         ${hand('h4', id.mem, at(D4, 20, 20))}, ${hand('h5', id.mem, at(D4, 20, 25))},
+         ${hand('h6', id.off, at(D4, 15), 1)}, ${hand('h7', id.off, at(D4, 15, 5), 2)}, ${hand('h8', id.bot, at(D4, 15, 10), 3)};` +
       `INSERT INTO reports (id, reporter_id, target_type, target_id, target_user_id, reason, status, handled_at, created_at) VALUES
          ('${tag}-r1', '${id.u2}', 'user', '${id.u1}', '${id.u1}', 'spam', 'resolved', ${at(D1 + 1, 12)}, ${at(D1, 12)}),
          ('${tag}-r2', '${id.u1}', 'user', '${id.u2}', '${id.u2}', 'abuse', 'open', NULL, ${at(D4, 9)});` +
@@ -115,6 +117,8 @@ describe('operations statistics', () => {
     expect([delta(D1, 'seats_official'), delta(D1, 'seat_ms_official'), delta(D1 + 1, 'seats_official')]).toEqual([1, HOUR, 1]);
     expect([delta(D4, 'seats_member'), delta(D4, 'seat_ms_member')]).toEqual([2, 90 * 60_000]);
     expect([delta(D1, 'hands_official'), delta(D1, 'tables_official'), delta(D4, 'hands_member'), delta(D4, 'tables_member')]).toEqual([3, 1, 2, 1]);
+    // Hands a bot played in are counted apart whatever the number of bots: one row for the day, the tables once each.
+    expect([delta(D4, 'hands_bots'), delta(D4, 'tables_bots'), delta(D4, 'hands_official'), delta(D4, 'tables_official')]).toEqual([3, 2, 0, 0]);
     // Concurrency: s2 and s3 overlap from 20:10 to 20:30.
     const peak = (day: number, metric: string, n: number) => {
       const was = before.get(`${day}:${metric}`) ?? 0;
