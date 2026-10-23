@@ -4659,3 +4659,20 @@ PR #29의 CI(실행 39893797813)에서 test 작업은 통과했고, e2e 작업�
       - 이 Windows 글꼴: 잘리지 않는다.
     - 수정: 휴대폰 폭에서만 줄 간격을 12px에서 8px로 줄였다(`gap-2 sm:gap-3`). 같은 측정에서 8~9자 이름은 두 글꼴 모두 잘리지 않는다. m·w만으로 된 8자처럼 아주 넓은 이름은 지금처럼 말줄임표로 줄어든다. 데스크톱은 그대로다.
   - 웹 단위 583건 통과. 타입 검사(웹·테스트) 오류 0.
+- PR #33 CI(39972451053): E2E는 모두 통과했다(`replay-share`·`bb-mobile` 포함). test 작업의 통합 테스트 8건이 실패했다.
+  - 실패: `admin-analytics`·`settings-sync`·`hand-notes`의 집계 실패(`rolled`가 `{failed: true}`), `admin-analytics`·`referral`·`privacy`의 cron 500, `referral`의 보상 집계.
+  - 시각: 통합 단계가 14:48:48Z~15:21:00Z로 한국 시간 자정(15:00Z)을 넘겼다. 그날 테스트가 만든 실제 핸드가 '어제'가 되어 처음으로 집계됐다. 앞선 세 CI는 자정 전에 끝나 통과했다.
+  - 원인: 일일 집계의 핸드 쿼리 `GROUP BY day, room, bots`에서 `bots`는 SELECT의 별칭(`h.bots > 0`)이 아니라 `hands.bots` 열(봇 수)이다. SQLite는 GROUP BY의 이름을 열부터 찾는다. `bots.test.ts`처럼 봇 1명·2명·3명인 핸드가 같은 날 있으면 `(day, hands_bots)` 행이 여럿 생긴다. 그러면 ON CONFLICT 없는 INSERT가 기본키에 걸려 그 쓰기 묶음 전체가 실패한다.
+  - 운영 영향: 봇 수가 다른 핸드가 있는 날부터 집계가 멈춘다. `rolled_through`가 그 전날에 머물고 통계 화면은 '최근 날짜 없음'을 보인다. 운영 DB는 읽지 않아 실제로 멈췄는지는 확인하지 않았다.
+  - 확인: node:sqlite(3.50.4)로 같은 쿼리를 돌렸다. 고치기 전에는 같은 날 공식 봇 행이 3개, 고친 뒤에는 1개(핸드 3, 테이블 2)다.
+  - 기각한 가설:
+    - 두 방 종류의 봇 핸드: 봇은 공식 테이블에만 앉는다(`room.ts`의 `roomType === 'official'`). 관리자 API도 회원 방의 봇 설정을 거절한다.
+    - `hands.bots`의 NULL: 열이 `NOT NULL DEFAULT 0`이다.
+    - D1 크기 제한·러너 이미지: 실패 시각이 자정과 정확히 맞고, 아래처럼 로컬에서 같은 실패가 재현된다.
+    - 이 PR의 변경: 웹 UI와 문서만 바꿨다.
+  - 수정: `GROUP BY day, room, h.bots > 0`.
+  - 테스트: `admin-analytics`의 시드에 같은 날(D4) 봇 핸드를 더했다. 같은 테이블에 봇 1명·2명, 다른 공식 테이블에 3명이다. `hands_bots` 3, `tables_bots` 2, 그날 `hands_official`·`tables_official` 0을 확인한다.
+    - 고치기 전 코드로 로컬 실행: CI와 같은 두 실패(`{failed: true}`, cron 500)로 6건 중 2건이 실패했다.
+    - 고친 뒤: 6건 모두 통과했다.
+  - CI에서 실패한 나머지 파일도 로컬에서 통과했다: `referral`·`privacy`·`hand-notes`(함께 실행), `settings-sync` 14건. `settings-sync`는 처음 실행에서 한 건이 테스트의 `d1 execute` 보조 프로세스가 메모리 부족(`std::bad_alloc`)으로 죽어 실패했고, 다시 돌려 통과했다. 로컬에서는 '어제'에 봇 핸드가 없어 이 파일들은 고치기 전에도 통과한다. 자정을 넘긴 경우는 위 회귀 테스트가 대신 확인한다.
+  - api 타입 검사 오류 0. Codex 적대적 리뷰: approve, 중요한 지적 없음.
