@@ -18,18 +18,20 @@
  * that could not be sent (no connection) says so over the bar. Neither changes the bar's height.
  *
  * Sizing a bet and making it are two buttons. The card's top line says the amount set, with a button of its own at its
- * right (`action-dock-toggle`, R) that opens and closes the sizing (slider, steps, presets, the amount field) and does
- * nothing else: it sends nothing, arms nothing and keeps the amount. Bet/Raise in the buttons' row always bets the amount
- * set, open or closed, with the same confirmation as any other press; an amount the server would refuse leaves it
- * disabled, saying an amount is wanted. The row is the same open or closed (fold, check or call, bet or raise, all-in
- * when it is the only raise), so its buttons neither move nor change meaning.
+ * right (`action-dock-toggle`, R, its tip saying it sets the amount) that opens and closes the sizing (slider, steps,
+ * presets, the amount field) and does nothing else: it sends nothing, arms nothing and keeps the amount, even one the
+ * server would refuse. Bet/Raise in the buttons' row always bets the amount set, written on it in full, open or closed,
+ * with the same confirmation as any other press; an amount the server would refuse leaves it disabled, saying an amount
+ * is wanted. The row is the same open or closed (fold, check or call, bet or raise, all-in when it is the only raise),
+ * so its buttons neither move nor change meaning: the dock's own control at its top right, the game's actions below.
  *
  * The bar sits in the table's dock, a band of fixed height under the table (Table.tsx): opening the sizing grows the
  * card inside that band and moves nothing else. Open, the slider (the amount at its end) takes the top line, beside the
  * same toggle, and the presets the next.
  *
  * `column`: a short screen's column at the table's side (short.ts), narrower than the bar's own row. The buttons share
- * one row of its width with their amounts under their names (pressed once, a risky one says to press again instead), and
+ * one row of its width with their amounts under their names (pressed once, a risky one says to press again instead,
+ * Bet/Raise still with its amount under it), and
  * the sizing above them is sized to it: the amount field beside the toggle, then the slider, then the presets.
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
@@ -111,6 +113,12 @@ export function ActionBar({
   /** The sizing's own button: Escape gives it the focus back. */
   const toggle = useRef<HTMLButtonElement>(null);
   const panelId = useId();
+  const tipId = useId();
+  /**
+   * The toggle's tip, put away once it is pressed, so it does not cover the amount field beside it while the pointer
+   * rests there; back when the pointer leaves the toggle or the focus comes to it again.
+   */
+  const [tipOff, setTipOff] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const bb = Math.max(1, state.table.bigBlind);
   const mine = state.seats.find((x) => x.seatIndex === state.you.seatIndex);
@@ -257,9 +265,13 @@ export function ActionBar({
   const pending = (key: ArmKey | 'check' | 'open') => busy && sent?.key === key && <Spinner className="size-4" />;
   const isArmed = (key: ArmKey, sig: string) => armed?.key === key && armed.sig === sig;
   const label = (key: ArmKey, sig: string, text: string) => (isArmed(key, sig) ? t('action.tapAgain', { type: text }) : text);
-  /** What Bet/Raise does: its name, and the amount set (in the column short, its top line saying it in full). */
+  /**
+   * What Bet/Raise does: its name and the amount set, never shortened (12,500, not 12.5K), so what it bets reads on it
+   * (in the column in the unit read, its chips on the sizing's line).
+   */
   const commitName = isAllInAmount ? t('action.allin') : bet ? t('action.bet') : t('action.raiseBtn');
-  const commitAmount = column ? a.fmt(amount, true) : a.exact(amount);
+  const commitAmount = column ? a.fmt(amount) : a.exact(amount);
+  const commitAmountCls = cx('font-mono tabular-nums', compact && 'break-all text-[11px] font-semibold');
   const stepBtn = 'jc-tap grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-ink-850 text-lg font-bold text-ivory active:bg-ink-700 disabled:opacity-40';
   const amountLabel = bet ? t('action.betTo') : t('action.raiseTo');
   // A raise is to a total: what already sits in front of me is part of it.
@@ -281,12 +293,13 @@ export function ActionBar({
         inputMode={a.unit === 'bb' ? 'decimal' : 'numeric'}
         className={cx('h-10 w-full min-w-0 rounded-lg border bg-ink-850 px-2 pt-3.5 text-right font-mono text-base font-semibold text-gold-300', commit ? 'border-white/10' : 'border-danger/70')}
         value={draft ?? a.toInput(amount)}
+        // Kept as typed when the field loses the focus (shutting the sizing does that): an amount the server would refuse
+        // stays, Bet/Raise disabled and saying so, until the player sets one, never moved to the nearest legal amount.
         onChange={(e) => {
           const typed = a.clean(e.target.value);
           setDraft(typed);
           setAmount(a.fromInput(typed));
         }}
-        onBlur={() => pick(clampAmt(amount))}
         aria-label={amountLabel}
         aria-invalid={!commit || undefined}
         data-testid="action-amount"
@@ -316,40 +329,51 @@ export function ActionBar({
         data-testid="action-commit"
       >
         {pending('commit')}
-        {commitArmed ? (
-          t('action.tapAgain', { type: column ? commitName : `${commitName} ${commitAmount}` })
-        ) : (
-          <>
-            <span>{commitName}</span>{' '}
-            {commit ? (
-              <span className={cx('font-mono', compact && 'text-[11px] font-semibold')}>{commitAmount}</span>
-            ) : (
-              <span className="text-[11px] font-semibold">{t('action.needAmount')}</span>
-            )}
-          </>
-        )}
+        {/* The amount on it pressed once too: the second press bets what it says. */}
+        <span>{commitArmed ? t('action.tapAgain', { type: commitName }) : commitName}</span>{' '}
+        {commit ? <span className={commitAmountCls}>{commitAmount}</span> : <span className="text-[11px] font-semibold">{t('action.needAmount')}</span>}
       </button>
       {caption}
     </div>
   );
   const sizingName = open ? t('action.sizingClose') : t('action.sizingOpen');
   // Opens and closes the sizing, nothing else: no amount, no confirmation, nothing sent. Not held while a press is in
-  // flight either, since it sends nothing.
+  // flight either, since it sends nothing. Its tip (hovered, or focused from the keyboard) says it sets the amount, and
+  // its key: at its left on the same line, inside the card, so the dock's scroll does not cut it and it covers no button.
   const toggleButton = (
-    <button
-      ref={toggle}
-      type="button"
-      onClick={() => setOpen((o) => !o)}
-      className="jc-tap grid size-10 shrink-0 place-items-center rounded-lg border border-gold-500/40 bg-ink-900/80 text-gold-300 transition-colors hover:border-gold-400 hover:bg-gold-500/15 aria-expanded:border-gold-400 aria-expanded:bg-gold-500/20"
-      aria-expanded={open}
-      aria-controls={panelId}
-      aria-label={sizingName}
-      title={sizingName}
-      aria-keyshortcuts="R"
-      data-testid="action-dock-toggle"
-    >
-      {open ? <ChevronDownIcon className="size-5" /> : <ChevronUpIcon className="size-5" />}
-    </button>
+    <span className="relative flex shrink-0">
+      <button
+        ref={toggle}
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setTipOff(true);
+        }}
+        onPointerLeave={() => setTipOff(false)}
+        onFocus={() => setTipOff(false)}
+        className="jc-tap peer grid size-10 shrink-0 place-items-center rounded-lg border border-gold-500/40 bg-ink-900/80 text-gold-300 transition-colors hover:border-gold-400 hover:bg-gold-500/15 aria-expanded:border-gold-400 aria-expanded:bg-gold-500/20"
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={sizingName}
+        aria-describedby={tipId}
+        aria-keyshortcuts="R"
+        data-testid="action-dock-toggle"
+      >
+        {open ? <ChevronDownIcon className="size-5" /> : <ChevronUpIcon className="size-5" />}
+      </button>
+      <span
+        id={tipId}
+        role="tooltip"
+        className={cx(
+          'pointer-events-none absolute right-full top-1/2 z-10 mr-2 flex -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gold-500/50 bg-ink-950/95 px-2 py-1 text-xs font-semibold text-gold-300 opacity-0 shadow-lg transition-opacity',
+          !tipOff && 'peer-hover:opacity-100 peer-hover:delay-300 peer-focus-visible:opacity-100',
+        )}
+        data-testid="action-dock-tip"
+      >
+        {t('action.sizingTip')}
+        <kbd className="rounded border border-gold-500/40 px-1 font-mono text-[10px] leading-4 text-ink-200">R</kbd>
+      </span>
+    </span>
   );
   // Closed, the top line says what Bet/Raise will bet (or that an amount is wanted).
   const summary = (

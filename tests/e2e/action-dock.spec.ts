@@ -15,8 +15,9 @@ function actionsSent(page: Page) {
 /**
  * The bet sizing has a button of its own at the dock's top right; Bet/Raise only ever bets the amount set. Open, shut,
  * and the amount kept between them, the toggle sends nothing and arms nothing; Bet/Raise bets the amount shown (the
- * two presses of a big bet), never opens or shuts the sizing, and a double press sends one action. An amount the server
- * would refuse leaves Bet/Raise disabled. The next turn starts shut.
+ * two presses of a big bet, the amount on it pressed once too), never opens or shuts the sizing, and a double press
+ * sends one action. An amount the server would refuse leaves Bet/Raise disabled, and shutting the sizing keeps it as
+ * typed. The toggle's tip says it sets the amount. The next turn starts shut.
  */
 test('bet sizing toggle: opening and shutting sends nothing, Bet/Raise always bets the amount set', async ({ browser }) => {
   const a = await signUp(browser);
@@ -51,9 +52,23 @@ test('bet sizing toggle: opening and shutting sends nothing, Bet/Raise always be
   const min = Number((await barA.getByTestId('action-dock-amount').textContent())!.replace(/\D/g, ''));
   expect(min).toBeGreaterThan(0);
   await expect(commit).toHaveText(new RegExp(`^${name} ${min.toLocaleString('en-US')}$`));
+  // Hovered, its tip says it sets the amount (and its key): at its left inside the card, over none of the buttons.
+  const tip = barA.getByTestId('action-dock-tip');
+  await expect(tip).toHaveAttribute('role', 'tooltip');
+  await expect(toggle).toHaveAttribute('aria-describedby', (await tip.getAttribute('id'))!);
+  await expect(tip).toHaveText(/^(베팅 금액 조절|Adjust bet amount)R$/);
+  await expect(tip).toHaveCSS('opacity', '0');
+  await toggle.hover();
+  await expect(tip).toHaveCSS('opacity', '1');
+  const [tipBox, toggleBox, barBox, commitBox] = await Promise.all([tip, toggle, barA, commit].map((l) => l.boundingBox()));
+  expect(tipBox!.x + tipBox!.width).toBeLessThanOrEqual(toggleBox!.x);
+  expect(tipBox!.x).toBeGreaterThanOrEqual(barBox!.x);
+  expect(tipBox!.y + tipBox!.height).toBeLessThanOrEqual(commitBox!.y);
 
-  // Open: the amount field, the slider and the presets; its controls name the panel; nothing sent, nothing armed.
+  // Open: the amount field, the slider and the presets; its controls name the panel; nothing sent, nothing armed. The
+  // tip goes once it is pressed, though the pointer is still on it.
   await toggle.click();
+  await expect(tip).toHaveCSS('opacity', '0');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(toggle).toHaveAttribute('aria-label', /^(베팅 금액 설정 접기|Collapse bet sizing)$/);
   await expect(panel).toBeVisible();
@@ -66,6 +81,30 @@ test('bet sizing toggle: opening and shutting sends nothing, Bet/Raise always be
   await expect(commit).toBeDisabled();
   await expect(commit).toHaveText(new RegExp(`^${name} (금액 설정 필요|Set an amount)$`));
   await expect(field).toHaveAttribute('aria-invalid', 'true');
+  // Shut with it under the minimum, it stays as typed (not moved to the minimum): Bet/Raise stays disabled.
+  const needAmount = new RegExp(`^${name} (금액 설정 필요|Set an amount)$`);
+  await toggle.click();
+  await expect(panel).toHaveCount(0);
+  await expect(commit).toBeDisabled();
+  await expect(commit).toHaveText(needAmount);
+  await expect(barA.getByTestId('action-dock-amount')).toHaveText(/^(금액 설정 필요|Set an amount)$/);
+  await toggle.click();
+  await expect(field).toHaveValue('3');
+  // Over the maximum, shut with Escape: the same. Its toggle, focused from the keyboard, shows its tip.
+  await field.fill('99999');
+  await expect(commit).toBeDisabled();
+  await expect(tip).toHaveCSS('opacity', '0'); // pressed, the pointer still on it: the tip stays away from the field
+  await a.page.mouse.move(0, 0);
+  await field.press('Escape');
+  await expect(panel).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await expect(tip).toHaveCSS('opacity', '1');
+  await expect(commit).toBeDisabled();
+  await expect(commit).toHaveText(needAmount);
+  await toggle.click();
+  await expect(field).toHaveValue('99999');
+  await a.page.waitForTimeout(300);
+  expect(aSent.length).toBe(n);
   // 600 is over half of A's stack: a big bet, two presses.
   await field.fill('600');
   await expect(commit).toBeEnabled();
@@ -82,7 +121,7 @@ test('bet sizing toggle: opening and shutting sends nothing, Bet/Raise always be
 
   // Bet/Raise, shut: the first press arms it (the panel stays shut), the second sends it once, even pressed twice at once.
   await commit.click();
-  await expect(commit).toHaveText(/^(한 번 더|Press again)/);
+  await expect(commit).toHaveText(/^(한 번 더|Press again).* 600$/);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   expect(aSent.length).toBe(n);
   await commit.evaluate((el: HTMLButtonElement) => {

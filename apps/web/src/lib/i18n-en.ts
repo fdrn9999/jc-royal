@@ -364,6 +364,7 @@ export const en: Dict = {
   'action.needAmount': 'Set an amount',
   'action.sizingOpen': 'Expand bet sizing',
   'action.sizingClose': 'Collapse bet sizing',
+  'action.sizingTip': 'Adjust bet amount',
   'action.tapAgain': 'Press again: {type}',
   'action.sending': 'Sending {action}…',
   'action.notSent': 'Not sent: the connection dropped. Press again once it is back.',
