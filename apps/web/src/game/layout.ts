@@ -12,6 +12,8 @@ export interface Point {
 export interface SeatGeometry {
   seat: Point;
   bet: Point;
+  /** Where its bet lies once it folds (TablePlan's `folds`), where that is somewhere else. */
+  fold?: Point;
   /** Where the dealer button puck sits for this seat. */
   button: Point;
 }
@@ -60,8 +62,9 @@ export interface Dims {
   /** How far the plate rides up over the cards. */
   overlap: number;
   plateH: number;
-  /** The plate's width less its name and stack column (avatar, gap, padding, border). */
+  /** The plate's width less its name and stack column (avatar, gap, padding, border), and its least width. */
   plateBase: number;
+  plateMin: number;
   /** The name's width cap, and one digit of the stack. */
   nameMax: number;
   digit: number;
@@ -80,9 +83,9 @@ export interface Dims {
 }
 
 export const DIMS: Record<Density, Dims> = {
-  full: { cardMe: 54.4, cardOther: 40, overlap: 9.6, plateH: 54, plateBase: 70, nameMax: 112, digit: 7.2, statusH: 20, overhang: 8, chip: 20, potChip: 21.6, boardMax: 56, boardMin: 44, boardGap: 6, boardPad: 8 },
-  compact: { cardMe: 41.6, cardOther: 27.2, overlap: 9.6, plateH: 46, plateBase: 62, nameMax: 88, digit: 6.6, statusH: 20, overhang: 8, chip: 16, potChip: 17.6, boardMax: 40, boardMin: 33.6, boardGap: 4, boardPad: 6 },
-  dense: { cardMe: 35.2, cardOther: 23.2, overlap: 8, plateH: 30, plateBase: 40, nameMax: 52, digit: 6, statusH: 16, overhang: 4, chip: 14, potChip: 16, boardMax: 34, boardMin: 28, boardGap: 4, boardPad: 6 },
+  full: { cardMe: 54.4, cardOther: 40, overlap: 9.6, plateH: 54, plateBase: 70, plateMin: 136, nameMax: 112, digit: 7.2, statusH: 20, overhang: 8, chip: 20, potChip: 21.6, boardMax: 56, boardMin: 44, boardGap: 6, boardPad: 8 },
+  compact: { cardMe: 41.6, cardOther: 27.2, overlap: 9.6, plateH: 46, plateBase: 62, plateMin: 104, nameMax: 88, digit: 6.6, statusH: 20, overhang: 8, chip: 16, potChip: 17.6, boardMax: 40, boardMin: 33.6, boardGap: 4, boardPad: 6 },
+  dense: { cardMe: 35.2, cardOther: 23.2, overlap: 8, plateH: 30, plateBase: 40, plateMin: 92, nameMax: 52, digit: 6, statusH: 16, overhang: 4, chip: 14, potChip: 16, boardMax: 34, boardMin: 28, boardGap: 4, boardPad: 6 },
 };
 
 /** Rows of seats top to bottom: each entry is a seat's place clockwise from the bottom seat (0), or -1 for the board. */
@@ -159,6 +162,8 @@ export interface TablePlan {
   /** Per seat index: where the seat is centred and where its bet is centred (px). */
   seats: Point[];
   bets: Point[];
+  /** Per seat index: where its bet lies once it folds, its cards gone (foldBets); the same as `bets` mostly. */
+  folds: Point[];
   /** Per seat index: the room the seat takes, from the top of what rises over its cards to its status line's bottom. */
   rooms: Rect[];
   /** The pot, the board and the status line under them. */
@@ -201,6 +206,12 @@ const SPREAD = [0, 0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.2, -1.2, 1.5, -1.5];
 const SPOTS = (() => {
   const out: { t: number; a: number; score: number }[] = [];
   for (let t = 0; t <= 1200; t += 4) for (const a of SPREAD) out.push({ t, a, score: t * (1 + 0.6 * Math.abs(a)) });
+  return out.sort((x, y) => x.score - y.score);
+})();
+/** Turned further, beside the seat and a little past it: only for a bet that reads as its own nowhere nearer (placeBets). */
+const WIDE = (() => {
+  const out: { t: number; a: number; score: number }[] = [];
+  for (let t = 0; t <= 1200; t += 4) for (const a of [1.8, -1.8, 2.1, -2.1, 2.4, -2.4]) out.push({ t, a, score: t * (1 + 0.6 * Math.abs(a)) });
   return out.sort((x, y) => x.score - y.score);
 })();
 
@@ -441,25 +452,47 @@ function seatCost(w: number, h: number, q: Placed) {
   return cost;
 }
 
-/** Whether a point is nearer this seat's box than any other seat's: a bet there reads as this seat's. */
-function nearest(x: number, y: number, mine: Box, seats: Box[]) {
+/** Whether a point is nearer this seat's box (`mine`) than any other seat's: a bet there reads as this seat's. */
+function nearest(x: number, y: number, mine: Box, seats: Box[], self: number) {
   const away = (b: Box) => Math.hypot(Math.max(b.l - x, 0, x - b.r), Math.max(b.t - y, 0, y - b.b));
   const d = away(mine);
-  return seats.every((b) => b === mine || away(b) > d);
+  return seats.every((b, i) => i === self || away(b) > d);
 }
 
 /**
- * Where the bets may lie: `strict`, each nearer its own seat (as drawn) than any other; `loose`, wherever it first has
- * room. Both may lie in the pot's row beside the pot, over the board's ends (the row draws only the pot, in its middle);
- * the replay (`kept`) keeps that whole row clear, as it always has.
+ * Where the bets may lie: `strict`, each nearer its own seat (as drawn) than any other; `firm`, so and nearer the least
+ * its seat is drawn as too (placeBets) where it has such a spot; `loose`, wherever it first has room. All may lie in the
+ * pot's row beside the pot, over the board's ends (the row draws only the pot, in its middle); the replay (`kept`) keeps
+ * that whole row clear, as it always has.
  */
-type Bets = 'strict' | 'loose' | 'kept';
+type Bets = 'firm' | 'strict' | 'loose' | 'kept';
 /**
  * Where nothing fits (planTable's last resort), what a bet lying over the board's cards costs, times what it covers:
  * the board comes before the bets, so a bet lies on a seat's room (its own first) rather than on the cards, and astray
  * costs more yet. What fits costs nothing either way.
  */
 const BOARD = 4;
+
+/**
+ * What of the block no bet lies on: the board's cards apart from the rest of the room kept (the pot's row middle and
+ * the status line under the cards), or for `kept`, all of it.
+ */
+function held(q: Placed, s: Parts, mode: Bets) {
+  const { blk } = s;
+  const k = q.block;
+  const bx = (k.l + k.r) / 2;
+  const top = k.t + blk.potRowH + 8;
+  const under = top + 1.4 * s.way.card + 2 * s.d.boardPad;
+  const cards: Box[] = mode === 'kept' ? [] : [{ ...k, t: top, b: Math.min(k.b, under) }];
+  const kept: Box[] =
+    mode === 'kept'
+      ? [k]
+      : [{ l: bx - blk.potW / 2, r: bx + blk.potW / 2, t: k.t, b: k.t + blk.potRowH }, ...(k.b > under ? [{ ...k, t: under }] : [])];
+  return { cards, kept };
+}
+
+/** The seats as drawn, without the room kept above their cards (the anchor is the centre of what is drawn). */
+const drawnOf = (q: Placed): Box[] => q.rects.map((r, i) => ({ ...r, t: 2 * q.anchors[i]!.y - r.b }));
 
 /**
  * Each bet on the way from its seat to the board, as near the seat as it has room (SPOTS), where `mode` lets it. The
@@ -469,21 +502,13 @@ function placeBets(w: number, h: number, p: PlanInput, q: Placed, s: Parts, quic
   const bets: Point[] = [];
   const taken: Box[] = [];
   let cost = 0;
-  const { bet, blk } = s;
+  const { bet } = s;
   const k = q.block;
   const bx = (k.l + k.r) / 2;
   const by = (k.t + k.b) / 2;
-  // The board's cards apart from the rest of the room kept: the pot's row middle and the status line under the cards.
-  const top = k.t + blk.potRowH + 8;
-  const under = top + 1.4 * s.way.card + 2 * s.d.boardPad;
-  const cards: Box[] = mode === 'kept' ? [] : [{ ...k, t: top, b: Math.min(k.b, under) }];
-  const kept: Box[] =
-    mode === 'kept'
-      ? [k]
-      : [{ l: bx - blk.potW / 2, r: bx + blk.potW / 2, t: k.t, b: k.t + blk.potRowH }, ...(k.b > under ? [{ ...k, t: under }] : [])];
-  // The seats as drawn, without the room kept above their cards (the anchor is the centre of what is drawn).
-  const strict = mode === 'strict';
-  const drawn = strict ? q.rects.map((r, i) => ({ ...r, t: 2 * q.anchors[i]!.y - r.b })) : [];
+  const { cards, kept } = held(q, s, mode);
+  const strict = mode === 'strict' || mode === 'firm';
+  const drawn = strict ? drawnOf(q) : [];
   for (let k = 0; k < p.n; k++) {
     const seat = (p.anchor + k) % p.n;
     const r = q.rects[seat]!;
@@ -491,26 +516,68 @@ function placeBets(w: number, h: number, p: PlanInput, q: Placed, s: Parts, quic
     const sy = (r.t + r.b) / 2;
     const dist = Math.hypot(bx - sx, by - sy);
     const angle = Math.atan2(by - sy, bx - sx);
+    const at = (t: number, a: number) => {
+      const x = sx + Math.cos(angle + a) * t;
+      const y = sy + Math.sin(angle + a) * t;
+      return { x, y, c: { l: x - bet.w / 2, r: x + bet.w / 2, t: y - bet.h / 2, b: y + bet.h / 2 } };
+    };
+    // What a spot lies over, counted until it reaches `bound`.
+    const over = (c: Box, bound: number) => {
+      let o = outside(c, w, h);
+      for (const z of kept) o += hit(c, z);
+      for (const z of cards) o += BOARD * hit(c, z);
+      for (const z of q.rects) if (o < bound) o += hit(c, z);
+      for (const z of taken) if (o < bound) o += hit(c, z);
+      return o;
+    };
+    // The least this seat is drawn as: its plate as narrow as it gets (a short name and stack) with no status line, and
+    // another's without its cards (folded with its bet still out; the viewer's own stay, dimmed). A bet nearer that than
+    // any other seat as drawn reads as its own however they are drawn (CI: a folded seat's bet, and the viewer's by a
+    // short name, read as a neighbour's by 2px). `firm` takes the first free spot that does, then one turned further
+    // (WIDE), else the first free spot nearer the seat as drawn (`spare`), as `strict` does. (A folded seat's bet, where
+    // no spot does, lies elsewhere once it folds: foldBets.)
+    const u = drawn[seat];
+    const least = mode === 'firm' && u && {
+      l: q.anchors[seat]!.x - s.d.plateMin / 2,
+      r: q.anchors[seat]!.x + s.d.plateMin / 2,
+      t: k === 0 && p.me ? u.t : u.t + 1.4 * s.d.cardOther - s.d.overlap,
+      b: u.b - s.d.statusH,
+    };
+    let spare: Box | null = null;
     let best: Box = { l: sx, r: sx, t: sy, b: sy };
     let bestCost = Infinity;
     for (const { t, a, score } of SPOTS) {
       if (score > dist * 1.9) break;
       if (t > dist) continue;
-      const x = sx + Math.cos(angle + a) * t;
-      const y = sy + Math.sin(angle + a) * t;
-      const c = { l: x - bet.w / 2, r: x + bet.w / 2, t: y - bet.h / 2, b: y + bet.h / 2 };
-      let o = outside(c, w, h);
-      for (const z of kept) o += hit(c, z);
-      for (const z of cards) o += BOARD * hit(c, z);
-      for (const z of q.rects) if (o < bestCost) o += hit(c, z);
-      for (const z of taken) if (o < bestCost) o += hit(c, z);
+      const { x, y, c } = at(t, a);
+      let o = over(c, bestCost);
       // Nearer another seat than its own, the bet reads as that seat's: worse than lying on anything.
-      if (strict && o < bestCost && !nearest(x, y, drawn[seat]!, drawn)) o += (BOARD + 1) * bet.w * bet.h;
+      if (strict && o < bestCost && !nearest(x, y, u!, drawn, seat)) o += (BOARD + 1) * bet.w * bet.h;
       if (o < bestCost) {
+        if (o === 0 && least && !nearest(x, y, least, drawn, seat)) {
+          spare ??= c;
+          continue;
+        }
         bestCost = o;
         best = c;
         if (o === 0) break;
       }
+    }
+    if (least && bestCost > 0) {
+      for (const { t, a, score } of WIDE) {
+        if (score > dist * 1.9) break;
+        if (t > dist) continue;
+        const { x, y, c } = at(t, a);
+        if (over(c, 1) === 0 && nearest(x, y, least, drawn, seat)) {
+          bestCost = 0;
+          best = c;
+          break;
+        }
+      }
+    }
+    if (spare && bestCost > 0) {
+      bestCost = 0;
+      best = spare;
     }
     if (bestCost > 0 && quick) return { bets, cost: Infinity };
     taken.push(best);
@@ -518,6 +585,50 @@ function placeBets(w: number, h: number, p: PlanInput, q: Placed, s: Parts, quic
     bets[seat] = { x: (best.l + best.r) / 2, y: (best.t + best.b) / 2 };
   }
   return { bets, cost };
+}
+
+/**
+ * Where each bet lies once its seat folds, the seat's cards gone and its bet still out (the viewer's own cards stay,
+ * dimmed): where it lies, if that is still nearer the seat than any other seat as drawn; else the first free spot on the
+ * way to the board that is, over the room the cards left (CI: nine seats on a 360×800 phone, a folded seat's bet read as
+ * the neighbour's by 5px, and no way of laying them out left it a spot that did either way); else where it lies.
+ */
+function foldBets(w: number, h: number, p: PlanInput, q: Placed, s: Parts, bets: Point[]): Point[] {
+  const { bet } = s;
+  const k = q.block;
+  const bx = (k.l + k.r) / 2;
+  const by = (k.t + k.b) / 2;
+  const { cards, kept } = held(q, s, 'strict');
+  const drawn = drawnOf(q);
+  const box = (x: number, y: number) => ({ l: x - bet.w / 2, r: x + bet.w / 2, t: y - bet.h / 2, b: y + bet.h / 2 });
+  const taken = bets.map((b) => box(b.x, b.y));
+  return bets.map((b, seat) => {
+    if (p.me && seat === p.anchor) return b;
+    const folded = { ...drawn[seat]!, t: drawn[seat]!.t + 1.4 * s.d.cardOther - s.d.overlap };
+    if (nearest(b.x, b.y, folded, drawn, seat)) return b;
+    const r = q.rects[seat]!;
+    const sx = (r.l + r.r) / 2;
+    const sy = (r.t + r.b) / 2;
+    const dist = Math.hypot(bx - sx, by - sy);
+    const angle = Math.atan2(by - sy, bx - sx);
+    for (const { t, a, score } of SPOTS) {
+      if (score > dist * 1.9) break;
+      if (t > dist) continue;
+      const x = sx + Math.cos(angle + a) * t;
+      const y = sy + Math.sin(angle + a) * t;
+      const c = box(x, y);
+      let o = outside(c, w, h);
+      for (const z of kept) o += hit(c, z);
+      for (const z of cards) o += BOARD * hit(c, z);
+      q.rects.forEach((z, i) => (o += hit(c, i === seat ? folded : z)));
+      taken.forEach((z, i) => i !== seat && (o += hit(c, z)));
+      if (o === 0 && nearest(x, y, folded, drawn, seat)) {
+        taken.push(c);
+        return { x, y };
+      }
+    }
+    return b;
+  });
 }
 
 function ways(n: number, densities: readonly Density[]): Way[] {
@@ -554,7 +665,13 @@ function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick
     if (found.seats + found.cost === 0) break;
   }
   if (!found) return null;
-  const { q, seats, bets, cost } = found;
+  const { q, seats, cost } = found;
+  let { bets } = found;
+  // Laid out so, each bet then nearer the least its seat is drawn as where it has room for that (placeBets).
+  if (quick && mode === 'strict') {
+    const firm = placeBets(w, h, p, q, s, true, 'firm');
+    if (firm.cost === 0) bets = firm.bets;
+  }
   const cx = w / 2;
   // The felt round the board's cards: in the box's middle where the block could move there, else where they lie (a
   // little off the seats' middle rather than the board off the felt's). It holds the block and reaches in under the seats.
@@ -580,6 +697,7 @@ function build(w: number, h: number, p: PlanInput, s: Parts, mask: number, quick
     potChip: s.d.potChip,
     seats: q.anchors,
     bets,
+    folds: mode === 'kept' ? bets : foldBets(w, h, p, q, s, bets),
     rooms: q.rects.map((r) => ({ x: r.l, y: r.t, w: r.r - r.l, h: r.b - r.t })),
     block: { x: q.block.l, y: q.block.t, w: q.block.r - q.block.l, h: q.block.b - q.block.t },
     pot: { x: cx, y: q.block.t + s.blk.potRowH / 2 },
@@ -739,6 +857,7 @@ export function scalePlan(plan: TablePlan, unit: number): TablePlan {
     potChip: plan.potChip * unit,
     seats: plan.seats.map(pt),
     bets: plan.bets.map(pt),
+    folds: plan.folds.map(pt),
     rooms: plan.rooms.map(rect),
     block: rect(plan.block),
     pot: pt(plan.pot),

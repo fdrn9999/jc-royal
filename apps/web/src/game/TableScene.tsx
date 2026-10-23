@@ -222,7 +222,9 @@ export function useTableLayout(area: { w: number; h: number }, maxSeats: number 
     const pct = (q: Point): Point => ({ x: (q.x / plan.w) * 100, y: (q.y / plan.h) * 100 });
     const geometry = plan.seats.map((seat, i) => {
       const b = pct(plan.bets[i] ?? seat);
-      return { seat: pct(seat), bet: b, button: b };
+      const f = plan.folds[i];
+      const bet = plan.bets[i];
+      return { seat: pct(seat), bet: b, button: b, ...(f && bet && (f.x !== bet.x || f.y !== bet.y) && { fold: pct(f) }) };
     });
     return { portrait: plan.w / plan.h < 0.95, compact: plan.density !== 'full', density: plan.density, box: { w: plan.w, h: plan.h }, geometry, pot: pct(plan.pot), footer, plan };
   }, [area.w, area.h, n, anchor, me, meTop, footer, stack, bet, pot, grow, narrow]);
@@ -333,6 +335,17 @@ export const TableScene = memo(function TableScene({
   const latest = useRef({ s, onSit, onSeatClick, onShow });
   latest.current = { s, onSit, onSeatClick, onShow };
   const places = useMemo(() => geometry.map((g) => ({ left: `${g.seat.x}%`, top: `${g.seat.y}%` })), [geometry]);
+  // Another player's bet once they fold, their cards gone, lies where it still reads as theirs (layout's `folds`), and
+  // its chips fly to the pot from there.
+  const foldedKey = s.seats
+    .filter((x) => x.state === 'folded' && x.seatIndex !== mySeat && geometry[x.seatIndex]?.fold)
+    .map((x) => x.seatIndex)
+    .join();
+  const placed = useMemo(() => {
+    if (!foldedKey) return geometry;
+    const folded = new Set(foldedKey.split(',').map(Number));
+    return geometry.map((g, i) => (folded.has(i) && g.fold ? { ...g, bet: g.fold } : g));
+  }, [geometry, foldedKey]);
   const handlers = useRef(new Map<number, { sit: () => void; pick: () => void }>());
   const handlersOf = (i: number) => {
     let h = handlers.current.get(i);
@@ -415,7 +428,7 @@ export const TableScene = memo(function TableScene({
 
       {/* seats, bets, dealer button */}
       {s.seats.map((seat) => {
-        const g = geometry[seat.seatIndex]!;
+        const g = placed[seat.seatIndex]!;
         const sd = showdown.get(seat.seatIndex);
         const label = sd ? t(`hand.${handLabelKey(sd.rankClass, sd.bestFive)}` as MsgKey) : null;
         const bet = staged?.bets[seat.seatIndex] ?? (hand?.stage !== 'settled' ? seat.streetBet : 0);
@@ -463,7 +476,7 @@ export const TableScene = memo(function TableScene({
         );
       })}
 
-      <Flights flights={flights} start={start} geometry={geometry} pot={layout.pot} box={box} amounts={amounts} />
+      <Flights flights={flights} start={start} geometry={placed} pot={layout.pot} box={box} amounts={amounts} />
     </div>
   );
 });
