@@ -36,7 +36,7 @@
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
 import { ChevronDownIcon, ChevronUpIcon, cx, formatChips, MinusIcon, PlusIcon, Spinner } from '@jc/ui';
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
@@ -66,6 +66,44 @@ function subscribePhone(onChange: () => void) {
   return () => m?.removeEventListener?.('change', onChange);
 }
 const readPhone = () => window.matchMedia?.(PHONE_QUERY).matches === true;
+
+/** An amount's text, free to wrap after each thousands comma where it is too long for its line (see `amountFit`). */
+const breakable = (text: string) =>
+  wrapPoints(text).map((part, j) => (
+    <Fragment key={j}>
+      {j > 0 && <wbr />}
+      {part}
+    </Fragment>
+  ));
+
+/**
+ * The line over Bet/Raise's lower edge (what comes from the stack, or the chips of an amount refused): as many lines as
+ * it wraps to at its smallest face, and that height kept clear at the button's foot, so it covers neither the name nor
+ * the amount and lies inside the button, which grows with it rather than cut it. One line is the button's own `pb-3.5`.
+ */
+function Foot({ button, className, style, children }: { button: RefObject<HTMLButtonElement | null>; className: string; style: CSSProperties; children: ReactNode }) {
+  const el = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const foot = el.current;
+    const btn = button.current;
+    if (!foot || !btn) return;
+    const keep = () => {
+      btn.style.paddingBottom = `${foot.offsetHeight}px`;
+    };
+    keep();
+    const seen = new ResizeObserver(keep);
+    seen.observe(foot);
+    return () => {
+      seen.disconnect();
+      btn.style.paddingBottom = '';
+    };
+  }, [button]);
+  return (
+    <span ref={el} className={className} style={style}>
+      {children}
+    </span>
+  );
+}
 
 export function ActionBar({
   state,
@@ -113,6 +151,8 @@ export function ActionBar({
   const readyAt = useRef(Date.now() + APPEAR_GUARD_MS);
   /** The sizing's own button: Escape gives it the focus back. */
   const toggle = useRef<HTMLButtonElement>(null);
+  /** Bet/Raise: the line over its foot keeps its own height clear there (`Foot`). */
+  const commitEl = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const tipId = useId();
   /**
@@ -288,13 +328,13 @@ export function ActionBar({
   const fromStackText = streetBet > 0 ? t('action.fromStack', { amount: a.fmt(Math.max(0, amount - streetBet), true) }) : '';
   const fromStack = fromStackText && (
     <span className={cx('font-mono tabular-nums', column && 'text-ink-400')} data-testid="action-from-stack">
-      {fromStackText}
+      {breakable(fromStackText)}
     </span>
   );
   const inChipsText = a.unit === 'bb' ? `= ${formatChips(amount)}` : '';
   const inChips = inChipsText && (
     <span className={cx('font-mono tabular-nums', column && 'text-ink-400')} data-testid="action-chips">
-      {inChipsText}
+      {breakable(inChipsText)}
     </span>
   );
   /** The amount typed, its name inside the field's top edge; an amount the server would refuse is edged in red. */
@@ -322,21 +362,24 @@ export function ActionBar({
   // button's name (which stays the action and its amount, the chips with it in big blinds, so not again here). An amount
   // the server would refuse, Bet/Raise saying one is wanted, has no amount on it: in big blinds, its chips read there
   // instead (open or closed), so what was typed still reads in chips. Pressed once, the press-again line stands alone.
-  // One line, its face smaller where it is longer than the button is wide (a phone's, in big blinds), never under 9px.
+  // One line, its face smaller where it is longer than the button is wide (a phone's, in big blinds), never under 9px;
+  // longer still at 9px (a refused amount typed far past the most), it wraps, the button taller with it (`Foot`).
   const captionText = commit ? fromStackText : amount > 0 ? inChipsText : '';
   const caption = !column && !isArmed('commit', commitSig) && captionText && (
-    <span
-      className={cx('pointer-events-none absolute inset-x-0.5 bottom-1 flex justify-center overflow-hidden whitespace-nowrap font-semibold leading-3.5 text-ink-950/75', (!commit || (busy && sent?.key !== 'commit')) && 'opacity-50')}
+    <Foot
+      button={commitEl}
+      className={cx('pointer-events-none absolute inset-x-0.5 bottom-1 flex justify-center text-center font-semibold leading-3.5 text-ink-950/75 [overflow-wrap:anywhere]', (!commit || (busy && sent?.key !== 'commit')) && 'opacity-50')}
       style={{ fontSize: captionFace(captionText) }}
     >
       {commit ? fromStack : inChips}
-    </span>
+    </Foot>
   );
   const commitArmed = isArmed('commit', commitSig);
   // The same button open or closed: it bets the amount set (the sizing only sets it), so it is never a way to open it.
   const commitButton = window_ && (
     <div className={cx('@container relative flex min-w-0', column ? 'flex-[1.4]' : 'flex-[2]')}>
       <button
+        ref={commitEl}
         type="button"
         disabled={busy || !commit}
         onClick={doCommit}
@@ -357,12 +400,7 @@ export function ActionBar({
             <Fragment key={i}>
               {i > 0 && ' '}
               <span className={commitAmountCls} style={fit(line)}>
-                {wrapPoints(line).map((part, j) => (
-                  <Fragment key={j}>
-                    {j > 0 && <wbr />}
-                    {part}
-                  </Fragment>
-                ))}
+                {breakable(line)}
               </span>
             </Fragment>
           ))
@@ -506,7 +544,7 @@ export function ActionBar({
               )}
               {toggleButton}
             </div>
-            {panel && column && (fromStack || inChips) && <p className="-mt-0.5 flex justify-end gap-x-1.5 px-1 text-[10px] leading-3">{fromStack}{inChips}</p>}
+            {panel && column && (fromStack || inChips) && <p className="-mt-0.5 flex flex-wrap justify-end gap-x-1.5 px-1 text-right text-[10px] leading-3">{fromStack}{inChips}</p>}
             {panel && column && <div className="flex items-center gap-1.5">{steps}</div>}
             {panel && presetRow}
           </div>

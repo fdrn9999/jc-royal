@@ -99,6 +99,19 @@ describe('the action bar', () => {
     expect(textOf(col, 'action-chips')).toBe('= 12,500');
   });
 
+  it('lets the line under Bet/Raise wrap between thousands rather than cut it, where it is too long at 9px', () => {
+    const legal: LegalOption[] = [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 12_500, max: 12_499 }];
+    const refused = markup(false, legal, amounts('bb', 2_500), 2_500);
+    expect(refused).toContain('data-testid="action-chips">= 12,<wbr/>500</span>');
+    const deep = markup(false, [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 8_332_500, max: 8_332_500 }], amounts('bb', 2_500), 2_500);
+    expect(deep).toContain('data-testid="action-from-stack">스택에서 3,<wbr/>332 BB</span>');
+    for (const html of [refused, deep]) {
+      const foot = /<span class="pointer-events-none absolute inset-x-0\.5 bottom-1[^"]*"/.exec(html)?.[0] ?? '';
+      expect(foot).toContain('[overflow-wrap:anywhere]');
+      expect(foot).not.toMatch(/whitespace-nowrap|overflow-hidden/);
+    }
+  });
+
   it('gives the sizing toggle a tip saying it sets the amount, and its key, in place of a bare title', () => {
     const html = markup(false);
     const toggle = /<button[^>]*data-testid="action-dock-toggle"[^>]*>/.exec(html)?.[0] ?? '';

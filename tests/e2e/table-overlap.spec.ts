@@ -476,8 +476,9 @@ function deepButton(p: Page, cases: string[][], max: number) {
  * at a 3-chip blind, the whole of a new account's wallet), and all of it lies inside its 48px, no line of it (nor the
  * line under it) under 9px: in a short screen's column (about 60px across, the blinds and the chips a line each, the
  * blinds wrapping there), on the narrowest phone and on a desktop, in Korean and English, at everything (All-in) and a
- * chip under it, pressed once and not, and with an amount the server would refuse (under the least, past the most),
- * open and closed, whose chips still read (Chrome emulation). Deeper stacks than a wallet holds are set on a copy of the
+ * chip under it, pressed once and not, and with an amount the server would refuse (under the least, past the most, and
+ * far past it, its chips then wrapping under the button, the one case it grows), open and closed, whose chips read
+ * whole (Chrome emulation). Deeper stacks than a wallet holds are set on a copy of the
  * button: they wrap inside it, the row growing only for the deepest. Nothing is bet: the turn is checked or folded after.
  */
 test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크톱에서 한국어·영어 모두 버튼 48px 안에 9px 이상으로 들어가고, 잘못된 금액도 칩 환산이 보인다', async ({ browser }) => {
@@ -525,7 +526,17 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
     const look = async (state: string) => {
       await p.waitForTimeout(150);
       const shown = (await chips.count()) ? await chips.textContent() : null;
-      seen.push({ screen: tag, state, ...(await spill(p)), chips: shown });
+      // The chips of a refused amount, wherever they are (under the button, or in the column's top line), inside the card.
+      const chipsOut = shown
+        ? await chips.evaluate((el) => {
+            const card = el.closest('[data-testid="action-bar"] > div')!.getBoundingClientRect();
+            return Array.from(el.getClientRects())
+              .filter((r) => r.left < card.left - 0.5 || r.right > card.right + 0.5)
+              .map((r) => `chips @${Math.round(r.left - card.left)} ${Math.round(r.width)}`);
+          })
+        : [];
+      const s = await spill(p);
+      seen.push({ screen: tag, state, ...s, out: [...s.out, ...chipsOut], chips: shown });
       await bar.screenshot({ path: test.info().outputPath(`commit-${tag}-${state}.png`) });
     };
 
@@ -566,18 +577,20 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
     await press(toggle);
     await bar.getByTestId('action-amount').fill((under / 3).toFixed(2));
     await expect(commit).toBeEnabled();
-    await expect(commit).toHaveText(new RegExp(`^(벳|레이즈|Bet|Raise to) \\d+\\.\\d\\d BB \\(${under.toLocaleString('en-US')}\\)$`));
+    await expect(commit).toHaveText(new RegExp(`^(벳|레이즈|Bet|Raise to) \\d{1,3}(,\\d{3})*\\.\\d\\d BB \\(${under.toLocaleString('en-US')}\\)$`));
     await look('under-open');
     await press(commit);
     await expect(commit).toHaveText(/^(한 번 더|Confirm|Press again)/);
     await look('under-open-armed');
 
-    // An amount the server would refuse, under the least and past the most: Bet/Raise disabled, saying one is wanted,
-    // the chips of what was typed reading open and closed (under the button, or beside the closed sizing's name in the
-    // column), and kept as typed when closed.
+    // An amount the server would refuse, under the least, past the most and typed far past it (its chips longer than a
+    // phone's button at 9px): Bet/Raise disabled, saying one is wanted, the chips of what was typed reading whole open
+    // and closed (under the button, wrapping there, or beside the closed sizing's name in the column), and kept as typed
+    // when closed.
     for (const [name, typed, sent] of [
       ['low', '0.5', 2],
       ['high', '9999.99', 30_000],
+      ['huge', '99999999999999999999', 3e20],
     ] as const) {
       const field = bar.getByTestId('action-amount');
       if (!(await field.isVisible())) await press(toggle);
@@ -600,16 +613,20 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
   const body = JSON.stringify({ issues, seen, deep }, null, 1);
   await test.info().attach('commit-fit.json', { body, contentType: 'application/json' });
   console.log(`commit-fit ${body}`);
-  expect(seen.length).toBe(screens.length * 8);
+  expect(seen.length).toBe(screens.length * 10);
   for (const s of seen) {
     expect(s.container, `${s.screen} ${s.state}: Bet/Raise is the container its face is sized against`).toBe('inline-size');
-    expect(s.size, `${s.screen} ${s.state}: Bet/Raise stays 48px high`).toMatch(/x48$/);
+    // Only a refused amount typed far past the most may make it taller: the chips under it wrap, kept inside it.
+    if (s.state.startsWith('huge')) expect(Number(s.size.split('x')[1]), `${s.screen} ${s.state}: Bet/Raise at 48px or more`).toBeGreaterThanOrEqual(48);
+    else expect(s.size, `${s.screen} ${s.state}: Bet/Raise stays 48px high`).toMatch(/x48$/);
     for (const f of s.faces) expect(parseFloat(f), `${s.screen} ${s.state}: an amount line of ${f}`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
     if (s.captionFace !== null) expect(s.captionFace, `${s.screen} ${s.state}: the line under it`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
   }
   // The full amount on the button, with what comes from the stack (in play, when a blind is in) under it in the row.
   expect(seen.filter((s) => s.state === 'max').every((s) => /\d,\d{3}\.\d\d BB|\(\d{1,3}(,\d{3})+\)/.test(s.text))).toBe(true);
   expect(issues, 'Bet/Raise’s text lies inside its button').toEqual([]);
+  // There, on the narrowest phone, they take two lines: the button taller rather than the line cut.
+  for (const s of seen.filter((x) => x.screen.startsWith('320x568') && x.state.startsWith('huge'))) expect(Number(s.size.split('x')[1]), `${s.screen} ${s.state}: ${s.caption}`).toBeGreaterThan(48);
   // Deeper stacks set on a copy: inside it, no line under 9px; up to 1,234,566 chips in 48px, the deepest taller.
   for (const d of deep) {
     expect(d.out, `${d.screen} ${d.text}`).toEqual([]);
