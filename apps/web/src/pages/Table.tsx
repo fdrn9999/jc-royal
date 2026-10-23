@@ -85,12 +85,16 @@ const secondsTo = (target: number) => Math.max(0, Math.ceil((target - Date.now()
  * The dock's band under the table (`--dock`, the safe edge `--dock-b` below it): room for the most it holds at once with
  * these settings (my turn with the raise panel open; the reaction tray over the status line; a beginner's notes and the
  * coach's tip over the action bar), so the table above it keeps one size whatever the dock holds now. A phone stacks the
- * time bank over the action bar and keeps the reaction tray two rows high; wider, they are beside it and one row.
+ * time bank over the action bar, and in the raise panel's card while it is open (ActionBar's `bank`: 168px holds the card
+ * alone, and a 375×667 phone's table stays 431px high, where nine seats keep inside the screen and six keep their bets by
+ * them), and keeps the reaction tray two rows high; wider, they are beside it and one row. The notes and the tip have
+ * room of their own only while it leaves the table `--dock-max` (about 18rem high, Table): past that they scroll in what
+ * is left (dock-notes), and the time bank and the action bar keep theirs.
  */
 function dockBand(beginner: boolean, coach: boolean) {
-  if (beginner && coach) return '[--dock:21.5rem] sm:[--dock:18rem]';
-  if (beginner) return '[--dock:16rem] sm:[--dock:14rem]';
-  if (coach) return '[--dock:16.25rem] sm:[--dock:15rem]';
+  if (beginner && coach) return '[--dock:max(11rem,min(24.5rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(18rem,var(--dock-max,100vh)))]';
+  if (beginner) return '[--dock:max(11rem,min(19rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(14rem,var(--dock-max,100vh)))]';
+  if (coach) return '[--dock:max(11rem,min(19.25rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(15rem,var(--dock-max,100vh)))]';
   return '[--dock:10.5rem]';
 }
 
@@ -300,8 +304,12 @@ export function TablePage() {
   const [colRef, col] = useBoxSize<HTMLDivElement>();
   const [areaRef, area] = useBoxSize<HTMLDivElement>();
   const narrow = col.w < 640;
-  // Coaching counts in the band from my first hand, seated or not, so sitting down does not change it.
+  // Coaching counts in the band from my first hand, seated or not, so sitting down does not change it; and it keeps its
+  // room after the last coached hand is settled, so the table does not grow then. Turning it off gives the room back.
   const coaching = coachActive(academy, true);
+  const coachBand = useRef(false);
+  if (coaching) coachBand.current = true;
+  else if (academy.coach.off) coachBand.current = false;
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
   // My seat is at the bottom, laid out as mine whether I sit in it yet or not (the room above it for the show-card
@@ -646,8 +654,10 @@ export function TablePage() {
           className={cx(
             'jc-game-surface relative flex min-w-0 flex-1 flex-col',
             !short && '[--dock-b:max(0.5rem,env(safe-area-inset-bottom))] sm:[--dock-b:1.5rem]',
-            !short && dockBand(prefs.beginner, coaching),
+            !short && dockBand(prefs.beginner, coachBand.current),
           )}
+          // The most of the column the notes may take: what leaves the table about 18rem (its top margin included).
+          style={!short && col.h > 0 ? { ['--dock-max' as string]: `calc(${col.h}px - var(--dock-b) - 18.25rem)` } : undefined}
         >
           {/* The table's area: the column less the dock's band below it (short: less the dock's column beside it). */}
           <div
@@ -728,37 +738,47 @@ export function TablePage() {
                 <TournamentResult tn={tn} />
               </Suspense>
             )}
-            {s && prefs.beginner && hand && (
-              // The street note (the header names the street too) gives the raise panel its line; both give the help theirs.
-              <div className="flex flex-col items-center gap-1.5 group-has-[[data-testid=action-help]]/stack:hidden sm:items-end">
-                <StageNote s={s} className="group-has-[[data-raise-open]]/stack:hidden" />
-                {seated && prefs.showHand && <CurrentHandPill s={s} />}
-              </div>
-            )}
             {s && short && !prefs.beginner && prefs.showHand && hand && seated && (
               // A line of the column, short (else it is under the board): it steps aside while the raise panel is open, the
               // column having no line to spare then.
               <CurrentHandPill s={s} compact className="group-has-[[data-raise-open]]/stack:hidden" />
             )}
-            {tip && (
-              <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-info/40 bg-ink-950/90 p-2.5 text-xs text-ivory backdrop-blur sm:w-[26rem]" role="status" data-testid="coach-tip">
-                <span className="mt-0.5 shrink-0 rounded-full bg-info/25 px-1.5 text-[10px] font-bold text-[#a9c8ee]">{t('coach.title')}</span>
-                <span className="min-w-0 flex-1">
-                  {tip.key === 'coach.call'
-                    ? t('coach.call', { amount: amt.fmt(tip.amount), pot: amt.fmt(tip.pot) })
-                    : tip.key === 'coach.strong'
-                      ? t('coach.strong', { hand: t(`hand.${tip.rankClass}` as MsgKey) })
-                      : t(tip.key)}
-                  <span className="mt-0.5 block text-[10px] text-ink-400">{t('coach.remaining', { n: COACH_HANDS - academy.coach.hands })}</span>
-                </span>
-                <button className="jc-tap shrink-0 rounded px-1.5 py-1 text-[10px] text-ink-300 hover:text-ivory" onClick={() => me && updateProgress(me.id, (p) => ({ ...p, coach: { ...p.coach, off: true } }))} data-testid="coach-off">
-                  {t('coach.off')}
-                </button>
+            {s && ((prefs.beginner && hand) || tip) && (
+              // A beginner's notes and the coach's tip, one part of the band: it scrolls in what the time bank and the action
+              // bar leave it (nothing but its gap, at the least), so they never push the bar out of the band. Short, the
+              // column scrolls as a whole instead, as it did.
+              <div
+                className={cx('flex w-full flex-col gap-[inherit]', short ? 'shrink-0 items-stretch *:w-full! *:max-w-none!' : 'min-h-0 items-center overflow-y-auto sm:items-end')}
+                data-testid="dock-notes"
+              >
+                {prefs.beginner && hand && (
+                  // The street note (the header names the street too) gives the raise panel its line; both give the help theirs.
+                  <div className="flex flex-col items-center gap-1.5 group-has-[[data-testid=action-help]]/stack:hidden sm:items-end">
+                    <StageNote s={s} className="group-has-[[data-raise-open]]/stack:hidden" />
+                    {seated && prefs.showHand && <CurrentHandPill s={s} />}
+                  </div>
+                )}
+                {tip && (
+                  <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-info/40 bg-ink-950/90 p-2.5 text-xs text-ivory backdrop-blur sm:w-[26rem]" role="status" data-testid="coach-tip">
+                    <span className="mt-0.5 shrink-0 rounded-full bg-info/25 px-1.5 text-[10px] font-bold text-[#a9c8ee]">{t('coach.title')}</span>
+                    <span className="min-w-0 flex-1">
+                      {tip.key === 'coach.call'
+                        ? t('coach.call', { amount: amt.fmt(tip.amount), pot: amt.fmt(tip.pot) })
+                        : tip.key === 'coach.strong'
+                          ? t('coach.strong', { hand: t(`hand.${tip.rankClass}` as MsgKey) })
+                          : t(tip.key)}
+                      <span className="mt-0.5 block text-[10px] text-ink-400">{t('coach.remaining', { n: COACH_HANDS - academy.coach.hands })}</span>
+                    </span>
+                    <button className="jc-tap shrink-0 rounded px-1.5 py-1 text-[10px] text-ink-300 hover:text-ivory" onClick={() => me && updateProgress(me.id, (p) => ({ ...p, coach: { ...p.coach, off: true } }))} data-testid="coach-off">
+                      {t('coach.off')}
+                    </button>
+                  </div>
+                )}
+                {myTurn && prefs.beginner && <ActionHelp s={s} className="group-has-[[data-raise-open]]/stack:hidden" />}
               </div>
             )}
             {s && myTurn && (
               <>
-                {prefs.beginner && <ActionHelp s={s} className="group-has-[[data-raise-open]]/stack:hidden" />}
                 {short ? (
                   <>
                     {/* The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen. */}
@@ -766,15 +786,11 @@ export function TablePage() {
                     <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column />
                   </>
                 ) : (
-                  // The label is in my seat. A phone stacks the time bank over the bar and lets the raise panel or the help
-                  // have its line while open; wider, it is beside the bar.
-                  <div className="pointer-events-none flex w-full flex-col items-center gap-1.5 sm:w-auto sm:flex-row sm:items-end sm:justify-end sm:gap-2">
-                    <TimeBankButton
-                      s={s}
-                      onUse={addBankTime}
-                      className="max-sm:group-has-[[data-raise-open]]/stack:hidden max-sm:group-has-[[data-testid=action-help]]/stack:hidden"
-                    />
-                    <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={false} />
+                  // The label is in my seat. A phone stacks the time bank over the bar, the help open too (a beginner's band
+                  // holds both), and puts it in the presets' line while the raise panel is open (ActionBar's `bank`); wider,
+                  // it is beside the bar.
+                  <div className="pointer-events-none flex w-full shrink-0 flex-col items-center gap-1.5 sm:w-auto sm:flex-row sm:items-end sm:justify-end sm:gap-2">
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} chip={chip} />} />
                   </div>
                 )}
               </>

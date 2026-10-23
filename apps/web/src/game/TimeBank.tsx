@@ -5,7 +5,7 @@
  * arrived adds nothing, and the button waits for the answer anyway.
  */
 import { TIME_BANK_MIN_USE_MS, type TableView } from '@jc/types';
-import { cx } from '@jc/ui';
+import { cx, HourglassIcon } from '@jc/ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useI18n } from '../lib/i18n';
 
@@ -15,7 +15,8 @@ const URGENT_MS = 8_000;
 /**
  * `column`: in a short screen's column (short.ts) the pill takes its width and wraps instead of widening it. `turn`: a
  * line shown above the bank's own (the column's turn label, so the column is no taller for it), the pill edged in gold.
- * `fallback`: shown instead when this turn has no bank. `className`: the pill's own, added (the dock hides it for a moment).
+ * `fallback`: shown instead when this turn has no bank. `chip`: a cell of the raise panel's presets line (ActionBar's
+ * `bank`), as high as a preset: the button, what is left over what it adds.
  */
 export function TimeBankButton({
   s,
@@ -23,14 +24,14 @@ export function TimeBankButton({
   column = false,
   turn,
   fallback = null,
-  className,
+  chip = false,
 }: {
   s: TableView;
   onUse: (handId: string, seq: number, seen: number) => Promise<void>;
   column?: boolean;
   turn?: ReactNode;
   fallback?: ReactNode;
-  className?: string;
+  chip?: boolean;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -63,13 +64,35 @@ export function TimeBankButton({
     }
   }
 
+  const tone = cx(usable ? 'bg-gold-500 text-ink-950 hover:bg-gold-400 disabled:opacity-60' : 'bg-white/5 text-ink-400', usable && urgent && !busy && 'jc-pulse-gold');
+  const aria = usable ? t('timeBank.useAria', { n: add, left }) : t('timeBank.emptyAria');
+
+  if (chip)
+    return (
+      <div className="flex min-w-0" data-testid="time-bank">
+        <button
+          type="button"
+          className={cx('jc-tap flex h-10 min-w-0 flex-1 flex-col items-center justify-center rounded-lg font-bold leading-tight tabular-nums transition-colors', tone)}
+          disabled={!usable || busy}
+          onClick={() => void use()}
+          aria-label={aria}
+          data-testid="time-bank-use"
+        >
+          <span className="flex items-center gap-0.5 text-[10px] font-semibold">
+            <HourglassIcon className="size-3" />
+            <span data-testid="time-bank-left">{t('timeBank.seconds', { n: left })}</span>
+          </span>
+          <span className="text-xs">{usable ? t('timeBank.use', { n: add }) : t('timeBank.empty')}</span>
+        </button>
+      </div>
+    );
+
   return (
     <div
       className={cx(
         'pointer-events-auto flex items-center border bg-ink-950/85 pl-3 pr-1 text-xs backdrop-blur',
         turn ? 'border-gold-400/60' : 'border-white/10',
         column ? 'flex-wrap gap-x-2 gap-y-1 rounded-2xl' : 'gap-2 rounded-full py-0.5 sm:self-end',
-        className,
       )}
       data-testid="time-bank"
     >
@@ -86,15 +109,10 @@ export function TimeBankButton({
       )}
       <button
         type="button"
-        className={cx(
-          'jc-tap min-h-10 rounded-full px-3.5 font-bold tabular-nums transition-colors',
-          column && 'ml-auto',
-          usable ? 'bg-gold-500 text-ink-950 hover:bg-gold-400 disabled:opacity-60' : 'bg-white/5 text-ink-400',
-          usable && urgent && !busy && 'jc-pulse-gold',
-        )}
+        className={cx('jc-tap min-h-10 rounded-full px-3.5 font-bold tabular-nums transition-colors', column && 'ml-auto', tone)}
         disabled={!usable || busy}
         onClick={() => void use()}
-        aria-label={usable ? t('timeBank.useAria', { n: add, left }) : t('timeBank.emptyAria')}
+        aria-label={aria}
         data-testid="time-bank-use"
       >
         {usable ? t('timeBank.use', { n: add }) : t('timeBank.empty')}

@@ -28,7 +28,7 @@
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
 import { cx, formatChips, MinusIcon, PlusIcon, Spinner } from '@jc/ui';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
@@ -49,12 +49,22 @@ function haptic(ms: number) {
 
 const CHIPS = chipAmounts('chips', 0);
 
+/** Narrower than Tailwind's `sm`: a phone held upright, where the bar's own row stacks the time bank over the bar. */
+const PHONE_QUERY = 'not all and (min-width: 40rem)';
+function subscribePhone(onChange: () => void) {
+  const m = window.matchMedia?.(PHONE_QUERY);
+  m?.addEventListener?.('change', onChange);
+  return () => m?.removeEventListener?.('change', onChange);
+}
+const readPhone = () => window.matchMedia?.(PHONE_QUERY).matches === true;
+
 export function ActionBar({
   state,
   onAct,
   busy,
   amounts: a = CHIPS,
   column = false,
+  bank,
 }: {
   state: TableView;
   /** Returns false when it could not be sent (no connection). */
@@ -64,9 +74,16 @@ export function ActionBar({
   amounts?: Amounts;
   /** Laid out for a short screen's column (see above). */
   column?: boolean;
+  /**
+   * The bar's own row's time bank (TimeBank.tsx), drawn before the bar: its pill, or (`inCard`) a cell of the presets'
+   * line, which it is on a phone while the raise panel is open. The dock's band there holds the card alone, and the
+   * table above it keeps the room nine seats need on a 375×667 phone (Table.tsx's dockBand).
+   */
+  bank?: (inCard: boolean) => ReactNode;
 }) {
   const { t } = useI18n();
   const prefs = usePrefs();
+  const phone = useSyncExternalStore(subscribePhone, readPhone, () => false);
   const legal = state.you.legal;
   const find = <K extends LegalOption['type']>(k: K) => legal.find((o) => o.type === k) as Extract<LegalOption, { type: K }> | undefined;
   const fold = find('fold');
@@ -211,6 +228,8 @@ export function ActionBar({
   const inCard = panel && !column;
   /** The buttons laid out narrow, their amounts under their names: in the column, or beside the card's confirm button. */
   const compact = column || inCard;
+  /** A phone's time bank, its pill over the bar, is a cell of the presets' line while the panel is open (see `bank`). */
+  const bankInCard = inCard && phone && !!bank;
   const btnBase = compact
     ? 'jc-tap jc-act flex h-12 min-w-0 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
     : 'jc-tap jc-act flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50';
@@ -310,7 +329,7 @@ export function ActionBar({
     </div>
   );
   const presetRow = (
-    <div className={cx('grid grid-cols-4', column ? 'gap-1' : 'gap-1.5')}>
+    <div className={cx('grid auto-cols-fr grid-flow-col', column ? 'gap-1' : 'gap-1.5')}>
       {presets.map((p) => (
         <button
           key={p.label}
@@ -324,9 +343,10 @@ export function ActionBar({
           {p.label}
         </button>
       ))}
+      {bankInCard && bank?.(true)}
     </div>
   );
-  return (
+  const bar = (
     <div ref={root} className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1' : 'sm:w-[26rem]')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
       {panel && column && (
         // In the column four lines, each 40px (what a finger needs, no more) and close together: a phone on its side
@@ -406,5 +426,12 @@ export function ActionBar({
         </div>
       </div>
     </div>
+  );
+  // One tree either way, so the bar stays the same element when the time bank moves into its card and keeps the focus.
+  return (
+    <>
+      {bank && !bankInCard && bank(false)}
+      {bar}
+    </>
   );
 }
