@@ -295,13 +295,14 @@ export function ActionBar({
   // 48px high, the row's buttons together: taller only for an amount too long for Bet/Raise even at its smallest face
   // (see `amountFit`), which then wraps inside it rather than past it.
   const btnBase = compact
-    ? 'jc-tap jc-act flex min-h-12 min-w-0 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
+    ? 'jc-tap jc-act flex min-h-12 min-w-0 flex-col items-center justify-center rounded-xl text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
     : 'jc-tap jc-act flex min-h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50';
-  const btn = cx(btnBase, 'flex-1', !compact && 'px-2');
+  const btn = cx(btnBase, 'flex-1', compact ? 'px-1' : 'px-2');
   // Bet/Raise: its name and the amount, beside each other while they fit (else the amount under the name), so a long
   // amount wraps instead of widening the row; three lines (a long press-again line over the amount) fit its 48px. Its
-  // own width is what its amount's face is sized against (see `fit`).
-  const commitBtn = cx(btnBase, '@container w-full', !compact && 'flex-wrap content-center gap-x-1.5 gap-y-0 px-2 leading-[1.1]');
+  // own width is what its amount's face is sized against (see `fit`): narrow, its sides thinner than the others' so a
+  // wallet's amount (411,522 BB at 9px in the column) takes a line.
+  const commitBtn = cx(btnBase, '@container w-full', compact ? 'px-0.5' : 'flex-wrap content-center gap-x-1.5 gap-y-0 px-2 leading-[1.1]');
   /** A button's amount, under its name when narrow; there, pressed once, the press-again line stands alone. */
   const amountOf = (key: ArmKey, sig: string, v: number) => !(compact && isArmed(key, sig)) && <span className={cx('font-mono', compact && 'text-[11px] font-semibold')}>{a.fmt(v, true)}</span>;
   const armedCls = 'ring-2 ring-ivory ring-offset-2 ring-offset-ink-950 animate-pulse';
@@ -322,7 +323,9 @@ export function ActionBar({
   const commitName = isAllInAmount ? t('action.allin') : bet ? t('action.bet') : t('action.raiseBtn');
   const commitLines = column && a.unit === 'bb' ? [a.fmt(amount), `(${formatChips(amount)})`] : [a.exact(amount)];
   const fit = (line: string) => ({ fontSize: lineFace(line, compact ? 11 : 14) });
-  const commitAmountCls = cx('text-center font-mono leading-[1.1] tabular-nums', compact && 'text-[11px] font-semibold');
+  // No letter spacing: a face sized to 96% of the width (`amountFit`) leaves no room for the button's wide tracking,
+  // which would push the line past it and wrap it at a comma.
+  const commitAmountCls = cx('text-center font-mono leading-[1.1] tracking-normal tabular-nums', compact && 'text-[11px] font-semibold');
   const stepBtn = 'jc-tap grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-ink-850 text-lg font-bold text-ivory active:bg-ink-700 disabled:opacity-40';
   const amountLabel = bet ? t('action.betTo') : t('action.raiseTo');
   // A raise is to a total: what already sits in front of me is part of it.
