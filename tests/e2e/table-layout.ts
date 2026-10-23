@@ -15,7 +15,7 @@ export interface TableReport {
 /**
  * How many places the table and the player's seat (its centre: the seat's width follows its countdown) are drawn in,
  * read at every frame, from just before `start` until `ms` after it: 1 when nothing moved, 2 when they moved once. The
- * raise panel opening or closing moves them once, not to a place in between first (TEST_REPORT).
+ * raise panel opening or closing moves neither, not even for a frame (Table.tsx's dockBand; TEST_REPORT).
  */
 export async function tablePlaces(page: Page, seat: string, start: () => Promise<void>, ms = 1_200): Promise<number> {
   await page.evaluate((id) => {

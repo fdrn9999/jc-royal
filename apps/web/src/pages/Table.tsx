@@ -1,6 +1,24 @@
 import { sound } from '@jc/audio';
 import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView } from '@jc/types';
-import { Button, cx, formatChips, Logo, Modal } from '@jc/ui';
+import {
+  ArrowDownIcon,
+  ArrowUpFromLineIcon,
+  Button,
+  ChevronDownIcon,
+  CrownIcon,
+  cx,
+  formatChips,
+  HandRanksIcon,
+  Logo,
+  LogOutIcon,
+  MessageCircleIcon,
+  Modal,
+  PauseIcon,
+  PlayIcon,
+  SettingsIcon,
+  TrophyIcon,
+  XIcon,
+} from '@jc/ui';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
@@ -20,7 +38,7 @@ import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { legacyMuckStep } from '../game/olderRooms';
 import { ReactionButton, ReactionTray, useReactionSender, useReactionTray } from '../game/Reactions';
 import { realTableOptions, useShortScreen } from '../game/short';
-import { amountChars, TableScene, useAreaSize, useStackRoom, useTableLayout, useTableStatus } from '../game/TableScene';
+import { amountChars, TableScene, useBoxSize, useTableLayout, useTableStatus } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -62,6 +80,26 @@ function tournamentStalled(s: TableView): boolean {
 const isFree = (x: SeatView) => x.state === 'empty' && !x.held;
 
 const secondsTo = (target: number) => Math.max(0, Math.ceil((target - Date.now()) / 1000));
+
+/**
+ * The dock's band under the table (`--dock`, the safe edge `--dock-b` below it): room for the most it holds at once with
+ * these settings (my turn with the raise panel open; the reaction tray over the status line; a beginner's notes and the
+ * coach's tip over the action bar), so the table above it keeps one size whatever the dock holds now. A phone stacks the
+ * time bank over the action bar, and in the raise panel's card while it is open (ActionBar's `bank`: 168px holds the card
+ * alone, and a 375×667 phone's table stays 431px high, where nine seats keep inside the screen and six keep their bets by
+ * them), and keeps the reaction tray two rows high; wider, they are beside it and one row. The notes and the tip have
+ * room of their own only while it leaves the table `--dock-max` (about 18rem high, Table): past that they scroll in what
+ * is left (dock-notes), and the time bank and the action bar keep theirs.
+ */
+function dockBand(beginner: boolean, coach: boolean) {
+  if (beginner && coach) return '[--dock:max(11rem,min(24.5rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(18rem,var(--dock-max,100vh)))]';
+  if (beginner) return '[--dock:max(11rem,min(19rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(14rem,var(--dock-max,100vh)))]';
+  if (coach) return '[--dock:max(11rem,min(19.25rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(15rem,var(--dock-max,100vh)))]';
+  return '[--dock:10.5rem]';
+}
+
+/** What shows while the raise panel, the reaction tray or a beginner's help is open: those need the band then. */
+const STEP_ASIDE = 'group-has-[[data-raise-open]]/stack:sr-only group-has-[#react-tray]/stack:sr-only group-has-[[data-testid=action-help]]/stack:sr-only';
 
 function useCountdown(target: number | null) {
   // The whole page draws with it: again when the second shown changes, not on every check of the clock.
@@ -256,28 +294,31 @@ export function TablePage() {
     if (opened && myId) rememberVisit(myId, id);
   }, [opened, myId, id]);
 
-  const anchor = s?.you.seatIndex ?? 0;
   // A phone on its side: the controls go to a column at the right and the seats get the height (short.ts).
   const short = useShortScreen();
   const academy = useProgress(me?.id);
-  const room = useStackRoom(`${s?.you.seatIndex != null}|${prefs.beginner}|${prefs.showHand}|${coachActive(academy, s?.you.seatIndex != null)}`, short);
-  const [areaRef, area] = useAreaSize<HTMLDivElement>(room.style);
+  // The table's place is the screen's alone: its area is what the column leaves above the dock's band (beside the column,
+  // short), whatever the dock holds and whether I am seated, so it is measured again only when the screen (or a setting
+  // that changes the band) does. Before, the area kept clear of what the dock held (measured, growing within a mode, and
+  // given back when the raise panel closed), and the table moved as I sat, my turn came and went or the tray opened.
+  const [colRef, col] = useBoxSize<HTMLDivElement>();
+  const [areaRef, area] = useBoxSize<HTMLDivElement>();
+  const narrow = col.w < 640;
+  // Coaching counts in the band from my first hand, seated or not, so sitting down does not change it; and it keeps its
+  // room after the last coached hand is settled, so the table does not grow then. Turning it off gives the room back.
+  const coaching = coachActive(academy, true);
+  const coachBand = useRef(false);
+  if (coaching) coachBand.current = true;
+  else if (academy.coach.off) coachBand.current = false;
   const hand = s?.hand ?? null;
   const myTurn = !!s && !!hand && s.you.seatIndex !== null && hand.actorSeat === s.you.seatIndex && s.you.legal.length > 0;
-  // Seated, my seat is at the bottom, with room above my cards for the show-card buttons unless the screen is short.
-  // The raise panel open (my turn, so no cards to show), that room goes to the table too; the reaction tray (off my
-  // turn, when the buttons may be showing) leaves it.
-  const tableOpts = realTableOptions(short);
-  const layout = useTableLayout(area, s?.table.maxSeats, anchor, {
-    me: s?.you.seatIndex != null,
-    ...tableOpts,
-    meTop: room.open && myTurn ? 0 : tableOpts.meTop,
-    chars: amountChars(amt.unit),
-  });
-  // A phone upright: every line of the stack costs the table its height (nine seats at 375×667 have none to spare), so
-  // the turn label goes to my seat's status line, right above the bar, and my hand to the status line under the board,
-  // both kept by the layout whatever they hold. Wider, and in a short screen's column, they are lines of the stack.
-  const inTable = !short && room.narrow;
+  // My seat is at the bottom, laid out as mine whether I sit in it yet or not (the room above it for the show-card
+  // buttons, unless the screen is short), so sitting down turns the seats to mine and changes no size. Standing up keeps
+  // the seat I had there, so the table does not turn under me either.
+  const lastSeat = useRef(0);
+  if (s?.you.seatIndex != null) lastSeat.current = s.you.seatIndex;
+  const anchor = s?.you.seatIndex ?? lastSeat.current;
+  const layout = useTableLayout(area, s?.table.maxSeats, anchor, { me: true, ...realTableOptions(short), chars: amountChars(amt.unit) });
   const nextIn = useCountdown(s?.nextHandAt ?? null);
   // Short, the status line under the board goes to the column instead.
   const tableStatus = useTableStatus(s, nextIn, amt);
@@ -315,7 +356,7 @@ export function TablePage() {
     [sock, err],
   );
 
-  const tip = coachActive(academy, s?.you.seatIndex != null) && myTurn && s ? coachTip(s) : null;
+  const tip = coaching && myTurn && s ? coachTip(s) : null;
   // First-hands coach: count each real hand this player was dealt into while coaching is on.
   const coachedHands = useRef(new Set<string>());
   useEffect(() => {
@@ -435,6 +476,8 @@ export function TablePage() {
       setLeftHere(true);
     }
   }, [seated]);
+  // A quick-play seat gone on arrival, or I just stood up here: where next is offered in the status line.
+  const nextOffer = !seated && ((!!quick && quickMissed) || leftHere);
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 
@@ -447,8 +490,10 @@ export function TablePage() {
   );
   const onShow = useCallback((card: 0 | 1) => send({ t: 'show', card }), [send]);
   const deadline = hand?.deadline ?? null;
-  const turnNote = useMemo(() => (inTable && myTurn ? <TurnBanner deadline={deadline} inSeat /> : undefined), [inTable, myTurn, deadline]);
-  const handNoteOn = inTable && !room.open && !prefs.beginner && prefs.showHand && seated;
+  // The turn's label and my hand are in the table, kept room by the layout whatever they hold (my seat's status line, the
+  // status line under the board), not lines of the dock; short, they are lines of the column.
+  const turnNote = useMemo(() => (!short && myTurn ? <TurnBanner deadline={deadline} inSeat /> : undefined), [short, myTurn, deadline]);
+  const handNoteOn = !short && !prefs.beginner && prefs.showHand && seated;
   const handNote = useMemo(() => (handNoteOn && s ? <CurrentHandPill s={s} inline /> : undefined), [handNoteOn, s]);
 
   // After every hook: a draw that returned before them would run fewer hooks than the one before, which React refuses.
@@ -478,12 +523,12 @@ export function TablePage() {
             <>
               <div className="flex min-w-0 items-center gap-1 text-sm font-bold text-ivory" data-testid="table-title">
                 <span className="truncate">{s?.table.name ?? '…'}</span>
-                {isHost && <span aria-hidden className="shrink-0 text-xs text-gold-300">▾</span>}
+                {isHost && <ChevronDownIcon className="size-3.5 text-gold-300" />}
               </div>
               {s && (
                 <div className="truncate font-mono text-[11px] text-ink-300">
                   {tn && <span className="font-sans">{t('tn.hud')} · </span>}
-                  {s.table.roomType === 'member' && <span className="font-sans">{isHost ? `👑 ${t('room.host')}` : t('room.member')} · </span>}
+                  {s.table.roomType === 'member' && <span className="font-sans">{isHost ? <><CrownIcon className="inline size-3 align-[-2px] text-gold-300" /> {t('room.host')}</> : t('room.member')} · </span>}
                   {formatChips(s.table.smallBlind)}/{formatChips(s.table.bigBlind)}
                   {hand && ` · ${t('table.handNo', { n: hand.number })} · ${t(`stage.${hand.stage}` as MsgKey)}`}
                 </div>
@@ -502,23 +547,31 @@ export function TablePage() {
         <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
           {seated && (
             <Button size="icon" variant="subtle" onClick={() => sock.send({ t: s!.you.sittingOut ? 'sitIn' : 'sitOut' })} data-testid="sitout-toggle" aria-label={s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}>
-              <span aria-hidden className="sm:hidden">{s!.you.sittingOut ? '▶' : '❚❚'}</span>
+              {/* What a tap does: play (come back) while away, pause (step away) while playing. */}
+              {s!.you.sittingOut ? <PlayIcon className="size-5 sm:hidden" /> : <PauseIcon className="size-5 sm:hidden" />}
               <span className="hidden sm:inline">{s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}</span>
             </Button>
           )}
-          <Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setChatOpen((o) => !o)} aria-label={t('table.chat')} aria-expanded={chatOpen}>
-            💬
+          <Button
+            size="icon"
+            variant="ghost"
+            className={cx('lg:hidden', chatOpen && 'bg-gold-500/15! text-gold-300!')}
+            onClick={() => setChatOpen((o) => !o)}
+            aria-label={t('table.chat')}
+            aria-expanded={chatOpen}
+          >
+            <MessageCircleIcon className="size-5" />
           </Button>
           <Button size="icon" variant="ghost" onClick={() => setChart(true)} aria-label={t('table.handChart')} data-testid="hand-chart-open">
-            <span aria-hidden className="sm:hidden">♠≡</span>
+            <HandRanksIcon className="size-5 sm:hidden" />
             <span className="hidden sm:inline">{t('table.handChart')}</span>
           </Button>
           <Button size="icon" variant="ghost" onClick={() => setSettings(true)} aria-label={t('table.settings')}>
-            ⚙
+            <SettingsIcon className="size-5" />
           </Button>
           {tn ? (
             <Button size="icon" variant="outline" onClick={() => nav(`/tournaments/${tn.id}`)} data-testid="leave" aria-label={t('tn.toTournament')}>
-              <span aria-hidden className="sm:hidden">🏆</span>
+              <TrophyIcon className="size-5 sm:hidden" />
               <span className="hidden sm:inline">{t('tn.toTournament')}</span>
             </Button>
           ) : (
@@ -532,7 +585,8 @@ export function TablePage() {
                 aria-label={seated ? t('table.standUp') : t('table.leave')}
                 aria-expanded={leaveFolds ? leaveAsk : undefined}
               >
-                <span aria-hidden className="sm:hidden">⏏</span>
+                {/* Standing up (rising from the seat, staying to watch) is not leaving the table (out the door). */}
+                {seated ? <ArrowUpFromLineIcon className="size-5 sm:hidden" /> : <LogOutIcon className="size-5 sm:hidden" />}
                 <span className="hidden sm:inline">{seated ? t('table.standUp') : t('table.leave')}</span>
               </Button>
               {leaveAsk && (
@@ -593,71 +647,27 @@ export function TablePage() {
           )}
         </div>
       )}
-      {/* A quick-play seat gone on arrival, or I just stood up here: where next (another table, this one, the lobby). */}
-      {!seated && ((quick && quickMissed) || leftHere) && (
-        <div className="z-40 flex flex-col gap-2 bg-gold-500/15 px-4 py-2 text-sm text-gold-300 sm:items-center" role="status" data-testid={leftHere ? 'left-next' : 'quick-missed'}>
-          {quickPlay.miss ? (
-            <>
-              <QuickMissNote miss={quickPlay.miss} filtered={false} />
-              <Link to={lobbyHref()} className="self-start text-xs font-semibold text-gold-300 underline underline-offset-2 sm:self-center">
-                {t('nav.lobby')}
-              </Link>
-            </>
-          ) : (
-            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
-              {leftHere ? (
-                <span>
-                  {t('table.leftNext')}{' '}
-                  {!tn && (
-                    <span className="whitespace-nowrap text-xs text-ink-200" data-testid="wallet">
-                      {t('table.wallet')} <span className="font-mono">{formatChips(me?.balance ?? 0)}</span>
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <span>{t('quick.missed')}</span>
-              )}
-              {/* Each a finger's height (40 px) on a phone too. */}
-              <span className="flex flex-wrap items-center justify-center gap-2">
-                {!tn && (
-                  <Button size="sm" className="min-h-10" loading={quickPlay.busy} disabled={!!s?.maintenance?.active} onClick={() => quickPlay.run(quick?.filters ?? ANY, [...new Set([...(quick?.tried ?? []), id])])} data-testid="quick-another">
-                    {t('quick.another')}
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="min-h-10"
-                  onClick={() => {
-                    setQuickMissed(false);
-                    setLeftHere(false);
-                  }}
-                  data-testid="stay-here"
-                >
-                  {s?.table.allowSpectators === false ? t('quick.stayHere') : t('quick.stay')}
-                </Button>
-                {leftHere && (
-                  <Link to={lobbyHref()} className="jc-tap inline-flex min-h-10 items-center rounded-lg px-2 text-xs font-semibold text-gold-300 underline underline-offset-2" data-testid="left-lobby">
-                    {t('nav.lobby')}
-                  </Link>
-                )}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="flex min-h-0 flex-1">
         {/* table area */}
-        <div ref={room.colRef} className="jc-game-surface relative flex min-w-0 flex-1 flex-col">
-          {/* Beginner aids and coaching stack above the action bar: the room they take is kept free so they never cover my seat. */}
+        <div
+          ref={colRef}
+          className={cx(
+            'jc-game-surface relative flex min-w-0 flex-1 flex-col',
+            !short && '[--dock-b:max(0.5rem,env(safe-area-inset-bottom))] sm:[--dock-b:1.5rem]',
+            !short && dockBand(prefs.beginner, coachBand.current),
+          )}
+          // The most of the column the notes may take: what leaves the table about 18rem (its top margin included).
+          style={!short && col.h > 0 ? { ['--dock-max' as string]: `calc(${col.h}px - var(--dock-b) - 18.25rem)` } : undefined}
+        >
+          {/* The table's area: the column less the dock's band below it (short: less the dock's column beside it). */}
           <div
             ref={areaRef}
             className={cx(
               'relative flex min-h-0 flex-1 items-center justify-center',
-              short ? 'ml-[max(0.5rem,env(safe-area-inset-left))] mt-1' : 'mx-2 mt-1 sm:mx-6 sm:mt-6',
+              short
+                ? 'mb-[max(4px,env(safe-area-inset-bottom))] ml-[max(0.5rem,env(safe-area-inset-left))] mr-[calc(12.5rem+max(0.5rem,env(safe-area-inset-right))+4px)] mt-1'
+                : 'mx-2 mb-[calc(var(--dock)+var(--dock-b))] mt-1 sm:mx-6 sm:mt-6',
             )}
-            style={room.style}
           >
             {s && (
               <TableScene
@@ -676,25 +686,41 @@ export function TablePage() {
                 reducedMotion={reducedMotion}
                 amounts={amt}
                 turnNote={turnNote}
-                // Steps aside while the raise panel is open, as the stack's line does: the table has no room to spare then.
                 handNote={handNote}
               />
             )}
           </div>
 
-          {/* bottom: action bar / status */}
+          {/* bottom: the dock (action bar / status) */}
           <div
-            ref={room.stackRef}
             className={cx(
               'group/stack pointer-events-none absolute z-40 flex flex-col',
               // Short: a column of one width at the right edge, every line as wide as it, scrolled rather than cut if a
               // beginner's notes make it taller than the screen. Closer lines with the raise panel open (ActionBar).
               short
                 ? 'inset-y-0 right-0 w-[calc(12.5rem+max(0.5rem,env(safe-area-inset-right)))] items-stretch justify-end-safe gap-1.5 has-[[data-raise-open]]:gap-1 overflow-y-auto pb-[max(0.375rem,env(safe-area-inset-bottom))] scroll-pb-[max(0.375rem,env(safe-area-inset-bottom))] pl-2 pr-[max(0.5rem,env(safe-area-inset-right))] pt-1 *:w-full! *:max-w-none!'
-                : 'inset-x-0 bottom-0 items-center gap-2 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-end sm:px-6 sm:pb-6',
+                : // Else the band under the table, of one height (dockBand): its lines from the bottom up, scrolled rather
+                  // than cut if they ever outgrow it (a long tournament result).
+                  'inset-x-0 bottom-0 h-[calc(var(--dock)+var(--dock-b))] items-center justify-end-safe gap-1.5 overflow-y-auto px-2 pb-[var(--dock-b)] scroll-pb-[var(--dock-b)] sm:items-end sm:gap-2 sm:px-6',
             )}
             data-testid="table-stack"
           >
+            {/* Passing word over the band's top, not a line of it: a toast (an error) shows over what is there; a notice
+                makes way for it, and for the raise panel, the reaction tray and the help, which need the band then. */}
+            {(toast || notice) && (
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-center gap-1 px-2 pt-1 sm:items-end sm:px-6">
+                {toast && (
+                  <div className="max-w-md rounded-lg border border-danger/40 bg-ink-950/95 px-3 py-1 text-xs text-[#f3b0b2] shadow-lg sm:py-2 sm:text-sm" role="alert">
+                    {toast}
+                  </div>
+                )}
+                {notice && (
+                  <div className={cx('max-w-md rounded-lg border border-gold-500/35 bg-ink-950/95 px-3 py-1 text-xs text-gold-300 shadow-lg sm:py-2 sm:text-sm', toast ? 'sr-only' : STEP_ASIDE)} role="status" data-testid="table-notice">
+                    {notice}
+                  </div>
+                )}
+              </div>
+            )}
             {short && s && (
               // Kept while empty (out of the column's flow, so it takes no gap), so a screen reader hears it as it changes.
               <div className={cx('pointer-events-none rounded-xl text-center text-ink-200', tableStatus.status || tableStatus.sidePots ? 'bg-black/45 px-2 py-1' : 'sr-only')} data-testid="table-status" aria-live="polite">
@@ -707,71 +733,131 @@ export function TablePage() {
                 ) : null}
               </div>
             )}
-            {tn && (
-            <Suspense fallback={null}>
-              <TournamentResult tn={tn} />
-            </Suspense>
-          )}
-            {toast && <div className="pointer-events-auto rounded-lg border border-danger/40 bg-ink-950/90 px-3 py-2 text-sm text-[#f3b0b2]" role="alert" data-transient>{toast}</div>}
-            {notice && (
-              // In beginner mode the notice stands in for the street note, so it counts like it.
-              <div className="pointer-events-auto max-w-md rounded-lg border border-gold-500/35 bg-ink-950/90 px-3 py-1 text-xs text-gold-300 sm:py-2 sm:text-sm" role="status" data-testid="table-notice" data-transient={prefs.beginner && hand ? undefined : ''}>
-                {notice}
-              </div>
+              {tn && (
+              <Suspense fallback={null}>
+                <TournamentResult tn={tn} />
+              </Suspense>
             )}
-            {s && prefs.beginner && hand && (
-              <div className="flex flex-col items-center gap-1.5 sm:items-end">
-                {/* A notice takes the street note's place (the header names the street), so the stack stays below my seat. */}
-                {!notice && <StageNote s={s} />}
-                {seated && prefs.showHand && <CurrentHandPill s={s} />}
-              </div>
-            )}
-            {s && !prefs.beginner && prefs.showHand && hand && seated && !inTable && (
-              // With the raise panel open the screen may have no line to spare (a phone sideways): the hand steps aside while
-              // it is, and the table keeps the room it had without the line (useStackRoom). Upright it is under the board.
+            {s && short && !prefs.beginner && prefs.showHand && hand && seated && (
+              // A line of the column, short (else it is under the board): it steps aside while the raise panel is open, the
+              // column having no line to spare then.
               <CurrentHandPill s={s} compact className="group-has-[[data-raise-open]]/stack:hidden" />
             )}
-            {tip && (
-              <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-info/40 bg-ink-950/90 p-2.5 text-xs text-ivory backdrop-blur sm:w-[26rem]" role="status" data-testid="coach-tip">
-                <span className="mt-0.5 shrink-0 rounded-full bg-info/25 px-1.5 text-[10px] font-bold text-[#a9c8ee]">{t('coach.title')}</span>
-                <span className="min-w-0 flex-1">
-                  {tip.key === 'coach.call'
-                    ? t('coach.call', { amount: amt.fmt(tip.amount), pot: amt.fmt(tip.pot) })
-                    : tip.key === 'coach.strong'
-                      ? t('coach.strong', { hand: t(`hand.${tip.rankClass}` as MsgKey) })
-                      : t(tip.key)}
-                  <span className="mt-0.5 block text-[10px] text-ink-400">{t('coach.remaining', { n: COACH_HANDS - academy.coach.hands })}</span>
-                </span>
-                <button className="jc-tap shrink-0 rounded px-1.5 py-1 text-[10px] text-ink-300 hover:text-ivory" onClick={() => me && updateProgress(me.id, (p) => ({ ...p, coach: { ...p.coach, off: true } }))} data-testid="coach-off">
-                  {t('coach.off')}
-                </button>
+            {s && ((prefs.beginner && hand) || tip) && (
+              // A beginner's notes and the coach's tip, one part of the band: it scrolls in what the time bank and the action
+              // bar leave it (nothing but its gap, at the least), so they never push the bar out of the band. Short, the
+              // column scrolls as a whole instead, as it did.
+              <div
+                className={cx('flex w-full flex-col gap-[inherit]', short ? 'shrink-0 items-stretch *:w-full! *:max-w-none!' : 'min-h-0 items-center overflow-y-auto sm:items-end')}
+                data-testid="dock-notes"
+              >
+                {prefs.beginner && hand && (
+                  // The street note (the header names the street too) gives the raise panel its line; both give the help theirs.
+                  <div className="flex flex-col items-center gap-1.5 group-has-[[data-testid=action-help]]/stack:hidden sm:items-end">
+                    <StageNote s={s} className="group-has-[[data-raise-open]]/stack:hidden" />
+                    {seated && prefs.showHand && <CurrentHandPill s={s} />}
+                  </div>
+                )}
+                {tip && (
+                  <div className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-info/40 bg-ink-950/90 p-2.5 text-xs text-ivory backdrop-blur sm:w-[26rem]" role="status" data-testid="coach-tip">
+                    <span className="mt-0.5 shrink-0 rounded-full bg-info/25 px-1.5 text-[10px] font-bold text-[#a9c8ee]">{t('coach.title')}</span>
+                    <span className="min-w-0 flex-1">
+                      {tip.key === 'coach.call'
+                        ? t('coach.call', { amount: amt.fmt(tip.amount), pot: amt.fmt(tip.pot) })
+                        : tip.key === 'coach.strong'
+                          ? t('coach.strong', { hand: t(`hand.${tip.rankClass}` as MsgKey) })
+                          : t(tip.key)}
+                      <span className="mt-0.5 block text-[10px] text-ink-400">{t('coach.remaining', { n: COACH_HANDS - academy.coach.hands })}</span>
+                    </span>
+                    <button className="jc-tap shrink-0 rounded px-1.5 py-1 text-[10px] text-ink-300 hover:text-ivory" onClick={() => me && updateProgress(me.id, (p) => ({ ...p, coach: { ...p.coach, off: true } }))} data-testid="coach-off">
+                      {t('coach.off')}
+                    </button>
+                  </div>
+                )}
+                {myTurn && prefs.beginner && <ActionHelp s={s} className="group-has-[[data-raise-open]]/stack:hidden" />}
               </div>
             )}
             {s && myTurn && (
               <>
-                {prefs.beginner && <ActionHelp s={s} />}
                 {short ? (
-                  // The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen.
-                  <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
-                ) : inTable ? (
-                  // The label is in my seat (above): only the time bank, when there is one, is a line here, as before.
-                  <TimeBankButton s={s} onUse={addBankTime} column={false} />
+                  <>
+                    {/* The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen. */}
+                    <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column />
+                  </>
                 ) : (
-                  // Wider: one line beside the time bank, so the label costs the table no height when there is one.
-                  <div className="pointer-events-none flex max-w-full flex-wrap items-center justify-center gap-2 sm:justify-end" data-testid="turn-line">
-                    <TurnBanner deadline={hand!.deadline} />
-                    <TimeBankButton s={s} onUse={addBankTime} column={false} />
+                  // The label is in my seat. A phone stacks the time bank over the bar, the help open too (a beginner's band
+                  // holds both), and puts it in the presets' line while the raise panel is open (ActionBar's `bank`); wider,
+                  // it is beside the bar.
+                  <div className="pointer-events-none flex w-full shrink-0 flex-col items-center gap-1.5 sm:w-auto sm:flex-row sm:items-end sm:justify-end sm:gap-2">
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} chip={chip} />} />
                   </div>
                 )}
-                <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={short} />
               </>
             )}
-            {/* Leaving, my next turn is a fold (the room plays it whatever was picked), so nothing is offered for it. */}
-            {s && !myTurn && seated && !s.you.leaving && <PreActions s={s} onPick={sock.preAct} column={short} />}
-            {/* A line of its own right above its button, the table making room while it is open: it covers nothing. */}
+            {/* Leaving, my next turn is a fold (the room plays it whatever was picked), so nothing is offered for it; the
+                reaction tray takes its line while open. */}
+            {s && !myTurn && seated && !s.you.leaving && !reactTray.open && <PreActions s={s} onPick={sock.preAct} column={short} />}
+            {/* A line of its own right above its button, in the band kept for it: it covers nothing and moves nothing. */}
             {s && reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={short} />}
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
+                {nextOffer && (
+                  // A quick-play seat gone on arrival, or I just stood up here: where next (another table, this one, the
+                  // lobby), the status line's first, so the table above keeps its size.
+                  <div className="flex basis-full flex-col gap-2 text-gold-300 sm:items-center" role="status" data-testid={leftHere ? 'left-next' : 'quick-missed'}>
+                    {quickPlay.miss ? (
+                      <>
+                        <QuickMissNote miss={quickPlay.miss} filtered={false} />
+                        <Link to={lobbyHref()} className="self-start text-xs font-semibold text-gold-300 underline underline-offset-2 sm:self-center">
+                          {t('nav.lobby')}
+                        </Link>
+                      </>
+                    ) : (
+                      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
+                        {leftHere ? (
+                          <span>
+                            {/* A phone's band has no line to spare for it under the notice saying I stood up (its six
+                                seconds): the notice says more, and a screen reader still hears this. */}
+                            <span className={cx(notice && 'max-sm:sr-only')}>{t('table.leftNext')}</span>{' '}
+                            {!tn && (
+                              <span className="whitespace-nowrap text-xs text-ink-200" data-testid="wallet">
+                                {t('table.wallet')} <span className="font-mono">{formatChips(me?.balance ?? 0)}</span>
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span>{t('quick.missed')}</span>
+                        )}
+                        {/* Each a finger's height (40 px) on a phone too. */}
+                        <span className="flex flex-wrap items-center justify-center gap-2">
+                          {!tn && (
+                            <Button size="sm" className="min-h-10" loading={quickPlay.busy} disabled={!!s.maintenance?.active} onClick={() => quickPlay.run(quick?.filters ?? ANY, [...new Set([...(quick?.tried ?? []), id])])} data-testid="quick-another">
+                              {t('quick.another')}
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="min-h-10"
+                            onClick={() => {
+                              setQuickMissed(false);
+                              setLeftHere(false);
+                            }}
+                            data-testid="stay-here"
+                          >
+                            {s.table.allowSpectators === false ? t('quick.stayHere') : t('quick.stay')}
+                          </Button>
+                          {leftHere && (
+                            <Link to={lobbyHref()} className="jc-tap inline-flex min-h-10 items-center rounded-lg px-2 text-xs font-semibold text-gold-300 underline underline-offset-2" data-testid="left-lobby">
+                              {t('nav.lobby')}
+                            </Link>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {s.you.leaving && (
                   // Still seated, leaving: still in the hand (folded at my turn), all in (once it is settled), or my
                   // stack's way back to the wallet failed and the room tries again.
@@ -789,7 +875,8 @@ export function TablePage() {
                     )}
                   </span>
                 )}
-                {!seated && (
+                {/* Where next says it already, unless I am waiting for a seat. */}
+                {!seated && (!nextOffer || s.you.inWaitlist) && (
                   <span className="text-ink-300" data-testid="viewer-status">
                     {s.you.inWaitlist && me && s.waitlist.includes(me.nickname)
                       ? t('table.waitingN', { n: s.waitlist.indexOf(me.nickname) + 1 })
@@ -820,7 +907,7 @@ export function TablePage() {
                   <span className="whitespace-nowrap text-xs text-ink-300" title={t('table.walletTitle', { amount: formatChips(me?.balance ?? 0) })} data-testid="wallet">
                     <span className="sr-only">{t('table.walletTitle', { amount: formatChips(me?.balance ?? 0) })}</span>
                     <span aria-hidden>
-                      {t('table.walletShort')} <span className="font-mono text-ink-200">{formatChips(me?.balance ?? 0, short || room.narrow)}</span>
+                      {t('table.walletShort')} <span className="font-mono text-ink-200">{formatChips(me?.balance ?? 0, short || narrow)}</span>
                     </span>
                   </span>
                 )}
@@ -828,7 +915,7 @@ export function TablePage() {
                   <span className="flex items-center gap-1 rounded-full border border-gold-500/35 bg-gold-500/10 py-0.5 pl-2.5 pr-1 text-xs text-gold-300" data-testid="topup-queued">
                     {t('topup.queued', { amount: amt.exact(s.you.topUpQueued) })}
                     <button type="button" className="jc-tap grid size-6 place-items-center rounded-full hover:bg-gold-500/20" onClick={() => sock.send({ t: 'cancelTopUp' })} aria-label={t('topup.cancel')} data-testid="topup-cancel">
-                      ✕
+                      <XIcon className="size-3.5" />
                     </button>
                   </span>
                 )}
@@ -864,13 +951,13 @@ export function TablePage() {
         >
           {chatOpen && myTurn && (
             <button className="jc-pulse-gold mb-2 rounded-xl border border-gold-400/60 bg-gold-500/20 px-3 py-2.5 text-sm font-bold text-gold-300 lg:hidden" onClick={() => setChatOpen(false)} data-testid="chat-your-turn">
-              {t('table.yourTurn')} · {t('table.backToTable')} ↓
+              {t('table.yourTurn')} · {t('table.backToTable')} <ArrowDownIcon className="inline size-4 align-[-3px]" />
             </button>
           )}
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-xs font-bold tracking-[0.08em] text-gold-300">{t('table.chat')}</h2>
             <button className="grid size-10 place-items-center text-ink-300 lg:hidden" onClick={() => setChatOpen(false)} aria-label={t('common.close')}>
-              ✕
+              <XIcon className="size-5" />
             </button>
           </div>
           <div className="min-h-0 flex-1">

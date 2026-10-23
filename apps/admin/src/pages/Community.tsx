@@ -1,4 +1,4 @@
-import { Badge, Button, Field, formatDate, Input, Panel } from '@jc/ui';
+import { Badge, Button, Field, formatDate, Input, MessageCircleIcon, Panel, PinIcon, XIcon } from '@jc/ui';
 import { useState, type FormEvent } from 'react';
 import { useT } from '../i18n';
 import { categoryLabel, contentStatusLabel, type Tr } from '../labels';
@@ -100,9 +100,14 @@ export function BoardAdminPage() {
         <ul className="divide-y divide-white/5">
           {shown.map((p) => (
             <li key={p.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm" data-testid="board-row">
-              {p.isNotice && <Badge tone="gold">📌</Badge>}
+              {p.isNotice && (
+                <Badge tone="gold">
+                  <PinIcon className="size-3" />
+                  <span className="sr-only">{t('catNotice')}</span>
+                </Badge>
+              )}
               <span className={`min-w-0 flex-1 truncate ${p.isNotice ? 'font-extrabold text-gold-300' : ''}`}>{p.title}</span>
-              <span className="text-xs text-ink-400">{p.author.withdrawn ? `${t('withdrawnAuthor')} (${p.author.id.slice(0, 8)})` : p.author.nickname} · {formatDate(p.createdAt, locale)} · 💬{p.commentCount} · ♠{p.handCount}</span>
+              <span className="text-xs text-ink-400">{p.author.withdrawn ? `${t('withdrawnAuthor')} (${p.author.id.slice(0, 8)})` : p.author.nickname} · {formatDate(p.createdAt, locale)} · <MessageCircleIcon className="inline size-3 align-[-2px]" /><span className="sr-only">{t('targetComment')} </span>{p.commentCount} · ♠{p.handCount}</span>
               <Badge tone={contentTone(p.status)}>{contentStatusLabel(t, p.status)}</Badge>
               {p.isNotice && <Button size="sm" variant="subtle" onClick={() => openNotice(p.id)}>{t('edit')}</Button>}
               {p.status !== 'visible' ? (
@@ -259,7 +264,7 @@ export function MessagesAdminPage() {
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap gap-1.5" data-testid="picked">
               {picked.length === 0 ? <span className="text-xs text-ink-400">{t('noRecipients')}</span> : picked.map((u) => (
-                <button key={u.id} onClick={() => setPicked((p) => p.filter((x) => x.id !== u.id))} className="rounded-full border border-gold-500/40 bg-gold-500/10 px-2 py-0.5 text-xs text-gold-300">{u.nickname} <span className="font-mono text-[10px] text-ink-300">{u.locale.toUpperCase()}</span> ✕</button>
+                <button key={u.id} onClick={() => setPicked((p) => p.filter((x) => x.id !== u.id))} className="rounded-full border border-gold-500/40 bg-gold-500/10 px-2 py-0.5 text-xs text-gold-300">{u.nickname} <span className="font-mono text-[10px] text-ink-300">{u.locale.toUpperCase()}</span> <XIcon className="inline size-3 align-[-2px]" /></button>
               ))}
             </div>
             {picked.length > 0 && (

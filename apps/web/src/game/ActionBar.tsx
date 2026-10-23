@@ -17,13 +17,18 @@
  * the bar then goes (the seat shows the action taken) or, refused, stays with the reason in the table's toast. A press
  * that could not be sent (no connection) says so over the bar. Neither changes the bar's height.
  *
+ * The bar sits in the table's dock, a band of fixed height under the table (Table.tsx): opening the raise panel grows the
+ * bar inside that band and moves nothing else. In the bar's own row the panel opens in the same gold card, the slider
+ * (the amount at its end) and the presets above the buttons, which narrow, their amounts under their names, to make
+ * room for the confirm button beside them: fold, check and call stay a press away while it is open.
+ *
  * `column`: a short screen's column at the table's side (short.ts), narrower than the bar's own row. The buttons share
  * one row of its width with their amounts under their names (pressed once, a risky one says to press again instead),
  * and the raise panel above them is sized to it, so opening it moves neither the buttons nor the table.
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
-import { cx, formatChips, Spinner } from '@jc/ui';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { cx, formatChips, MinusIcon, PlusIcon, Spinner } from '@jc/ui';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
@@ -44,12 +49,22 @@ function haptic(ms: number) {
 
 const CHIPS = chipAmounts('chips', 0);
 
+/** Narrower than Tailwind's `sm`: a phone held upright, where the bar's own row stacks the time bank over the bar. */
+const PHONE_QUERY = 'not all and (min-width: 40rem)';
+function subscribePhone(onChange: () => void) {
+  const m = window.matchMedia?.(PHONE_QUERY);
+  m?.addEventListener?.('change', onChange);
+  return () => m?.removeEventListener?.('change', onChange);
+}
+const readPhone = () => window.matchMedia?.(PHONE_QUERY).matches === true;
+
 export function ActionBar({
   state,
   onAct,
   busy,
   amounts: a = CHIPS,
   column = false,
+  bank,
 }: {
   state: TableView;
   /** Returns false when it could not be sent (no connection). */
@@ -59,9 +74,16 @@ export function ActionBar({
   amounts?: Amounts;
   /** Laid out for a short screen's column (see above). */
   column?: boolean;
+  /**
+   * The bar's own row's time bank (TimeBank.tsx), drawn before the bar: its pill, or (`inCard`) a cell of the presets'
+   * line, which it is on a phone while the raise panel is open. The dock's band there holds the card alone, and the
+   * table above it keeps the room nine seats need on a 375×667 phone (Table.tsx's dockBand).
+   */
+  bank?: (inCard: boolean) => ReactNode;
 }) {
   const { t } = useI18n();
   const prefs = usePrefs();
+  const phone = useSyncExternalStore(subscribePhone, readPhone, () => false);
   const legal = state.you.legal;
   const find = <K extends LegalOption['type']>(k: K) => legal.find((o) => o.type === k) as Extract<LegalOption, { type: K }> | undefined;
   const fold = find('fold');
@@ -108,14 +130,15 @@ export function ActionBar({
     return () => clearTimeout(h);
   }, [unsent]);
 
-  // The column scrolls when what it holds is taller than the screen (the raise panel under a side-pot line, a phone on its
-  // side): the buttons acted on are kept whole at its end, what is above them scrolled up, instead of cut at the bottom.
-  // Only then: a column that just fits (its padding aside) keeps its top line in view.
+  // The dock scrolls when what it holds is taller than its band (the raise panel under a side-pot line, a phone on its
+  // side, a beginner's notes): the buttons acted on are kept whole at its end, what is above them scrolled up, instead of
+  // cut at the bottom. Only then: a dock that just fits (its padding aside) keeps its top line in view.
   useLayoutEffect(() => {
     const el = root.current;
-    const box = el?.parentElement;
-    if (column && el && box && el.getBoundingClientRect().bottom > box.getBoundingClientRect().bottom + 0.5) el.scrollIntoView({ block: 'nearest' });
-  }, [column, open]);
+    let box = el?.parentElement;
+    while (box && !/auto|scroll/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
+    if (el && box && el.getBoundingClientRect().bottom > box.getBoundingClientRect().bottom + 0.5) el.scrollIntoView({ block: 'nearest' });
+  }, [open]);
 
   // A changed amount cancels an armed commit, even if it is moved back to the armed amount.
   useEffect(() => setArmed((a) => (a?.key === 'commit' ? null : a)), [amount]);
@@ -200,14 +223,22 @@ export function ActionBar({
 
   if (legal.length === 0) return null;
   const isAllInAmount = commit?.type === 'allin';
-  const btn = column
-    ? 'jc-tap jc-act flex h-12 min-w-0 flex-1 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
-    : 'jc-tap jc-act flex h-12 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12 sm:min-w-[7.5rem] sm:flex-none';
+  const panel = open && !!window_;
+  /** The panel open in the bar's own row: in the card, over its buttons. */
+  const inCard = panel && !column;
+  /** The buttons laid out narrow, their amounts under their names: in the column, or beside the card's confirm button. */
+  const compact = column || inCard;
+  /** A phone's time bank, its pill over the bar, is a cell of the presets' line while the panel is open (see `bank`). */
+  const bankInCard = inCard && phone && !!bank;
+  const btnBase = compact
+    ? 'jc-tap jc-act flex h-12 min-w-0 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
+    : 'jc-tap jc-act flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50';
+  const btn = cx(btnBase, 'flex-1', !compact && 'px-2');
   const commitBtn = column
     ? 'jc-tap jc-act flex h-10 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50'
-    : 'jc-tap jc-act flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50 sm:h-12';
-  /** A button's amount, under its name in the column; there, pressed once, the press-again line stands alone. */
-  const amountOf = (key: ArmKey, sig: string, v: number) => !(column && isArmed(key, sig)) && <span className={cx('font-mono', column && 'text-[11px] font-semibold')}>{a.fmt(v, true)}</span>;
+    : 'jc-tap jc-act flex h-12 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50';
+  /** A button's amount, under its name when narrow; there, pressed once, the press-again line stands alone. */
+  const amountOf = (key: ArmKey, sig: string, v: number) => !(compact && isArmed(key, sig)) && <span className={cx('font-mono', compact && 'text-[11px] font-semibold')}>{a.fmt(v, true)}</span>;
   const armedCls = 'ring-2 ring-ivory ring-offset-2 ring-offset-ink-950 animate-pulse';
   // The pressed button stays lit while the others dim.
   const sentCls = (key: ArmKey | 'check' | 'open') => (busy && sent?.key === key ? 'disabled:opacity-100 ring-2 ring-ivory/70' : '');
@@ -234,7 +265,7 @@ export function ActionBar({
   const amountInput = (
     <input
       inputMode={a.unit === 'bb' ? 'decimal' : 'numeric'}
-      className={cx('rounded-lg border border-white/10 bg-ink-850 px-2 text-right font-mono font-semibold text-gold-300', column ? 'h-10 w-24 min-w-0 shrink text-base' : 'h-11 w-full pt-3.5 text-lg sm:h-12')}
+      className={cx('rounded-lg border border-white/10 bg-ink-850 px-2 text-right font-mono font-semibold text-gold-300', column ? 'h-10 w-24 min-w-0 shrink text-base' : 'h-11 w-full pt-3.5 text-base sm:text-lg')}
       value={draft ?? a.toInput(amount)}
       onChange={(e) => {
         const typed = a.clean(e.target.value);
@@ -269,116 +300,138 @@ export function ActionBar({
     </button>
   );
 
-  return (
-    <div ref={root} className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1' : 'gap-2 sm:w-auto')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
-      {open && window_ && (
-        // Open for a moment: the table makes way for it while it is open, then takes the room back (useStackRoom).
-        // In the bar's own row three lines (steps and slider, presets, the amount beside the confirm button), so a phone
-        // held upright keeps as much of its table as it can while the panel is open. In the column four, each 40px (what
-        // a finger needs, no more) and close together: a phone on its side 360px high holds them, the turn line and the
-        // bar without scrolling.
-        <div className={cx('jc-panel flex flex-col', column ? 'gap-1 p-1.5' : 'gap-2 p-2 sm:w-[26rem] sm:gap-3 sm:p-3')} data-momentary data-raise-panel>
-          {column && (
-            <div className="flex items-center gap-2">
-              <span className="flex min-w-0 flex-1 flex-col text-[10px] leading-tight">
-                <span className="font-semibold uppercase tracking-wider text-ink-300">{amountLabel}</span>
-                {fromStack}
-                {inChips}
-              </span>
-              {amountInput}
-            </div>
+  const steps = window_ && (
+    <div className={cx('flex items-center', column ? 'gap-1.5' : 'gap-2')}>
+      <button type="button" className={stepBtn} disabled={amount <= window_.min} onClick={() => pick(clampAmt(amount - bb))} aria-label={`- ${a.fmt(bb)}`}>
+        <MinusIcon className="size-5" />
+      </button>
+      <input
+        type="range"
+        className="jc-range min-w-0 flex-1"
+        min={window_.min}
+        max={window_.max}
+        step={1}
+        value={clampAmt(amount)}
+        onChange={(e) => pick(snap(Number(e.target.value)))}
+        aria-label={amountLabel}
+        aria-valuetext={a.fmt(clampAmt(amount))}
+      />
+      <button type="button" className={stepBtn} disabled={amount >= window_.max} onClick={() => pick(clampAmt(amount + bb))} aria-label={`+ ${a.fmt(bb)}`}>
+        <PlusIcon className="size-5" />
+      </button>
+      {/* In the card the amount ends the slider's line, so the buttons' row keeps fold, check and call. */}
+      {inCard && (
+        <label className="relative w-20 shrink-0 sm:w-32">
+          <span className="pointer-events-none absolute left-2 top-1 text-[10px] font-semibold uppercase leading-3 tracking-wider text-ink-300">{amountLabel}</span>
+          {amountInput}
+        </label>
+      )}
+    </div>
+  );
+  const presetRow = (
+    <div className={cx('grid auto-cols-fr grid-flow-col', column ? 'gap-1' : 'gap-1.5')}>
+      {presets.map((p) => (
+        <button
+          key={p.label}
+          onClick={() => pick(p.value)}
+          className={cx(
+            'jc-tap rounded-lg border font-semibold text-gold-300 hover:bg-gold-500/20',
+            column ? 'h-10 px-0.5 text-[11px] leading-tight' : 'h-10 text-xs',
+            amount === p.value ? 'border-gold-400 bg-gold-500/25' : 'border-gold-500/30 bg-gold-500/10',
           )}
-          <div className={cx('flex items-center', column ? 'gap-1.5' : 'gap-2')}>
-            <button type="button" className={stepBtn} disabled={amount <= window_.min} onClick={() => pick(clampAmt(amount - bb))} aria-label={`- ${a.fmt(bb)}`}>
-              −
-            </button>
-            <input
-              type="range"
-              className="jc-range min-w-0 flex-1"
-              min={window_.min}
-              max={window_.max}
-              step={1}
-              value={clampAmt(amount)}
-              onChange={(e) => pick(snap(Number(e.target.value)))}
-              aria-label={amountLabel}
-              aria-valuetext={a.fmt(clampAmt(amount))}
-            />
-            <button type="button" className={stepBtn} disabled={amount >= window_.max} onClick={() => pick(clampAmt(amount + bb))} aria-label={`+ ${a.fmt(bb)}`}>
-              +
-            </button>
+        >
+          {p.label}
+        </button>
+      ))}
+      {bankInCard && bank?.(true)}
+    </div>
+  );
+  const bar = (
+    <div ref={root} className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1' : 'sm:w-[26rem]')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
+      {panel && column && (
+        // In the column four lines, each 40px (what a finger needs, no more) and close together: a phone on its side
+        // 360px high holds them, the turn line and the bar without scrolling.
+        <div className="jc-panel flex flex-col gap-1 p-1.5" data-momentary data-raise-panel>
+          <div className="flex items-center gap-2">
+            <span className="flex min-w-0 flex-1 flex-col text-[10px] leading-tight">
+              <span className="font-semibold uppercase tracking-wider text-ink-300">{amountLabel}</span>
+              {fromStack}
+              {inChips}
+            </span>
+            {amountInput}
           </div>
-          <div className={cx('grid grid-cols-4', column ? 'gap-1' : 'gap-1.5')}>
-            {presets.map((p) => (
-              <button
-                key={p.label}
-                onClick={() => pick(p.value)}
-                className={cx(
-                  'jc-tap rounded-lg border font-semibold text-gold-300 hover:bg-gold-500/20',
-                  column ? 'h-10 px-0.5 text-[11px] leading-tight' : 'h-10 text-xs',
-                  amount === p.value ? 'border-gold-400 bg-gold-500/25' : 'border-gold-500/30 bg-gold-500/10',
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          {column ? (
-            commitButton
-          ) : (
-            <div className="flex gap-2">
-              <label className="relative w-32 shrink-0">
-                <span className="pointer-events-none absolute left-2 top-1 text-[10px] font-semibold uppercase leading-3 tracking-wider text-ink-300">{amountLabel}</span>
-                {amountInput}
-              </label>
-              <div className="relative flex min-w-0 flex-1">
-                {commitButton}
-                {caption}
-              </div>
-            </div>
-          )}
+          {steps}
+          {presetRow}
+          {commitButton}
         </div>
       )}
       {/* Shown only on my turn: a gold edge says the buttons are live. */}
-      <div className={cx('relative flex rounded-2xl border border-gold-400/60 bg-ink-950/85 shadow-[0_0_14px_rgba(230,197,107,0.22)] backdrop-blur-md', column ? 'gap-1.5 p-1.5' : 'gap-2 p-2')}>
-        {/* Over the bar, so the bar (and the table above it) does not move. */}
+      <div className={cx('relative flex rounded-2xl border border-gold-400/60 bg-ink-950/85 shadow-[0_0_14px_rgba(230,197,107,0.22)] backdrop-blur-md', column ? 'gap-1.5 p-1.5' : 'flex-col gap-1.5 p-2')}>
+        {/* Over the bar, so the bar (and the table above it) does not move; with the panel open, over its slider, which
+            may be the dock's top line (the dock scrolls, and would cut what stands above it). */}
         <p role="status" aria-live="polite" className="sr-only" data-testid="action-sending">
           {busy && sent ? t('action.sending', { action: sent.text }) : ''}
         </p>
         {unsent && (
-          <p role="alert" className="pointer-events-none absolute inset-x-2 bottom-full mb-2 rounded-lg border border-danger/40 bg-ink-950/95 px-3 py-2 text-center text-xs text-[#f3b0b2]" data-testid="action-unsent">
+          <p role="alert" className={cx('pointer-events-none absolute inset-x-2 z-10 rounded-lg border border-danger/40 bg-ink-950/95 px-3 py-2 text-center text-xs text-[#f3b0b2]', inCard ? 'top-2' : 'bottom-full mb-2')} data-testid="action-unsent">
             {t('action.notSent')}
           </p>
         )}
-        {fold && (
-          <button disabled={busy} onClick={doFold} className={cx(btn, isArmed('fold', foldSig) && armedCls, sentCls('fold'))} style={{ background: 'linear-gradient(180deg,var(--act-fold-from),var(--act-fold-to))', color: 'var(--act-fold-fg)' }} aria-keyshortcuts="F" aria-busy={busy && sent?.key === 'fold'}>
-            {pending('fold')}
-            {label('fold', foldSig, t('action.fold'))}
-          </button>
+        {inCard && (
+          // Open, the slider (the amount at its end) and the presets join the card above its row, whose buttons narrow
+          // to make room for the confirm button: the dock's band holds the card either way, so neither the table nor
+          // anything else in the dock moves, and fold, check and call stay a press away.
+          <div className="flex flex-col gap-1.5" data-momentary data-raise-panel>
+            {steps}
+            {presetRow}
+          </div>
         )}
-        {check && (
-          <button disabled={busy} onClick={doCheck} className={cx(btn, sentCls('check'))} style={{ background: 'linear-gradient(180deg,var(--act-check-from),var(--act-check-to))', color: 'var(--act-check-fg)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'check'}>
-            {pending('check')}
-            {t('action.check')}
-          </button>
-        )}
-        {call && (
-          <button disabled={busy} onClick={doCall} className={cx(btn, isArmed('call', callSig) && armedCls, sentCls('call'))} style={{ background: 'linear-gradient(180deg,var(--act-call-from),var(--act-call-to))', color: 'var(--act-call-fg)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'call'}>
-            {pending('call')}
-            {label('call', callSig, t('action.call'))} {amountOf('call', callSig, call.amount)}
-          </button>
-        )}
-        {window_ && (
-          <button ref={toggle} disabled={busy} onClick={() => setOpen((o) => !o)} className={btn} style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }} aria-expanded={open} aria-keyshortcuts="R">
-            {bet ? t('action.bet') : t('action.raise')}
-          </button>
-        )}
-        {allin && !window_ && (
-          <button disabled={busy} onClick={doAllin} className={cx(btn, isArmed('allin', allinSig) && armedCls, sentCls('allin'))} style={{ background: 'linear-gradient(180deg,var(--act-allin-from),var(--act-allin-to))', color: 'var(--act-allin-fg)' }} aria-busy={busy && sent?.key === 'allin'}>
-            {pending('allin')}
-            {label('allin', allinSig, t('action.allin'))} {amountOf('allin', allinSig, allin.amount)}
-          </button>
-        )}
+        {/* One row either way, so its buttons are the same elements open or closed and keep the focus. */}
+        <div className={column ? 'contents' : 'flex gap-2'}>
+          {fold && (
+            <button disabled={busy} onClick={doFold} className={cx(btn, isArmed('fold', foldSig) && armedCls, sentCls('fold'))} style={{ background: 'linear-gradient(180deg,var(--act-fold-from),var(--act-fold-to))', color: 'var(--act-fold-fg)' }} aria-keyshortcuts="F" aria-busy={busy && sent?.key === 'fold'}>
+              {pending('fold')}
+              {label('fold', foldSig, t('action.fold'))}
+            </button>
+          )}
+          {check && (
+            <button disabled={busy} onClick={doCheck} className={cx(btn, sentCls('check'))} style={{ background: 'linear-gradient(180deg,var(--act-check-from),var(--act-check-to))', color: 'var(--act-check-fg)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'check'}>
+              {pending('check')}
+              {t('action.check')}
+            </button>
+          )}
+          {call && (
+            <button disabled={busy} onClick={doCall} className={cx(btn, isArmed('call', callSig) && armedCls, sentCls('call'))} style={{ background: 'linear-gradient(180deg,var(--act-call-from),var(--act-call-to))', color: 'var(--act-call-fg)' }} aria-keyshortcuts="C" aria-busy={busy && sent?.key === 'call'}>
+              {pending('call')}
+              {label('call', callSig, t('action.call'))} {amountOf('call', callSig, call.amount)}
+            </button>
+          )}
+          {window_ && (
+            <button ref={toggle} disabled={busy} onClick={() => setOpen((o) => !o)} className={btn} style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }} aria-expanded={open} aria-keyshortcuts="R">
+              {bet ? t('action.bet') : t('action.raise')}
+            </button>
+          )}
+          {inCard && (
+            <div className="relative flex min-w-0 flex-[2]">
+              {commitButton}
+              {caption}
+            </div>
+          )}
+          {allin && !window_ && (
+            <button disabled={busy} onClick={doAllin} className={cx(btn, isArmed('allin', allinSig) && armedCls, sentCls('allin'))} style={{ background: 'linear-gradient(180deg,var(--act-allin-from),var(--act-allin-to))', color: 'var(--act-allin-fg)' }} aria-busy={busy && sent?.key === 'allin'}>
+              {pending('allin')}
+              {label('allin', allinSig, t('action.allin'))} {amountOf('allin', allinSig, allin.amount)}
+            </button>
+          )}
+        </div>
       </div>
     </div>
+  );
+  // One tree either way, so the bar stays the same element when the time bank moves into its card and keeps the focus.
+  return (
+    <>
+      {bank && !bankInCard && bank(false)}
+      {bar}
+    </>
   );
 }

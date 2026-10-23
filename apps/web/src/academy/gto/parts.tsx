@@ -4,7 +4,7 @@
  * wrong, in range and selected are each shown by a shape or text as well as a colour (colour-vision modes).
  */
 import type { Card } from '@jc/types';
-import { cx, PlayingCard } from '@jc/ui';
+import { CheckIcon, cx, PlayingCard, XIcon } from '@jc/ui';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { cardName, l, useTr, type L } from '../content';
@@ -30,11 +30,11 @@ export const G = {
   offsuit: l('오프수딧', 'offsuit'),
 };
 
-/** ✓ or ✗ in a disc, so a right or wrong answer never rests on colour alone. */
+/** A tick or a cross in a disc, so a right or wrong answer never rests on colour alone. */
 export function Mark({ ok, className }: { ok: boolean; className?: string }) {
   return (
     <span aria-hidden className={cx('grid size-6 shrink-0 place-items-center rounded-full text-xs font-black text-ink-950 shadow ring-2 ring-ink-950', ok ? 'bg-success' : 'bg-danger', className)} data-mark={ok ? 'correct' : 'wrong'}>
-      {ok ? '✓' : '✗'}
+      {ok ? <CheckIcon className="size-3.5 stroke-[3px]" /> : <XIcon className="size-3.5 stroke-[3px]" />}
     </span>
   );
 }
@@ -238,7 +238,7 @@ export function CardPicker({ value, onChange, max, label, testid }: { value: Car
                   className={cx('h-8 min-w-0 rounded font-mono text-[11px] font-bold transition', on ? 'bg-gold-400 text-ink-950 ring-2 ring-gold-300' : 'bg-ink-850 hover:bg-ink-700', !on && (row.red ? 'text-danger-soft' : 'text-ink-100'))}
                 >
                   {r === 'T' ? '10' : r}
-                  {on && <span aria-hidden>✓</span>}
+                  {on && <CheckIcon className="ml-0.5 inline size-3 align-[-1px] stroke-[3px]" />}
                 </button>
               );
             })}
@@ -263,7 +263,7 @@ export function CardsView({ cards, size = 'clamp(2.4rem,11vw,3.2rem)', label }: 
 }
 
 /**
- * Answer options. Before an answer they are plain buttons; after one they lock, the pick shows ✓ or ✗ and the right
+ * Answer options. Before an answer they are plain buttons; after one they lock, the pick shows a tick or a cross and the right
  * option is marked "Answer" in words as well, whatever was picked.
  */
 export function OptionList({ options, answer, picked, onPick, label }: { options: GtoOption[]; answer: string; picked: string | null; onPick: (id: string) => void; label: string }) {

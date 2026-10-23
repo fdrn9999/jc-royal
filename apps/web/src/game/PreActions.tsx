@@ -5,7 +5,7 @@
  * press shows at once until the next state arrives.
  */
 import type { PreActionKind, TableView } from '@jc/types';
-import { cx } from '@jc/ui';
+import { CheckIcon, cx } from '@jc/ui';
 import { useState } from 'react';
 import { useI18n } from '../lib/i18n';
 import { preActionSpot } from './preAction';
@@ -43,7 +43,7 @@ export function PreActions({ s, onPick, column = false }: { s: TableView; onPick
           )}
           data-testid={`pre-${k}`}
         >
-          {kept === k && <span aria-hidden>✓ </span>}
+          {kept === k && <CheckIcon className="mr-1 inline size-3.5 align-[-2px]" />}
           {t(`pre.${k}`)}
         </button>
       ))}

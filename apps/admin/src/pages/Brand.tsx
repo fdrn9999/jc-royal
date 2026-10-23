@@ -4,7 +4,7 @@
  * only the default preview), the preview image itself, the manifest and its icons — and the outside debuggers that
  * refresh what KakaoTalk and Facebook have cached. Read only: the image and copy are changed in code and deployed.
  */
-import { Badge, Button, Empty, formatDate, Panel, Stat } from '@jc/ui';
+import { Badge, Button, ChevronRightIcon, Empty, formatDate, Panel, Stat } from '@jc/ui';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useT, type Key } from '../i18n';
@@ -85,7 +85,7 @@ function Checks({ checks, testid }: { checks: Check[]; testid?: string }) {
       {passed.length > 0 && (
         <details className="group">
           <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-xs text-ink-300 hover:text-ivory [&::-webkit-details-marker]:hidden">
-            <span className="text-ink-400 transition-transform group-open:rotate-90" aria-hidden>▸</span>
+            <ChevronRightIcon className="size-3.5 text-ink-400 transition-transform group-open:rotate-90" />
             {t('brPassed', { n: passed.length })}
           </summary>
           <ul className="flex flex-col divide-y divide-white/5 border-t border-white/5">{passed.map(row)}</ul>

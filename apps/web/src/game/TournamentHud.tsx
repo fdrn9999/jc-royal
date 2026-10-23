@@ -5,7 +5,7 @@
  * the blinds, from the next hand, whatever this screen shows.
  */
 import type { TournamentTableView } from '@jc/types';
-import { cx, formatChips } from '@jc/ui';
+import { cx, formatChips, MedalIcon, SquareIcon, TrophyIcon, XIcon } from '@jc/ui';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { MemberName } from '../components/MemberName';
@@ -50,7 +50,7 @@ export function TournamentBar({ tn }: { tn: TournamentTableView }) {
             : null;
   return (
     <div className="jc-game-surface z-40 flex items-center gap-x-3 gap-y-0.5 overflow-x-auto whitespace-nowrap border-b border-gold-500/10 bg-ink-950/60 px-3 py-1 text-[11px] text-ink-200" data-testid="tn-bar" data-level={tn.level}>
-      <span className="font-bold text-gold-300">🏆 {tr('level', { n: tn.level + 1, total: tn.levelCount })}</span>
+      <span className="inline-flex items-center gap-1 font-bold text-gold-300"><TrophyIcon className="size-3" />{tr('level', { n: tn.level + 1, total: tn.levelCount })}</span>
       <span className="font-mono tabular-nums">
         {formatChips(tn.smallBlind)}/{formatChips(tn.bigBlind)}
       </span>
@@ -104,16 +104,14 @@ export function TournamentResult({ tn }: { tn: TournamentTableView }) {
       data-status={tn.you.status}
     >
       <div className="flex items-start gap-2">
-        <span aria-hidden className="text-xl leading-none">
-          {tn.you.status === 'won' ? '🏆' : tn.status === 'aborted' ? '⏹' : '🎖'}
-        </span>
+        {tn.you.status === 'won' ? <TrophyIcon className="size-5 text-gold-300" /> : tn.status === 'aborted' ? <SquareIcon className="size-5 text-ink-300" /> : <MedalIcon className="size-5 text-gold-300" />}
         <div className="min-w-0 flex-1">
           <p className={cx('font-bold', tn.you.status === 'won' ? 'text-gold-300' : 'text-ivory')}>{head}</p>
           <p className="text-xs text-ink-300">{ended ? (tn.status === 'aborted' ? tr('abortedNote') : tr('result.closing')) : tr('result.watching')}</p>
         </div>
         {!ended && (
           <button type="button" className="jc-tap -mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-full text-ink-300 hover:text-ivory" onClick={() => setClosed(key)} aria-label={tr('result.dismiss')} data-testid="tn-result-close">
-            ✕
+            <XIcon className="size-4" />
           </button>
         )}
       </div>

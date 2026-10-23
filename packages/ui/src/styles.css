@@ -151,6 +151,13 @@
   input[type='range'] {
     accent-color: var(--color-gold-500);
   }
+  /* The UI's line icons (icons.tsx), drawn like this design system's own: 18px, a 1.8 stroke, in the text's colour. A size-* class sets another size. */
+  svg.lucide {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    stroke-width: 1.8;
+  }
   /* Edge draws its own reveal and clear buttons in password fields; PasswordInput has its own eye button. */
   input::-ms-reveal,
   input::-ms-clear {

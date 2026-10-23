@@ -2,7 +2,7 @@
  * Console building blocks the pages share: the dialog in the console's language, what a list shows besides its rows
  * (first load, nothing found, a failed load with a retry), the result of an action, and a page-by-page pager.
  */
-import { Badge, Button, Modal as BaseModal } from '@jc/ui';
+import { Badge, Button, Modal as BaseModal, XIcon } from '@jc/ui';
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { useT } from './i18n';
 
@@ -143,7 +143,7 @@ export function Feedback({ note, testid = 'feedback', pin }: { note: Note; testi
     <div ref={pinned} className="sticky top-[calc(var(--shell-h,0px)_+_0.5rem)] z-20 flex items-start gap-1 rounded-lg bg-ink-950 shadow-lg shadow-black/40" data-testid={`${testid}-pin`}>
       {p}
       <button type="button" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-ink-300 hover:text-ivory" aria-label={t('closeNote')} onClick={() => setClosed(note)} data-testid={`${testid}-close`}>
-        <span aria-hidden>✕</span>
+        <XIcon />
       </button>
     </div>
   );

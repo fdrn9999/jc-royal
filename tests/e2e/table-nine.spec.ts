@@ -9,10 +9,10 @@ import { measureTable, smallTargets, type TableReport } from './table-layout';
  *
  * Every seat, bet, the board and every control of the stack has its own room, and each bet lies nearer its own seat
  * than any other (measureTable), and every button and field of the action bar and the raise panel is at least 40px each
- * way (smallTargets). Upright the raise panel takes the room from the table while it is open (on a small
- * phone the seats then overlap), and the table gets it back when the panel closes. Sideways (short.ts) the controls are
- * a column at the right and the table keeps the full height, the panel open or not (at 800×360 the top row's middle
- * bets lie beside the pot, under their seats). Upright on the iPhone SE nine seats fit only with some bets nearer a
+ * way (smallTargets). The table keeps its size and place with the raise panel open, and so everything it holds: upright
+ * the panel grows inside the dock under the table, which keeps the bar's room at its tallest (Table.tsx's dockBand), and
+ * sideways (short.ts) the controls are a column at the right (at 800×360 the top row's middle bets lie beside the pot,
+ * under their seats). Upright on the iPhone SE nine seats fit only with some bets nearer a
  * neighbour, and on it sideways the bets have no room each by its own seat (layout.ts places each as near its seat as
  * it can): there a bet may lie astray (TEST_REPORT), everything else is held.
  */
@@ -41,7 +41,7 @@ async function act(p: Page) {
   if (await fold.isVisible().catch(() => false)) await fold.click();
 }
 
-test('9인 실시간 테이블: 휴대폰(세로·가로)·태블릿·노트북에서 좌석·베팅·조작이 화면 안에 겹침 없이 있고, 레이즈 패널을 닫으면 테이블이 원래 크기로 돌아온다', async ({ browser }) => {
+test('9인 실시간 테이블: 휴대폰(세로·가로)·태블릿·노트북에서 좌석·베팅·조작이 화면 안에 겹침 없이 있고, 레이즈 패널을 열고 닫아도 테이블이 그대로다', async ({ browser }) => {
   test.setTimeout(630_000);
   const { page } = await signUp(browser);
   await sitWith(page, 'e2e-nine', 1000);
@@ -91,23 +91,17 @@ test('9인 실시간 테이블: 휴대폰(세로·가로)·태블릿·노트북�
     await raise.click();
     await expect(raise).toHaveAttribute('aria-expanded', 'true');
     await expect(bar.getByTestId('action-commit')).toBeVisible();
-    // An upright phone's table makes way for the panel a frame or two after it opens: it is read once it has.
-    if (sc.mobile && !sc.sideways && sc.viewport.width < 640) {
-      await expect.poll(async () => (await measureTable(p)).table, { message: `${sc.name}: table makes way for the panel` }).not.toEqual(before.table);
-    }
     const open = await look('raise-open');
-    // Upright the panel, the bar, the turn line and the time bank stay on screen and in reach; sideways all of it, and
-    // the table as it was.
-    const controls = sc.sideways ? held(open, sc) : open.issues.filter((x) => x.item.includes(':') || x.item.startsWith('line-'));
-    expect(controls, `${sc.name} raise open`).toEqual([]);
+    // The panel, the bar, the turn line and the time bank on screen and in reach, and the table as it was, with all it
+    // holds (before, an upright phone's table made way for the panel: TEST_REPORT).
+    expect(open.table, `${sc.name}: the table keeps its size with the panel open`).toEqual(before.table);
+    expect(held(open, sc), `${sc.name} raise open`).toEqual([]);
     // Every button and field of the bar and the panel at least 40px each way, the column's too.
     expect(await smallTargets(p), `${sc.name} raise open: small targets`).toEqual([]);
-    if (sc.sideways) expect(open.table, `${sc.name}: the table keeps its size with the panel open`).toEqual(before.table);
 
     await raise.click();
     await expect(bar.getByTestId('action-commit')).toHaveCount(0);
-    // The table takes its room back once the panel has closed (a frame for the stack to be read again).
-    await expect.poll(async () => (await measureTable(p)).table, { message: `${sc.name}: table back to its size` }).toEqual(before.table);
+    expect((await measureTable(p)).table, `${sc.name}: the table keeps its size with the panel closed`).toEqual(before.table);
     const after = await look('raise-closed');
     expect(held(after, sc), `${sc.name} raise closed`).toEqual([]);
 

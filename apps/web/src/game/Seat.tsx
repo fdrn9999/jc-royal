@@ -4,7 +4,7 @@
  * rebuilt for the server-projected SeatView and the JC ROYAL style.
  */
 import type { SeatView } from '@jc/types';
-import { cx, PlayingCard } from '@jc/ui';
+import { CrownIcon, cx, HourglassIcon, PlayingCard, PlusIcon } from '@jc/ui';
 import { memo, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
@@ -199,7 +199,7 @@ function SeatPlace(p: SeatProps) {
             aria-label={t('table.heldSeat')}
             data-testid={`held-${s.seatIndex}`}
           >
-            <span aria-hidden>⏳</span>
+            <HourglassIcon className="size-4" />
           </div>
         ) : p.canSit ? (
           <button
@@ -207,7 +207,7 @@ function SeatPlace(p: SeatProps) {
             data-testid={`sit-${s.seatIndex}`}
             className={cx('flex flex-col items-center justify-center rounded-full border border-dashed border-gold-500/50 bg-black/40 text-[10px] font-semibold text-gold-300 transition hover:bg-gold-500/15', z.sit)}
           >
-            <span className="text-base leading-none">＋</span>
+            <PlusIcon className="size-4" />
             {t('table.sit')}
           </button>
         ) : (
@@ -256,8 +256,10 @@ function SeatPlace(p: SeatProps) {
     >
       {/* A folded hand fades back in when its owner shows a card (quieter than a winner's: it stays where it is). */}
       <div className={cx('relative flex flex-col items-center transition-opacity duration-300', folded && !shown && 'opacity-55')}>
-        {/* hole cards */}
-        {cards.length > 0 && (
+        {/* hole cards. A seat without any keeps their room, empty: layout.ts lays every seat out with its cards, and the
+            seat is centred on its place, so its plate and status line would rise half a card as its cards fold away (a
+            folded seat's bet then read as its neighbour's on a small phone) and drop as they are dealt. */}
+        {cards.length > 0 ? (
           <div className={cx('relative flex', z.cards, p.isMe ? 'gap-1' : z.spread)} key={p.newHandKey ?? 'cards'}>
             {cards.map((c, i) =>
               rests(i) ? (
@@ -319,6 +321,12 @@ function SeatPlace(p: SeatProps) {
                 )}
               </div>
             )}
+          </div>
+        ) : (
+          <div aria-hidden className={cx('flex', z.cards, p.isMe ? 'gap-1' : z.spread)} data-testid={`no-cards-${s.seatIndex}`}>
+            {[0, 1].map((i) => (
+              <span key={i} className="block shrink-0" style={{ width: cardSize, height: `calc(${cardSize} * 1.4)` }} />
+            ))}
           </div>
         )}
         {/* A winner's shown cards, resting by the board, each in its own place of two (a card shown later takes the other
@@ -397,8 +405,8 @@ function SeatPlace(p: SeatProps) {
             </span>
           )}
           {p.isHost && (
-            <span className={cx('absolute z-10 rounded-full border border-gold-500/50 bg-ink-950 px-1 text-[10px] leading-4', z.host)} title={t('room.host')} aria-label={t('room.host')} data-testid="host-mark">
-              👑
+            <span className={cx('absolute z-10 grid h-4 place-items-center rounded-full border border-gold-500/50 bg-ink-950 px-1 text-gold-300', z.host)} title={t('room.host')} aria-label={t('room.host')} data-testid="host-mark">
+              <CrownIcon className="size-2.5" />
             </span>
           )}
           {p.onPick && (

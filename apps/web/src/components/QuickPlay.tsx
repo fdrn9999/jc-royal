@@ -5,7 +5,7 @@
  * the tables already tried, so "find another table" on the table page skips them.
  */
 import type { LobbyTableDto, QuickPlayDto } from '@jc/types';
-import { Button, formatChips } from '@jc/ui';
+import { Button, formatChips, PlusIcon, ZapIcon } from '@jc/ui';
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError } from '../lib/api';
@@ -94,7 +94,8 @@ export function QuickMissNote({ miss, filtered, onReset, onRetry, onCreateRoom }
         )}
         {miss.code !== 'insufficient_balance' && onCreateRoom && (
           <Button size="sm" variant="outline" onClick={onCreateRoom}>
-            ＋ {t('room.create')}
+            <PlusIcon />
+            {t('room.create')}
           </Button>
         )}
         {miss.code === 'insufficient_balance' && (
@@ -158,7 +159,8 @@ export function QuickPlayPanel({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         <div className="min-w-0 lg:w-80 lg:shrink-0">
           <h2 id="quick-title" className="font-bold text-ivory">
-            ⚡ {t('quick.title')}
+            <ZapIcon className="mr-1 inline size-4 align-[-2px] text-gold-300" />
+            {t('quick.title')}
           </h2>
           <p className="mt-1 text-xs text-ink-300">{t('quick.desc')}</p>
         </div>

@@ -121,7 +121,7 @@ describe('VIP name', () => {
   it('shows a VIP host with the diamond instead of the member mark', () => {
     const out = html(h(HostedBy, { host: { nickname: 'Rosa', vip: 'emerald' } }));
     expect(out).toContain('vip-icon');
-    expect(out).not.toContain('👤');
+    expect(out).not.toContain('lucide-user');
     expect(out).toMatch(/방장 <span class="jc-vip-name" data-vip="emerald">Rosa<\/span>/);
   });
 });
@@ -130,7 +130,7 @@ describe('HostedBy', () => {
   it('colors only the name inside the translated sentence', () => {
     expect(html(h(HostedBy, { host: { nickname: 'Royal', role: 'super_admin' } }))).toMatch(/방장 <span class="jc-role-name" data-role="super_admin">Royal<\/span>/);
     const member = html(h(HostedBy, { host: { nickname: 'Joe' } }));
-    expect(member).toContain('👤');
+    expect(member).toContain('lucide-user');
     expect(member).toMatch(/방장 <span>Joe<\/span>/);
   });
 });

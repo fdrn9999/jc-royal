@@ -254,7 +254,8 @@ describe('GTO academy tools (§29)', () => {
       const html = renderToStaticMarkup(h(I18nProvider, null, h(GtoTool, { kind })));
       expect(html, kind).toContain(`data-testid="tool-${kind}"`);
       expect(html, kind).toMatch(/data-accuracy="(exact|estimate|example)"/);
-      expect(html, kind).not.toMatch(/https?:\/\//); // no external links (§27)
+      // No external links (§27); an inline icon's SVG namespace is not one.
+      expect(html.replaceAll('xmlns="http://www.w3.org/2000/svg"', ''), kind).not.toMatch(/https?:\/\//);
     }
   });
 

@@ -1,5 +1,5 @@
 import type { AuthorDto, CommentDto, HandSummaryDto, PostDetailDto, PostListItemDto, PostPageDto, PublicUserDto } from '@jc/types';
-import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PlayingCard } from '@jc/ui';
+import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PinIcon, PlayingCard } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { HandReview } from '../components/HandReview';
@@ -50,7 +50,7 @@ function PostRow({ p, notice }: { p: PostListItemDto; notice?: boolean }) {
     <li>
       <Link to={`/board/${p.id}`} className={`flex flex-col gap-1 px-3 py-3 transition hover:bg-white/[0.03] sm:flex-row sm:items-center sm:gap-4 ${notice ? 'bg-gold-500/[0.06]' : ''}`} data-testid={notice ? 'notice-row' : 'post-row'}>
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          {notice && <Badge tone="gold">📌 {t('board.notice')}</Badge>}
+          {notice && <Badge tone="gold"><PinIcon className="size-3" />{t('board.notice')}</Badge>}
           <span className={`truncate ${notice ? 'font-extrabold text-gold-300' : 'font-medium text-ivory'}`}>{p.title}</span>
           {p.commentCount > 0 && <span className="shrink-0 text-xs font-semibold text-gold-400">[{p.commentCount}]</span>}
           {p.handCount > 0 && <span className="shrink-0 rounded bg-success/15 px-1 text-[10px] font-bold text-[#9fd8b6]">♠ {p.handCount}</span>}
@@ -170,7 +170,7 @@ export function PostPage() {
       <article className="jc-panel p-5 sm:p-6">
         <header className="mb-4 border-b border-white/5 pb-4">
           <h1 className={`text-xl sm:text-2xl ${post.isNotice ? 'font-extrabold text-gold-300' : 'font-bold'}`} data-testid="post-title">
-            {post.isNotice && <Badge tone="gold" className="mr-2 align-middle">📌 {t('board.notice')}</Badge>}
+            {post.isNotice && <Badge tone="gold" className="mr-2 align-middle"><PinIcon className="size-3" />{t('board.notice')}</Badge>}
             {post.title}
           </h1>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-ink-400">

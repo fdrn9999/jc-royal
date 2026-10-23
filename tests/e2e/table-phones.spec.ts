@@ -1,6 +1,5 @@
 import { expect, type Page } from '@playwright/test';
 import { checkOrCall, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
-import type { LayoutIssue } from './replay-layout';
 import { measureTable, smallTargets, tablePlaces, type TableReport } from './table-layout';
 
 /**
@@ -9,21 +8,19 @@ import { measureTable, smallTargets, tablePlaces, type TableReport } from './tab
  * the table while the player waits and on their turn, opens the raise panel and closes it again.
  *
  * Waiting and on the turn every seat, bet, the board and every control has its own room and each bet lies by its own
- * seat (measureTable). With the panel open the panel, the bar, the turn line and the time bank are on screen, in reach
- * and at least 40px each way, and so is the table, every card, bet, stack, name and the pot read whole (hit-tested over
- * all their text), but where it is short of room (320 wide, `tight`): there pieces may touch, and what matters less may
- * lie under what matters more (a seat's name, status line and cards face down; a stack under the pot; the player's own
- * bet under their seat; their cards over the board's edge by 2px at most), while the player's cards, the board, the pot
- * and every other bet read whole. The table gets its room back when the panel closes.
+ * seat (measureTable). The table keeps its size and place as the panel opens and closes (the dock under it keeps the
+ * bar's room at its tallest: Table.tsx's dockBand). With the panel open the panel, the bar, the turn line and the time
+ * bank are on screen, in reach and at least 40px each way, and the table is as on the turn: nothing over anything, and
+ * every card, bet, stack, name and the pot read whole (hit-tested over all their text).
  */
 // English last: the language is the account's (chosen in the settings), so every screen after it would read English.
 const PHONES = [
-  { name: 'small phone 320×568', viewport: { width: 320, height: 568 }, scale: 2, locale: 'ko', tight: true },
+  { name: 'small phone 320×568', viewport: { width: 320, height: 568 }, scale: 2, locale: 'ko' },
   { name: 'Android 360×800', viewport: { width: 360, height: 800 }, scale: 3, locale: 'ko' },
   { name: 'iPhone SE 375×667', viewport: { width: 375, height: 667 }, scale: 2, locale: 'ko' },
   { name: 'iPhone 15 393×852', viewport: { width: 393, height: 852 }, scale: 3, locale: 'ko' },
   { name: 'Android 412×839', viewport: { width: 412, height: 839 }, scale: 2.625, locale: 'ko' },
-  { name: 'small phone 320×568 (English)', viewport: { width: 320, height: 568 }, scale: 2, locale: 'en', tight: true },
+  { name: 'small phone 320×568 (English)', viewport: { width: 320, height: 568 }, scale: 2, locale: 'en' },
 ];
 
 /** Checks, else folds: the player keeps their chips through every screen. */
@@ -35,7 +32,7 @@ async function act(p: Page) {
   if (await fold.isVisible().catch(() => false)) await fold.click();
 }
 
-test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조작이 겹침 없이 화면 안에 있고, 레이즈 패널을 열어도 내 카드와 조작이 보이며 닫으면 테이블이 돌아온다', async ({ browser }) => {
+test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조작이 겹침 없이 화면 안에 있고, 레이즈 패널을 열고 닫아도 테이블이 그대로다', async ({ browser }) => {
   test.setTimeout(600_000);
   const { page, nickname } = await signUp(browser);
   await sitWith(page, 'e2e-phones', 1000);
@@ -91,52 +88,23 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
     expect(before.issues, `${sc.name} turn`).toEqual([]);
     expect(await smallTargets(p), `${sc.name} turn: small targets`).toEqual([]);
 
-    // The table makes way for the panel a frame after it opens (once the stack's room is measured), in one move: the
-    // table's size is worked out with the room it gives, not measured a frame later (it moved twice; TEST_REPORT).
-    expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table moves once as the panel opens`).toBe(2);
+    // The table and the player's seat stay where they were, every frame, as the panel opens: it grows inside the dock
+    // (before, the table made way for it, moving once each way: TEST_REPORT).
+    expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table stays put as the panel opens`).toBe(1);
     await expect(raise).toHaveAttribute('aria-expanded', 'true');
     await expect(bar.getByTestId('action-commit')).toBeVisible();
-    await expect.poll(async () => (await measureTable(p)).table, { message: `${sc.name}: table makes way for the panel` }).not.toEqual(before.table);
     // Every card's face, bet, stack, name and the pot hit-tested over the whole of its text or face.
     const open = await look('raise-open', /^(card|board|bet|stack|name|pot)-/);
-    // The panel, the bar, the turn line and the time bank on screen, in reach and clear of the table.
-    expect(open.issues.filter((x) => x.item.includes(':') || x.item.startsWith('line-')), `${sc.name} raise open: controls`).toEqual([]);
+    expect(open.table, `${sc.name}: the table keeps its size with the panel open`).toEqual(before.table);
+    // The panel, the bar, the turn line and the time bank on screen, in reach and clear of the table, and the table
+    // with nothing over anything.
+    expect(open.issues, `${sc.name} raise open`).toEqual([]);
     expect(await smallTargets(p), `${sc.name} raise open: small targets`).toEqual([]);
-    const own = (id = '') => id.startsWith(`card-${mine}-`);
-    expect(open.items.filter((x) => own(x)), `${sc.name} raise open: own cards`).toHaveLength(2);
-    // The table with nothing over anything, but where it is short of room while the panel is open (320 wide, `tight`):
-    // there no way of laying six seats and their bets out in it leaves nothing overlapping (layout.ts lays the least,
-    // the board's cards and each bet by its own seat first), so pieces may touch, and what matters less may lie under
-    // what matters more (the order the table keeps: the player's own cards, the board and the pot, the bets and stacks,
-    // then the rest). The player's own cards, the board's cards, the pot and every other bet still read whole (the dense
-    // hit tests), and so does every stack but the one of the seat across the table under the pot (the pot's row lies on
-    // it: the three seats at the top take the whole width). What may lie under them: a seat's name (cut short to a letter
-    // here), its status line (the last action, a bot's level) and its cards face down, and the player's own bet under
-    // their own seat (its amount is on the call and the raise: "N from your stack"). The player's own cards lie over the
-    // board's edge (drawn above it) by 2px at most (TEST_REPORT).
-    const by = (x: LayoutIssue) => (x.by ?? '').split(' | ');
-    const tight = (x: LayoutIssue) => {
-      if (!('tight' in sc)) return false;
-      if (x.kind === 'covered') {
-        if (/^(name-\d+|status-\d+-\d+)$/.test(x.item)) return true;
-        const back = /^card-(\d+)-\d+$/.exec(x.item);
-        if (back) return back[1] !== mine;
-        if (x.item === `bet-${mine}`) return by(x).every((b) => b.startsWith(`seat-${mine}>`) || b.startsWith(`card-${mine}-`));
-        return /^stack-\d+$/.test(x.item) && by(x).every((b) => b === 'pot' || b.startsWith('pot>'));
-      }
-      if (x.kind !== 'overlap') return false;
-      if (own(x.item) || own(x.by)) {
-        const other = own(x.item) ? x.by! : x.item;
-        return other === `bet-${mine}` || (/^board-\d+$/.test(other) && (x.px ?? 0) <= 2);
-      }
-      return true;
-    };
-    expect(open.issues.filter((x) => !x.item.includes(':') && !x.item.startsWith('line-') && !tight(x)), `${sc.name} raise open: table`).toEqual([]);
+    expect(open.items.filter((x) => x.startsWith(`card-${mine}-`)), `${sc.name} raise open: own cards`).toHaveLength(2);
 
-    expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table moves once as the panel closes`).toBe(2);
+    expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table stays put as the panel closes`).toBe(1);
     await expect(bar.getByTestId('action-commit')).toHaveCount(0);
-    // The table takes its room back once the panel has closed (a frame for the stack to be read again).
-    await expect.poll(async () => (await measureTable(p)).table, { message: `${sc.name}: table back to its size` }).toEqual(before.table);
+    expect((await measureTable(p)).table, `${sc.name}: the table keeps its size with the panel closed`).toEqual(before.table);
     expect((await look('raise-closed')).issues, `${sc.name} raise closed`).toEqual([]);
 
     await act(p);

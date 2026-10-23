@@ -5,7 +5,7 @@
  * reduced motion are kept: the sound engine plays nothing muted or hidden, and the pulse stops under reduced motion.
  */
 import { sound } from '@jc/audio';
-import { cx } from '@jc/ui';
+import { cx, TriangleAlertIcon } from '@jc/ui';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../lib/i18n';
 
@@ -114,7 +114,7 @@ export function useSecondsLeft(deadline: number | null): number | null {
  * "Your turn" with the time left, at the action bar (above it on a wider screen; in a short screen's column, `compact`
  * in the time bank's pill, so the column is no taller for it; on a phone upright, `inSeat` in my seat's status line, right
  * above the bar, so the table keeps the height a line of its own would take). Takes no taps and lays nothing over the
- * table. Low on time it turns to the warning colour with a ⚠ and says so to a screen reader once (the seconds themselves
+ * table. Low on time it turns to the warning colour with a warning sign and says so to a screen reader once (the seconds themselves
  * are not read out).
  */
 export function TurnBanner({ deadline, compact = false, inSeat = false, className }: { deadline: number | null; compact?: boolean; inSeat?: boolean; className?: string }) {
@@ -139,7 +139,7 @@ export function TurnBanner({ deadline, compact = false, inSeat = false, classNam
       <span className="uppercase">{t(short ? 'table.turnTitle' : 'table.yourTurn')}</span>
       {left !== null && (
         <span className="font-mono tabular-nums" aria-hidden data-testid="turn-left">
-          {low && '⚠ '}
+          {low && <TriangleAlertIcon className="mr-1 inline size-3.5 align-[-2px]" />}
           {t('table.turnLeft', { n: left })}
         </span>
       )}

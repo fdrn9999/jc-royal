@@ -159,7 +159,7 @@ describe('TurnBanner', () => {
     expect(TURN_LOW_MS).toBe(5_000);
     const at = html(1_000_000 + TURN_LOW_MS);
     expect(at).toContain('data-low=""');
-    expect(at).toMatch(/data-testid="turn-left">⚠ 5초</);
+    expect(at).toMatch(/data-testid="turn-left"><svg[^>]*lucide-triangle-alert[^>]*>.*?<\/svg>5초</);
     expect(at).toContain('시간이 얼마 남지 않았습니다');
     expect(at).toContain('text-danger-soft');
     expect(at).not.toContain('jc-pulse-gold');
@@ -177,7 +177,7 @@ describe('TurnBanner', () => {
     expect(out).not.toContain('border');
     const low = html2(1_000_000 + 2_000);
     expect(low).toContain('data-low=""');
-    expect(low).toMatch(/data-testid="turn-left">⚠ 2초</);
+    expect(low).toMatch(/data-testid="turn-left"><svg[^>]*lucide-triangle-alert[^>]*>.*?<\/svg>2초</);
     expect(low).toContain('시간이 얼마 남지 않았습니다');
   });
 
@@ -196,13 +196,13 @@ describe('TurnBanner', () => {
     expect(out).not.toContain('text-xs');
     const low = seat(1_000_000 + 4_000);
     expect(low).toContain('data-low=""');
-    expect(low).toMatch(/data-testid="turn-left">⚠ 4초</);
+    expect(low).toMatch(/data-testid="turn-left"><svg[^>]*lucide-triangle-alert[^>]*>.*?<\/svg>4초</);
     expect(low).toContain('시간이 얼마 남지 않았습니다');
     expect(low).toContain('text-danger-soft');
   });
 
   it('never counts below zero, and shows no clock without a deadline', () => {
-    expect(html(1_000_000 - 3_000)).toMatch(/data-testid="turn-left">⚠ 0초</);
+    expect(html(1_000_000 - 3_000)).toMatch(/data-testid="turn-left"><svg[^>]*lucide-triangle-alert[^>]*>.*?<\/svg>0초</);
     const none = html(null);
     expect(none).toContain('내 차례입니다');
     expect(none).not.toContain('turn-left');

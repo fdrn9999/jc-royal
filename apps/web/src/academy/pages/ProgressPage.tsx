@@ -1,4 +1,4 @@
-import { Button, cx, Modal, Stat } from '@jc/ui';
+import { Button, CheckIcon, cx, Modal, Stat } from '@jc/ui';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../../lib/auth';
@@ -37,7 +37,7 @@ export function ProgressPage() {
           const x = p.lessons[id];
           return (
             <div key={id} className="flex items-center gap-3 p-3 text-sm">
-              <span className={cx('grid size-8 shrink-0 place-items-center rounded-lg', isDone(p, id) ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-ink-300')}>{isDone(p, id) ? '✓' : LESSONS[id].n}</span>
+              <span className={cx('grid size-8 shrink-0 place-items-center rounded-lg', isDone(p, id) ? 'bg-gold-500 text-ink-950' : 'bg-ink-700 text-ink-300')}>{isDone(p, id) ? <CheckIcon className="size-4 stroke-[3px]" /> : LESSONS[id].n}</span>
               <span className="min-w-0 flex-1 font-semibold text-ivory">{tr(LESSONS[id].title)}</span>
               <span className="text-xs text-ink-400">{x ? (isDone(p, id) ? `${tr(l('완료', 'Done'))} ${date(x.completedAt ?? 0)}` : `${tr(l('단계', 'Step'))} ${x.step + 1}`) : tr(l('시작 전', 'Not started'))}</span>
             </div>

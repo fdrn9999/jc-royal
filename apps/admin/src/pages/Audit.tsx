@@ -3,7 +3,7 @@
  * (a link from a member or table opens it filtered); pages follow a cursor (the last entry's time and id), and the
  * first page counts the matches up to the API's cap. Plain administrators see their own entries (`audit.all`).
  */
-import { Badge, Button, Empty, formatDate, Input, Panel } from '@jc/ui';
+import { ArrowRightIcon, Badge, Button, Empty, formatDate, Input, Panel, XIcon } from '@jc/ui';
 import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
@@ -162,17 +162,17 @@ export function AuditPage() {
           <div className="flex flex-wrap items-center gap-2">
             {action && !family && (
               <button className={chipCls} onClick={() => set({ action: null })} data-testid="audit-action-chip">
-                {t('action')}: {auditActionLabel(t, action)} ✕
+                {t('action')}: {auditActionLabel(t, action)} <XIcon className="inline size-3 align-[-2px]" />
               </button>
             )}
             {targetId && (
               <button className={chipCls} onClick={() => set({ targetId: null })} data-testid="audit-target-chip">
-                {t('target')}: {targetTypeLabel(t, params.get('targetType'))} {targetName} ✕
+                {t('target')}: {targetTypeLabel(t, params.get('targetType'))} {targetName} <XIcon className="inline size-3 align-[-2px]" />
               </button>
             )}
             {actor && !staff?.items.some((s) => s.id === actor) && (
               <button className={chipCls} onClick={() => set({ actor: null })} data-testid="audit-actor-chip">
-                {t('actor')}: {actorName(actor)} ✕
+                {t('actor')}: {actorName(actor)} <XIcon className="inline size-3 align-[-2px]" />
               </button>
             )}
             {filtered && <Button size="sm" variant="ghost" onClick={reset} data-testid="audit-reset">{t('auditReset')}</Button>}
@@ -217,10 +217,10 @@ export function AuditPage() {
                             </button>
                           ) : null}
                           {a.target.id && (a.target.type === 'user' || a.target.type === 'table' || a.target.type === 'tournament') && (
-                            <Link to={`/${a.target.type === 'user' ? 'users' : a.target.type === 'table' ? 'tables' : 'tournaments'}/${a.target.id}`} className="ml-1 text-gold-300" aria-label={t('detail')}>→</Link>
+                            <Link to={`/${a.target.type === 'user' ? 'users' : a.target.type === 'table' ? 'tables' : 'tournaments'}/${a.target.id}`} className="ml-1 text-gold-300" aria-label={t('detail')}><ArrowRightIcon className="inline size-3.5 align-[-2px]" /></Link>
                           )}
                           {a.target.type === 'tournament_template' && (
-                            <Link to="/tournaments/templates" className="ml-1 text-gold-300" aria-label={t('detail')}>→</Link>
+                            <Link to="/tournaments/templates" className="ml-1 text-gold-300" aria-label={t('detail')}><ArrowRightIcon className="inline size-3.5 align-[-2px]" /></Link>
                           )}
                         </>
                       ) : (

@@ -11,7 +11,7 @@ import {
   type LobbyTableDto,
   type SocialSettingsDto,
 } from '@jc/types';
-import { Button, cx, Empty, formatChips, Input, Modal, Panel, Spinner } from '@jc/ui';
+import { ArrowLeftIcon, Button, cx, Empty, formatChips, Input, LockIcon, Modal, Panel, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
@@ -139,7 +139,7 @@ function InvitePicker({ friend, onClose, onSent }: { friend: FriendDto | null; o
                             <HostedBy host={tb.host} />
                           </>
                         )}
-                        {tb.isPrivate && <span className="shrink-0">· 🔒 {t('invite.private')}</span>}
+                        {tb.isPrivate && <span className="shrink-0">· <LockIcon className="inline size-3 align-[-1px]" /> {t('invite.private')}</span>}
                       </span>
                     </span>
                     <span className="shrink-0 text-right font-mono text-sm tabular-nums text-gold-300">
@@ -388,7 +388,7 @@ export function FriendSettingsPage() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
       <header className="flex items-center gap-2">
-        <Link to="/friends" className="grid size-10 place-items-center rounded-full text-gold-300 hover:bg-white/5" aria-label={t('friends.title')}>←</Link>
+        <Link to="/friends" className="grid size-10 place-items-center rounded-full text-gold-300 hover:bg-white/5" aria-label={t('friends.title')}><ArrowLeftIcon className="size-5" /></Link>
         <h1 className="text-xl font-extrabold tracking-[0.04em] jc-gold-text">{t('social.settingsTitle')}</h1>
       </header>
       {note && <p className={cx('text-sm', note.ok ? 'text-gold-300' : 'text-danger')} role={note.ok ? 'status' : 'alert'}>{note.text}</p>}
@@ -724,7 +724,7 @@ export function ConversationPage() {
   return (
     <div className="mx-auto flex h-[calc(100dvh-11.5rem)] min-h-[22rem] w-full max-w-3xl flex-col gap-3 sm:h-[calc(100dvh-8rem)]">
       <header className="flex shrink-0 items-center gap-3">
-        <Link to="/friends" className="grid size-10 place-items-center rounded-full text-gold-300 hover:bg-white/5" aria-label={t('friends.title')}>←</Link>
+        <Link to="/friends" className="grid size-10 place-items-center rounded-full text-gold-300 hover:bg-white/5" aria-label={t('friends.title')}><ArrowLeftIcon className="size-5" /></Link>
         <PresenceCorner state={peerState}>
           <Avatar user={conv.user} />
         </PresenceCorner>

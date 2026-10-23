@@ -1,5 +1,5 @@
 import { TREND_DAYS, type PositionStatsDto, type StatRatio, type StatsTrendDto } from '@jc/types';
-import { cx, Empty, Figure, formatChips, Stat } from '@jc/ui';
+import { ChevronDownIcon, cx, Empty, Figure, formatChips, Stat } from '@jc/ui';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -85,7 +85,7 @@ export function StatDefinitions() {
     <details className="group rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3" data-testid="stats-definitions">
       <summary className="jc-tap flex min-h-8 cursor-pointer list-none items-center justify-between text-sm font-semibold text-ink-300 hover:text-ivory">
         {t('me.defs')}
-        <span aria-hidden className="text-ink-400 transition group-open:rotate-180">▾</span>
+        <ChevronDownIcon className="size-4 text-ink-400 transition group-open:rotate-180" />
       </summary>
       <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-ink-300">
         {DEFINITIONS.map((k) => (

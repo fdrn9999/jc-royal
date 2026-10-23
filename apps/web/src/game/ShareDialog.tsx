@@ -4,7 +4,7 @@
  * share sheet where a phone will not save a download. The step is the one the dialog opened on (`snap`): moving the
  * replay meanwhile changes nothing in it. Loaded only when it opens.
  */
-import { Button, cx, Modal, Spinner } from '@jc/ui';
+import { Button, ChevronDownIcon, cx, Modal, Spinner } from '@jc/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { canShareFiles, downloadShare, encodeShare, paintShare, renderShare, shareArt, shareFile, type ShareArt } from './shareDraw';
@@ -224,9 +224,7 @@ export default function ShareDialog({
           <details className="group rounded-lg border border-white/10 px-3 py-1" data-testid="share-more">
             <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between text-sm font-semibold text-ink-200 [&::-webkit-details-marker]:hidden">
               {t('shareImg.moreOptions')}
-              <span aria-hidden="true" className="text-ink-400 transition-transform group-open:rotate-180">
-                ▾
-              </span>
+              <ChevronDownIcon className="size-4 text-ink-400 transition-transform group-open:rotate-180" />
             </summary>
             <div className="flex flex-col gap-3 pt-1 pb-2">
               {inBB && <Choice label={t('shareImg.unit')} value={opt.unit} id="unit" cols="grid-cols-2" onChange={(v) => set({ unit: v })} options={(['chips', 'bb'] as const).map((v) => ({ v, label: t(`shareImg.unit.${v}`) }))} />}

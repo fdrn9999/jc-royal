@@ -1,4 +1,4 @@
-import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat } from '@jc/ui';
+import { ArrowRightIcon, Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat, XIcon } from '@jc/ui';
 import { academyItemName, ageOn, BOT_LEVELS, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type VipColor } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
@@ -1706,7 +1706,7 @@ export function HandsPage() {
         <MemberFilter value={member} onApply={(v) => f.set({ member: v })} />
         {tableId && (
           <button className={chipCls} onClick={() => f.set({ tableId: null })} data-testid="table-chip">
-            {t('colTable')}: {tableName} ✕
+            {t('colTable')}: {tableName} <XIcon className="inline size-3 align-[-2px]" />
           </button>
         )}
         {member && data?.member && !loading && (
@@ -1846,7 +1846,7 @@ export function LedgerPage() {
               <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</td>
               <td className="px-2 py-1.5">
                 <button className="text-left hover:underline" onClick={() => f.set({ member: l.userId })} title={t('auditOnlyThis')}>{l.nickname}</button>
-                <Link to={`/users/${l.userId}`} className="ml-1 text-gold-300" aria-label={t('detail')}>→</Link>
+                <Link to={`/users/${l.userId}`} className="ml-1 text-gold-300" aria-label={t('detail')}><ArrowRightIcon className="inline size-3.5 align-[-2px]" /></Link>
               </td>
               <td className="px-2 py-1.5">
                 <button className="text-left hover:underline" onClick={() => f.set({ type: l.type })} title={t('auditOnlyThis')}>{ledgerTypeLabel(t, l.type)}</button>
