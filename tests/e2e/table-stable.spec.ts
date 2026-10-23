@@ -149,6 +149,12 @@ test('the table keeps its size and place whatever the game does round it', async
     await test.step(sc.name, async () => {
       const ctx = await browser.newContext({ storageState: state, viewport: sc.viewport, isMobile: sc.touch, hasTouch: sc.touch, reducedMotion: 'reduce' });
       const p = await ctx.newPage();
+      const sentActions: string[] = [];
+      p.on('websocket', (ws) =>
+        ws.on('framesent', ({ payload }) => {
+          if (typeof payload === 'string' && payload.includes('"t":"action"')) sentActions.push(payload);
+        }),
+      );
       let mine: string | null = null;
       const check = stageWatch(p, sc.name, () => mine);
 
@@ -183,7 +189,7 @@ test('the table keeps its size and place whatever the game does round it', async
       await check('tray shut');
 
       // My turn with a raise to make: the panel open and shut, then the fold.
-      const raise = bar.locator('button[aria-expanded]');
+      const raise = bar.getByTestId('action-dock-toggle');
       await expect(async () => {
         await expect(bar).toBeVisible({ timeout: 60_000 });
         if (!(await raise.isVisible())) {
@@ -193,17 +199,32 @@ test('the table keeps its size and place whatever the game does round it', async
       }).toPass({ timeout: 240_000 });
       await check('my turn');
       expect(await outOfDock(p), `${sc.name} my turn`).toEqual([]);
+      // The sizing's toggle sends nothing, and the buttons' row (Bet/Raise in it) stays where it was open or shut.
+      const commit = bar.getByTestId('action-commit');
+      const row = async () => {
+        const b = (await commit.boundingBox())!;
+        return { x: b.x, y: b.y, w: b.width, h: b.height };
+      };
+      const near = (a: Box, b: Box, what: string) => {
+        for (const k of ['x', 'y', 'w', 'h'] as const) expect(Math.abs(a[k] - b[k]), `${sc.name} ${what}: Bet/Raise ${k} ${a[k]} (shut: ${b[k]})`).toBeLessThan(1);
+      };
+      const shut = await row();
+      const frames = sentActions.length;
       await raise.click();
-      await expect(bar.getByTestId('action-commit')).toBeVisible();
+      await expect(bar.locator('[data-raise-panel]')).toBeVisible();
       await check('raise open');
+      near(await row(), shut, 'raise open');
       // The time bank stays with the panel open: beside the bar, or on a phone in the presets' line of its card.
       expect(await outOfDock(p), `${sc.name} raise open`).toEqual([]);
       await expect(bar.getByTestId('time-bank-use')).toHaveCount(sc.viewport.width < 640 ? 1 : 0);
       await expect(p.getByTestId('time-bank-use')).toBeEnabled();
       await raise.click();
       await expect(bar.getByTestId('time-bank-use')).toHaveCount(0);
-      await expect(bar.getByTestId('action-commit')).toHaveCount(0);
+      await expect(bar.locator('[data-raise-panel]')).toHaveCount(0);
       await check('raise shut');
+      near(await row(), shut, 'raise shut');
+      await p.waitForTimeout(200);
+      expect(sentActions.length, `${sc.name}: the toggle sent nothing`).toBe(frames);
       await act(p, 'fold');
       await expect(bar).toBeHidden({ timeout: 10_000 });
       await check('folded');
@@ -273,7 +294,7 @@ test('beginner notes and the coach tip scroll in the band: small phones keep the
 
       const bar = p.getByTestId('action-bar');
       const tip = p.getByTestId('coach-tip');
-      const raise = bar.locator('button[aria-expanded]');
+      const raise = bar.getByTestId('action-dock-toggle');
       if (sc.last) {
         // The first hand I am dealt is the coach's last: its tip on my turn, then the fold.
         await expect(bar).toBeVisible({ timeout: 240_000 });
@@ -301,11 +322,11 @@ test('beginner notes and the coach tip scroll in the band: small phones keep the
         await check('my turn');
         expect(await outOfDock(p), `${sc.name} my turn`).toEqual([]);
         await raise.tap();
-        await expect(bar.getByTestId('action-commit')).toBeVisible();
+        await expect(bar.locator('[data-raise-panel]')).toBeVisible();
         await check('raise open');
         expect(await outOfDock(p), `${sc.name} raise open`).toEqual([]);
         await raise.tap();
-        await expect(bar.getByTestId('action-commit')).toHaveCount(0);
+        await expect(bar.locator('[data-raise-panel]')).toHaveCount(0);
         await p.getByTestId('action-help-toggle').tap();
         await expect(p.getByTestId('action-help')).toBeVisible();
         await check('help open');

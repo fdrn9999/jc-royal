@@ -121,7 +121,7 @@ function traceSummary(buf) {
 
 async function waitForRaise(p, ms) {
   const bar = p.getByTestId('action-bar');
-  const raise = bar.locator('button[aria-expanded]');
+  const raise = bar.getByTestId('action-dock-toggle');
   const end = Date.now() + ms;
   while (Date.now() < end) {
     if (await bar.isVisible().catch(() => false)) {

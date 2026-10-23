@@ -268,7 +268,10 @@ describe('where the colours are used', () => {
   it('high contrast outlines every action button, with a focus ring of its own', () => {
     expect(css).toMatch(/:root\[data-cv='highContrast'\] \.jc-act \{[^}]*outline: 2px solid/);
     expect(css).toMatch(/:root\[data-cv='highContrast'\] \.jc-act:focus-visible \{[^}]*outline: 3px solid/);
-    expect(actionBar.match(/'jc-tap jc-act /g)).toHaveLength(4);
+    // One base for every action button (narrow and wide); Bet/Raise is built on it too.
+    expect(actionBar.match(/'jc-tap jc-act /g)).toHaveLength(2);
+    expect(actionBar).toMatch(/const btn = cx\(btnBase,/);
+    expect(actionBar).toMatch(/const commitBtn = cx\(btnBase,/);
   });
 
   it('every mode has its own block; no stray mode', () => {

@@ -100,7 +100,7 @@ export function buildScenarios(heroName: string): Scenario[] {
         {
           expect: 'raise',
           minTo: 20,
-          coach: l('[레이즈]를 누르고 슬라이더·[−][+]·프리셋으로 금액을 정한 뒤 아래의 확정 버튼을 누르세요.', 'Tap [Raise], set the amount with the slider, [−][+] or a preset, then press the confirm button.'),
+          coach: l('오른쪽 위의 화살표 버튼으로 금액 설정을 펼치고 슬라이더·[−][+]·프리셋으로 금액을 정한 뒤 [레이즈]를 누르세요.', 'Open the bet sizing with the arrow button at the top right, set the amount with the slider, [−][+] or a preset, then press [Raise].'),
         },
       ],
       questions: [],

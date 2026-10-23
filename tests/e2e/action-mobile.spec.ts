@@ -31,7 +31,7 @@ test('mobile: a big call needs a second tap, and moving the bet amount cancels a
       await checkOrCall(a.page);
     } else if (await barB.isVisible().catch(() => false)) {
       await b.page.waitForTimeout(400);
-      await barB.getByRole('button', { name: /^(레이즈|Raise|벳|Bet)$/ }).click();
+      await barB.getByTestId('action-dock-toggle').click();
       await barB.getByRole('textbox').fill('600');
       await barB.getByTestId('action-commit').click();
       await barB.getByTestId('action-commit').click();
@@ -51,17 +51,24 @@ test('mobile: a big call needs a second tap, and moving the bet amount cancels a
   expect(aSent.at(-1)!.type).toBe('call');
 
   // Next street, A to act with a bet window: Max is all-in and needs two taps.
-  const betA = barA.getByRole('button', { name: /^(벳|Bet)$/ });
+  const commit = barA.getByTestId('action-commit');
   await expect(async () => {
-    if (await betA.isVisible().catch(() => false)) return;
+    if (/^(벳|Bet) /.test((await commit.textContent({ timeout: 500 }).catch(() => '')) ?? '')) return;
     await checkOrCall(b.page);
-    await expect(betA).toBeVisible({ timeout: 1000 });
+    await expect(commit).toHaveText(/^(벳|Bet) /, { timeout: 1000 });
   }).toPass({ timeout: 30_000 });
   await a.page.waitForTimeout(400);
-  await betA.tap();
-  await barA.getByRole('button', { name: /^(최대|Max)$/ }).tap();
-  const commit = barA.getByTestId('action-commit');
   const n = aSent.length;
+  // The dock's own toggle opens the sizing and sends nothing; tapping it twice more closes and reopens it.
+  const toggleA = barA.getByTestId('action-dock-toggle');
+  await toggleA.tap();
+  await expect(toggleA).toHaveAttribute('aria-expanded', 'true');
+  await toggleA.tap();
+  await expect(toggleA).toHaveAttribute('aria-expanded', 'false');
+  await toggleA.tap();
+  await expect(barA.locator('[data-raise-panel]')).toBeVisible();
+  expect(aSent.length).toBe(n);
+  await barA.getByRole('button', { name: /^(최대|Max)$/ }).tap();
   await commit.tap();
   await expect(commit).toHaveText(/^(한 번 더|Press again)/);
   // Changing the amount, even back to the same all-in, cancels the first tap.

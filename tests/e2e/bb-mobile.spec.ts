@@ -100,7 +100,7 @@ test('mobile: with big blinds chosen, the table, the buy-in and the replay read 
   await expect
     .poll(
       async () => {
-        if (await a.page.getByRole('button', { name: /^(레이즈|Raise|벳|Bet)$/ }).isVisible().catch(() => false)) return true;
+        if (await a.page.getByTestId('action-commit').isVisible().catch(() => false)) return true;
         await checkOrCall(b.page);
         return false;
       },
@@ -109,16 +109,16 @@ test('mobile: with big blinds chosen, the table, the buy-in and the replay read 
     .toBe(true);
   const callBtn = a.page.getByTestId('action-bar').getByRole('button', { name: /^(콜|Call)/ });
   if (await callBtn.isVisible()) await expect(callBtn).toHaveText(/ BB$/);
-  await a.page.getByRole('button', { name: /^(레이즈|Raise|벳|Bet)$/ }).tap();
+  await a.page.getByTestId('action-dock-toggle').tap();
 
-  // Typing "2.5" (through "2.") holds 50 chips, shown beside the field and on the button.
+  // Typing "2.5" (through "2.") holds 50 chips, shown on the button after the blinds (once: not again under it).
   const field = a.page.getByTestId('action-amount');
   await expect(field).toHaveAttribute('inputmode', 'decimal');
   await field.fill('');
   await field.pressSequentially('2.5');
   await expect(field).toHaveValue('2.5');
-  await expect(a.page.getByTestId('action-chips')).toHaveText('= 50');
   await expect(a.page.getByTestId('action-commit')).toHaveText(/2\.5 BB \(50\)$/);
+  await expect(a.page.getByTestId('action-chips')).toHaveCount(0);
   expect(await widerThanDevice(a.page)).toBe(false);
   await a.page.screenshot({ path: test.info().outputPath('bb-raise-360.png') });
   await a.page.getByTestId('action-commit').tap();

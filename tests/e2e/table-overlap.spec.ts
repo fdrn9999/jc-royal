@@ -1,4 +1,5 @@
-import { expect, type Browser, type Page } from '@playwright/test';
+import { expect, type Browser, type Locator, type Page } from '@playwright/test';
+import { lineFace, MIN_FACE, wrapPoints } from '../../apps/web/src/game/amountFit';
 import { setAccountPrefs, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
 /**
@@ -263,10 +264,10 @@ async function walk(browser: Browser, table: string, seats: number, screens: Scr
     await expect(bar).toBeVisible({ timeout: 120_000 });
     await p.waitForTimeout(400);
     await look('turn');
-    const raise = bar.locator('button[aria-expanded]');
+    const raise = bar.getByTestId('action-dock-toggle');
     if (await raise.isVisible()) {
       await raise.click();
-      await expect(bar.getByTestId('action-commit')).toBeVisible();
+      await expect(bar.locator('[data-raise-panel]')).toBeVisible();
       await p.waitForTimeout(200);
       await look('raise');
       await raise.click();
@@ -320,7 +321,8 @@ test('9인과 2인 테이블: 이웃 좌석이 가까워도 지갑·반응 버�
 
 /**
  * The column at a short screen's side scrolls when what it holds is taller than the screen. With the beginner aids above
- * the turn's buttons on a phone held sideways, opening the raise panel makes it so (asserted, else this proves nothing):
+ * the turn's buttons on a phone held sideways, its browser's bars shown (330px high: the sizing, opened, fits a 375px-high
+ * column now), opening the raise panel makes it so (asserted, else this proves nothing):
  * the bar and the panel lie whole on the screen and every control of them takes a tap at its middle, and what was
  * scrolled up is still there to scroll back to.
  */
@@ -333,12 +335,12 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
   await expect(filled(page)).toHaveCount(2, { timeout: 120_000 });
   const state = await page.context().storageState();
   await page.goto('/');
-  const ctx = await browser.newContext({ storageState: state, viewport: { width: 667, height: 375 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+  const ctx = await browser.newContext({ storageState: state, viewport: { width: 667, height: 330 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
   const p = await ctx.newPage();
   await p.goto('/table/e2e-ov2');
   await expect(filled(p)).toHaveCount(2);
   const bar = p.getByTestId('action-bar');
-  const raise = bar.locator('button[aria-expanded]');
+  const raise = bar.getByTestId('action-dock-toggle');
 
   // A turn that offers a raise (else play it and wait for the next), the panel open.
   await expect(async () => {
@@ -349,7 +351,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
     }
   }).toPass({ timeout: 180_000 });
   await raise.tap();
-  await expect(bar.getByTestId('action-commit')).toBeVisible();
+  await expect(bar.locator('[data-raise-panel]')).toBeVisible();
   await p.waitForTimeout(200);
 
   const seen = await p.evaluate(() => {
@@ -368,7 +370,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
       .map((e) => e.getAttribute('aria-label') ?? e.textContent?.trim() ?? e.tagName);
     return { overflows: col.scrollHeight > col.clientHeight + 1, scrolled: col.scrollTop, barTop: r.top - c.top, barBelow: r.bottom - Math.min(vh, c.bottom), missed };
   });
-  await p.screenshot({ path: test.info().outputPath('overlap-column-667x375-beginner-raise.png') });
+  await p.screenshot({ path: test.info().outputPath('overlap-column-667x330-beginner-raise.png') });
   // Scrolled back to the top, the column's first line is in it again.
   const firstBack = await p.evaluate(() => {
     const col = document.querySelector('[data-testid=table-stack]')!;
@@ -376,7 +378,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
     const first = Array.from(col.children).find((k) => k.getBoundingClientRect().height > 1 && getComputedStyle(k).clipPath === 'none');
     return first ? Math.round(first.getBoundingClientRect().top - col.getBoundingClientRect().top) : -1;
   });
-  await p.screenshot({ path: test.info().outputPath('overlap-column-667x375-beginner-raise-top.png') });
+  await p.screenshot({ path: test.info().outputPath('overlap-column-667x330-beginner-raise-top.png') });
   console.log(`column ${JSON.stringify({ ...seen, firstBack })}`);
   expect(seen.overflows, 'the column is taller than the screen here, else this proves nothing').toBe(true);
   expect(seen.barBelow, 'the bar ends inside the screen').toBeLessThanOrEqual(0.5);
@@ -387,6 +389,258 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
 
   await ctx.close();
   await page.goto('/table/e2e-ov2');
+  await expect(filled(page)).toHaveCount(2);
+  await standUp(page);
+  await page.context().close();
+});
+
+/**
+ * Where Bet/Raise's text lies past its own button, as drawn: the boxes of what is in it (and of the caption under it),
+ * each line of text across, what it would scroll, and the caption over the name or the amount. With the faces its amount lines took, and the container its face
+ * is sized against.
+ */
+function spill(p: Page) {
+  return p.getByTestId('action-commit').evaluate((btn) => {
+    const b = btn.getBoundingClientRect();
+    const at = (what: string, r: DOMRect) => `${what} @${Math.round(r.left - b.left)},${Math.round(r.top - b.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+    const out: string[] = [];
+    for (const k of [...Array.from(btn.children), ...Array.from(btn.parentElement!.children).filter((c) => c !== btn)]) {
+      const r = k.getBoundingClientRect();
+      if (r.width > 0 && (r.left < b.left - 0.5 || r.right > b.right + 0.5 || r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5)) out.push(at(k.textContent!.trim() || k.tagName, r));
+    }
+    const texts = document.createTreeWalker(btn.parentElement!, NodeFilter.SHOW_TEXT);
+    for (let n = texts.nextNode(); n; n = texts.nextNode()) {
+      if (!n.textContent!.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const r of Array.from(range.getClientRects())) if (r.left < b.left - 0.5 || r.right > b.right + 0.5) out.push(at(n.textContent!.trim(), r));
+    }
+    if (btn.scrollWidth > btn.clientWidth + 1 || btn.scrollHeight > btn.clientHeight + 1) out.push(`scroll ${btn.scrollWidth}x${btn.scrollHeight} in ${btn.clientWidth}x${btn.clientHeight}`);
+    const lines = Array.from(btn.querySelectorAll<HTMLElement>('span.font-mono'));
+    const caption = Array.from(btn.parentElement!.children).find((c) => c !== btn) as HTMLElement | undefined;
+    // The line under it below the name and the amount, not over them (however many lines it wraps to).
+    if (caption) {
+      const top = caption.getBoundingClientRect().top;
+      const low = Math.max(...Array.from(btn.children).map((k) => k.getBoundingClientRect().bottom));
+      if (top < low - 0.5) out.push(`caption over the text by ${Math.round(low - top)}px`);
+    }
+    return {
+      text: btn.textContent!.replace(/\s+/g, ' ').trim(),
+      size: `${Math.round(b.width)}x${Math.round(b.height)}`,
+      faces: lines.map((s) => getComputedStyle(s).fontSize),
+      container: getComputedStyle(btn).containerType,
+      caption: caption ? `${caption.textContent} ${getComputedStyle(caption).fontSize}` : '',
+      captionFace: caption ? parseFloat(getComputedStyle(caption).fontSize) : null,
+      out,
+    };
+  });
+}
+
+/**
+ * Bet/Raise as a stack deeper than this table's would write it (1,234,566 chips at a 3-chip blind; 400,000,000), the
+ * whole of it: a copy of the button (and of what is under it) at its own width, out of sight, its amount lines set as
+ * the page sets them (`amountFit`, at the face the page's own lines may take), then measured as `spill` measures the
+ * button: what lies past it, its height and the faces drawn.
+ */
+function deepButton(p: Page, cases: string[][], max: number) {
+  const faces = cases.map((lines) => lines.map((l) => ({ face: lineFace(l, max), parts: wrapPoints(l) })));
+  return p.getByTestId('action-commit').evaluate((btn, faces) => {
+    const wrap = btn.parentElement!;
+    const card = wrap.closest<HTMLElement>('[data-testid="action-bar"] > div')!;
+    return faces.map((lines) => {
+      const copy = wrap.cloneNode(true) as HTMLElement;
+      Object.assign(copy.style, { position: 'absolute', left: '0', top: '0', width: `${wrap.getBoundingClientRect().width}px`, visibility: 'hidden' });
+      const b = copy.querySelector<HTMLElement>('[data-testid="action-commit"]')!;
+      b.removeAttribute('data-testid');
+      const spans = Array.from(b.querySelectorAll<HTMLElement>('span.font-mono'));
+      spans.forEach((s, i) => {
+        const l = lines[i];
+        if (!l) return s.remove();
+        s.replaceChildren(...l.parts.flatMap((part, j) => (j ? [document.createElement('wbr'), part] : [part])));
+        s.style.fontSize = l.face;
+      });
+      card.append(copy);
+      const r = b.getBoundingClientRect();
+      const out: string[] = [];
+      const texts = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+      for (let n = texts.nextNode(); n; n = texts.nextNode()) {
+        if (!n.textContent!.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        for (const t of Array.from(range.getClientRects())) if (t.left < r.left - 0.5 || t.right > r.right + 0.5 || t.top < r.top - 1.5 || t.bottom > r.bottom + 1.5) out.push(`${n.textContent!.trim()} @${Math.round(t.left - r.left)},${Math.round(t.top - r.top)}`);
+      }
+      if (b.scrollWidth > b.clientWidth + 1 || b.scrollHeight > b.clientHeight + 1) out.push(`scroll ${b.scrollWidth}x${b.scrollHeight} in ${b.clientWidth}x${b.clientHeight}`);
+      const drawn = Array.from(b.querySelectorAll<HTMLElement>('span.font-mono')).map((s) => ({ face: parseFloat(getComputedStyle(s).fontSize), rows: s.getClientRects().length }));
+      copy.remove();
+      return { text: b.textContent!.replace(/\s+/g, ' ').trim(), size: `${Math.round(r.width)}x${Math.round(r.height)}`, h: Math.round(r.height), drawn, out };
+    });
+  }, faces);
+}
+
+/**
+ * Bet/Raise writes the amount it bets in full however long it is (in big blinds the chips follow: 3,333.33 BB (10,000)
+ * at a 3-chip blind, the whole of a new account's wallet), and all of it lies inside its 48px, no line of it (nor the
+ * line under it) under 9px: in a short screen's column (about 60px across, the blinds and the chips a line each, the
+ * blinds wrapping there), on the narrowest phone and on a desktop, in Korean and English, at everything (All-in) and a
+ * chip under it, pressed once and not, and with an amount the server would refuse (under the least, past the most, and
+ * far past it, its chips then wrapping under the button, the one case it grows), open and closed, whose chips read
+ * whole (Chrome emulation). Deeper stacks than a wallet holds are set on a copy of the
+ * button: they wrap inside it, the row growing only for the deepest. Nothing is bet: the turn is checked or folded after.
+ */
+test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크톱에서 한국어·영어 모두 버튼 48px 안에 9px 이상으로 들어가고, 잘못된 금액도 칩 환산이 보인다', async ({ browser }) => {
+  test.setTimeout(1_500_000);
+  const { page } = await signUp(browser);
+  await setAccountPrefs(page, { amountUnit: 'bb' });
+  await sitWith(page, 'e2e-deep', 10_000);
+  const filled = (p: Page) => p.locator('[data-testid=table] [data-testid^="seat-"][data-state]');
+  await expect(filled(page)).toHaveCount(2, { timeout: 120_000 });
+  const state = await page.context().storageState();
+  await page.goto('/');
+  const screens: (Screen & { column?: boolean })[] = [
+    { name: '667x330-side', viewport: { width: 667, height: 330 }, ...PHONE, column: true },
+    { name: '667x330-side', viewport: { width: 667, height: 330 }, ...PHONE, column: true, locale: 'en' },
+    { name: '320x568', viewport: { width: 320, height: 568 }, ...PHONE },
+    { name: '320x568', viewport: { width: 320, height: 568 }, ...PHONE, locale: 'en' },
+    { name: '1366x768', viewport: { width: 1366, height: 768 } },
+    { name: '1366x768', viewport: { width: 1366, height: 768 }, locale: 'en' },
+  ];
+  const seen: { screen: string; state: string; text: string; size: string; faces: string[]; container: string; caption: string; captionFace: number | null; chips: string | null; out: string[] }[] = [];
+  const deep: { screen: string; text: string; size: string; h: number; drawn: { face: number; rows: number }[]; out: string[] }[] = [];
+
+  for (const sc of screens) {
+    const touch = !!sc.touch;
+    const ctx = await browser.newContext({ storageState: state, viewport: sc.viewport, deviceScaleFactor: 2, isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
+    const p = await ctx.newPage();
+    if (sc.locale === 'en') {
+      await p.addInitScript(() => localStorage.setItem('jc.locale', 'en'));
+      // English as the account's own choice, as the page is told it: only what it shows, nothing is saved.
+      await p.route('**/api/auth/me', async (route) => {
+        if (route.request().method() !== 'GET') return route.continue();
+        const res = await route.fetch();
+        await route.fulfill({ response: res, json: { ...(await res.json()), locale: 'en' } });
+      });
+    }
+    await p.goto('/table/e2e-deep');
+    await expect(filled(p)).toHaveCount(2);
+    await expect(p.locator('html')).toHaveAttribute('lang', sc.locale ?? 'ko');
+    const bar = p.getByTestId('action-bar');
+    const toggle = bar.getByTestId('action-dock-toggle');
+    const commit = bar.getByTestId('action-commit');
+    const press = (l: Locator) => (touch ? l.tap() : l.click());
+    const tag = `${sc.name}${sc.locale ? '-en' : ''}`;
+    const chips = bar.getByTestId('action-chips');
+    const look = async (state: string) => {
+      await p.waitForTimeout(150);
+      const shown = (await chips.count()) ? await chips.textContent() : null;
+      // The chips of a refused amount, wherever they are (under the button, or in the column's top line), inside the card.
+      const chipsOut = shown
+        ? await chips.evaluate((el) => {
+            const card = el.closest('[data-testid="action-bar"] > div')!.getBoundingClientRect();
+            return Array.from(el.getClientRects())
+              .filter((r) => r.left < card.left - 0.5 || r.right > card.right + 0.5)
+              .map((r) => `chips @${Math.round(r.left - card.left)} ${Math.round(r.width)}`);
+          })
+        : [];
+      const s = await spill(p);
+      seen.push({ screen: tag, state, ...s, out: [...s.out, ...chipsOut], chips: shown });
+      await bar.screenshot({ path: test.info().outputPath(`commit-${tag}-${state}.png`) });
+    };
+
+    // A turn with a bet or raise to make (else play it and wait for the next).
+    await expect(async () => {
+      await expect(bar).toBeVisible({ timeout: 30_000 });
+      if (!(await toggle.isVisible())) {
+        await act(p);
+        throw new Error('no bet or raise on this turn');
+      }
+    }).toPass({ timeout: 180_000 });
+    // The column at the screen's side, narrow; elsewhere the bar's own row.
+    if (sc.column) expect((await bar.boundingBox())!.width).toBeLessThan(240);
+    else expect((await bar.boundingBox())!.width).toBeGreaterThan(240);
+    await p.waitForTimeout(400); // past the appear guard
+
+    // Everything: All-in, the whole stack in big blinds and chips.
+    await press(toggle);
+    await press(bar.getByRole('button', { name: /^(최대|Max)$/ }));
+    await press(toggle);
+    await expect(commit).toHaveText(/ BB \(\d[\d,]*\)$/);
+    const stack = Number(/\(([\d,]+)\)$/.exec((await commit.textContent())!.trim())![1]!.replace(/,/g, ''));
+    await look('max');
+    const cases = sc.column
+      ? [
+          ['411,522 BB', '(1,234,566)'],
+          ['133,333,333.33 BB', '(400,000,000)'],
+        ]
+      : [['411,522 BB (1,234,566)'], ['133,333,333.33 BB (400,000,000)']];
+    deep.push(...(await deepButton(p, cases, touch ? 11 : 14)).map((d) => ({ screen: tag, ...d })));
+    await press(commit); // half the stack or more: armed, nothing sent
+    await expect(commit).toHaveText(/^(한 번 더|Confirm|Press again)/);
+    await look('max-armed');
+
+    // A chip or two under it, the sizing open: Bet or Raise to, the amount as long (blinds to the hundredth: not a whole
+    // number of them).
+    const under = stack - ((stack - 1) % 3 ? 1 : 2);
+    await press(toggle);
+    await bar.getByTestId('action-amount').fill((under / 3).toFixed(2));
+    await expect(commit).toBeEnabled();
+    await expect(commit).toHaveText(new RegExp(`^(벳|레이즈|Bet|Raise to) \\d{1,3}(,\\d{3})*\\.\\d\\d BB \\(${under.toLocaleString('en-US')}\\)$`));
+    await look('under-open');
+    await press(commit);
+    await expect(commit).toHaveText(/^(한 번 더|Confirm|Press again)/);
+    await look('under-open-armed');
+
+    // An amount the server would refuse, under the least, past the most and typed far past it (its chips longer than a
+    // phone's button at 9px): Bet/Raise disabled, saying one is wanted, the chips of what was typed reading whole open
+    // and closed (under the button, wrapping there, or beside the closed sizing's name in the column), and kept as typed
+    // when closed.
+    for (const [name, typed, sent] of [
+      ['low', '0.5', 2],
+      ['high', '9999.99', 30_000],
+      ['huge', '99999999999999999999', 3e20],
+    ] as const) {
+      const field = bar.getByTestId('action-amount');
+      if (!(await field.isVisible())) await press(toggle);
+      await field.fill(typed);
+      await expect(commit).toBeDisabled();
+      await expect(commit).toHaveText(/(금액 설정 필요|Set an amount)$/);
+      await expect(chips).toHaveText(`= ${sent.toLocaleString('en-US')}`);
+      await look(`${name}-open`);
+      await press(toggle);
+      await expect(bar.getByTestId('action-dock-amount')).toHaveText(/^(금액 설정 필요|Set an amount)$/);
+      await expect(chips).toHaveText(`= ${sent.toLocaleString('en-US')}`);
+      await look(`${name}-closed`);
+    }
+
+    await act(p);
+    await ctx.close();
+  }
+
+  const issues = seen.flatMap((s) => s.out.map((o) => `${s.screen} ${s.state}: ${o}`));
+  const body = JSON.stringify({ issues, seen, deep }, null, 1);
+  await test.info().attach('commit-fit.json', { body, contentType: 'application/json' });
+  console.log(`commit-fit ${body}`);
+  expect(seen.length).toBe(screens.length * 10);
+  for (const s of seen) {
+    expect(s.container, `${s.screen} ${s.state}: Bet/Raise is the container its face is sized against`).toBe('inline-size');
+    // Only a refused amount typed far past the most may make it taller: the chips under it wrap, kept inside it.
+    if (s.state.startsWith('huge')) expect(Number(s.size.split('x')[1]), `${s.screen} ${s.state}: Bet/Raise at 48px or more`).toBeGreaterThanOrEqual(48);
+    else expect(s.size, `${s.screen} ${s.state}: Bet/Raise stays 48px high`).toMatch(/x48$/);
+    for (const f of s.faces) expect(parseFloat(f), `${s.screen} ${s.state}: an amount line of ${f}`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
+    if (s.captionFace !== null) expect(s.captionFace, `${s.screen} ${s.state}: the line under it`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
+  }
+  // The full amount on the button, with what comes from the stack (in play, when a blind is in) under it in the row.
+  expect(seen.filter((s) => s.state === 'max').every((s) => /\d,\d{3}\.\d\d BB|\(\d{1,3}(,\d{3})+\)/.test(s.text))).toBe(true);
+  expect(issues, 'Bet/Raise’s text lies inside its button').toEqual([]);
+  // There, on the narrowest phone, they take two lines: the button taller rather than the line cut.
+  for (const s of seen.filter((x) => x.screen.startsWith('320x568') && x.state.startsWith('huge'))) expect(Number(s.size.split('x')[1]), `${s.screen} ${s.state}: ${s.caption}`).toBeGreaterThan(48);
+  // Deeper stacks set on a copy: inside it, no line under 9px; up to 1,234,566 chips in 48px, the deepest taller.
+  for (const d of deep) {
+    expect(d.out, `${d.screen} ${d.text}`).toEqual([]);
+    for (const x of d.drawn) expect(x.face, `${d.screen} ${d.text}`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
+    if (d.text.includes('1,234,566')) expect(d.h, `${d.screen} ${d.text}`).toBe(48);
+  }
+
+  await page.goto('/table/e2e-deep');
   await expect(filled(page)).toHaveCount(2);
   await standUp(page);
   await page.context().close();

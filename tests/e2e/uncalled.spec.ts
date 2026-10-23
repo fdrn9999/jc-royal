@@ -39,7 +39,7 @@ test('a raise everyone folds to: the raise above the call goes straight back, on
 
   const bar = r.getByTestId('action-bar');
   await r.waitForTimeout(400); // past the appear guard
-  await bar.getByRole('button', { name: /^(레이즈|Raise)$/ }).click();
+  await bar.getByTestId('action-dock-toggle').click();
   await bar.getByRole('textbox').fill('100');
   await bar.getByTestId('action-commit').click();
   const fold = folder.getByTestId('action-bar').getByRole('button', { name: /^(폴드|Fold)$/ });

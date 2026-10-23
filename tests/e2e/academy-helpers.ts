@@ -52,8 +52,10 @@ export async function playScenario(page: Page, plan: { action: RegExp; raise?: b
     await page.waitForTimeout(400); // ActionBar ignores taps right after it appears
     const before = await coach.textContent();
     if (step.raise) {
-      await press(page, '[data-testid=action-bar] button[aria-expanded]', how);
-      const confirm = bar.getByRole('button', { name: /^(레이즈|Raise|벳|Bet) \d/ });
+      // The sizing's toggle only opens it; Bet/Raise bets the amount it shows.
+      await press(page, '[data-testid=action-dock-toggle]', how);
+      await expect(bar.locator('[data-raise-panel]')).toBeVisible();
+      const confirm = bar.getByRole('button', { name: /^(레이즈|Raise to|벳|Bet) \d/ });
       await (how === 'tap' ? confirm.tap() : confirm.click());
     } else {
       const btn = bar.getByRole('button', { name: step.action });

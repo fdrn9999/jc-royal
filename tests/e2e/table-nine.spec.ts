@@ -56,7 +56,7 @@ test('9인 실시간 테이블: 휴대폰(세로·가로)·태블릿·노트북�
     await p.goto('/table/e2e-nine');
     await expect(p.locator('[data-testid=table] [data-testid^="seat-"][data-state]')).toHaveCount(9);
     const bar = p.getByTestId('action-bar');
-    const raise = bar.locator('button[aria-expanded]');
+    const raise = bar.getByTestId('action-dock-toggle');
     const look = async (what: string) => {
       const r = await measureTable(p);
       expect(await widerThanDevice(p), `${sc.name} ${what}: page wider than the screen`).toBe(false);
@@ -90,7 +90,7 @@ test('9인 실시간 테이블: 휴대폰(세로·가로)·태블릿·노트북�
 
     await raise.click();
     await expect(raise).toHaveAttribute('aria-expanded', 'true');
-    await expect(bar.getByTestId('action-commit')).toBeVisible();
+    await expect(bar.locator('[data-raise-panel]')).toBeVisible();
     const open = await look('raise-open');
     // The panel, the bar, the turn line and the time bank on screen and in reach, and the table as it was, with all it
     // holds (before, an upright phone's table made way for the panel: TEST_REPORT).
@@ -100,7 +100,7 @@ test('9인 실시간 테이블: 휴대폰(세로·가로)·태블릿·노트북�
     expect(await smallTargets(p), `${sc.name} raise open: small targets`).toEqual([]);
 
     await raise.click();
-    await expect(bar.getByTestId('action-commit')).toHaveCount(0);
+    await expect(bar.locator('[data-raise-panel]')).toHaveCount(0);
     expect((await measureTable(p)).table, `${sc.name}: the table keeps its size with the panel closed`).toEqual(before.table);
     const after = await look('raise-closed');
     expect(held(after, sc), `${sc.name} raise closed`).toEqual([]);

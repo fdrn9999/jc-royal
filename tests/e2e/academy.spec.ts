@@ -96,8 +96,8 @@ test('academy practice: real table UI offline — no socket, wallet unchanged, s
   // Off-script action is refused with coaching, nothing happens.
   await expect(p.getByTestId('action-bar')).toBeVisible({ timeout: 15_000 });
   await p.waitForTimeout(400);
-  await p.getByTestId('action-bar').getByRole('button', { name: /^(레이즈|Raise)$/ }).click();
-  await p.getByTestId('action-bar').getByRole('button', { name: /^(레이즈|Raise) \d/ }).click();
+  // Raise bets the amount it shows straight away, the sizing closed.
+  await p.getByTestId('action-bar').getByRole('button', { name: /^(레이즈|Raise to) \d/ }).click();
   await expect(p.getByTestId('coach')).toContainText(/다른 액션|try this instead/);
   await playScenario(p, [{ action: /^(체크|Check)$/ }, { action: /^(체크|Check)$/ }]);
   await expect(p.getByTestId('practice-done')).toBeVisible({ timeout: 30_000 });

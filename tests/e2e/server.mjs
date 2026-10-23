@@ -25,7 +25,7 @@ writeFileSync(
    ('e2e-hu', 'E2E Heads-up', 2, 5, 10, 100, 1000, 30), ('e2e-six', 'E2E Six', 6, 5, 10, 100, 1000, 30), ('e2e-touch', 'E2E Touch', 2, 5, 10, 100, 1000, 30), ('e2e-academy', 'E2E Academy', 2, 5, 10, 100, 1000, 30), ('e2e-coach', 'E2E Coach', 2, 5, 10, 100, 1000, 30), ('e2e-social', 'E2E Social', 6, 5, 10, 100, 1000, 30);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, beginner) VALUES ('e2e-rookie', 'E2E Rookie', 6, 1, 2, 20, 200, 30, 1);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds) VALUES ('e2e-together', 'E2E Together', 2, 5, 10, 100, 1000, 30), ('e2e-reconnect', 'E2E Reconnect', 2, 5, 10, 100, 1000, 30),
-   ('e2e-keys', 'E2E Keys', 2, 5, 10, 100, 1000, 30), ('e2e-keys-touch', 'E2E Keys Touch', 2, 5, 10, 100, 1000, 30),
+   ('e2e-keys', 'E2E Keys', 2, 5, 10, 100, 1000, 30), ('e2e-keys-touch', 'E2E Keys Touch', 2, 5, 10, 100, 1000, 30), ('e2e-dock', 'E2E Dock', 2, 5, 10, 100, 1000, 60),
    ('e2e-quick-a', 'E2E Quick A', 2, 7, 14, 140, 1400, 30), ('e2e-quick-b', 'E2E Quick B', 2, 7, 14, 140, 1400, 30), ('e2e-quick-m', 'E2E Quick Mobile', 2, 9, 18, 180, 1800, 30),
    ('e2e-topup', 'E2E Top-up', 2, 5, 10, 100, 1000, 30), ('e2e-topup-m', 'E2E Top-up Mobile', 2, 5, 10, 100, 1000, 30), ('e2e-topup-open', 'E2E Top-up Open', 2, 5, 10, 100, 1000, 30), ('e2e-topup-drain', 'E2E Top-up Drain', 2, 50, 100, 9000, 9900, 30),
    ('e2e-rebuy', 'E2E Rebuy', 2, 5, 10, 100, 1000, 30), ('e2e-autotop', 'E2E Auto top-up', 2, 5, 10, 100, 1000, 30), ('e2e-autotop-m', 'E2E Auto top-up Mobile', 2, 5, 10, 100, 1000, 30), ('e2e-stats', 'E2E Stats', 2, 5, 10, 100, 1000, 30), ('e2e-stats-m', 'E2E Stats Mobile', 2, 5, 10, 100, 1000, 30),
@@ -46,7 +46,8 @@ writeFileSync(
    ('e2e-ov2', 'E2E Overlap 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-ov6', 'E2E Overlap 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-ov9', 'E2E Overlap 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-bd2', 'E2E Board 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-bd6', 'E2E Board 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-bd9', 'E2E Board 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-tx6', 'E2E Text 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-tx9', 'E2E Text 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
-   ('e2e-stable', 'E2E Stable', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-stable-c', 'E2E Stable Coach', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6);
+   ('e2e-stable', 'E2E Stable', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-stable-c', 'E2E Stable Coach', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6),
+   ('e2e-deep', 'E2E Deep', 2, 1, 3, 30, 10000, 60, 1, 'normal', 1, 2);
    INSERT INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) VALUES (2, 1, 1000000, 20, 'policy', 'e2e seed');
    INSERT INTO referral_policies (version, enabled, paused, referrer_amount, invitee_amount, daily_cap, total_cap, min_hands, burst_limit, change, reason) VALUES (2, 1, 0, 1000, 1000, 5, 50, 0, 20, 'policy', 'e2e seed');`,
 );
