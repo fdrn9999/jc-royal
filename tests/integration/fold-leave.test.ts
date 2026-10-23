@@ -260,6 +260,7 @@ describe('standing up right after a fold', () => {
     // The console: the seat is empty, held by the hand, and the room holds what the leaver put in, not what they took.
     expect(await liveTable(admin, 'it-fold-5')).toMatchObject({ heldSeats: [seat], chipsOnTable: 500 + 400 + 300 - stack });
     expect((await liveTable(admin, 'it-fold-5')).seats[seat]).toBeNull();
+    const n = await player('it-fold-5');
     expect(await play(others, handId)).toBeNull();
     const end = await settled(others[0]!, handId);
     expect((await liveTable(admin, 'it-fold-5')).chipsOnTable).toBe(500 + 400 + 300 - stack);
@@ -267,6 +268,14 @@ describe('standing up right after a fold', () => {
     await ledgersAddUp(ps);
     // Free once the hand is over.
     await eventually(() => liveTable(admin, 'it-fold-5'), (x) => !x.heldSeats.includes(seat), 'the seat freed');
+    // Whoever sits there while the result still shows was not in the hand: not shown folded, nor with the leaver's last
+    // action, to them or to the others (the first-hands coaching counts a hand its player folded).
+    await sit(n, seat, 200);
+    for (const x of [n, ...others]) {
+      const v = await x.ws.waitState((s) => s.seats[seat]!.userId === n.me.id, 15_000, 'the newcomer seated');
+      expect(v.hand).toMatchObject({ id: handId, stage: 'settled' });
+      expect(v.seats[seat]).toMatchObject({ state: 'waiting', hasCards: false, streetBet: 0, lastAction: null });
+    }
   });
 
   it('heads-up: leaving folds the hand to the other player, and the leaver is paid what was left, once, and told so', async () => {

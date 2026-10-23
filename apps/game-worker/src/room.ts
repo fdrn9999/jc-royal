@@ -2925,7 +2925,9 @@ export class TableRoom extends DurableObject<Env> {
       // A seat its player folded and left mid-hand: nobody, and no cards, only the chips they put in on this street.
       if (!s && this.handHolds(i)) return { seatIndex: i, state: 'empty', held: true, stack: 0, streetBet: info?.get(i)?.streetBet ?? 0, connected: false, hasCards: false };
       if (!s) return { seatIndex: i, state: 'empty', stack: 0, streetBet: 0, connected: false, hasCards: false };
-      const hi = info?.get(i);
+      // The hand's word on a seat is about the player it dealt there. A seat it held is free once it settles, while its
+      // result still shows: a player who sits there then was not in it (not folded, no action, no bet of theirs).
+      const hi = h?.startingSeats.some((p) => p.seatIndex === i && p.playerId === s.userId) ? info?.get(i) : undefined;
       let state: SeatView['state'] = s.sittingOut ? 'sittingOut' : 'waiting';
       if (hi?.inHand) state = hi.folded ? 'folded' : hi.allIn ? 'allin' : 'active';
       // Only the chosen positions carry a card: the other one stays unknown to everybody but its owner.
