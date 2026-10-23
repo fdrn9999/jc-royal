@@ -17,18 +17,24 @@
  * the bar then goes (the seat shows the action taken) or, refused, stays with the reason in the table's toast. A press
  * that could not be sent (no connection) says so over the bar. Neither changes the bar's height.
  *
- * The bar sits in the table's dock, a band of fixed height under the table (Table.tsx): opening the raise panel grows the
- * bar inside that band and moves nothing else. In the bar's own row the panel opens in the same gold card, the slider
- * (the amount at its end) and the presets above the buttons, which narrow, their amounts under their names, to make
- * room for the confirm button beside them: fold, check and call stay a press away while it is open.
+ * Sizing a bet and making it are two buttons. The card's top line says the amount set, with a button of its own at its
+ * right (`action-dock-toggle`, R) that opens and closes the sizing (slider, steps, presets, the amount field) and does
+ * nothing else: it sends nothing, arms nothing and keeps the amount. Bet/Raise in the buttons' row always bets the amount
+ * set, open or closed, with the same confirmation as any other press; an amount the server would refuse leaves it
+ * disabled, saying an amount is wanted. The row is the same open or closed (fold, check or call, bet or raise, all-in
+ * when it is the only raise), so its buttons neither move nor change meaning.
+ *
+ * The bar sits in the table's dock, a band of fixed height under the table (Table.tsx): opening the sizing grows the
+ * card inside that band and moves nothing else. Open, the slider (the amount at its end) takes the top line, beside the
+ * same toggle, and the presets the next.
  *
  * `column`: a short screen's column at the table's side (short.ts), narrower than the bar's own row. The buttons share
- * one row of its width with their amounts under their names (pressed once, a risky one says to press again instead),
- * and the raise panel above them is sized to it, so opening it moves neither the buttons nor the table.
+ * one row of its width with their amounts under their names (pressed once, a risky one says to press again instead), and
+ * the sizing above them is sized to it: the amount field beside the toggle, then the slider, then the presets.
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
-import { cx, formatChips, MinusIcon, PlusIcon, Spinner } from '@jc/ui';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { ChevronDownIcon, ChevronUpIcon, cx, formatChips, MinusIcon, PlusIcon, Spinner } from '@jc/ui';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
@@ -102,7 +108,9 @@ export function ActionBar({
   const [sent, setSent] = useState<{ key: ArmKey | 'check' | 'open'; text: string } | null>(null);
   const [unsent, setUnsent] = useState(false);
   const readyAt = useRef(Date.now() + APPEAR_GUARD_MS);
+  /** The sizing's own button: Escape gives it the focus back. */
   const toggle = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
   const root = useRef<HTMLDivElement>(null);
   const bb = Math.max(1, state.table.bigBlind);
   const mine = state.seats.find((x) => x.seatIndex === state.you.seatIndex);
@@ -196,14 +204,15 @@ export function ActionBar({
   const callSig = armSig(seq, call?.amount);
   const allinSig = armSig(seq, allin?.amount);
   const commitSig = armSig(seq, amount);
-  const commitText = (c: NonNullable<typeof commit>) => `${c.type === 'allin' ? t('action.allin') : bet ? t('action.bet') : t('action.raise')} ${a.fmt(c.amount, true)}`;
+  const commitText = (c: NonNullable<typeof commit>) => `${c.type === 'allin' ? t('action.allin') : bet ? t('action.bet') : t('action.raiseBtn')} ${a.fmt(c.amount, true)}`;
   const doFold = () => tap('fold', !!check, foldSig, () => send('fold', t('action.fold'), 'fold'));
   const doCheck = () => tap('call', false, callSig, () => send('check', t('action.check'), 'check'));
   const doCall = () => tap('call', bigCall, callSig, () => send('call', `${t('action.call')} ${a.fmt(call?.amount ?? 0, true)}`, 'call'));
   const doCommit = () => commit && tap('commit', isRisky('commit', legal, myStack, streetBet, commit.amount), commitSig, () => send('commit', commitText(commit), commit.type, commit.amount));
   const doAllin = () => tap('allin', true, allinSig, () => send('allin', `${t('action.allin')} ${a.fmt(allin?.amount ?? 0, true)}`, 'allin'));
 
-  // Keyboard: F fold, C check/call, R raise panel, Escape closes it (back to its button). Same confirmation as a tap.
+  // Keyboard: F fold, C check/call, R opens or closes the sizing (never bets), Escape closes it (back to its button).
+  // Same confirmation as a tap.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = shortcutFor(e, !!document.querySelector('[aria-modal="true"]'));
@@ -224,19 +233,22 @@ export function ActionBar({
   if (legal.length === 0) return null;
   const isAllInAmount = commit?.type === 'allin';
   const panel = open && !!window_;
-  /** The panel open in the bar's own row: in the card, over its buttons. */
+  /** The sizing open in the bar's own row: in the card, over its buttons. */
   const inCard = panel && !column;
-  /** The buttons laid out narrow, their amounts under their names: in the column, or beside the card's confirm button. */
-  const compact = column || inCard;
-  /** A phone's time bank, its pill over the bar, is a cell of the presets' line while the panel is open (see `bank`). */
+  /**
+   * The buttons laid out narrow, their amounts under their names: in the column, and on a phone, where Bet/Raise takes
+   * the room of two. The same open or closed, so the row never moves.
+   */
+  const compact = column || phone;
+  /** A phone's time bank, its pill over the bar, is a cell of the presets' line while the sizing is open (see `bank`). */
   const bankInCard = inCard && phone && !!bank;
   const btnBase = compact
     ? 'jc-tap jc-act flex h-12 min-w-0 flex-col items-center justify-center rounded-xl px-1 text-center text-xs font-bold leading-tight tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50'
     : 'jc-tap jc-act flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50';
   const btn = cx(btnBase, 'flex-1', !compact && 'px-2');
-  const commitBtn = column
-    ? 'jc-tap jc-act flex h-10 w-full items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50'
-    : 'jc-tap jc-act flex h-12 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 text-center text-sm font-bold leading-tight tracking-wide shadow-lg transition active:translate-y-px disabled:opacity-50';
+  // Bet/Raise: its name and the amount, beside each other while they fit (else the amount under the name), so a long
+  // amount wraps instead of widening the row.
+  const commitBtn = cx(btnBase, 'w-full', !compact && 'flex-wrap content-center gap-x-1.5 gap-y-0 px-2 leading-tight');
   /** A button's amount, under its name when narrow; there, pressed once, the press-again line stands alone. */
   const amountOf = (key: ArmKey, sig: string, v: number) => !(compact && isArmed(key, sig)) && <span className={cx('font-mono', compact && 'text-[11px] font-semibold')}>{a.fmt(v, true)}</span>;
   const armedCls = 'ring-2 ring-ivory ring-offset-2 ring-offset-ink-950 animate-pulse';
@@ -245,11 +257,10 @@ export function ActionBar({
   const pending = (key: ArmKey | 'check' | 'open') => busy && sent?.key === key && <Spinner className="size-4" />;
   const isArmed = (key: ArmKey, sig: string) => armed?.key === key && armed.sig === sig;
   const label = (key: ArmKey, sig: string, text: string) => (isArmed(key, sig) ? t('action.tapAgain', { type: text }) : text);
-  const commitType = isAllInAmount ? t('action.allin') : bet ? t('action.bet') : t('action.raise');
-  const stepBtn = cx(
-    'jc-tap grid shrink-0 place-items-center rounded-lg border border-white/10 bg-ink-850 text-lg font-bold text-ivory active:bg-ink-700 disabled:opacity-40',
-    column ? 'size-10' : 'size-11',
-  );
+  /** What Bet/Raise does: its name, and the amount set (in the column short, its top line saying it in full). */
+  const commitName = isAllInAmount ? t('action.allin') : bet ? t('action.bet') : t('action.raiseBtn');
+  const commitAmount = column ? a.fmt(amount, true) : a.exact(amount);
+  const stepBtn = 'jc-tap grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-ink-850 text-lg font-bold text-ivory active:bg-ink-700 disabled:opacity-40';
   const amountLabel = bet ? t('action.betTo') : t('action.raiseTo');
   // A raise is to a total: what already sits in front of me is part of it.
   const fromStack = streetBet > 0 && (
@@ -262,46 +273,96 @@ export function ActionBar({
       = {formatChips(amount)}
     </span>
   );
-  const amountInput = (
-    <input
-      inputMode={a.unit === 'bb' ? 'decimal' : 'numeric'}
-      className={cx('rounded-lg border border-white/10 bg-ink-850 px-2 text-right font-mono font-semibold text-gold-300', column ? 'h-10 w-24 min-w-0 shrink text-base' : 'h-11 w-full pt-3.5 text-base sm:text-lg')}
-      value={draft ?? a.toInput(amount)}
-      onChange={(e) => {
-        const typed = a.clean(e.target.value);
-        setDraft(typed);
-        setAmount(a.fromInput(typed));
-      }}
-      onBlur={() => pick(clampAmt(amount))}
-      aria-label={amountLabel}
-      data-testid="action-amount"
-    />
+  /** The amount typed, its name inside the field's top edge; an amount the server would refuse is edged in red. */
+  const amountField = (cls: string) => (
+    <label className={cx('relative min-w-0', cls)}>
+      <span className="pointer-events-none absolute left-2 top-1 text-[10px] font-semibold uppercase leading-3 tracking-wider text-ink-300">{amountLabel}</span>
+      <input
+        inputMode={a.unit === 'bb' ? 'decimal' : 'numeric'}
+        className={cx('h-10 w-full min-w-0 rounded-lg border bg-ink-850 px-2 pt-3.5 text-right font-mono text-base font-semibold text-gold-300', commit ? 'border-white/10' : 'border-danger/70')}
+        value={draft ?? a.toInput(amount)}
+        onChange={(e) => {
+          const typed = a.clean(e.target.value);
+          setDraft(typed);
+          setAmount(a.fromInput(typed));
+        }}
+        onBlur={() => pick(clampAmt(amount))}
+        aria-label={amountLabel}
+        aria-invalid={!commit || undefined}
+        data-testid="action-amount"
+      />
+    </label>
   );
-  // In the bar's own row, what comes from the stack and the chips read on the confirm button's lower edge, as the
-  // panel's text rather than the button's name (which stays the action and its amount). Pressed once, the press-again
-  // line stands alone.
+  // In the bar's own row, what comes from the stack and the chips read on Bet/Raise's lower edge, as the sizing's text
+  // rather than the button's name (which stays the action and its amount). Pressed once, the press-again line stands
+  // alone.
   const caption = !column && !isArmed('commit', commitSig) && (fromStack || inChips) && (
     <span className={cx('pointer-events-none absolute inset-x-1 bottom-1 flex justify-center gap-x-1.5 overflow-hidden whitespace-nowrap text-[11px] font-semibold leading-3.5 text-ink-950/75', (!commit || (busy && sent?.key !== 'commit')) && 'opacity-50')}>
       {fromStack}
       {inChips}
     </span>
   );
-  const commitButton = (
+  const commitArmed = isArmed('commit', commitSig);
+  // The same button open or closed: it bets the amount set (the sizing only sets it), so it is never a way to open it.
+  const commitButton = window_ && (
+    <div className={cx('relative flex min-w-0', column ? 'flex-[1.4]' : 'flex-[2]')}>
+      <button
+        type="button"
+        disabled={busy || !commit}
+        onClick={doCommit}
+        className={cx(commitBtn, caption && 'pb-3.5', commitArmed && armedCls, sentCls('commit'))}
+        style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }}
+        aria-busy={busy && sent?.key === 'commit'}
+        data-testid="action-commit"
+      >
+        {pending('commit')}
+        {commitArmed ? (
+          t('action.tapAgain', { type: column ? commitName : `${commitName} ${commitAmount}` })
+        ) : (
+          <>
+            <span>{commitName}</span>{' '}
+            {commit ? (
+              <span className={cx('font-mono', compact && 'text-[11px] font-semibold')}>{commitAmount}</span>
+            ) : (
+              <span className="text-[11px] font-semibold">{t('action.needAmount')}</span>
+            )}
+          </>
+        )}
+      </button>
+      {caption}
+    </div>
+  );
+  const sizingName = open ? t('action.sizingClose') : t('action.sizingOpen');
+  // Opens and closes the sizing, nothing else: no amount, no confirmation, nothing sent. Not held while a press is in
+  // flight either, since it sends nothing.
+  const toggleButton = (
     <button
-      disabled={busy || !commit}
-      onClick={doCommit}
-      className={cx(commitBtn, caption && 'pb-3.5', isArmed('commit', commitSig) && armedCls, sentCls('commit'))}
-      style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }}
-      aria-busy={busy && sent?.key === 'commit'}
-      data-testid="action-commit"
+      ref={toggle}
+      type="button"
+      onClick={() => setOpen((o) => !o)}
+      className="jc-tap grid size-10 shrink-0 place-items-center rounded-lg border border-gold-500/40 bg-ink-900/80 text-gold-300 transition-colors hover:border-gold-400 hover:bg-gold-500/15 aria-expanded:border-gold-400 aria-expanded:bg-gold-500/20"
+      aria-expanded={open}
+      aria-controls={panelId}
+      aria-label={sizingName}
+      title={sizingName}
+      aria-keyshortcuts="R"
+      data-testid="action-dock-toggle"
     >
-      {pending('commit')}
-      {label('commit', commitSig, t('action.confirm', { type: commitType, amount: a.exact(amount) }))}
+      {open ? <ChevronDownIcon className="size-5" /> : <ChevronUpIcon className="size-5" />}
     </button>
+  );
+  // Closed, the top line says what Bet/Raise will bet (or that an amount is wanted).
+  const summary = (
+    <p className={cx('flex min-w-0 flex-1 px-1', column ? 'flex-col justify-center' : 'items-baseline gap-2')}>
+      <span className="shrink-0 text-[10px] font-semibold uppercase leading-3 tracking-wider text-ink-300">{amountLabel}</span>
+      <span className={cx('truncate font-mono font-semibold tabular-nums', column ? 'text-sm' : 'text-base', commit ? 'text-gold-300' : 'text-[#f3b0b2]')} data-testid="action-dock-amount">
+        {commit ? a.exact(amount) : t('action.needAmount')}
+      </span>
+    </p>
   );
 
   const steps = window_ && (
-    <div className={cx('flex items-center', column ? 'gap-1.5' : 'gap-2')}>
+    <>
       <button type="button" className={stepBtn} disabled={amount <= window_.min} onClick={() => pick(clampAmt(amount - bb))} aria-label={`- ${a.fmt(bb)}`}>
         <MinusIcon className="size-5" />
       </button>
@@ -319,20 +380,14 @@ export function ActionBar({
       <button type="button" className={stepBtn} disabled={amount >= window_.max} onClick={() => pick(clampAmt(amount + bb))} aria-label={`+ ${a.fmt(bb)}`}>
         <PlusIcon className="size-5" />
       </button>
-      {/* In the card the amount ends the slider's line, so the buttons' row keeps fold, check and call. */}
-      {inCard && (
-        <label className="relative w-20 shrink-0 sm:w-32">
-          <span className="pointer-events-none absolute left-2 top-1 text-[10px] font-semibold uppercase leading-3 tracking-wider text-ink-300">{amountLabel}</span>
-          {amountInput}
-        </label>
-      )}
-    </div>
+    </>
   );
   const presetRow = (
     <div className={cx('grid auto-cols-fr grid-flow-col', column ? 'gap-1' : 'gap-1.5')}>
       {presets.map((p) => (
         <button
           key={p.label}
+          type="button"
           onClick={() => pick(p.value)}
           className={cx(
             'jc-tap rounded-lg border font-semibold text-gold-300 hover:bg-gold-500/20',
@@ -347,47 +402,49 @@ export function ActionBar({
     </div>
   );
   const bar = (
-    <div ref={root} className={cx('pointer-events-auto flex w-full flex-col', column ? 'gap-1' : 'sm:w-[26rem]')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
-      {panel && column && (
-        // In the column four lines, each 40px (what a finger needs, no more) and close together: a phone on its side
-        // 360px high holds them, the turn line and the bar without scrolling.
-        <div className="jc-panel flex flex-col gap-1 p-1.5" data-momentary data-raise-panel>
-          <div className="flex items-center gap-2">
-            <span className="flex min-w-0 flex-1 flex-col text-[10px] leading-tight">
-              <span className="font-semibold uppercase tracking-wider text-ink-300">{amountLabel}</span>
-              {fromStack}
-              {inChips}
-            </span>
-            {amountInput}
-          </div>
-          {steps}
-          {presetRow}
-          {commitButton}
-        </div>
-      )}
+    <div ref={root} className={cx('pointer-events-auto flex w-full flex-col', !column && 'sm:w-[26rem]')} data-testid="action-bar" data-raise-open={open ? '' : undefined}>
       {/* Shown only on my turn: a gold edge says the buttons are live. */}
-      <div className={cx('relative flex rounded-2xl border border-gold-400/60 bg-ink-950/85 shadow-[0_0_14px_rgba(230,197,107,0.22)] backdrop-blur-md', column ? 'gap-1.5 p-1.5' : 'flex-col gap-1.5 p-2')}>
-        {/* Over the bar, so the bar (and the table above it) does not move; with the panel open, over its slider, which
-            may be the dock's top line (the dock scrolls, and would cut what stands above it). */}
+      <div className={cx('relative flex flex-col rounded-2xl border border-gold-400/60 bg-ink-950/85 shadow-[0_0_14px_rgba(230,197,107,0.22)] backdrop-blur-md', column ? 'gap-1 p-1.5' : 'gap-1.5 p-2')}>
+        {/* Over the card's top line, so the bar (and the table above it) does not move, and kept in the dock, which
+            scrolls and would cut what stands above it. */}
         <p role="status" aria-live="polite" className="sr-only" data-testid="action-sending">
           {busy && sent ? t('action.sending', { action: sent.text }) : ''}
         </p>
         {unsent && (
-          <p role="alert" className={cx('pointer-events-none absolute inset-x-2 z-10 rounded-lg border border-danger/40 bg-ink-950/95 px-3 py-2 text-center text-xs text-[#f3b0b2]', inCard ? 'top-2' : 'bottom-full mb-2')} data-testid="action-unsent">
+          <p role="alert" className={cx('pointer-events-none absolute inset-x-2 z-10 rounded-lg border border-danger/40 bg-ink-950/95 px-3 py-2 text-center text-xs text-[#f3b0b2]', window_ ? 'top-2' : 'bottom-full mb-2')} data-testid="action-unsent">
             {t('action.notSent')}
           </p>
         )}
-        {inCard && (
-          // Open, the slider (the amount at its end) and the presets join the card above its row, whose buttons narrow
-          // to make room for the confirm button: the dock's band holds the card either way, so neither the table nor
-          // anything else in the dock moves, and fold, check and call stay a press away.
-          <div className="flex flex-col gap-1.5" data-momentary data-raise-panel>
-            {steps}
-            {presetRow}
+        {window_ && (
+          // The sizing, its toggle at the right of the card's top line. Open, it grows the card upward inside the dock's
+          // band (lines of 40px, what a finger needs, close together: a phone 375px wide holds them in the band, and a
+          // phone on its side 360px high holds them, the turn line and the bar without scrolling), so neither the table
+          // nor the buttons' row moves. In the bar's own row the slider (the amount at its end) takes the top line and
+          // the presets the next; in the column the amount takes the top line, then the slider and the presets.
+          <div id={panelId} className={cx('flex flex-col', column ? 'gap-1' : 'gap-1.5')} data-raise-panel={panel ? '' : undefined} data-momentary={panel ? '' : undefined}>
+            {/* The toggle the second child either way, so it stays the same element and keeps the focus. */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {panel ? (
+                column ? (
+                  amountField('flex-1')
+                ) : (
+                  <>
+                    {steps}
+                    {amountField('w-[4.5rem] shrink-0 sm:w-28')}
+                  </>
+                )
+              ) : (
+                summary
+              )}
+              {toggleButton}
+            </div>
+            {panel && column && (fromStack || inChips) && <p className="-mt-0.5 flex justify-end gap-x-1.5 px-1 text-[10px] leading-3">{fromStack}{inChips}</p>}
+            {panel && column && <div className="flex items-center gap-1.5">{steps}</div>}
+            {panel && presetRow}
           </div>
         )}
-        {/* One row either way, so its buttons are the same elements open or closed and keep the focus. */}
-        <div className={column ? 'contents' : 'flex gap-2'}>
+        {/* One row either way, the same buttons in the same places doing the same things open or closed. */}
+        <div className={cx('flex', column ? 'gap-1.5' : 'gap-2')}>
           {fold && (
             <button disabled={busy} onClick={doFold} className={cx(btn, isArmed('fold', foldSig) && armedCls, sentCls('fold'))} style={{ background: 'linear-gradient(180deg,var(--act-fold-from),var(--act-fold-to))', color: 'var(--act-fold-fg)' }} aria-keyshortcuts="F" aria-busy={busy && sent?.key === 'fold'}>
               {pending('fold')}
@@ -406,17 +463,7 @@ export function ActionBar({
               {label('call', callSig, t('action.call'))} {amountOf('call', callSig, call.amount)}
             </button>
           )}
-          {window_ && (
-            <button ref={toggle} disabled={busy} onClick={() => setOpen((o) => !o)} className={btn} style={{ background: 'linear-gradient(180deg,var(--act-raise-from),var(--act-raise-to))', color: 'var(--act-raise-fg)' }} aria-expanded={open} aria-keyshortcuts="R">
-              {bet ? t('action.bet') : t('action.raise')}
-            </button>
-          )}
-          {inCard && (
-            <div className="relative flex min-w-0 flex-[2]">
-              {commitButton}
-              {caption}
-            </div>
-          )}
+          {commitButton}
           {allin && !window_ && (
             <button disabled={busy} onClick={doAllin} className={cx(btn, isArmed('allin', allinSig) && armedCls, sentCls('allin'))} style={{ background: 'linear-gradient(180deg,var(--act-allin-from),var(--act-allin-to))', color: 'var(--act-allin-fg)' }} aria-busy={busy && sent?.key === 'allin'}>
               {pending('allin')}

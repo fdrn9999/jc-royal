@@ -107,10 +107,10 @@ async function walk(browser: Browser, table: string, seats: number, screens: Scr
     await expect(bar).toBeVisible({ timeout: 120_000 });
     await p.waitForTimeout(300);
     await look('turn');
-    const raise = bar.locator('button[aria-expanded]');
+    const raise = bar.getByTestId('action-dock-toggle');
     if (await raise.isVisible()) {
       await raise.click();
-      await expect(bar.getByTestId('action-commit')).toBeVisible();
+      await expect(bar.locator('[data-raise-panel]')).toBeVisible();
       await p.waitForTimeout(200);
       await look('raise');
       await raise.click();

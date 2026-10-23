@@ -21,11 +21,11 @@ async function armedNow(page: Page, button: Locator) {
   return /^(한 번 더|Press again)/.test((await button.textContent()) ?? '');
 }
 
-/** Opens the raise panel, types `to` and confirms it; the first press only arms a raise of half the stack or more. */
+/** Opens the bet sizing, types `to` and bets it; the first press only arms a raise of half the stack or more. */
 async function raiseTo(page: Page, sent: unknown[], to: number) {
   const bar = page.getByTestId('action-bar');
   await page.waitForTimeout(400); // past the appear guard
-  await bar.getByRole('button', { name: /^(레이즈|Raise|벳|Bet)$/ }).click();
+  await bar.getByTestId('action-dock-toggle').click();
   await bar.getByRole('textbox').fill(String(to));
   const commit = bar.getByTestId('action-commit');
   const n = sent.length;
@@ -106,14 +106,25 @@ test('keyboard shortcuts: same two-press confirmation as a tap, no repeats, noth
   }).toPass({ timeout: 30_000 });
   await a.page.waitForTimeout(400);
   const n = aSent.length;
-  // R opens the bet panel; Escape closes it from its amount field, sending nothing, and the Bet button has the focus.
+  // R opens the bet sizing and never bets; Escape closes it from its amount field, sending nothing, and its toggle has
+  // the focus. The amount typed stays, and Bet still bets it.
+  const toggleA = barA.getByTestId('action-dock-toggle');
+  await expect(toggleA).toHaveAttribute('aria-expanded', 'false');
   await a.page.keyboard.press('r');
+  await expect(toggleA).toHaveAttribute('aria-expanded', 'true');
   const amountA = barA.getByTestId('action-amount');
   await amountA.fill('300');
   await amountA.press('Escape');
-  await expect(barA.getByTestId('action-commit')).toHaveCount(0);
-  await expect(barA.getByRole('button', { name: /^(벳|Bet)$/ })).toBeFocused();
+  await expect(barA.locator('[data-raise-panel]')).toHaveCount(0);
+  await expect(toggleA).toBeFocused();
+  await expect(toggleA).toHaveAttribute('aria-expanded', 'false');
+  await expect(barA.getByTestId('action-commit')).toHaveText(/^(벳|Bet) 300$/);
+  await a.page.keyboard.press('r');
+  await a.page.keyboard.press('r');
+  await expect(toggleA).toHaveAttribute('aria-expanded', 'false');
+  await a.page.waitForTimeout(300);
   expect(aSent.length).toBe(n);
+  expect(await armedNow(a.page, barA.getByTestId('action-commit'))).toBe(false);
   // F with a free check only arms the fold.
   await a.page.keyboard.press('f');
   await expect(barA.getByRole('button', { name: /폴드|Fold/ })).toHaveText(/^(한 번 더|Press again)/);

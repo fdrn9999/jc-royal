@@ -86,9 +86,9 @@ test('mobile: a check chosen while the other player acts is made on the turn, an
   await preCheck.tap();
   await expect.poll(() => wa.state?.preAction).toBe('check');
   await b.page.waitForTimeout(300);
-  await barB.getByRole('button', { name: /^(레이즈|Raise|벳|Bet)$/ }).click();
+  await barB.getByTestId('action-dock-toggle').click();
   await barB.getByRole('textbox').fill('40');
-  // 40 is far below half of B's stack (about 1,000), so one press sends it and the panel closes; a press that only armed
+  // 40 is far below half of B's stack (about 1,000), so one press sends it and B's bar goes; a press that only armed
   // it fails here. The button is never read: a read waits for it to exist, and once it is gone that lasts until the timeout.
   const commit = barB.getByTestId('action-commit');
   await commit.click();

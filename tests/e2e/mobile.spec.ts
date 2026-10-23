@@ -53,8 +53,8 @@ test('mobile: touch guards — no-zoom game surface, 16px inputs, two-tap risky 
   await a.page.waitForTimeout(400); // past the appear guard
   await a.page.screenshot({ path: info.outputPath('action-bar.png') });
 
-  // Raise panel: + adds one big blind (10) to the minimum.
-  const raiseBtn = bar.getByRole('button', { name: /^(레이즈|Raise|벳|Bet)$/ });
+  // Bet sizing (its own toggle): + adds one big blind (10) to the minimum.
+  const raiseBtn = bar.getByTestId('action-dock-toggle');
   if (await raiseBtn.isVisible().catch(() => false)) {
     await raiseBtn.click();
     const amt = bar.getByRole('textbox');

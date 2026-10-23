@@ -106,7 +106,7 @@ await shot(b, '08-table-mobile-flop');
 for (const p of [a, b]) {
   const bar = p.getByTestId('action-bar');
   if (await bar.isVisible().catch(() => false)) {
-    const r = bar.getByRole('button', { name: /^(레이즈|벳|Raise|Bet)$/ });
+    const r = bar.getByTestId('action-dock-toggle');
     if (await r.isVisible().catch(() => false)) {
       await r.click();
       await p.waitForTimeout(300);

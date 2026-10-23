@@ -57,7 +57,7 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
     await expect(p.locator('html')).toHaveAttribute('lang', sc.locale);
     const mine = (await p.locator('[data-testid=table] [data-testid^="seat-"][data-state]', { has: p.getByText(nickname, { exact: true }) }).getAttribute('data-testid'))!.slice(5);
     const bar = p.getByTestId('action-bar');
-    const raise = bar.locator('button[aria-expanded]');
+    const raise = bar.getByTestId('action-dock-toggle');
     const look = async (what: string, dense?: RegExp) => {
       const r = await measureTable(p, dense);
       expect(await widerThanDevice(p), `${sc.name} ${what}: page wider than the screen`).toBe(false);
@@ -92,7 +92,7 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
     // (before, the table made way for it, moving once each way: TEST_REPORT).
     expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table stays put as the panel opens`).toBe(1);
     await expect(raise).toHaveAttribute('aria-expanded', 'true');
-    await expect(bar.getByTestId('action-commit')).toBeVisible();
+    await expect(bar.locator('[data-raise-panel]')).toBeVisible();
     // Every card's face, bet, stack, name and the pot hit-tested over the whole of its text or face.
     const open = await look('raise-open', /^(card|board|bet|stack|name|pot)-/);
     expect(open.table, `${sc.name}: the table keeps its size with the panel open`).toEqual(before.table);
@@ -103,7 +103,7 @@ test('6인 실시간 테이블, 세로 휴대폰 320~412px: 좌석·베팅·조�
     expect(open.items.filter((x) => x.startsWith(`card-${mine}-`)), `${sc.name} raise open: own cards`).toHaveLength(2);
 
     expect(await tablePlaces(p, mine, () => raise.click()), `${sc.name}: the table stays put as the panel closes`).toBe(1);
-    await expect(bar.getByTestId('action-commit')).toHaveCount(0);
+    await expect(bar.locator('[data-raise-panel]')).toHaveCount(0);
     expect((await measureTable(p)).table, `${sc.name}: the table keeps its size with the panel closed`).toEqual(before.table);
     expect((await look('raise-closed')).issues, `${sc.name} raise closed`).toEqual([]);
 

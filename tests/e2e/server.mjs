@@ -25,7 +25,7 @@ writeFileSync(
    ('e2e-hu', 'E2E Heads-up', 2, 5, 10, 100, 1000, 30), ('e2e-six', 'E2E Six', 6, 5, 10, 100, 1000, 30), ('e2e-touch', 'E2E Touch', 2, 5, 10, 100, 1000, 30), ('e2e-academy', 'E2E Academy', 2, 5, 10, 100, 1000, 30), ('e2e-coach', 'E2E Coach', 2, 5, 10, 100, 1000, 30), ('e2e-social', 'E2E Social', 6, 5, 10, 100, 1000, 30);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, beginner) VALUES ('e2e-rookie', 'E2E Rookie', 6, 1, 2, 20, 200, 30, 1);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds) VALUES ('e2e-together', 'E2E Together', 2, 5, 10, 100, 1000, 30), ('e2e-reconnect', 'E2E Reconnect', 2, 5, 10, 100, 1000, 30),
-   ('e2e-keys', 'E2E Keys', 2, 5, 10, 100, 1000, 30), ('e2e-keys-touch', 'E2E Keys Touch', 2, 5, 10, 100, 1000, 30),
+   ('e2e-keys', 'E2E Keys', 2, 5, 10, 100, 1000, 30), ('e2e-keys-touch', 'E2E Keys Touch', 2, 5, 10, 100, 1000, 30), ('e2e-dock', 'E2E Dock', 2, 5, 10, 100, 1000, 60),
    ('e2e-quick-a', 'E2E Quick A', 2, 7, 14, 140, 1400, 30), ('e2e-quick-b', 'E2E Quick B', 2, 7, 14, 140, 1400, 30), ('e2e-quick-m', 'E2E Quick Mobile', 2, 9, 18, 180, 1800, 30),
    ('e2e-topup', 'E2E Top-up', 2, 5, 10, 100, 1000, 30), ('e2e-topup-m', 'E2E Top-up Mobile', 2, 5, 10, 100, 1000, 30), ('e2e-topup-open', 'E2E Top-up Open', 2, 5, 10, 100, 1000, 30), ('e2e-topup-drain', 'E2E Top-up Drain', 2, 50, 100, 9000, 9900, 30),
    ('e2e-rebuy', 'E2E Rebuy', 2, 5, 10, 100, 1000, 30), ('e2e-autotop', 'E2E Auto top-up', 2, 5, 10, 100, 1000, 30), ('e2e-autotop-m', 'E2E Auto top-up Mobile', 2, 5, 10, 100, 1000, 30), ('e2e-stats', 'E2E Stats', 2, 5, 10, 100, 1000, 30), ('e2e-stats-m', 'E2E Stats Mobile', 2, 5, 10, 100, 1000, 30),

@@ -263,10 +263,10 @@ async function walk(browser: Browser, table: string, seats: number, screens: Scr
     await expect(bar).toBeVisible({ timeout: 120_000 });
     await p.waitForTimeout(400);
     await look('turn');
-    const raise = bar.locator('button[aria-expanded]');
+    const raise = bar.getByTestId('action-dock-toggle');
     if (await raise.isVisible()) {
       await raise.click();
-      await expect(bar.getByTestId('action-commit')).toBeVisible();
+      await expect(bar.locator('[data-raise-panel]')).toBeVisible();
       await p.waitForTimeout(200);
       await look('raise');
       await raise.click();
@@ -320,7 +320,8 @@ test('9인과 2인 테이블: 이웃 좌석이 가까워도 지갑·반응 버�
 
 /**
  * The column at a short screen's side scrolls when what it holds is taller than the screen. With the beginner aids above
- * the turn's buttons on a phone held sideways, opening the raise panel makes it so (asserted, else this proves nothing):
+ * the turn's buttons on a phone held sideways, its browser's bars shown (330px high: the sizing, opened, fits a 375px-high
+ * column now), opening the raise panel makes it so (asserted, else this proves nothing):
  * the bar and the panel lie whole on the screen and every control of them takes a tap at its middle, and what was
  * scrolled up is still there to scroll back to.
  */
@@ -333,12 +334,12 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
   await expect(filled(page)).toHaveCount(2, { timeout: 120_000 });
   const state = await page.context().storageState();
   await page.goto('/');
-  const ctx = await browser.newContext({ storageState: state, viewport: { width: 667, height: 375 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+  const ctx = await browser.newContext({ storageState: state, viewport: { width: 667, height: 330 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
   const p = await ctx.newPage();
   await p.goto('/table/e2e-ov2');
   await expect(filled(p)).toHaveCount(2);
   const bar = p.getByTestId('action-bar');
-  const raise = bar.locator('button[aria-expanded]');
+  const raise = bar.getByTestId('action-dock-toggle');
 
   // A turn that offers a raise (else play it and wait for the next), the panel open.
   await expect(async () => {
@@ -349,7 +350,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
     }
   }).toPass({ timeout: 180_000 });
   await raise.tap();
-  await expect(bar.getByTestId('action-commit')).toBeVisible();
+  await expect(bar.locator('[data-raise-panel]')).toBeVisible();
   await p.waitForTimeout(200);
 
   const seen = await p.evaluate(() => {
@@ -368,7 +369,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
       .map((e) => e.getAttribute('aria-label') ?? e.textContent?.trim() ?? e.tagName);
     return { overflows: col.scrollHeight > col.clientHeight + 1, scrolled: col.scrollTop, barTop: r.top - c.top, barBelow: r.bottom - Math.min(vh, c.bottom), missed };
   });
-  await p.screenshot({ path: test.info().outputPath('overlap-column-667x375-beginner-raise.png') });
+  await p.screenshot({ path: test.info().outputPath('overlap-column-667x330-beginner-raise.png') });
   // Scrolled back to the top, the column's first line is in it again.
   const firstBack = await p.evaluate(() => {
     const col = document.querySelector('[data-testid=table-stack]')!;
@@ -376,7 +377,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
     const first = Array.from(col.children).find((k) => k.getBoundingClientRect().height > 1 && getComputedStyle(k).clipPath === 'none');
     return first ? Math.round(first.getBoundingClientRect().top - col.getBoundingClientRect().top) : -1;
   });
-  await p.screenshot({ path: test.info().outputPath('overlap-column-667x375-beginner-raise-top.png') });
+  await p.screenshot({ path: test.info().outputPath('overlap-column-667x330-beginner-raise-top.png') });
   console.log(`column ${JSON.stringify({ ...seen, firstBack })}`);
   expect(seen.overflows, 'the column is taller than the screen here, else this proves nothing').toBe(true);
   expect(seen.barBelow, 'the bar ends inside the screen').toBeLessThanOrEqual(0.5);
