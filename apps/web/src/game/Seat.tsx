@@ -256,8 +256,10 @@ function SeatPlace(p: SeatProps) {
     >
       {/* A folded hand fades back in when its owner shows a card (quieter than a winner's: it stays where it is). */}
       <div className={cx('relative flex flex-col items-center transition-opacity duration-300', folded && !shown && 'opacity-55')}>
-        {/* hole cards */}
-        {cards.length > 0 && (
+        {/* hole cards. A seat without any keeps their room, empty: layout.ts lays every seat out with its cards, and the
+            seat is centred on its place, so its plate and status line would rise half a card as its cards fold away (a
+            folded seat's bet then read as its neighbour's on a small phone) and drop as they are dealt. */}
+        {cards.length > 0 ? (
           <div className={cx('relative flex', z.cards, p.isMe ? 'gap-1' : z.spread)} key={p.newHandKey ?? 'cards'}>
             {cards.map((c, i) =>
               rests(i) ? (
@@ -319,6 +321,12 @@ function SeatPlace(p: SeatProps) {
                 )}
               </div>
             )}
+          </div>
+        ) : (
+          <div aria-hidden className={cx('flex', z.cards, p.isMe ? 'gap-1' : z.spread)} data-testid={`no-cards-${s.seatIndex}`}>
+            {[0, 1].map((i) => (
+              <span key={i} className="block shrink-0" style={{ width: cardSize, height: `calc(${cardSize} * 1.4)` }} />
+            ))}
           </div>
         )}
         {/* A winner's shown cards, resting by the board, each in its own place of two (a card shown later takes the other
