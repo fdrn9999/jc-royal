@@ -369,7 +369,7 @@ export const en: Dict = {
   'action.again': 'Confirm',
   'action.sending': 'Sending {action}…',
   'action.notSent': 'Not sent: the connection dropped. Press again once it is back.',
-  'action.fromStack': '{amount} from your stack',
+  'action.fromStack': '{amount} from stack',
   'hand.high-card': 'High card',
   'hand.pair': 'One pair',
   'hand.two-pair': 'Two pair',

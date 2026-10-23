@@ -12,12 +12,12 @@ import { I18nProvider } from '../src/lib/i18n';
 vi.mock('../src/lib/prefs', async (original) => ({ ...(await original<object>()), usePrefs: () => ({ confirmRisky: true, amountUnit: 'chips' }) }));
 
 /** My turn at a deep table: a raise from 12,500 (or `min`) to everything I have. */
-function turn(legal: LegalOption[]): TableView {
+function turn(legal: LegalOption[], streetBet = 0): TableView {
   return {
     table: { bigBlind: 2_500 },
     you: { seatIndex: 0, legal },
     seats: [
-      { seatIndex: 0, stack: 1_234_567, streetBet: 0 },
+      { seatIndex: 0, stack: 1_234_567, streetBet },
       { seatIndex: 1, stack: 900_000, streetBet: 5_000 },
     ],
     hand: { seq: 7, potTotal: 7_500 },
@@ -25,8 +25,8 @@ function turn(legal: LegalOption[]): TableView {
 }
 const raise: LegalOption[] = [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 12_500, max: 1_234_567 }];
 
-const markup = (column: boolean, legal = raise, unit?: Amounts) =>
-  renderToStaticMarkup(h(I18nProvider, null, h(ActionBar, { state: turn(legal), onAct: () => true, busy: false, column, amounts: unit })));
+const markup = (column: boolean, legal = raise, unit?: Amounts, streetBet = 0) =>
+  renderToStaticMarkup(h(I18nProvider, null, h(ActionBar, { state: turn(legal, streetBet), onAct: () => true, busy: false, column, amounts: unit })));
 /** The text of the element with this test id (its tags dropped). */
 const textOf = (html: string, id: string) => {
   const m = new RegExp(`<(\\w+)[^>]*data-testid="${id}"[^>]*>([\\s\\S]*?)</\\1>`).exec(html);
@@ -47,6 +47,27 @@ describe('the action bar', () => {
     // 12,501 at a 2,500 blind reads 5 BB rounded: the chips say what is sent.
     const odd: LegalOption[] = [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 12_501, max: 1_234_567 }];
     for (const column of [false, true]) expect(textOf(markup(column, odd, amounts('bb', 2_500)), 'action-commit')).toBe('레이즈 5 BB (12,501)');
+  });
+
+  it('never wraps a line of Bet/Raise’s amount, its face sized to the button’s width; in the column the blinds and the chips take a line each', () => {
+    const odd: LegalOption[] = [{ type: 'fold' }, { type: 'call', amount: 5_000 }, { type: 'raise', min: 12_501, max: 1_234_567 }];
+    const lines = (column: boolean) =>
+      [...markup(column, odd, amounts('bb', 2_500)).matchAll(/<span class="whitespace-nowrap[^"]*" style="font-size:([^"]+)">([^<]+)<\/span>/g)].map((m) => [m[2], m[1]]);
+    expect(lines(true)).toEqual([
+      ['5 BB', 'min(11px, 40.00cqi)'],
+      ['(12,501)', 'min(11px, 20.00cqi)'],
+    ]);
+    expect(lines(false)).toEqual([['5 BB (12,501)', 'min(14px, 12.31cqi)']]);
+    expect(markup(true)).not.toMatch(/break-all/);
+  });
+
+  it('under Bet/Raise in the bar’s row, writes what comes from the stack on one line sized to the button, not the chips again', () => {
+    // A blind of 2,500 in: a raise to 12,500 takes 10,000 from the stack.
+    const html = markup(false, raise, amounts('bb', 2_500), 2_500);
+    expect(textOf(html, 'action-commit')).toBe('레이즈 5 BB (12,500)');
+    expect(textOf(html, 'action-from-stack')).toBe('스택에서 4 BB');
+    expect(html).toContain('style="font-size:min(11px, calc((100cqi - 10px) / 7.00))"');
+    expect(html).not.toContain('data-testid="action-chips"');
   });
 
   it('gives the sizing toggle a tip saying it sets the amount, and its key, in place of a bare title', () => {

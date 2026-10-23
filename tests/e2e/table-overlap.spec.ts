@@ -1,4 +1,4 @@
-import { expect, type Browser, type Page } from '@playwright/test';
+import { expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { setAccountPrefs, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
 /**
@@ -388,6 +388,181 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
 
   await ctx.close();
   await page.goto('/table/e2e-ov2');
+  await expect(filled(page)).toHaveCount(2);
+  await standUp(page);
+  await page.context().close();
+});
+
+/**
+ * Where Bet/Raise's text lies past its own button, as drawn: the boxes of what is in it (and of the caption under it),
+ * each line of text across, and what it would scroll. With the faces its amount lines took, and the container its face
+ * is sized against.
+ */
+function spill(p: Page) {
+  return p.getByTestId('action-commit').evaluate((btn) => {
+    const b = btn.getBoundingClientRect();
+    const at = (what: string, r: DOMRect) => `${what} @${Math.round(r.left - b.left)},${Math.round(r.top - b.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+    const out: string[] = [];
+    for (const k of [...Array.from(btn.children), ...Array.from(btn.parentElement!.children).filter((c) => c !== btn)]) {
+      const r = k.getBoundingClientRect();
+      if (r.width > 0 && (r.left < b.left - 0.5 || r.right > b.right + 0.5 || r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5)) out.push(at(k.textContent!.trim() || k.tagName, r));
+    }
+    const texts = document.createTreeWalker(btn.parentElement!, NodeFilter.SHOW_TEXT);
+    for (let n = texts.nextNode(); n; n = texts.nextNode()) {
+      if (!n.textContent!.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const r of Array.from(range.getClientRects())) if (r.left < b.left - 0.5 || r.right > b.right + 0.5) out.push(at(n.textContent!.trim(), r));
+    }
+    if (btn.scrollWidth > btn.clientWidth + 1 || btn.scrollHeight > btn.clientHeight + 1) out.push(`scroll ${btn.scrollWidth}x${btn.scrollHeight} in ${btn.clientWidth}x${btn.clientHeight}`);
+    const lines = Array.from(btn.querySelectorAll<HTMLElement>('span.whitespace-nowrap'));
+    const caption = Array.from(btn.parentElement!.children).find((c) => c !== btn);
+    return {
+      text: btn.textContent!.replace(/\s+/g, ' ').trim(),
+      size: `${Math.round(b.width)}x${Math.round(b.height)}`,
+      faces: lines.map((s) => getComputedStyle(s).fontSize),
+      container: getComputedStyle(btn).containerType,
+      caption: caption ? `${caption.textContent} ${getComputedStyle(caption).fontSize}` : '',
+      out,
+    };
+  });
+}
+
+/**
+ * The widest lines a deep stack makes (493.83 BB, (1,234,566), and the two together), each set on the button the way
+ * its amount lines are (the same face rule, read off them), measured across against the button's inside. No such stack
+ * is reached in play here; the rule is the same whatever the text.
+ */
+function deepLines(p: Page, texts: string[]) {
+  return p.getByTestId('action-commit').evaluate((btn, texts) => {
+    const one = btn.querySelector<HTMLElement>('span.whitespace-nowrap')!;
+    const [, max, cqi] = /min\(([\d.]+)px, ([\d.]+)cqi\)/.exec(one.style.fontSize)!;
+    const rule = Number(cqi) * one.textContent!.length;
+    const s = getComputedStyle(btn);
+    const inside = btn.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+    return texts.map((text) => {
+      const c = one.cloneNode() as HTMLElement;
+      c.textContent = text;
+      c.style.fontSize = `min(${max}px, ${(rule / text.length).toFixed(2)}cqi)`;
+      btn.append(c);
+      const w = c.getBoundingClientRect().width;
+      const face = getComputedStyle(c).fontSize;
+      c.remove();
+      return { text, face, w: Math.round(w * 10) / 10, inside, fits: w <= inside + 0.5 };
+    });
+  }, texts);
+}
+
+/**
+ * Bet/Raise writes the amount it bets in full however long it is (in big blinds the chips follow: 333.33 BB (1,000) at a
+ * 3-chip blind), and all of it lies inside its 48px: in a short screen's column (about 60px across, the blinds and the
+ * chips a line each), on the narrowest phone and on a desktop, in Korean and English, at everything (All-in) and a chip
+ * under it, pressed once and not (Chrome emulation). A line too long for the button takes a smaller face rather than
+ * wrapping or spilling, and so does the line under it in the bar's own row (what comes from the stack). Nothing is bet:
+ * the turn is checked or folded after.
+ */
+test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크톱에서 한국어·영어 모두 버튼 48px 안에 들어간다', async ({ browser }) => {
+  test.setTimeout(900_000);
+  const { page } = await signUp(browser);
+  await setAccountPrefs(page, { amountUnit: 'bb' });
+  await sitWith(page, 'e2e-deep', 1000);
+  const filled = (p: Page) => p.locator('[data-testid=table] [data-testid^="seat-"][data-state]');
+  await expect(filled(page)).toHaveCount(2, { timeout: 120_000 });
+  const state = await page.context().storageState();
+  await page.goto('/');
+  const screens: (Screen & { column?: boolean })[] = [
+    { name: '667x330-side', viewport: { width: 667, height: 330 }, ...PHONE, column: true },
+    { name: '667x330-side', viewport: { width: 667, height: 330 }, ...PHONE, column: true, locale: 'en' },
+    { name: '320x568', viewport: { width: 320, height: 568 }, ...PHONE },
+    { name: '320x568', viewport: { width: 320, height: 568 }, ...PHONE, locale: 'en' },
+    { name: '1366x768', viewport: { width: 1366, height: 768 } },
+    { name: '1366x768', viewport: { width: 1366, height: 768 }, locale: 'en' },
+  ];
+  const seen: { screen: string; state: string; text: string; size: string; faces: string[]; container: string; caption: string; out: string[] }[] = [];
+  const deep: { screen: string; text: string; face: string; w: number; inside: number; fits: boolean }[] = [];
+
+  for (const sc of screens) {
+    const touch = !!sc.touch;
+    const ctx = await browser.newContext({ storageState: state, viewport: sc.viewport, deviceScaleFactor: 2, isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
+    const p = await ctx.newPage();
+    if (sc.locale === 'en') {
+      await p.addInitScript(() => localStorage.setItem('jc.locale', 'en'));
+      // English as the account's own choice, as the page is told it: only what it shows, nothing is saved.
+      await p.route('**/api/auth/me', async (route) => {
+        if (route.request().method() !== 'GET') return route.continue();
+        const res = await route.fetch();
+        await route.fulfill({ response: res, json: { ...(await res.json()), locale: 'en' } });
+      });
+    }
+    await p.goto('/table/e2e-deep');
+    await expect(filled(p)).toHaveCount(2);
+    await expect(p.locator('html')).toHaveAttribute('lang', sc.locale ?? 'ko');
+    const bar = p.getByTestId('action-bar');
+    const toggle = bar.getByTestId('action-dock-toggle');
+    const commit = bar.getByTestId('action-commit');
+    const press = (l: Locator) => (touch ? l.tap() : l.click());
+    const tag = `${sc.name}${sc.locale ? '-en' : ''}`;
+    const look = async (state: string) => {
+      await p.waitForTimeout(150);
+      seen.push({ screen: tag, state, ...(await spill(p)) });
+      await bar.screenshot({ path: test.info().outputPath(`commit-${tag}-${state}.png`) });
+    };
+
+    // A turn with a bet or raise to make (else play it and wait for the next).
+    await expect(async () => {
+      await expect(bar).toBeVisible({ timeout: 30_000 });
+      if (!(await toggle.isVisible())) {
+        await act(p);
+        throw new Error('no bet or raise on this turn');
+      }
+    }).toPass({ timeout: 180_000 });
+    // The column at the screen's side, narrow; elsewhere the bar's own row.
+    if (sc.column) expect((await bar.boundingBox())!.width).toBeLessThan(240);
+    else expect((await bar.boundingBox())!.width).toBeGreaterThan(240);
+    await p.waitForTimeout(400); // past the appear guard
+
+    // Everything: All-in, the whole stack in big blinds and chips.
+    await press(toggle);
+    await press(bar.getByRole('button', { name: /^(최대|Max)$/ }));
+    await press(toggle);
+    await expect(commit).toHaveText(/ BB \(\d[\d,]*\)$/);
+    const stack = Number(/\(([\d,]+)\)$/.exec((await commit.textContent())!.trim())![1]!.replace(/,/g, ''));
+    await look('max');
+    await press(commit); // half the stack or more: armed, nothing sent
+    await expect(commit).toHaveText(/^(한 번 더|Confirm|Press again)/);
+    await look('max-armed');
+    if (sc.column) deep.push(...(await deepLines(p, ['493.83 BB', '(1,234,566)'])).map((d) => ({ screen: tag, ...d })));
+    else deep.push(...(await deepLines(p, ['493.83 BB (1,234,566)'])).map((d) => ({ screen: tag, ...d })));
+
+    // A chip or two under it, the sizing open: Bet or Raise to, the amount as long (blinds to the hundredth: not a whole
+    // number of them).
+    const under = stack - ((stack - 1) % 3 ? 1 : 2);
+    await press(toggle);
+    await bar.getByTestId('action-amount').fill((under / 3).toFixed(2));
+    await expect(commit).toBeEnabled();
+    await expect(commit).toHaveText(new RegExp(`^(벳|레이즈|Bet|Raise to) \\d+\\.\\d\\d BB \\(${under.toLocaleString('en-US')}\\)$`));
+    await look('under-open');
+    await press(commit);
+    await expect(commit).toHaveText(/^(한 번 더|Confirm|Press again)/);
+    await look('under-open-armed');
+
+    await act(p);
+    await ctx.close();
+  }
+
+  const issues = seen.flatMap((s) => s.out.map((o) => `${s.screen} ${s.state}: ${o}`));
+  const body = JSON.stringify({ issues, seen, deep }, null, 1);
+  await test.info().attach('commit-fit.json', { body, contentType: 'application/json' });
+  console.log(`commit-fit ${body}`);
+  expect(seen.length).toBe(screens.length * 4);
+  for (const s of seen) {
+    expect(s.container, `${s.screen} ${s.state}: Bet/Raise is the container its face is sized against`).toBe('inline-size');
+    expect(s.size, `${s.screen} ${s.state}: Bet/Raise stays 48px high`).toMatch(/x48$/);
+  }
+  expect(issues, 'Bet/Raise’s text lies inside its button').toEqual([]);
+  expect(deep.filter((d) => !d.fits), 'a deep stack’s lines fit the button across').toEqual([]);
+
+  await page.goto('/table/e2e-deep');
   await expect(filled(page)).toHaveCount(2);
   await standUp(page);
   await page.context().close();

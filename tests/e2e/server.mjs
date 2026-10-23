@@ -46,7 +46,8 @@ writeFileSync(
    ('e2e-ov2', 'E2E Overlap 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-ov6', 'E2E Overlap 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-ov9', 'E2E Overlap 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-bd2', 'E2E Board 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-bd6', 'E2E Board 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-bd9', 'E2E Board 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-tx6', 'E2E Text 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-tx9', 'E2E Text 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
-   ('e2e-stable', 'E2E Stable', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-stable-c', 'E2E Stable Coach', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6);
+   ('e2e-stable', 'E2E Stable', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-stable-c', 'E2E Stable Coach', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6),
+   ('e2e-deep', 'E2E Deep', 2, 1, 3, 30, 1000, 60, 1, 'normal', 1, 2);
    INSERT INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) VALUES (2, 1, 1000000, 20, 'policy', 'e2e seed');
    INSERT INTO referral_policies (version, enabled, paused, referrer_amount, invitee_amount, daily_cap, total_cap, min_hands, burst_limit, change, reason) VALUES (2, 1, 0, 1000, 1000, 5, 50, 0, 20, 'policy', 'e2e seed');`,
 );

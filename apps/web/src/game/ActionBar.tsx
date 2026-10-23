@@ -36,7 +36,7 @@
  */
 import type { ActionType, LegalOption, TableView } from '@jc/types';
 import { ChevronDownIcon, ChevronUpIcon, cx, formatChips, MinusIcon, PlusIcon, Spinner } from '@jc/ui';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts } from '../lib/amount';
 import { useI18n } from '../lib/i18n';
 import { usePrefs } from '../lib/prefs';
@@ -56,6 +56,12 @@ function haptic(ms: number) {
 }
 
 const CHIPS = chipAmounts('chips', 0);
+
+/**
+ * About how wide a line of the amounts' text is, in its own font size: a figure, letter or space of the monospace face
+ * is 0.6 of it, a Hangul (or other wide) glyph, set in the fallback face, at most 1.
+ */
+const ems = (text: string) => Array.from(text).reduce((n, c) => n + (/[ᄀ-ᇿ⺀-꓏가-힯豈-﫿＀-￯]/.test(c) ? 1 : 0.6), 0);
 
 /** Narrower than Tailwind's `sm`: a phone held upright, where the bar's own row stacks the time bank over the bar. */
 const PHONE_QUERY = 'not all and (min-width: 40rem)';
@@ -255,8 +261,9 @@ export function ActionBar({
     : 'jc-tap jc-act flex h-12 min-w-0 items-center justify-center gap-1.5 rounded-xl text-sm font-bold tracking-wide text-white shadow-lg transition active:translate-y-px disabled:opacity-50';
   const btn = cx(btnBase, 'flex-1', !compact && 'px-2');
   // Bet/Raise: its name and the amount, beside each other while they fit (else the amount under the name), so a long
-  // amount wraps instead of widening the row.
-  const commitBtn = cx(btnBase, 'w-full', !compact && 'flex-wrap content-center gap-x-1.5 gap-y-0 px-2 leading-tight');
+  // amount wraps instead of widening the row; three lines (a long press-again line over the amount) fit its 48px. Its
+  // own width is what its amount's face is sized against (see `fit`).
+  const commitBtn = cx(btnBase, '@container w-full', !compact && 'flex-wrap content-center gap-x-1.5 gap-y-0 px-2 leading-[1.1]');
   /** A button's amount, under its name when narrow; there, pressed once, the press-again line stands alone. */
   const amountOf = (key: ArmKey, sig: string, v: number) => !(compact && isArmed(key, sig)) && <span className={cx('font-mono', compact && 'text-[11px] font-semibold')}>{a.fmt(v, true)}</span>;
   const armedCls = 'ring-2 ring-ivory ring-offset-2 ring-offset-ink-950 animate-pulse';
@@ -269,21 +276,28 @@ export function ActionBar({
    * What Bet/Raise does: its name and the amount set, never shortened or rounded (12,500, not 12.5K; in big blinds the
    * chips follow, 5 BB (12,501)), so what it bets reads on it. Pressed once in the column, too narrow for the whole
    * press-again line and the amount, a short word stands for the name.
+   *
+   * All of it fits the button's 48px, however long the amount: a line of the amount never wraps, and one too long for
+   * the button's width takes a smaller face (see `ems`). In the column, about 60px across, the blinds and the chips take
+   * a line each.
    */
   const commitName = isAllInAmount ? t('action.allin') : bet ? t('action.bet') : t('action.raiseBtn');
-  const commitAmount = a.exact(amount);
-  const commitAmountCls = cx('font-mono tabular-nums', compact && 'break-all text-[11px] font-semibold');
+  const commitLines = column && a.unit === 'bb' ? [a.fmt(amount), `(${formatChips(amount)})`] : [a.exact(amount)];
+  const fit = (line: string) => ({ fontSize: `min(${compact ? 11 : 14}px, ${(96 / ems(line)).toFixed(2)}cqi)` });
+  const commitAmountCls = cx('whitespace-nowrap font-mono tabular-nums', compact && 'text-[11px] font-semibold');
   const stepBtn = 'jc-tap grid size-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-ink-850 text-lg font-bold text-ivory active:bg-ink-700 disabled:opacity-40';
   const amountLabel = bet ? t('action.betTo') : t('action.raiseTo');
   // A raise is to a total: what already sits in front of me is part of it.
-  const fromStack = streetBet > 0 && (
+  const fromStackText = streetBet > 0 ? t('action.fromStack', { amount: a.fmt(Math.max(0, amount - streetBet), true) }) : '';
+  const fromStack = fromStackText && (
     <span className={cx('font-mono tabular-nums', column && 'text-ink-400')} data-testid="action-from-stack">
-      {t('action.fromStack', { amount: a.fmt(Math.max(0, amount - streetBet), true) })}
+      {fromStackText}
     </span>
   );
-  const inChips = a.unit === 'bb' && (
+  const inChipsText = a.unit === 'bb' ? `= ${formatChips(amount)}` : '';
+  const inChips = inChipsText && (
     <span className={cx('font-mono tabular-nums', column && 'text-ink-400')} data-testid="action-chips">
-      = {formatChips(amount)}
+      {inChipsText}
     </span>
   );
   /** The amount typed, its name inside the field's top edge; an amount the server would refuse is edged in red. */
@@ -307,19 +321,22 @@ export function ActionBar({
       />
     </label>
   );
-  // In the bar's own row, what comes from the stack and the chips read on Bet/Raise's lower edge, as the sizing's text
-  // rather than the button's name (which stays the action and its amount). Pressed once, the press-again line stands
-  // alone.
-  const caption = !column && !isArmed('commit', commitSig) && (fromStack || inChips) && (
-    <span className={cx('pointer-events-none absolute inset-x-1 bottom-1 flex justify-center gap-x-1.5 overflow-hidden whitespace-nowrap text-[11px] font-semibold leading-3.5 text-ink-950/75', (!commit || (busy && sent?.key !== 'commit')) && 'opacity-50')}>
+  // In the bar's own row, what comes from the stack reads on Bet/Raise's lower edge, as the sizing's text rather than the
+  // button's name (which stays the action and its amount, the chips with it in big blinds, so not again here). Pressed
+  // once, the press-again line stands alone. One line, its face smaller where it is longer than the button is wide (a
+  // phone's, in big blinds), never cut.
+  const caption = !column && !isArmed('commit', commitSig) && fromStack && (
+    <span
+      className={cx('pointer-events-none absolute inset-x-1 bottom-1 flex justify-center overflow-hidden whitespace-nowrap font-semibold leading-3.5 text-ink-950/75', (!commit || (busy && sent?.key !== 'commit')) && 'opacity-50')}
+      style={{ fontSize: `min(11px, calc((100cqi - 10px) / ${ems(fromStackText).toFixed(2)}))` }}
+    >
       {fromStack}
-      {inChips}
     </span>
   );
   const commitArmed = isArmed('commit', commitSig);
   // The same button open or closed: it bets the amount set (the sizing only sets it), so it is never a way to open it.
   const commitButton = window_ && (
-    <div className={cx('relative flex min-w-0', column ? 'flex-[1.4]' : 'flex-[2]')}>
+    <div className={cx('@container relative flex min-w-0', column ? 'flex-[1.4]' : 'flex-[2]')}>
       <button
         type="button"
         disabled={busy || !commit}
@@ -329,10 +346,25 @@ export function ActionBar({
         aria-busy={busy && sent?.key === 'commit'}
         data-testid="action-commit"
       >
-        {pending('commit')}
+        {/* Narrow, the spinner beside the name, not a line of its own over it. */}
+        {!compact && pending('commit')}
         {/* The amount on it pressed once too: the second press bets what it says. */}
-        <span>{commitArmed ? (column ? t('action.again') : t('action.tapAgain', { type: commitName })) : commitName}</span>{' '}
-        {commit ? <span className={commitAmountCls}>{commitAmount}</span> : <span className="text-[11px] font-semibold">{t('action.needAmount')}</span>}
+        <span className={cx(compact && 'flex items-center justify-center gap-1')}>
+          {compact && pending('commit')}
+          {commitArmed ? (column ? t('action.again') : t('action.tapAgain', { type: commitName })) : commitName}
+        </span>{' '}
+        {commit ? (
+          commitLines.map((line, i) => (
+            <Fragment key={i}>
+              {i > 0 && ' '}
+              <span className={commitAmountCls} style={fit(line)}>
+                {line}
+              </span>
+            </Fragment>
+          ))
+        ) : (
+          <span className="text-[11px] font-semibold">{t('action.needAmount')}</span>
+        )}
       </button>
       {caption}
     </div>
