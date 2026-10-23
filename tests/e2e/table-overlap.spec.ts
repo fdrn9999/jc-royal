@@ -1,4 +1,5 @@
 import { expect, type Browser, type Locator, type Page } from '@playwright/test';
+import { lineFace, MIN_FACE, wrapPoints } from '../../apps/web/src/game/amountFit';
 import { setAccountPrefs, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
 /**
@@ -415,57 +416,75 @@ function spill(p: Page) {
       for (const r of Array.from(range.getClientRects())) if (r.left < b.left - 0.5 || r.right > b.right + 0.5) out.push(at(n.textContent!.trim(), r));
     }
     if (btn.scrollWidth > btn.clientWidth + 1 || btn.scrollHeight > btn.clientHeight + 1) out.push(`scroll ${btn.scrollWidth}x${btn.scrollHeight} in ${btn.clientWidth}x${btn.clientHeight}`);
-    const lines = Array.from(btn.querySelectorAll<HTMLElement>('span.whitespace-nowrap'));
-    const caption = Array.from(btn.parentElement!.children).find((c) => c !== btn);
+    const lines = Array.from(btn.querySelectorAll<HTMLElement>('span.font-mono'));
+    const caption = Array.from(btn.parentElement!.children).find((c) => c !== btn) as HTMLElement | undefined;
     return {
       text: btn.textContent!.replace(/\s+/g, ' ').trim(),
       size: `${Math.round(b.width)}x${Math.round(b.height)}`,
       faces: lines.map((s) => getComputedStyle(s).fontSize),
       container: getComputedStyle(btn).containerType,
       caption: caption ? `${caption.textContent} ${getComputedStyle(caption).fontSize}` : '',
+      captionFace: caption ? parseFloat(getComputedStyle(caption).fontSize) : null,
       out,
     };
   });
 }
 
 /**
- * The widest lines a deep stack makes (493.83 BB, (1,234,566), and the two together), each set on the button the way
- * its amount lines are (the same face rule, read off them), measured across against the button's inside. No such stack
- * is reached in play here; the rule is the same whatever the text.
+ * Bet/Raise as a stack deeper than this table's would write it (1,234,566 chips at a 3-chip blind; 400,000,000), the
+ * whole of it: a copy of the button (and of what is under it) at its own width, out of sight, its amount lines set as
+ * the page sets them (`amountFit`, at the face the page's own lines may take), then measured as `spill` measures the
+ * button: what lies past it, its height and the faces drawn.
  */
-function deepLines(p: Page, texts: string[]) {
-  return p.getByTestId('action-commit').evaluate((btn, texts) => {
-    const one = btn.querySelector<HTMLElement>('span.whitespace-nowrap')!;
-    const [, max, cqi] = /min\(([\d.]+)px, ([\d.]+)cqi\)/.exec(one.style.fontSize)!;
-    const rule = Number(cqi) * one.textContent!.length;
-    const s = getComputedStyle(btn);
-    const inside = btn.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
-    return texts.map((text) => {
-      const c = one.cloneNode() as HTMLElement;
-      c.textContent = text;
-      c.style.fontSize = `min(${max}px, ${(rule / text.length).toFixed(2)}cqi)`;
-      btn.append(c);
-      const w = c.getBoundingClientRect().width;
-      const face = getComputedStyle(c).fontSize;
-      c.remove();
-      return { text, face, w: Math.round(w * 10) / 10, inside, fits: w <= inside + 0.5 };
+function deepButton(p: Page, cases: string[][], max: number) {
+  const faces = cases.map((lines) => lines.map((l) => ({ face: lineFace(l, max), parts: wrapPoints(l) })));
+  return p.getByTestId('action-commit').evaluate((btn, faces) => {
+    const wrap = btn.parentElement!;
+    const card = wrap.closest<HTMLElement>('[data-testid="action-bar"] > div')!;
+    return faces.map((lines) => {
+      const copy = wrap.cloneNode(true) as HTMLElement;
+      Object.assign(copy.style, { position: 'absolute', left: '0', top: '0', width: `${wrap.getBoundingClientRect().width}px`, visibility: 'hidden' });
+      const b = copy.querySelector<HTMLElement>('[data-testid="action-commit"]')!;
+      b.removeAttribute('data-testid');
+      const spans = Array.from(b.querySelectorAll<HTMLElement>('span.font-mono'));
+      spans.forEach((s, i) => {
+        const l = lines[i];
+        if (!l) return s.remove();
+        s.replaceChildren(...l.parts.flatMap((part, j) => (j ? [document.createElement('wbr'), part] : [part])));
+        s.style.fontSize = l.face;
+      });
+      card.append(copy);
+      const r = b.getBoundingClientRect();
+      const out: string[] = [];
+      const texts = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+      for (let n = texts.nextNode(); n; n = texts.nextNode()) {
+        if (!n.textContent!.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        for (const t of Array.from(range.getClientRects())) if (t.left < r.left - 0.5 || t.right > r.right + 0.5 || t.top < r.top - 1.5 || t.bottom > r.bottom + 1.5) out.push(`${n.textContent!.trim()} @${Math.round(t.left - r.left)},${Math.round(t.top - r.top)}`);
+      }
+      if (b.scrollWidth > b.clientWidth + 1 || b.scrollHeight > b.clientHeight + 1) out.push(`scroll ${b.scrollWidth}x${b.scrollHeight} in ${b.clientWidth}x${b.clientHeight}`);
+      const drawn = Array.from(b.querySelectorAll<HTMLElement>('span.font-mono')).map((s) => ({ face: parseFloat(getComputedStyle(s).fontSize), rows: s.getClientRects().length }));
+      copy.remove();
+      return { text: b.textContent!.replace(/\s+/g, ' ').trim(), size: `${Math.round(r.width)}x${Math.round(r.height)}`, h: Math.round(r.height), drawn, out };
     });
-  }, texts);
+  }, faces);
 }
 
 /**
- * Bet/Raise writes the amount it bets in full however long it is (in big blinds the chips follow: 333.33 BB (1,000) at a
- * 3-chip blind), and all of it lies inside its 48px: in a short screen's column (about 60px across, the blinds and the
- * chips a line each), on the narrowest phone and on a desktop, in Korean and English, at everything (All-in) and a chip
- * under it, pressed once and not (Chrome emulation). A line too long for the button takes a smaller face rather than
- * wrapping or spilling, and so does the line under it in the bar's own row (what comes from the stack). Nothing is bet:
- * the turn is checked or folded after.
+ * Bet/Raise writes the amount it bets in full however long it is (in big blinds the chips follow: 3,333.33 BB (10,000)
+ * at a 3-chip blind, the whole of a new account's wallet), and all of it lies inside its 48px, no line of it (nor the
+ * line under it) under 9px: in a short screen's column (about 60px across, the blinds and the chips a line each, the
+ * blinds wrapping there), on the narrowest phone and on a desktop, in Korean and English, at everything (All-in) and a
+ * chip under it, pressed once and not, and with an amount the server would refuse (under the least, past the most),
+ * open and closed, whose chips still read (Chrome emulation). Deeper stacks than a wallet holds are set on a copy of the
+ * button: they wrap inside it, the row growing only for the deepest. Nothing is bet: the turn is checked or folded after.
  */
-test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크톱에서 한국어·영어 모두 버튼 48px 안에 들어간다', async ({ browser }) => {
-  test.setTimeout(900_000);
+test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크톱에서 한국어·영어 모두 버튼 48px 안에 9px 이상으로 들어가고, 잘못된 금액도 칩 환산이 보인다', async ({ browser }) => {
+  test.setTimeout(1_500_000);
   const { page } = await signUp(browser);
   await setAccountPrefs(page, { amountUnit: 'bb' });
-  await sitWith(page, 'e2e-deep', 1000);
+  await sitWith(page, 'e2e-deep', 10_000);
   const filled = (p: Page) => p.locator('[data-testid=table] [data-testid^="seat-"][data-state]');
   await expect(filled(page)).toHaveCount(2, { timeout: 120_000 });
   const state = await page.context().storageState();
@@ -478,8 +497,8 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
     { name: '1366x768', viewport: { width: 1366, height: 768 } },
     { name: '1366x768', viewport: { width: 1366, height: 768 }, locale: 'en' },
   ];
-  const seen: { screen: string; state: string; text: string; size: string; faces: string[]; container: string; caption: string; out: string[] }[] = [];
-  const deep: { screen: string; text: string; face: string; w: number; inside: number; fits: boolean }[] = [];
+  const seen: { screen: string; state: string; text: string; size: string; faces: string[]; container: string; caption: string; captionFace: number | null; chips: string | null; out: string[] }[] = [];
+  const deep: { screen: string; text: string; size: string; h: number; drawn: { face: number; rows: number }[]; out: string[] }[] = [];
 
   for (const sc of screens) {
     const touch = !!sc.touch;
@@ -502,9 +521,11 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
     const commit = bar.getByTestId('action-commit');
     const press = (l: Locator) => (touch ? l.tap() : l.click());
     const tag = `${sc.name}${sc.locale ? '-en' : ''}`;
+    const chips = bar.getByTestId('action-chips');
     const look = async (state: string) => {
       await p.waitForTimeout(150);
-      seen.push({ screen: tag, state, ...(await spill(p)) });
+      const shown = (await chips.count()) ? await chips.textContent() : null;
+      seen.push({ screen: tag, state, ...(await spill(p)), chips: shown });
       await bar.screenshot({ path: test.info().outputPath(`commit-${tag}-${state}.png`) });
     };
 
@@ -528,11 +549,16 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
     await expect(commit).toHaveText(/ BB \(\d[\d,]*\)$/);
     const stack = Number(/\(([\d,]+)\)$/.exec((await commit.textContent())!.trim())![1]!.replace(/,/g, ''));
     await look('max');
+    const cases = sc.column
+      ? [
+          ['411,522 BB', '(1,234,566)'],
+          ['133,333,333.33 BB', '(400,000,000)'],
+        ]
+      : [['411,522 BB (1,234,566)'], ['133,333,333.33 BB (400,000,000)']];
+    deep.push(...(await deepButton(p, cases, touch ? 11 : 14)).map((d) => ({ screen: tag, ...d })));
     await press(commit); // half the stack or more: armed, nothing sent
     await expect(commit).toHaveText(/^(한 번 더|Confirm|Press again)/);
     await look('max-armed');
-    if (sc.column) deep.push(...(await deepLines(p, ['493.83 BB', '(1,234,566)'])).map((d) => ({ screen: tag, ...d })));
-    else deep.push(...(await deepLines(p, ['493.83 BB (1,234,566)'])).map((d) => ({ screen: tag, ...d })));
 
     // A chip or two under it, the sizing open: Bet or Raise to, the amount as long (blinds to the hundredth: not a whole
     // number of them).
@@ -546,6 +572,26 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
     await expect(commit).toHaveText(/^(한 번 더|Confirm|Press again)/);
     await look('under-open-armed');
 
+    // An amount the server would refuse, under the least and past the most: Bet/Raise disabled, saying one is wanted,
+    // the chips of what was typed reading open and closed (under the button, or beside the closed sizing's name in the
+    // column), and kept as typed when closed.
+    for (const [name, typed, sent] of [
+      ['low', '0.5', 2],
+      ['high', '9999.99', 30_000],
+    ] as const) {
+      const field = bar.getByTestId('action-amount');
+      if (!(await field.isVisible())) await press(toggle);
+      await field.fill(typed);
+      await expect(commit).toBeDisabled();
+      await expect(commit).toHaveText(/(금액 설정 필요|Set an amount)$/);
+      await expect(chips).toHaveText(`= ${sent.toLocaleString('en-US')}`);
+      await look(`${name}-open`);
+      await press(toggle);
+      await expect(bar.getByTestId('action-dock-amount')).toHaveText(/^(금액 설정 필요|Set an amount)$/);
+      await expect(chips).toHaveText(`= ${sent.toLocaleString('en-US')}`);
+      await look(`${name}-closed`);
+    }
+
     await act(p);
     await ctx.close();
   }
@@ -554,13 +600,22 @@ test('Bet/Raise의 긴 BB 금액: 좁은 가로 열, 320px 휴대폰, 데스크�
   const body = JSON.stringify({ issues, seen, deep }, null, 1);
   await test.info().attach('commit-fit.json', { body, contentType: 'application/json' });
   console.log(`commit-fit ${body}`);
-  expect(seen.length).toBe(screens.length * 4);
+  expect(seen.length).toBe(screens.length * 8);
   for (const s of seen) {
     expect(s.container, `${s.screen} ${s.state}: Bet/Raise is the container its face is sized against`).toBe('inline-size');
     expect(s.size, `${s.screen} ${s.state}: Bet/Raise stays 48px high`).toMatch(/x48$/);
+    for (const f of s.faces) expect(parseFloat(f), `${s.screen} ${s.state}: an amount line of ${f}`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
+    if (s.captionFace !== null) expect(s.captionFace, `${s.screen} ${s.state}: the line under it`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
   }
+  // The full amount on the button, with what comes from the stack (in play, when a blind is in) under it in the row.
+  expect(seen.filter((s) => s.state === 'max').every((s) => /\d,\d{3}\.\d\d BB|\(\d{1,3}(,\d{3})+\)/.test(s.text))).toBe(true);
   expect(issues, 'Bet/Raise’s text lies inside its button').toEqual([]);
-  expect(deep.filter((d) => !d.fits), 'a deep stack’s lines fit the button across').toEqual([]);
+  // Deeper stacks set on a copy: inside it, no line under 9px; up to 1,234,566 chips in 48px, the deepest taller.
+  for (const d of deep) {
+    expect(d.out, `${d.screen} ${d.text}`).toEqual([]);
+    for (const x of d.drawn) expect(x.face, `${d.screen} ${d.text}`).toBeGreaterThanOrEqual(MIN_FACE - 0.01);
+    if (d.text.includes('1,234,566')) expect(d.h, `${d.screen} ${d.text}`).toBe(48);
+  }
 
   await page.goto('/table/e2e-deep');
   await expect(filled(page)).toHaveCount(2);
