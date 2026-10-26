@@ -56,7 +56,7 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
     <fieldset className="break-keep rounded-xl border border-white/10 bg-ink-900/60">
       <legend className="sr-only">{t('consent.title')}</legend>
       <label className="flex cursor-pointer items-start gap-3 border-b border-white/10 px-4 py-3.5">
-        <input type="checkbox" className={cx(box, 'mt-0.5')} checked={all} onChange={(e) => onChange({ ...value, age14: e.target.checked, privacy: e.target.checked })} />
+        <input type="checkbox" name="agree-all" className={cx(box, 'mt-0.5')} checked={all} onChange={(e) => onChange({ ...value, age14: e.target.checked, privacy: e.target.checked })} />
         <span>
           <span className="block text-sm font-semibold text-ivory">{t('consent.all')}</span>
           <span className="mt-0.5 block text-xs text-ink-400">{t('consent.allHint')}</span>

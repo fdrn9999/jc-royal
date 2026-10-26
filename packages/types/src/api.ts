@@ -33,14 +33,15 @@ export function ageOn(birthDate: string, today: string): number {
   const [ty, tm, td] = today.split('-').map(Number) as [number, number, number];
   return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0);
 }
-const realDate = (s: string) => {
+/** A YYYY-MM-DD string that names a real calendar day (not Feb 30). */
+export const isCalendarDate = (s: string) => {
   const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && isoDate(d) === s;
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(d.getTime()) && isoDate(d) === s;
 };
 export const BirthDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .refine(realDate, 'not a calendar date')
+  .refine(isCalendarDate, 'not a calendar date')
   // One day of slack for members whose local date is already ahead of UTC.
   .refine((s) => s >= '1900-01-01' && s <= isoDate(new Date(Date.now() + 86_400_000)), 'out of range');
 
