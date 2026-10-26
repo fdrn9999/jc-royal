@@ -789,6 +789,53 @@ describe('Bot AI 2.0: public statistics', () => {
   });
 });
 
+describe('Bot AI 2.0: levels and styles move separately', () => {
+  // The cutoff (seat 5) first in, and the button's continuation bet heads-up on a dry flop after the big blind called.
+  const coFirstIn = (hole: string) => viewAt(5, 6, { 5: hole }, [[3, 'fold'], [4, 'fold']]);
+  const board = '9s 5d 2c Kh 7h';
+  const cbet = (hole: string) => viewAt(0, 6, { 0: hole }, [...FOLD_TO_BTN, [0, 'raise', 25], [1, 'fold'], [2, 'call'], [2, 'check']], { board });
+  const bbFacingFlop = (bet: number) => (hole: string) =>
+    viewAt(1, 2, { 1: hole }, [[0, 'raise', 25], [1, 'call'], [1, 'check'], [0, 'bet', bet]], { board: 'Kh 8d 3c 2s 5h' });
+
+  it('keeps each style’s width and aggression at every level', async () => {
+    for (const level of BOT_LEVELS) {
+      const m = {} as Record<BotStyle, Mix>;
+      for (const style of BOT_STYLES) m[style] = await rangeMix(coFirstIn, bot(level, { style }), 2);
+      console.log(`${level} CO first in: ${BOT_STYLES.map((s) => `${s} ${show(m[s])}`).join(' | ')}`);
+      // Wider: loose-aggressive over tight-aggressive, loose-passive over balanced; tighter: both tight styles.
+      expect(m.lag.defend, level).toBeGreaterThan(m.tag.defend + 0.05);
+      expect(m['loose-passive'].defend, level).toBeGreaterThan(m.balanced.defend);
+      expect(m.tag.defend, level).toBeLessThan(m.balanced.defend);
+      expect(m['tight-passive'].defend, level).toBeLessThan(m.balanced.defend);
+      // Passive: the hands it plays are limped more and raised less.
+      for (const s of ['tight-passive', 'loose-passive'] as const) {
+        expect(m[s].call / m[s].defend, `${level} ${s}`).toBeGreaterThan(m.balanced.call / m.balanced.defend);
+        expect(m[s].raise, `${level} ${s}`).toBeLessThan(m.tag.raise);
+      }
+    }
+  }, 240_000);
+
+  it('lets an expert be passive and an easy bot aggressive, and keeps the expert’s passive calls by the price', async () => {
+    const expertTp = await rangeMix(cbet, bot('expert', { style: 'tight-passive' }), 2, board);
+    const easyLag = await rangeMix(cbet, bot('easy', { style: 'lag' }), 2, board);
+    console.log(`c-bet heads-up on 9s 5d 2c: expert tight-passive ${show(expertTp)} | easy loose-aggressive ${show(easyLag)}`);
+    expect(easyLag.raise).toBeGreaterThan(expertTp.raise + 0.1);
+    // A loose-passive expert calls wide but is no calling station: air folds to a half-pot bet and to an overbet,
+    // top pair stays, and an overbet is defended less than a half-pot bet.
+    const lp = bot('expert', { style: 'loose-passive' });
+    const air = spotMix(await bbFacingFlop(25)('7s 4d'), lp, 200);
+    const airOver = spotMix(await bbFacingFlop(100)('7s 4d'), lp, 200);
+    const top = spotMix(await bbFacingFlop(25)('Kd Jc'), lp, 200);
+    const half = await rangeMix(bbFacingFlop(25), lp, 2, 'Kh 8d 3c 2s 5h');
+    const over = await rangeMix(bbFacingFlop(100), lp, 2, 'Kh 8d 3c 2s 5h');
+    console.log(`expert loose-passive vs a flop bet: air ${show(air)} | air vs 2× pot ${show(airOver)} | top pair ${show(top)} | all hands vs half pot ${show(half)} | vs 2× pot ${show(over)}`);
+    expect(air.fold).toBeGreaterThan(0.75);
+    expect(airOver.defend).toBeLessThan(0.05);
+    expect(top.defend).toBeGreaterThan(0.9);
+    expect(over.defend).toBeLessThan(half.defend - 0.1);
+  }, 240_000);
+});
+
 describe('Bot AI 2.0: fairness and safety', () => {
   it('sees only its own seat: the same view and the same decisions whatever the others hold', async () => {
     const stats = { stats: { 0: PROFILES_FOR_FAIRNESS } };
