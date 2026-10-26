@@ -931,6 +931,7 @@ const admin = new Hono<AppEnv>()
       beginner: body.beginner,
       botsEnabled: body.botsEnabled,
       botLevel: body.botLevel,
+      botStyle: body.botStyle,
       botMinHumans: body.botMinHumans,
       botMax: body.botMax,
       botFillTo: body.botFillTo,
@@ -982,7 +983,7 @@ const admin = new Hono<AppEnv>()
       assertRecentReauth(c);
     }
     const T = schema.tables;
-    const botFields = (['botsEnabled', 'botLevel', 'botMinHumans', 'botMax', 'botFillTo', 'botYield'] as const).filter((k) => body[k] !== undefined);
+    const botFields = (['botsEnabled', 'botLevel', 'botStyle', 'botMinHumans', 'botMax', 'botFillTo', 'botYield'] as const).filter((k) => body[k] !== undefined);
     const joinCodeHash = body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null;
     const conflict = (now: { updatedAt: number } | undefined): never => fail(409, 'table_conflict', 'the table changed meanwhile', { updatedAt: now?.updatedAt ?? null });
     // The row is written only if every column this sets still holds what was read, and the status too: a change another
@@ -1005,6 +1006,7 @@ const admin = new Hono<AppEnv>()
         const bots = {
           botsEnabled: body.botsEnabled ?? r.botsEnabled,
           botLevel: body.botLevel ?? r.botLevel,
+          botStyle: body.botStyle ?? r.botStyle,
           botMinHumans: body.botMinHumans ?? r.botMinHumans,
           botMax: body.botMax ?? r.botMax,
           botFillTo: body.botFillTo ?? r.botFillTo,
@@ -1048,6 +1050,7 @@ const admin = new Hono<AppEnv>()
               eq(T.entryBlocked, r.entryBlocked),
               eq(T.botsEnabled, r.botsEnabled),
               eq(T.botLevel, r.botLevel),
+              eq(T.botStyle, r.botStyle),
               eq(T.botMinHumans, r.botMinHumans),
               eq(T.botMax, r.botMax),
               eq(T.botFillTo, r.botFillTo),

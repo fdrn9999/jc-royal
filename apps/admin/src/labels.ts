@@ -79,9 +79,11 @@ const auditNames = labeler({
   'admin.session.end': 'auditSessionEnd',
   'admin.session.end_others': 'auditSessionEndOthers',
   'board.comment.status': 'auditCommentStatus',
+  'bots.accounts': 'auditBotsAccounts',
   'bots.events': 'auditBotsEvents',
   'bots.integrity': 'auditBotsIntegrity',
   'bots.policy': 'auditBotsPolicy',
+  'bots.profile': 'auditBotsProfile',
   'bots.stop': 'auditBotsStop',
   'bots.view': 'auditBotsView',
   'board.notice.create': 'auditNoticeCreate',
@@ -288,6 +290,15 @@ export const noticeStateLabel = labeler({ live: 'noticeStateLive', scheduled: 'n
 export const maintStateLabel = labeler({ active: 'maintStateActive', scheduled: 'maintStateScheduled', finished: 'maintStateFinished', ended_early: 'maintStateEndedEarly', cancelled: 'maintStateCancelled' });
 /** Table bots: difficulty, the operations log's kinds and the codes the room writes with them (others are shown as they are). */
 export const botLevelLabel = labeler({ easy: 'botLevelEasy', normal: 'botLevelNormal', hard: 'botLevelHard', expert: 'botLevelExpert' });
+/** Play styles (persona.ts), and a table's `auto`: each account's own style from its ID. */
+export const botStyleLabel = labeler({
+  auto: 'botStyleAuto',
+  balanced: 'botStyleBalanced',
+  tag: 'botStyleTag',
+  lag: 'botStyleLag',
+  'tight-passive': 'botStyleTightPassive',
+  'loose-passive': 'botStyleLoosePassive',
+});
 export const botEventKindLabel = labeler({ join: 'botEvJoin', leave: 'botEvLeave', fund_exhausted: 'botEvFundExhausted', join_failed: 'botEvJoinFailed', action_failed: 'botEvActionFailed' });
 const botCodes = labeler({
   busted: 'botCodeBusted',

@@ -12,12 +12,43 @@
  * twice; chips issued for a buy-in that then did not happen stay in the bot's wallet for its next one.
  */
 import { applyLedger } from '@jc/db';
+import { BOT_LEVELS, BOT_STYLES, type BotLevel, type BotProfile, type BotStyle } from '@jc/types';
 import { buyIn } from './settlement';
 
 export interface BotAccount {
   id: string;
   nickname: string;
   balance: number;
+  /** What an administrator set for this bot (bot_profiles); null: it follows each table it sits at. */
+  profile: BotProfile | null;
+}
+
+/** A bot_profiles row as the room uses it: a value this build does not know follows the table, as if unset. */
+export function profileOf(r: { level?: unknown; style?: unknown } | null | undefined): BotProfile | null {
+  if (!r) return null;
+  return {
+    level: BOT_LEVELS.includes(r.level as BotLevel) ? (r.level as BotLevel) : null,
+    style: BOT_STYLES.includes(r.style as BotStyle) ? (r.style as BotStyle) : null,
+  };
+}
+
+/** The settings of these bots, in one D1 call (bots with none are absent). */
+export async function readBotProfiles(d1: D1Database, ids: string[]): Promise<Map<string, BotProfile>> {
+  if (!ids.length) return new Map();
+  const { results } = await d1
+    .prepare(`SELECT bot_id AS id, level, style FROM bot_profiles WHERE bot_id IN (${ids.map((_, i) => `?${i + 1}`).join(', ')})`)
+    .bind(...ids)
+    .all<{ id: string; level: unknown; style: unknown }>();
+  return new Map(results.map((r) => [r.id, profileOf(r)!]));
+}
+
+/** `p`'s answer, or a rejection once `ms` passed without one (an answer after that is dropped). */
+export function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer in ${ms} ms`)), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 export type BotEventKind = 'join' | 'leave' | 'fund_exhausted' | 'join_failed' | 'action_failed';
@@ -43,13 +74,14 @@ export async function pickBot(d1: D1Database, exclude: string[]): Promise<BotAcc
   const marks = exclude.map((_, i) => `?${i + 1}`).join(', ');
   const r = await d1
     .prepare(
-      `SELECT id, nickname, balance FROM users u WHERE is_bot = 1 AND status = 'active'${exclude.length ? ` AND id NOT IN (${marks})` : ''}
+      `SELECT u.id, u.nickname, u.balance, p.bot_id AS profiled, p.level, p.style FROM users u LEFT JOIN bot_profiles p ON p.bot_id = u.id
+        WHERE u.is_bot = 1 AND u.status = 'active'${exclude.length ? ` AND u.id NOT IN (${marks})` : ''}
          AND NOT EXISTS (SELECT 1 FROM table_sessions s WHERE s.user_id = u.id AND s.status = 'seated')
-       ORDER BY balance DESC LIMIT 1`,
+       ORDER BY u.balance DESC LIMIT 1`,
     )
     .bind(...exclude)
-    .first<BotAccount>();
-  return r ? { id: r.id, nickname: r.nickname, balance: Number(r.balance) } : createBot(d1);
+    .first<{ id: string; nickname: string; balance: number; profiled: string | null; level: unknown; style: unknown }>();
+  return r ? { id: r.id, nickname: r.nickname, balance: Number(r.balance), profile: r.profiled ? profileOf(r) : null } : createBot(d1);
 }
 
 /**
@@ -69,7 +101,7 @@ async function createBot(d1: D1Database): Promise<BotAccount> {
         )
         .bind(id, `bot-${id}@bots.invalid`, nickname)
         .run();
-      return { id, nickname, balance: 0 };
+      return { id, nickname, balance: 0, profile: null };
     } catch (e) {
       // Another bot already has this name: draw again.
       if (attempt < 5 && e instanceof Error && /UNIQUE constraint failed/.test(e.message)) continue;

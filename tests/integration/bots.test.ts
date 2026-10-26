@@ -2,7 +2,7 @@
 // play through the same engine, give up seats to members and stand up when switched off, and every chip they hold goes
 // through the ledger. Once nobody is seated, members' wallets + bots' wallets − what the bot fund issued never changes,
 // each table's buy-ins and cash-outs cancel out, and each bot seat has one buy-in, at most one fund row and one cash-out.
-import type { HandDetailDto, LobbyTableDto, TableView } from '@jc/types';
+import { styleFor, type BotLevel, type BotPlay, type BotProfile, type BotStyle, type HandDetailDto, type LobbyTableDto, type TableView } from '@jc/types';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin, signupBody, WEB_ORIGIN } from '../support/client';
@@ -135,6 +135,30 @@ async function botPlay(level: string) {
 }
 
 const ids = (xs: string[]) => xs.map((x) => `'${x}'`).join(', ');
+
+interface BotAccount {
+  id: string;
+  profile: BotProfile | null;
+  updatedAt: number | null;
+  auto: BotStyle;
+  seat: { tableId: string } | null;
+  effective: BotPlay | null;
+  play: { hands: number; counted: number; vpip: number; pfr: number; net: number; af: { hands: number; aggressive: number; calls: number } };
+}
+const account = async (id: string, c: Client = admin) => {
+  const r = await c.get('/api/admin/bots/accounts?days=1&limit=200');
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+  return (r.body.items as BotAccount[]).find((b) => b.id === id)!;
+};
+/** What the room holds for its bot seat: the level and style of the hand dealt last, and the bot's settings it read. */
+const roomBot = async (tableId: string, seat: number) =>
+  (await admin.get(`/api/admin/tables/${tableId}`)).body.live.seats[seat] as { userId: string; bot: BotLevel; botStyle: BotStyle; botProfile: BotProfile | null };
+async function setProfile(botId: string, base: number | null, level: BotLevel | null, style: BotStyle | null, reason = 'bots test profile') {
+  await reauth();
+  const r = await admin.req('PUT', `/api/admin/bots/${botId}/profile`, { baseUpdatedAt: base, level, style, reason });
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+  return r.body as { profile: BotProfile | null; updatedAt: number | null; effective: BotPlay | null; appliesFrom: string; roomConfirmed: boolean | null };
+}
 /** Members' wallets + all bots' wallets − what the fund issued: unchanged across a test once nobody is seated. */
 async function books(members: string[], state?: string) {
   const [r] = await d1<{ m: number; b: number; i: number }>(
@@ -326,6 +350,131 @@ describe('table bots', () => {
     await ws.waitState(empty, 90_000, 'the table to empty');
     await stop();
     await balanced(T, [m.me.id], before);
+  }, 300_000);
+
+  it("a bot's own level and style apply from the next hand over the table's, each one separately, and back to the table's when reset", async () => {
+    const T = 'it-bot-prof-0';
+    const m = await newUser();
+    const before = await books([m.me.id]);
+    const ws = await watch(m.client, T);
+    await sit(ws, 0, 500);
+    const playing = await ws.waitState((s) => isMyTurn(s) && s.seats[1]!.bot === 'normal' && s.seats[1]!.hasCards, 30_000, 'the member to act beside the bot');
+    const number = playing.hand!.number;
+    const botId = playing.seats[1]!.userId!;
+    const auto = styleFor(botId);
+    const style: BotStyle = auto === 'lag' ? 'tight-passive' : 'lag';
+
+    // With no settings of its own it plays the table's level in its own automatic style, as every bot did before.
+    expect(await account(botId)).toMatchObject({ profile: null, updatedAt: null, auto, seat: { tableId: T }, effective: { level: 'normal', levelFrom: 'table', style: auto, styleFrom: 'auto' } });
+    expect(await roomBot(T, 1)).toMatchObject({ userId: botId, bot: 'normal', botStyle: auto, botProfile: null });
+
+    // A plain administrator sees the accounts, and changes one only after confirming the password.
+    const staff = await plainAdmin();
+    expect((await account(botId, staff)).id).toBe(botId);
+    const refused = await staff.req('PUT', `/api/admin/bots/${botId}/profile`, { baseUpdatedAt: null, level: 'expert', style, reason: 'no password' });
+    expect([refused.status, refused.body.error?.code]).toEqual([401, 'reauth_required']);
+
+    await reauth();
+    const url = `/api/admin/bots/${botId}/profile`;
+    const preview = await admin.req('PUT', url, { preview: true, baseUpdatedAt: null, level: 'expert', style });
+    expect(preview.status, JSON.stringify(preview.body)).toBe(200);
+    expect(preview.body).toMatchObject({
+      preview: true,
+      from: { level: null, style: null },
+      to: { level: 'expert', style },
+      auto,
+      table: { id: T, level: 'normal', style: 'auto' },
+      effective: { from: { level: 'normal', style: auto }, to: { level: 'expert', levelFrom: 'bot', style, styleFrom: 'bot' } },
+      appliesFrom: 'next_hand',
+    });
+    expect(await d1(`SELECT bot_id FROM bot_profiles WHERE bot_id = '${botId}'`)).toEqual([]);
+    const stale = await admin.req('PUT', url, { baseUpdatedAt: 1, level: 'expert', style, reason: 'stale' });
+    expect([stale.status, stale.body.error?.code, stale.body.error?.details?.profile]).toEqual([409, 'bot_profile_conflict', null]);
+    const same = await admin.req('PUT', url, { baseUpdatedAt: null, level: null, style: null, reason: 'no change' });
+    expect([same.status, same.body.error?.code]).toEqual([400, 'bot_profile_no_change']);
+    expect((await admin.req('PUT', url, { baseUpdatedAt: null, level: 'expert', style })).status).toBe(400);
+    expect((await admin.req('PUT', url, { baseUpdatedAt: null, level: 'master', style, reason: 'bad level' })).status).toBe(400);
+    expect((await admin.req('PUT', url, { baseUpdatedAt: null, level: 'expert', style: 'shark', reason: 'bad style' })).status).toBe(400);
+    const notBot = await admin.req('PUT', `/api/admin/bots/${m.me.id}/profile`, { baseUpdatedAt: null, level: 'expert', style, reason: 'a member' });
+    expect(notBot.status).toBe(404);
+
+    const reason = `bot profile ${Date.now()}`;
+    const saved = await setProfile(botId, null, 'expert', style, reason);
+    expect(saved).toMatchObject({ profile: { level: 'expert', style }, effective: { level: 'expert', style }, appliesFrom: 'next_hand', roomConfirmed: true });
+    const [audit] = await d1<{ target_type: string; target_id: string; detail: string }>(
+      `SELECT target_type, target_id, detail FROM admin_audit_log WHERE action = 'bots.profile' ORDER BY created_at DESC LIMIT 1`,
+    );
+    expect(audit).toMatchObject({ target_type: 'user', target_id: botId });
+    expect(JSON.parse(audit!.detail)).toMatchObject({ reason, from: { level: null, style: null }, to: { level: 'expert', style }, table: T, roomConfirmed: true });
+    // The room has read it, but the hand under way (the member's turn) is played out as it was dealt.
+    await pause(1500);
+    expect(ws.state!.hand!.number).toBe(number);
+    expect(ws.state!.seats[1]).toMatchObject({ userId: botId, bot: 'normal' });
+    expect(await roomBot(T, 1)).toMatchObject({ bot: 'normal', botStyle: auto, botProfile: { level: 'expert', style } });
+
+    const stop = autoplay([ws], careful(30));
+    const next = await ws.waitState((s) => (s.hand?.number ?? 0) > number && live(s), 60_000, 'the next hand');
+    expect(next.seats[1]).toMatchObject({ userId: botId, bot: 'expert' });
+    expect(await roomBot(T, 1)).toMatchObject({ bot: 'expert', botStyle: style });
+
+    // The table's own settings change: the bot keeps the style it was given and takes the table's new level.
+    await reauth();
+    expect((await admin.patch(`/api/admin/tables/${T}`, { botLevel: 'hard', botStyle: 'tag' })).status).toBe(200);
+    const levelOnly = await setProfile(botId, saved.updatedAt, null, style);
+    expect(levelOnly).toMatchObject({ profile: { level: null, style }, effective: { level: 'hard', levelFrom: 'table', style, styleFrom: 'bot' } });
+    const n1 = ws.state!.hand?.number ?? 0;
+    await ws.waitState((s) => (s.hand?.number ?? 0) > n1 + 1 && live(s), 90_000, 'a hand dealt after the change');
+    expect(await roomBot(T, 1)).toMatchObject({ bot: 'hard', botStyle: style, botProfile: { level: null, style } });
+
+    // Both back to the table's: the row is gone and the table's style applies.
+    const reset = await setProfile(botId, levelOnly.updatedAt, null, null, 'back to the table');
+    expect(reset).toMatchObject({ profile: null, updatedAt: null, effective: { level: 'hard', levelFrom: 'table', style: 'tag', styleFrom: 'table' } });
+    expect(await d1(`SELECT bot_id FROM bot_profiles WHERE bot_id = '${botId}'`)).toEqual([]);
+    const n2 = ws.state!.hand?.number ?? 0;
+    const after = await ws.waitState((s) => (s.hand?.number ?? 0) > n2 + 1 && live(s), 90_000, 'a hand dealt after the reset');
+    expect(after.seats[1]).toMatchObject({ userId: botId, bot: 'hard' });
+    expect(await roomBot(T, 1)).toMatchObject({ bot: 'hard', botStyle: 'tag', botProfile: null });
+
+    // Its play over the period comes from the recorded hands; nothing is counted that was not played.
+    const row = await account(botId);
+    expect(row.play.hands).toBeGreaterThanOrEqual(3);
+    expect(row.play.counted).toBeLessThanOrEqual(row.play.hands);
+    expect(row.play.vpip).toBeLessThanOrEqual(row.play.counted);
+    expect(row.play.pfr).toBeLessThanOrEqual(row.play.vpip);
+    expect(row.play.af.hands).toBe(row.play.hands);
+    expect(await events(T, 'action_failed')).toEqual([]);
+
+    await leave(ws);
+    await ws.waitState(empty, 90_000, 'the table to empty');
+    await stop();
+    await balanced(T, [m.me.id], before);
+    // Standing up does not touch its settings' history: no seat, no table to play at.
+    expect(await account(botId)).toMatchObject({ profile: null, seat: null, effective: null });
+  }, 300_000);
+
+  it("a bot's settings belong to its account: whichever bot sits at another table brings its own", async () => {
+    const T = 'it-bot-prof-1';
+    // Every bot without settings gets an easy level for this test, so the table's normal never shows.
+    const bare = (await d1<{ id: string }>(`SELECT u.id FROM users u LEFT JOIN bot_profiles p ON p.bot_id = u.id WHERE u.is_bot = 1 AND p.bot_id IS NULL`)).map((r) => r.id);
+    if (bare.length) await d1(`INSERT INTO bot_profiles (bot_id, level, style) VALUES ${bare.map((id) => `('${id}', 'easy', 'loose-passive')`).join(', ')}`);
+    const m = await newUser();
+    const before = await books([m.me.id]);
+    try {
+      const ws = await watch(m.client, T);
+      await sit(ws, 0, 500);
+      // The bot reads its own at the deal it sits down for, never the table's.
+      const first = await ws.waitState((s) => live(s) && !!s.seats[1]?.bot, 30_000, 'a bot to sit and be dealt in');
+      const botId = first.seats[1]!.userId!;
+      const [own] = await d1<{ level: BotLevel; style: BotStyle }>(`SELECT level, style FROM bot_profiles WHERE bot_id = '${botId}'`);
+      expect(first.seats[1]!.bot).toBe(own!.level);
+      expect(await roomBot(T, 1)).toMatchObject({ userId: botId, bot: own!.level, botStyle: own!.style, botProfile: own });
+      expect(await account(botId)).toMatchObject({ seat: { tableId: T }, effective: { level: own!.level, levelFrom: 'bot', style: own!.style, styleFrom: 'bot' } });
+      await leave(ws);
+      await ws.waitState(empty, 90_000, 'the table to empty');
+      await balanced(T, [m.me.id], before);
+    } finally {
+      if (bare.length) await d1(`DELETE FROM bot_profiles WHERE bot_id IN (${ids(bare)})`);
+    }
   }, 300_000);
 
   it('all-ins of different sizes against a bot make side pots it is part of, and nothing is lost', async () => {
@@ -657,6 +806,8 @@ describe('table bots across a server restart', () => {
     const botId = before.seats[1]!.userId!;
     ws.close();
     await worker.stop();
+    // Its own level, saved while the room was down (so never told): the room reads it at its first deal after waking.
+    await d1(`INSERT INTO bot_profiles (bot_id, level, style) VALUES ('${botId}', 'expert', 'tag')`, state);
     worker = await startWorker(port, state);
 
     ws = await TableSocket.open(c, T, { base });
@@ -674,6 +825,8 @@ describe('table bots across a server restart', () => {
       'the bot to act',
       90_000,
     );
+    const woke = await ws.waitState((s) => (s.hand?.number ?? 0) > before.hand!.number && live(s), 90_000, 'a hand dealt after the restart');
+    expect(woke.seats[1]).toMatchObject({ userId: botId, bot: 'expert' });
     await leave(ws);
     await ws.waitState(empty, 90_000, 'the table to empty');
     await stop();

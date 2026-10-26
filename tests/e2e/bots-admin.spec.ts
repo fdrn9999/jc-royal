@@ -35,6 +35,8 @@ test.afterEach(() => {
     `INSERT INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) SELECT version + 1, 1, 1000000, 20, 'policy', 'e2e reset' FROM bot_policies WHERE version = (SELECT MAX(version) FROM bot_policies) AND NOT (enabled = 1 AND fund_limit = 1000000 AND max_bots = 20)`,
   );
   sql(`DELETE FROM daily_stats WHERE metric GLOB 'bt_expert_*'`);
+  // Bot accounts are reused by later tests' tables: they follow their tables again.
+  sql(`DELETE FROM bot_profiles`);
 });
 
 test('bot administration: the seated bot and its fund, a policy change with before → after and a reason, an emergency stop the table follows, the event log and the fund check', async ({ browser }) => {
@@ -80,10 +82,46 @@ test('bot administration: the seated bot and its fund, a policy change with befo
   await row.getByRole('link', { name: 'E2E Bots Admin' }).click();
   await expect(page.getByTestId('table-bots-live')).toContainText('지금 봇 착석 가능');
   await expect(page.getByTestId('bot-level')).toHaveValue('hard');
+  await expect(page.getByTestId('bot-style')).toHaveValue('auto');
   await page.getByTestId('table-bots-link').click();
   await expect(page).toHaveURL(/\/bots\?table=e2e-bots-admin$/);
   await expect(page.getByTestId('bots-events-table')).toHaveValue('e2e-bots-admin');
   await expect(page.getByTestId('bots-events').locator('tr[data-kind="join"]').first()).toBeVisible();
+
+  // The seated bot's own settings: the table's level and its account's auto style until an administrator sets its own,
+  // previewed (before → after, and how it plays at the table) and saved with a reason; the table deals it from the next hand.
+  const acct = page.getByTestId('bots-accounts').locator('tr').filter({ has: page.getByRole('link', { name: 'E2E Bots Admin' }) });
+  await expect(acct).toHaveAttribute('data-level', 'hard');
+  await expect(acct.getByTestId('bot-acct-level')).toContainText('어려움');
+  await expect(acct.getByTestId('bot-acct-level')).toContainText('테이블');
+  await expect(acct.getByTestId('bot-acct-style')).toContainText('자동');
+  await acct.getByTestId('bot-acct-edit').click();
+  await expect(page.getByTestId('bot-profile-now')).toContainText('E2E Bots Admin에서 지금: 어려움');
+  await expect(page.getByTestId('bot-profile-preview')).toBeDisabled();
+  await page.getByTestId('bot-profile-level').selectOption('expert');
+  await page.getByTestId('bot-profile-style').selectOption('tag');
+  await page.getByTestId('bot-profile-preview').click();
+  const profileChange = page.getByTestId('bot-profile-change');
+  await expect(profileChange).toContainText('테이블 설정 따르기 → 전문가');
+  await expect(profileChange).toContainText('테이블 설정 따르기 → 타이트 어그레시브');
+  await expect(page.getByTestId('bot-profile-effective')).toContainText('→ 전문가 · 타이트 어그레시브');
+  await expect(page.getByTestId('bot-profile-applies')).toContainText('다음 핸드부터 적용됩니다');
+  await expect(page.getByTestId('bot-profile-apply')).toBeDisabled();
+  await page.getByTestId('bot-profile-reason').fill('E2E 봇 개별 설정');
+  await page.screenshot({ path: 'test-results/bots-admin-profile.png', animations: 'disabled' });
+  await page.getByTestId('bot-profile-apply').click();
+  await reauthIfAsked(page);
+  await expect(page.getByTestId('bots-feedback')).toContainText('봇 설정을 저장했습니다.');
+  await expect(acct).toHaveAttribute('data-level', 'expert');
+  await expect(acct).toHaveAttribute('data-style', 'tag');
+  await expect(acct.getByTestId('bot-acct-level')).toContainText('계정');
+  await page.screenshot({ path: 'test-results/bots-admin-accounts.png', fullPage: true, animations: 'disabled' });
+  // At the member's table the bot plays from the next deal as set (the member folds the hands until then).
+  await expect(async () => {
+    const fold = m.page.getByTestId('action-bar').getByRole('button', { name: /^(폴드|Fold)$/ });
+    if (await fold.isVisible().catch(() => false)) await fold.click().catch(() => {});
+    await expect(m.page.getByTestId('bot-badge')).toHaveAttribute('data-level', 'expert', { timeout: 1_000 });
+  }).toPass({ timeout: 60_000 });
 
   // A new policy: the change is shown before it is saved, with a reason and the password.
   await page.getByTestId('bots-max').fill('10');

@@ -19,7 +19,10 @@ import {
   type AutoBuyPolicy,
   type AutoBuyRequest,
   blindsAt,
+  botPlayOf,
   type BotLevel,
+  type BotProfile,
+  type BotStyle,
   ClientMessageSchema,
   isVipColor,
   MEMBER_IDLE_CLOSE_MS,
@@ -65,7 +68,7 @@ import {
   type Maintenance,
   type TableRow,
 } from './settlement';
-import { botBuyIn, botEvent, pickBot, type BotEventKind } from './bots';
+import { botBuyIn, botEvent, pickBot, readBotProfiles, within, type BotEventKind } from './bots';
 import { addShown, afterHandMs } from './muck';
 import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
@@ -146,6 +149,13 @@ interface SeatState {
    * times out or sits out, and leaves through `leaveAfterHand` like a member — but plays the hand out first.
    */
   bot?: BotLevel;
+  /** The style the bot plays the current hand in, fixed with its level at the deal (`startHand`); absent: `styleFor`. */
+  botStyle?: BotStyle;
+  /**
+   * The bot account's own settings (bot_profiles) as D1 last showed them: read when it sits down and by
+   * `syncBotProfiles`, applied over the table's at the next deal. Null: none, it follows the table.
+   */
+  botProfile?: BotProfile | null;
   /**
    * The member's time bank at this table: ms left, and hands dealt in since the last refill. Given at their first hand
    * (`dealTimeBanks`), kept when they leave the seat (`keepBank`). Never on a bot.
@@ -249,6 +259,13 @@ const BOT_THINK_MS = { min: 700, max: 2_200 };
 const BOT_RETRY_MS = { first: 60_000, max: 30 * 60_000 };
 /** A bot sits down with this many big blinds, within the table's buy-in range. */
 const BOT_BUY_IN_BB = 100;
+/** The seated bots' settings are read again at a deal this long after the last read, should a change not have reached the room. */
+const BOT_SYNC_MS = 5 * 60_000;
+/**
+ * The longest that read may hold the room (players' moves and the clock wait behind it): slower, the deal goes on with
+ * the settings the seats have and the next deal reads again.
+ */
+const BOT_SYNC_WAIT_MS = 2_000;
 /** A member's time bank is kept this long after they leave their seat (and for at most this many members per room). */
 const BANK_KEEP_MS = 6 * 60 * 60_000;
 const BANK_KEEP_MAX = 100;
@@ -317,6 +334,8 @@ export class TableRoom extends DurableObject<Env> {
   /** The bots' statistics of the members (`oppStats`), read from storage the first time a table with bots needs them. */
   private opp: OppStats | null = null;
   private oppRead = false;
+  /** When the seated bots' settings were last read from D1 (`syncBotProfiles`); 0 after a wake-up or a failed read. */
+  private botSyncAt = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -682,6 +701,12 @@ export class TableRoom extends DurableObject<Env> {
               maintenance: this.inMaintenance(),
               handInProgress: !!this.hand && !this.hand.isSettled,
             });
+          }
+          case 'bot-profiles': {
+            // An administrator changed a bot's own settings: read again now, applied from the next deal.
+            if (!(await this.syncBotProfiles(true))) return Response.json({ ok: false }, { status: 503 });
+            await this.save();
+            return Response.json({ ok: true, appliesFrom: 'next hand', handInProgress: !!this.hand && !this.hand.isSettled });
           }
           case 'close':
             await this.beginClose();
@@ -1878,10 +1903,15 @@ export class TableRoom extends DurableObject<Env> {
       this.broadcast();
       return;
     }
-    // A level an operator changed applies to the bots already seated from this deal on (never during a hand).
+    // A level or style an operator changed (the table's, or a bot's own) applies to the bots already seated from this
+    // deal on, never during a hand. A failed read of the bots' settings deals with the ones the seats already have.
+    if (dealt.some((i) => this.room.seats[i]!.bot)) await this.syncBotProfiles(false);
     for (const i of dealt) {
       const s = this.room.seats[i]!;
-      if (s.bot && s.bot !== t.bots.level) s.bot = t.bots.level;
+      if (!s.bot) continue;
+      const play = botPlayOf(s.userId, s.botProfile, t.bots);
+      s.bot = play.level;
+      s.botStyle = play.style;
     }
     // (A tournament's button moves to the next player still in: busted seats are free, so there is no dead button.)
     const button = nextButtonSeat(this.room.buttonSeat, dealt, t.maxSeats);
@@ -2471,6 +2501,7 @@ export class TableRoom extends DurableObject<Env> {
       const exclude = this.room.seats.flatMap((s) => (s?.bot ? [s.userId] : []));
       for (let attempt = 0; attempt < 3; attempt++) {
         const bot = await pickBot(this.env.DB, exclude);
+        const play = botPlayOf(bot.id, bot.profile, t.bots);
         const seat: SeatState = {
           userId: bot.id,
           nickname: bot.nickname,
@@ -2484,7 +2515,9 @@ export class TableRoom extends DurableObject<Env> {
           leaveAfterHand: false,
           timeouts: 0,
           joinedAt: Date.now(),
-          bot: t.bots.level,
+          bot: play.level,
+          botStyle: play.style,
+          botProfile: bot.profile,
         };
         this.room.seats[seatIndex] = seat;
         await this.save();
@@ -2533,8 +2566,9 @@ export class TableRoom extends DurableObject<Env> {
   /**
    * The table bot to act moves, from what its own seat sees (`botView`: its cards, the board, the pot, the bets and its
    * legal moves — never another player's cards or the deck) and the members' public statistics at this table, through
-   * the engine's checks like anyone's move. Its style comes from its account, the same at every table. A choice the
-   * engine refuses becomes a check, or a fold when it must call. False when it could not move at all.
+   * the engine's checks like anyone's move. Its level and style were fixed at the deal (`startHand`): its account's own
+   * settings, else the table's. A choice the engine refuses becomes a check, or a fold when it must call. False when it
+   * could not move at all.
    */
   private async playBotTurn(now: number): Promise<boolean> {
     const h = this.hand!;
@@ -2551,7 +2585,7 @@ export class TableRoom extends DurableObject<Env> {
       else {
         const stats = statsBySeat(await this.oppStats(), this.room.seats, now);
         const onFallback = () => (fellBack = true);
-        r = await h.act(actor, decideBot(seat.bot, v, Math.random, { style: styleFor(actor), stats, onFallback }), `bot-${h.version}`, now);
+        r = await h.act(actor, decideBot(seat.bot, v, Math.random, { style: seat.botStyle ?? styleFor(actor), stats, onFallback }), `bot-${h.version}`, now);
         if (!r.ok) failed = r.code;
       }
     } catch (e) {
@@ -2574,6 +2608,28 @@ export class TableRoom extends DurableObject<Env> {
     if (failed) await this.logBot('action_failed', actor, failed);
     await this.progress(r.cues);
     return true;
+  }
+
+  /**
+   * Reads the seated bots' own settings into their seats, for the next deal to apply: when an administrator changes one
+   * (`bot-profiles`), else at a deal once BOT_SYNC_MS passed since the last read (and the first after the room wakes).
+   * One D1 call, never per move. A failed or slow read (BOT_SYNC_WAIT_MS) keeps what the seats had and is tried again at
+   * the next deal.
+   */
+  private async syncBotProfiles(force: boolean): Promise<boolean> {
+    const bots = this.room.seats.filter((s): s is SeatState => !!s?.bot);
+    const now = Date.now();
+    if (!bots.length || (!force && this.botSyncAt && now - this.botSyncAt < BOT_SYNC_MS)) return true;
+    try {
+      const found = await within(readBotProfiles(this.env.DB, bots.map((s) => s.userId)), BOT_SYNC_WAIT_MS);
+      for (const s of bots) s.botProfile = found.get(s.userId) ?? null;
+      this.botSyncAt = now;
+      return true;
+    } catch (e) {
+      this.botSyncAt = 0;
+      console.error('bot profiles', e instanceof Error ? e.message : e);
+      return false;
+    }
   }
 
   /** A line in the bots' operations log; a failure to write it changes nothing else. */
@@ -2850,6 +2906,7 @@ export class TableRoom extends DurableObject<Env> {
               topUp: s.topUp ? { state: s.topUp.state, amount: s.topUp.amount, auto: !!s.topUp.auto } : null,
               tableSessionId: s.tableSessionId,
               bot: s.bot ?? null,
+              ...(s.bot ? { botStyle: s.botStyle ?? styleFor(s.userId), botProfile: s.botProfile ?? null } : {}),
               // Read only: no one sets a member's time.
               timeBank: s.bank ? { ms: s.bank.ms, hands: s.bank.hands } : null,
             }

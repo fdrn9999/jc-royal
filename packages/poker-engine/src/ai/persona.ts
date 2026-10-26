@@ -3,10 +3,10 @@
  * plays). Styles only shift ranges, sizes and mixing frequencies within sane bounds: none of them turns a bot into a
  * calling station or a random all-in machine.
  */
-import type { BotLevel } from '@jc/types';
+import type { BotLevel, BotStyle } from '@jc/types';
 
-export const BOT_STYLES = ['balanced', 'tag', 'lag', 'tight-passive', 'loose-passive'] as const;
-export type BotStyle = (typeof BOT_STYLES)[number];
+// The styles and an account's automatic one live with the shared types, so the API and the console can name them.
+export { BOT_STYLES, styleFor, type BotStyle } from '@jc/types';
 
 export interface Persona {
   /** Opening range width. */
@@ -36,13 +36,6 @@ const PERSONAS: Record<BotStyle, Persona> = {
 };
 
 export const personaOf = (style: BotStyle | undefined): Persona => PERSONAS[style ?? 'balanced'] ?? PERSONAS.balanced;
-
-/** A stable style for a bot account (no setting to store): the same bot keeps its style at every table. */
-export function styleFor(id: string): BotStyle {
-  let h = 2166136261;
-  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
-  return BOT_STYLES[(h >>> 0) % BOT_STYLES.length]!;
-}
 
 export interface LevelParams {
   /** Monte Carlo deals per decision. */

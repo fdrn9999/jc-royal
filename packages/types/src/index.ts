@@ -1,5 +1,6 @@
 export * from './cards';
 export * from './table';
+export * from './bots';
 export * from './protocol';
 export * from './api';
 export * from './community';

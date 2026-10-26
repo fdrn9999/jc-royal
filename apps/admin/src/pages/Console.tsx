@@ -1,5 +1,5 @@
 import { ArrowRightIcon, Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat, XIcon } from '@jc/ui';
-import { academyItemName, ageOn, BOT_LEVELS, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type VipColor } from '@jc/types';
+import { academyItemName, ageOn, BOT_LEVELS, BOT_TABLE_STYLES, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type BotTableStyle, type VipColor } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useT } from '../i18n';
@@ -7,6 +7,7 @@ import {
   academyKindLabel,
   actionLabel,
   botLevelLabel,
+  botStyleLabel,
   capabilityLabel,
   handRankLabel,
   ledgerTypeLabel,
@@ -890,10 +891,10 @@ interface TableRow {
   /** When its settings last changed; sent back with a change so one made meanwhile by another administrator is a conflict. */
   updatedAt: number;
   /** Table bots (official tables only); `liveBots` is how many of `liveSeated` are bots. */
-  botsEnabled?: boolean; botLevel?: string; botMinHumans?: number; botMax?: number; botFillTo?: number; botYield?: boolean; liveBots?: number;
+  botsEnabled?: boolean; botLevel?: string; botStyle?: string; botMinHumans?: number; botMax?: number; botFillTo?: number; botYield?: boolean; liveBots?: number;
 }
-type BotForm = { botsEnabled: boolean; botLevel: BotLevel; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
-const BOT_DEFAULTS: BotForm = { botsEnabled: false, botLevel: 'normal', botMinHumans: 1, botMax: 1, botFillTo: 2, botYield: true };
+type BotForm = { botsEnabled: boolean; botLevel: BotLevel; botStyle: BotTableStyle; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
+const BOT_DEFAULTS: BotForm = { botsEnabled: false, botLevel: 'normal', botStyle: 'auto', botMinHumans: 1, botMax: 1, botFillTo: 2, botYield: true };
 /** Bot counts that still fit a table of maxSeats (the create form's size can change under them). */
 const fitBots = (b: BotForm, maxSeats: number): Pick<BotForm, 'botMinHumans' | 'botMax' | 'botFillTo'> => {
   const botFillTo = Math.min(b.botFillTo, maxSeats);
@@ -925,6 +926,11 @@ function BotFields({ v, set, maxSeats, disabled }: { v: BotForm; set: (v: BotFor
           {BOT_LEVELS.map((l) => <option key={l} value={l}>{botLevelLabel(t, l)}</option>)}
         </select>
       )}</Field>
+      <Field label={t('botsStyle')}>{(id) => (
+        <select id={id} className={selectCls} value={v.botStyle} disabled={disabled || !v.botsEnabled} onChange={(e) => set({ ...v, botStyle: e.target.value as BotTableStyle })} data-testid="bot-style">
+          {BOT_TABLE_STYLES.map((st) => <option key={st} value={st}>{botStyleLabel(t, st)}</option>)}
+        </select>
+      )}</Field>
       {pick('botMinHumans', 1, Math.min(8, maxSeats - 1), 'bot-min-humans')}
       {pick('botMax', 1, Math.min(8, maxSeats - 1), 'bot-max')}
       {pick('botFillTo', 2, maxSeats, 'bot-fill-to')}
@@ -937,7 +943,7 @@ function BotFields({ v, set, maxSeats, disabled }: { v: BotForm; set: (v: BotFor
           {issues.map((x) => <li key={x.message}>{t(BOT_ISSUE[x.path[0] as keyof typeof BOT_ISSUE] ?? 'errBotMax')}</li>)}
         </ul>
       )}
-      <p className="col-span-2 text-xs text-ink-400">{t('botsFieldsHint')}</p>
+      <p className="col-span-2 text-xs text-ink-400">{t('botsFieldsHint')} {t('botStyleTableHint')}</p>
     </div>
   );
 }
@@ -1100,8 +1106,10 @@ interface LiveSeat {
   leaveAfterHand?: boolean;
   timeouts?: number;
   topUp?: { state: string; amount: number; auto: boolean } | null;
-  /** A table bot's level (the room plays it). */
+  /** A table bot's level and style for the hand under way (the room plays it), and the account's own settings the room holds. */
   bot?: string | null;
+  botStyle?: string;
+  botProfile?: { level: string | null; style: string | null } | null;
   /** The member's time bank here: ms left, hands since the last refill (read only: no one sets it). */
   timeBank?: { ms: number; hands: number } | null;
 }
@@ -1162,6 +1170,7 @@ function TableBotsPanel({ tb, live, act }: { tb: TableRow; live: LiveStatus | nu
   const saved: BotForm = {
     botsEnabled: !!tb.botsEnabled,
     botLevel: (BOT_LEVELS as readonly string[]).includes(tb.botLevel ?? '') ? (tb.botLevel as BotLevel) : 'normal',
+    botStyle: (BOT_TABLE_STYLES as readonly string[]).includes(tb.botStyle ?? '') ? (tb.botStyle as BotTableStyle) : 'auto',
     botMinHumans: tb.botMinHumans ?? 1,
     botMax: tb.botMax ?? 1,
     botFillTo: tb.botFillTo ?? 2,
@@ -1422,7 +1431,7 @@ export function TableDetailPage() {
                   <li key={i} className="flex justify-between gap-2 py-1.5">
                     <span className="flex min-w-0 flex-wrap items-center gap-1">
                       #{s.seatIndex + 1} {s.nickname}
-                      {s.bot && <Badge tone="blue">{t('botBadge')} · {botLevelLabel(t, s.bot)}</Badge>}
+                      {s.bot && <Badge tone="blue">{t('botBadge')} · {botLevelLabel(t, s.bot)}{s.botStyle ? ` · ${botStyleLabel(t, s.botStyle)}` : ''}</Badge>}
                       {!s.connected && <Badge>{t('offline')}</Badge>}
                       {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}
                       {s.phase && s.phase !== 'seated' && <Badge tone="gold">{seatPhaseLabel(t, s.phase)}</Badge>}
@@ -1560,7 +1569,7 @@ export function TableDetailPage() {
             </div>
           </form>
         </Panel>
-        <TableBotsPanel key={[tb.botsEnabled, tb.botLevel, tb.botMinHumans, tb.botMax, tb.botFillTo, tb.botYield].join(':')} tb={tb} live={live} act={act} />
+        <TableBotsPanel key={[tb.botsEnabled, tb.botLevel, tb.botStyle, tb.botMinHumans, tb.botMax, tb.botFillTo, tb.botYield].join(':')} tb={tb} live={live} act={act} />
       </div>
       )}
       <div className="flex flex-wrap gap-4">

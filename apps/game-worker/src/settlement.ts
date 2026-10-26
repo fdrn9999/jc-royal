@@ -7,7 +7,7 @@
  */
 import { applyLedger, botStatsIncrement, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
-import { BOT_LEVELS, toSocialPolicy, type BotLevel, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
+import { BOT_LEVELS, BOT_TABLE_STYLES, toSocialPolicy, type BotLevel, type BotTableStyle, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
 import { TOURNAMENT_JSON, toTournamentRow, type TournamentRow } from './tournament';
 
 export interface TableRow {
@@ -35,7 +35,7 @@ export interface TableRow {
    * must be seated first, at most how many bots, the player count they fill up to, and whether one gives up its seat
    * after the hand to a member waiting for one.
    */
-  bots: { enabled: boolean; level: BotLevel; minHumans: number; max: number; fillTo: number; yieldSeat: boolean };
+  bots: { enabled: boolean; level: BotLevel; style: BotTableStyle; minHumans: number; max: number; fillTo: number; yieldSeat: boolean };
   /** The service-wide bot switch (bot_policies, newest version) as D1 last showed it; read again with each hand record. */
   botPolicyOn: boolean;
   /** The time bank policy (time_bank_policies, newest version) as D1 last showed it; read again with each hand record. */
@@ -81,7 +81,7 @@ export async function loadTable(d1: D1Database, tableId: string, now = Date.now(
                 min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
                 is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
                 room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash,
-                bots_enabled AS botsEnabled, bot_level AS botLevel, bot_min_humans AS botMinHumans, bot_max AS botMax,
+                bots_enabled AS botsEnabled, bot_level AS botLevel, bot_style AS botStyle, bot_min_humans AS botMinHumans, bot_max AS botMax,
                 bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn, (${TIME_BANK_POLICY}) AS timeBank,
                 (${SOCIAL_POLICY_JSON}) AS social, (${TOURNAMENT_JSON}) AS tournament
          FROM tables WHERE id = ?1`,
@@ -114,6 +114,7 @@ function toTableRow(r: Record<string, unknown>): TableRow {
     bots: {
       enabled: !!r.botsEnabled,
       level: BOT_LEVELS.includes(r.botLevel as BotLevel) ? (r.botLevel as BotLevel) : 'normal',
+      style: BOT_TABLE_STYLES.includes(r.botStyle as BotTableStyle) ? (r.botStyle as BotTableStyle) : 'auto',
       minHumans: Math.max(1, Number(r.botMinHumans ?? 1)),
       max: Math.max(0, Number(r.botMax ?? 0)),
       fillTo: Math.max(0, Number(r.botFillTo ?? 0)),
