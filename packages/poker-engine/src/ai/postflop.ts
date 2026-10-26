@@ -60,7 +60,7 @@ function facingBet(s: Spot, h: Hand): ActionRequest {
   const thr = (river ? 0.78 : 0.72) + 0.05 * extra;
   if (raiseOk && h.e >= thr - 0.12 && (s.facingSize <= OVERBET || h.hs >= 0.9)) {
     const want = soft(h.e, thr, 0.03) * soft(equityIfRaised(s), 0.58 + 0.04 * extra, 0.04);
-    if (rand() < want * Math.min(1, 0.75 * persona.aggression) * lp.value) {
+    if (rand() < want * Math.min(1, 0.75 * persona.aggression ** 1.5) * lp.value) {
       const all = v.stack + v.streetBet;
       const to = potSized(v, 0.75 * persona.sizing);
       return (spr <= 2 || to >= all * 0.45 ? shove(v) : aggress(v, to)) ?? callOr(v);
@@ -89,7 +89,7 @@ function notFacing(s: Spot, h: Hand): ActionRequest {
   const station = h.heads && !!t && (t.wtsd >= 0.38 || (t.vpip >= 0.45 && t.af < 1));
   const overfolder = h.heads && !!t && t.foldToCbet >= 0.6;
   const wet = wetness(s.board);
-  let thr = (river ? 0.62 : 0.6) - (lp.refined ? 0.04 : 0) + 0.06 * extra;
+  let thr = (river ? 0.62 : 0.6) - (lp.refined ? 0.04 : 0) + 0.06 * extra - (persona.aggression - 1) * 0.15;
   if (station) thr -= 0.04;
   const bluffF = lp.bluff * persona.bluff * (station ? 0.4 : 1) * (overfolder ? 1.4 : 1);
 
@@ -97,7 +97,7 @@ function notFacing(s: Spot, h: Hand): ActionRequest {
     // Slow-play a monster on a dry flop now and then, or check to raise an aggressive player.
     const slow = lp.adapt && stage === 'flop' && h.hs >= 0.95 && wet < 0.3 && rand() < 0.15;
     const trap = !s.ip && h.heads && h.e >= 0.75 && !!t && t.af >= 2 && rand() < 0.3;
-    if (!slow && !trap && rand() < soft(h.e, thr, 0.03) * Math.min(1, 0.7 + 0.3 * persona.aggression) * lp.value) return bet(s, h, true, wet);
+    if (!slow && !trap && rand() < soft(h.e, thr, 0.03) * Math.min(1, persona.aggression) * lp.value) return bet(s, h, true, wet);
     if (slow || trap) return { type: 'check' };
   }
 
@@ -130,13 +130,13 @@ function notFacing(s: Spot, h: Hand): ActionRequest {
   return { type: 'check' };
 }
 
-/** A bet sized by street and board; very strong hands may overbet at the refined level; all in when the stacks are short. */
+/** A bet sized by street and board; very strong hands may overbet at the levels that do; all in when the stacks are short. */
 function bet(s: Spot, h: Hand, value: boolean, wet: number): ActionRequest {
   const { v, lp, persona, rand } = s;
   const spr = sprOf(s);
   if (spr <= 1.2 && (value || h.bucket === DRAW)) return shove(v) ?? { type: 'check' };
   let f = !lp.sizes ? 0.5 : v.stage === 'flop' ? (wet >= 0.45 ? 0.66 : 0.33) : v.stage === 'turn' ? 0.66 : 0.7;
-  if (value && lp.refined && v.stage !== 'flop' && h.heads && h.e >= 0.85 && rand() < 0.25) f = 1.25;
+  if (value && lp.overbet > 0 && v.stage !== 'flop' && h.heads && h.e >= 0.85 && rand() < lp.overbet) f = 1.25;
   f *= persona.sizing;
   const to = potSized(v, f);
   const all = v.stack + v.streetBet;

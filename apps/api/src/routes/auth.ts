@@ -102,11 +102,13 @@ export const authRoutes = new Hono<AppEnv>()
     const taken = await db.query.users.findFirst({ where: eq(schema.users.email, body.email), columns: { id: true } });
     if (taken) fail(409, 'email_taken', 'email already registered');
     const now = Date.now();
-    const prev = await db.query.emailVerifications.findFirst({ where: eq(ev.email, body.email), columns: { createdAt: true } });
+    const prev = await db.query.emailVerifications.findFirst({ where: eq(ev.email, body.email), columns: { createdAt: true, expiresAt: true, verifiedAt: true, attempts: true } });
     const wait = prev ? Math.ceil((prev.createdAt + RESEND_AFTER_SECONDS * 1000 - now) / 1000) : 0;
     if (wait > 0) {
       c.header('Retry-After', String(wait));
-      fail(429, 'resend_too_soon', 'wait before requesting another code', { retryAfterSeconds: wait });
+      // The code just sent still works: a page that lost its code step (an in-app browser reloading it) asks for that one.
+      const codeExpiresInSeconds = prev && !prev.verifiedAt && prev.attempts < MAX_CODE_ATTEMPTS ? Math.max(0, Math.floor((prev.expiresAt - now) / 1000)) : 0;
+      fail(429, 'resend_too_soon', 'wait before requesting another code', { retryAfterSeconds: wait, codeExpiresInSeconds });
     }
     const code = sixDigitCode();
     const row = { codeHash: await codeHash(body.email, code), attempts: 0, expiresAt: now + CODE_MINUTES * 60 * 1000, proofHash: null, verifiedAt: null, createdAt: now };

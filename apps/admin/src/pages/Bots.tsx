@@ -8,10 +8,11 @@
  * applies at each table between hands; a bot in a hand plays it out.
  */
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
+import { BOT_LEVELS, BOT_STYLES, type BotLevel, type BotPlay, type BotProfile, type BotStyle, type BotTableStyle } from '@jc/types';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
-import { botEventCodeLabel, botEventKindLabel, botLevelLabel } from '../labels';
+import { botEventCodeLabel, botEventKindLabel, botLevelLabel, botStyleLabel, userStatusLabel } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
 import { Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { Table } from './Console';
@@ -156,6 +157,7 @@ export function BotsPage() {
       <FundPanel o={o} />
       <TablesPanel o={o} />
       <PlayPanel o={o} days={days} setDays={setDays} loading={overview.loading} />
+      <AccountsPanel days={days} onNote={setNote} />
       <Panel title={t('refillVersions')}>
         <VersionTable rows={o.versions} />
       </Panel>
@@ -695,5 +697,293 @@ function IssueList({ title, n, children }: { title: string; n: number; children:
       </div>
       {n === 0 ? <p className="text-xs text-ink-400">{t('noneFound')}</p> : <ul className="flex flex-col gap-1 text-xs">{children}</ul>}
     </div>
+  );
+}
+
+interface BotAccount {
+  id: string;
+  nickname: string;
+  status: string;
+  balance: number;
+  createdAt: number;
+  /** The account's own settings; null (or a null field): the table's. */
+  profile: BotProfile | null;
+  updatedAt: number | null;
+  updatedBy: string | null;
+  /** The style a table on `auto` gives it. */
+  auto: BotStyle;
+  seat: { tableId: string; tableName: string; seatIndex: number; since: number; table: { level: BotLevel; style: BotTableStyle } } | null;
+  /** How it plays at that table from the next hand. */
+  effective: BotPlay | null;
+  play: { hands: number; counted: number; vpip: number; pfr: number; net: number; af: { hands: number; aggressive: number; calls: number } };
+  result: number;
+}
+interface BotAccounts { days: number; total: number; limit: number; offset: number; afHands: number; items: BotAccount[] }
+interface ProfileTable { id: string; name: string; level: BotLevel; style: BotTableStyle }
+interface ProfilePreview { from: BotProfile; to: BotProfile; auto: BotStyle; table: ProfileTable | null; effective: { from: BotPlay; to: BotPlay } | null; appliesFrom: 'next_hand' | 'next_seat' }
+
+/** Where a level or style comes from: the account's own, the table's, or the account's auto style. */
+function From({ from }: { from: BotPlay['styleFrom'] }) {
+  const { t } = useT();
+  if (from === 'bot') return <Badge tone="gold">{t('botsFromOwn')}</Badge>;
+  return <span className="text-[11px] text-ink-400">{t(from === 'auto' ? 'botsFromAuto' : 'botsFromTable')}</span>;
+}
+
+/** Postflop aggression: bets and raises over calls, with both counts; a dash with no calls (no ratio to show). */
+function Af({ af }: { af: BotAccount['play']['af'] }) {
+  if (af.hands === 0 || af.aggressive + af.calls === 0) return <span className="text-ink-400">—</span>;
+  return (
+    <>
+      {af.calls > 0 ? (af.aggressive / af.calls).toFixed(2) : <span className="text-ink-400">—</span>} <span className="text-ink-400">({formatChips(af.aggressive)}/{formatChips(af.calls)})</span>
+    </>
+  );
+}
+
+/** Each bot account: its own level and style over the table's, where it sits, and how it played over the period. */
+function AccountsPanel({ days, onNote }: { days: number; onNote: (n: Note) => void }) {
+  const { t, locale } = useT();
+  const [offset, setOffset] = useState(0);
+  const { data, error, loading, reload } = useData<BotAccounts>(`/api/admin/bots/accounts?days=${days}&limit=${PAGE}&offset=${offset}`);
+  const [edit, setEdit] = useState<BotAccount | null>(null);
+  const rows = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const done = async (n: Note) => {
+    setEdit(null);
+    onNote(n);
+    await reload();
+  };
+  const level = (r: BotAccount) =>
+    r.effective ? (
+      <>{botLevelLabel(t, r.effective.level)} <From from={r.effective.levelFrom} /></>
+    ) : r.profile?.level ? (
+      <>{botLevelLabel(t, r.profile.level)} <From from="bot" /></>
+    ) : (
+      <span className="text-ink-400">{t('botsFollowTable')}</span>
+    );
+  const style = (r: BotAccount) =>
+    r.effective ? (
+      <>{botStyleLabel(t, r.effective.style)} <From from={r.effective.styleFrom} /></>
+    ) : r.profile?.style ? (
+      <>{botStyleLabel(t, r.profile.style)} <From from="bot" /></>
+    ) : (
+      <span className="text-ink-400">{t('botsFollowTable')}</span>
+    );
+  return (
+    <Panel title={t('botsAcctTitle', { n: total })} className={loading ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
+      <p className="mb-3 text-xs text-ink-400">{t('botsAcctHint', { days, af: data?.afHands ?? 500 })}</p>
+      {error && <LoadError error={error} onRetry={reload} />}
+      {data && total === 0 ? <Empty>{t('botsAcctEmpty')}</Empty> : <ListState loading={loading} empty={rows.length === 0} />}
+      {rows.length > 0 && (
+        <div data-testid="bots-accounts">
+          <Table
+            head={[
+              t('botsBot'),
+              t('botsColBotId'),
+              t('botsLevel'),
+              t('botsStyle'),
+              t('botsColTableNow'),
+              t('status'),
+              t('botsColHands'),
+              t('botsColVpip'),
+              t('botsColPfr'),
+              t('botsColAf'),
+              t('botsColNet'),
+              t('botsColResult'),
+              '',
+            ]}
+          >
+            {rows.map((r) => (
+              <tr key={r.id} data-bot={r.id} data-level={r.effective?.level ?? r.profile?.level ?? ''} data-style={r.effective?.style ?? r.profile?.style ?? ''}>
+                <td className={td}><BotLink id={r.id} name={r.nickname} /></td>
+                <td className={`${td} max-w-[9rem] truncate font-mono text-[11px] text-ink-400`} title={r.id}>{r.id}</td>
+                <td className={`${td} whitespace-nowrap`} data-testid="bot-acct-level">{level(r)}</td>
+                <td className={`${td} whitespace-nowrap`} data-testid="bot-acct-style">{style(r)}</td>
+                <td className={`${td} text-xs`}>
+                  {r.seat ? (
+                    <>
+                      <Link to={`/tables/${r.seat.tableId}`} className="text-gold-300 hover:underline">{r.seat.tableName}</Link>{' '}
+                      <span className="whitespace-nowrap text-ink-400">{t('botsSeatN', { n: r.seat.seatIndex + 1 })}</span>
+                    </>
+                  ) : (
+                    <span className="text-ink-400">—</span>
+                  )}
+                </td>
+                <td className={td}>
+                  <div className="flex flex-wrap gap-1">
+                    {r.seat ? <Badge tone="green">{t('botsStateSeated')}</Badge> : <Badge>{t('botsStateIdle')}</Badge>}
+                    {r.status !== 'active' && <Badge tone="red">{userStatusLabel(t, r.status)}</Badge>}
+                  </div>
+                </td>
+                <td className={`${td} font-mono`}>{formatChips(r.play.hands)}</td>
+                <td className={`${td} whitespace-nowrap font-mono`}><Rate n={r.play.vpip} of={r.play.counted} /></td>
+                <td className={`${td} whitespace-nowrap font-mono`}><Rate n={r.play.pfr} of={r.play.counted} /></td>
+                <td className={`${td} whitespace-nowrap font-mono`} data-testid="bot-acct-af"><Af af={r.play.af} /></td>
+                <td className={`${td} font-mono`}>{r.play.hands > 0 ? signed(r.play.net) : <span className="text-ink-400">—</span>}</td>
+                <td className={`${td} font-mono`}>{signed(r.result)}</td>
+                <td className={td}>
+                  <Button size="sm" variant="outline" onClick={() => setEdit(r)} data-testid="bot-acct-edit">{t('botsEdit')}</Button>
+                  {r.updatedAt !== null && (
+                    <p className="mt-1 whitespace-nowrap text-[11px] text-ink-400">{t('botsUpdatedBy', { who: r.updatedBy ?? t('refillSystem'), at: formatDate(r.updatedAt, locale) })}</p>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        </div>
+      )}
+      {(offset > 0 || total > rows.length) && (
+        <Pager
+          label={t('botsAcctTitle', { n: total })}
+          testid="bots-accounts-pager"
+          range={rows.length ? t('auditRangeNoTotal', { from: offset + 1, to: offset + rows.length }) : ''}
+          prev={offset > 0 ? () => setOffset(Math.max(0, offset - PAGE)) : null}
+          next={offset + rows.length < total ? () => setOffset(offset + PAGE) : null}
+          busy={loading}
+        />
+      )}
+      {edit && <ProfileEditor key={`${edit.id}:${edit.updatedAt ?? 0}`} bot={edit} onClose={() => setEdit(null)} onDone={done} />}
+    </Panel>
+  );
+}
+
+/**
+ * A bot's own level and style, each set or left to the table: a preview of the old and new values (and how it plays at
+ * the table it sits at), then the password and a reason. Another administrator's change meanwhile reloads the list.
+ */
+function ProfileEditor({ bot, onClose, onDone }: { bot: BotAccount; onClose: () => void; onDone: (n: Note) => Promise<void> }) {
+  const { t } = useT();
+  const { api } = useAdmin();
+  const [level, setLevel] = useState<BotLevel | ''>(bot.profile?.level ?? '');
+  const [style, setStyle] = useState<BotStyle | ''>(bot.profile?.style ?? '');
+  const [pv, setPv] = useState<ProfilePreview | null>(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const body = { baseUpdatedAt: bot.updatedAt, level: level || null, style: style || null };
+  const same = (bot.profile?.level ?? null) === body.level && (bot.profile?.style ?? null) === body.style;
+  const table = bot.seat?.table ?? null;
+  const tableStyle = (s: BotTableStyle) => (s === 'auto' ? `${botStyleLabel(t, 'auto')} (${botStyleLabel(t, bot.auto)})` : botStyleLabel(t, s));
+  const own = (v: string | null, label: (x: string) => string) => (v ? label(v) : t('botsFollowTable'));
+  const play = (p: BotPlay) => `${botLevelLabel(t, p.level)} · ${botStyleLabel(t, p.style)}`;
+  const url = `/api/admin/bots/${encodeURIComponent(bot.id)}/profile`;
+  const fail = async (e: unknown) => {
+    if (e instanceof ApiError && e.code === 'reauth_cancelled') return;
+    // Someone else's change came first: the list shows the settings now in force.
+    if (e instanceof ApiError && e.code === 'bot_profile_conflict') return onDone({ ok: false, text: errText(e, t) });
+    setPv(null);
+    setError(errText(e, t));
+  };
+  const preview = async (ev: FormEvent) => {
+    ev.preventDefault();
+    setError(null);
+    setReason('');
+    setBusy(true);
+    try {
+      setPv(await api<ProfilePreview>(url, { method: 'PUT', body: { ...body, preview: true } }));
+    } catch (e) {
+      await fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ roomConfirmed: boolean | null }>(url, { method: 'PUT', body: { ...body, reason: reason.trim() } });
+      const late = r.roomConfirmed === false ? ` ${t('botsProfileRoomLate')}` : '';
+      await onDone({ ok: true, text: `${t('botsProfileSaved', { name: bot.nickname })}${late}` });
+    } catch (e) {
+      await fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={pv ? t('botsProfileChange') : t('botsProfileTitle', { name: bot.nickname })}
+      footer={
+        pv ? (
+          <>
+            <Button variant="ghost" onClick={() => setPv(null)}>{t('cancel')}</Button>
+            <Button variant="gold" disabled={reason.trim().length < 2} loading={busy} onClick={apply} data-testid="bot-profile-apply">{t('confirm')}</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+            <Button type="submit" form="bot-profile-form" disabled={same} loading={busy} data-testid="bot-profile-preview">{t('refillPreviewBtn')}</Button>
+          </>
+        )
+      }
+    >
+      {pv ? (
+        <div className="flex flex-col gap-3 text-sm" data-testid="bot-profile-change">
+          <ul className="flex flex-col gap-1">
+            {(
+              [
+                ['botsLevel', own(pv.from.level, (x) => botLevelLabel(t, x)), own(pv.to.level, (x) => botLevelLabel(t, x))],
+                ['botsStyle', own(pv.from.style, (x) => botStyleLabel(t, x)), own(pv.to.style, (x) => botStyleLabel(t, x))],
+              ] as [Key, string, string][]
+            ).map(([k, from, to]) => (
+              <li key={k} className={from === to ? 'text-ink-400' : 'font-semibold'} data-changed={from !== to}>
+                <span className="font-normal text-ink-400">{t(k)}:</span> {from === to ? to : t('histChange', { from, to })}
+              </li>
+            ))}
+          </ul>
+          {pv.table && pv.effective && (
+            <p className="text-ink-200" data-testid="bot-profile-effective">
+              <span className="text-ink-400">{t('botsProfilePlays', { table: pv.table.name })}:</span> {t('histChange', { from: play(pv.effective.from), to: play(pv.effective.to) })}
+            </p>
+          )}
+          <p className="rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2 text-ink-200" data-testid="bot-profile-applies">
+            {pv.table ? t('botsProfileApplyHand', { table: pv.table.name }) : t('botsProfileApplySeat')}
+          </p>
+          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="bot-profile-reason" />}</Field>
+          <p className="text-xs text-ink-400">{t('pvBasis')}</p>
+        </div>
+      ) : (
+        <form id="bot-profile-form" className="flex flex-col gap-3 text-sm" onSubmit={preview} data-testid="bot-profile-form">
+          <p className="text-ink-300" data-testid="bot-profile-now">
+            {bot.seat && bot.effective
+              ? t('botsProfileNow', { table: bot.seat.tableName, level: botLevelLabel(t, bot.effective.level), style: botStyleLabel(t, bot.effective.style) })
+              : t('botsProfileIdle')}
+          </p>
+          <Field label={t('botsLevel')} hint={table ? t('botsTableDefault', { v: botLevelLabel(t, table.level) }) : undefined}>
+            {(id) => (
+              <select id={id} className={selectCls} value={level} onChange={(e) => setLevel(e.target.value as BotLevel | '')} data-testid="bot-profile-level">
+                {BOT_LEVELS.map((l) => <option key={l} value={l}>{botLevelLabel(t, l)}</option>)}
+                <option value="">{t('botsFollowTable')}</option>
+              </select>
+            )}
+          </Field>
+          <Field label={t('botsStyle')} hint={table ? t('botsTableDefault', { v: tableStyle(table.style) }) : t('botsAutoStyle', { v: botStyleLabel(t, bot.auto) })}>
+            {(id) => (
+              <select id={id} className={selectCls} value={style} onChange={(e) => setStyle(e.target.value as BotStyle | '')} data-testid="bot-profile-style">
+                {BOT_STYLES.map((st) => <option key={st} value={st}>{botStyleLabel(t, st)}</option>)}
+                <option value="">{t('botsFollowTable')}</option>
+              </select>
+            )}
+          </Field>
+          {bot.profile && (
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              className="self-start"
+              disabled={level === '' && style === ''}
+              onClick={() => {
+                setLevel('');
+                setStyle('');
+              }}
+              data-testid="bot-profile-reset"
+            >
+              {t('botsProfileReset')}
+            </Button>
+          )}
+          {error && <p className="text-sm text-danger" role="alert" data-testid="bot-profile-error">{error}</p>}
+        </form>
+      )}
+    </Modal>
   );
 }

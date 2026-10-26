@@ -87,13 +87,13 @@ interface Player {
 }
 
 /** A stable 32-bit seed from parts (FNV-1a). */
-function mix(...parts: (number | string)[]): number {
+export function mix(...parts: (number | string)[]): number {
   let h = 2166136261;
   for (const ch of parts.join('|')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
   return h >>> 0;
 }
 
-function shuffled(rand: () => number): Card[] {
+export function shuffled(rand: () => number): Card[] {
   const d = standardDeck();
   for (let i = d.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));

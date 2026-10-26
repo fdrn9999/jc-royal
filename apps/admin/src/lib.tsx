@@ -96,6 +96,8 @@ const BY_CODE: Record<string, Key> = {
   bot_account: 'errBotAccount',
   bot_policy_conflict: 'errBotPolicyConflict',
   bot_policy_no_change: 'errBotPolicyNoChange',
+  bot_profile_conflict: 'errBotProfileConflict',
+  bot_profile_no_change: 'errBotProfileNoChange',
   bot_already_off: 'errBotAlreadyOff',
   referral_policy_conflict: 'errReferralConflict',
   referral_no_policy: 'errReferralNoPolicy',

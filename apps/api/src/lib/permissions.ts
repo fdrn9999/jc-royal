@@ -309,8 +309,10 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'GET /users/:id/refill': r('refill', 'refill.member', { target: 'user' }),
 
   // Table bots (routes/admin-bots.ts): the policy is a super admin's; anyone on duty may stop them. Each table's bot
-  // settings are the table's (PATCH /tables/:id).
+  // settings are the table's (PATCH /tables/:id); a bot's own level and style take the password and a reason.
   'GET /bots': r('bots', 'bots.view'),
+  'GET /bots/accounts': r('bots', 'bots.accounts'),
+  'PUT /bots/:id/profile': r('bots', 'bots.profile', { reauth, preview, target: 'user' }),
   'PUT /bots/policy': r('bots', 'bots.policy', { role: CAPABILITIES['bots.policy'], reauth, preview }),
   'POST /bots/stop': r('bots', 'bots.stop', { reauth }),
   'GET /bots/events': r('bots', 'bots.events'),

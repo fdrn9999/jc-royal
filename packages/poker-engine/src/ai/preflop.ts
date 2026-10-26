@@ -89,7 +89,8 @@ function firstIn(s: Spot, pct: number, wide: number): ActionRequest {
   }
   const w = clamp(openWidth(s.dealt, behind) * persona.open * wide, 0.05, 0.95);
   const edge = pct <= w || (pct <= w + 0.03 && rand() < (w + 0.03 - pct) / 0.06);
-  if (edge && !premium && s.lp.limp > 0 && rand() < s.lp.limp) return callOr(v);
+  const limp = 1 - (1 - s.lp.limp) * (1 - persona.limp);
+  if (edge && !premium && limp > 0 && rand() < limp) return callOr(v);
   if (edge || premium) return raiseTo(s, openSize(s)) ?? callOr(v);
   if (s.pos === 'SB' && s.dealt > 2) {
     // Against the big blind alone, completing keeps many hands that are too weak to raise.

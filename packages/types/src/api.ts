@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { PublicRole } from './social';
 import type { VipColor } from './vip';
 import { PushConsentSchema } from './notifications';
+import { BOT_TABLE_STYLES, type BotTableStyle } from './bots';
 import { BOT_LEVELS, SUPPORTED_MAX_SEATS, type BotLevel } from './table';
 
 export const NICKNAME_RE = /^[\p{L}\p{N}_]{2,16}$/u;
@@ -33,14 +34,15 @@ export function ageOn(birthDate: string, today: string): number {
   const [ty, tm, td] = today.split('-').map(Number) as [number, number, number];
   return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0);
 }
-const realDate = (s: string) => {
+/** A YYYY-MM-DD string that names a real calendar day (not Feb 30). */
+export const isCalendarDate = (s: string) => {
   const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && isoDate(d) === s;
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(d.getTime()) && isoDate(d) === s;
 };
 export const BirthDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .refine(realDate, 'not a calendar date')
+  .refine(isCalendarDate, 'not a calendar date')
   // One day of slack for members whose local date is already ahead of UTC.
   .refine((s) => s >= '1900-01-01' && s <= isoDate(new Date(Date.now() + 86_400_000)), 'out of range');
 
@@ -92,19 +94,21 @@ export const ResetConfirmSchema = z.object({ token: z.string().min(20).max(200),
 export const DeleteAccountSchema = z.object({ password: z.string().min(1).max(128) });
 
 /**
- * An official table's table bots: whether they may sit in, how well they play, how many members must be seated first
- * (minHumans), how many bots at most (max), the player count they fill up to (fillTo), and whether one stands up after
- * the hand for a member waiting for a seat (yieldSeat). Member rooms never have bots.
+ * An official table's table bots: whether they may sit in, how well they play (level) and in what style unless a bot
+ * has its own (bot_profiles; 'auto' leaves the style to each bot), how many members must be seated first (minHumans),
+ * how many bots at most (max), the player count they fill up to (fillTo), and whether one stands up after the hand for
+ * a member waiting for a seat (yieldSeat). Member rooms never have bots.
  */
 const BotSettingsShape = {
   botsEnabled: z.boolean().default(false),
   botLevel: z.enum(BOT_LEVELS).default('normal'),
+  botStyle: z.enum(BOT_TABLE_STYLES).default('auto'),
   botMinHumans: z.number().int().min(1).max(8).default(1),
   botMax: z.number().int().min(1).max(8).default(1),
   botFillTo: z.number().int().min(2).max(9).default(2),
   botYield: z.boolean().default(true),
 };
-export type BotSettings = { botsEnabled: boolean; botLevel: BotLevel; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
+export type BotSettings = { botsEnabled: boolean; botLevel: BotLevel; botStyle: BotTableStyle; botMinHumans: number; botMax: number; botFillTo: number; botYield: boolean };
 
 /** What makes a table's bot settings unusable at its size (also checked against the stored row on a patch). */
 export function botSettingsIssues(b: Pick<BotSettings, 'botMinHumans' | 'botMax' | 'botFillTo'>, maxSeats: number): { message: string; path: string[] }[] {
@@ -188,6 +192,7 @@ export const TablePatchSchema = z.object({
   entryBlocked: z.boolean().optional(),
   botsEnabled: z.boolean().optional(),
   botLevel: z.enum(BOT_LEVELS).optional(),
+  botStyle: z.enum(BOT_TABLE_STYLES).optional(),
   botMinHumans: BotSettingsShape.botMinHumans.removeDefault().optional(),
   botMax: BotSettingsShape.botMax.removeDefault().optional(),
   botFillTo: BotSettingsShape.botFillTo.removeDefault().optional(),

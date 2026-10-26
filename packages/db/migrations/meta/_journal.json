@@ -239,6 +239,13 @@
       "when": 1792521606964,
       "tag": "0033_presence_last_online",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1792984197880,
+      "tag": "0034_bot_profiles",
+      "breakpoints": true
     }
   ]
 }
