@@ -353,6 +353,8 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /reports/:id/notes': r('reports', 'report.note', { target: 'report' }),
   'PATCH /reports/:id': r('reports', 'report.update', { target: 'report' }),
   'POST /reports/:id': r('reports', 'report.resolve', { preview, target: 'report' }),
+  'GET /integrity': r('reports', 'integrity.view'),
+  'POST /integrity/review': r('reports', 'integrity.review'),
 
   'GET /service/notices': r('notices', 'service.notice.list'),
   'POST /service/notices': r('notices', 'service.notice.create'),

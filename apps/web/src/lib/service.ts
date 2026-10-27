@@ -5,17 +5,49 @@ import { useAuth } from './auth';
 
 /** Service notices and maintenance (GET /api/service/status), shared by the banners and the maintenance page. */
 let status: ServiceStatusDto | null = null;
-/** Server clock minus this device's, so notices start and end on time on a device whose clock is off. */
+/**
+ * Server clock minus this device's, so notices start and end on time, and turn clocks count the room's seconds, on a
+ * device whose clock is off. Read at the middle of the request's round trip (performance.now), so a slow answer does
+ * not add its delay: it can be off by `spread`, half the round trip, at most.
+ */
 let skew = 0;
+let spread = Infinity;
+let measured = false;
+/** Date.now() − performance.now() when it was measured: if that moves, the device clock was set (or it slept). */
+let anchor = 0;
 let pending: Promise<void> | null = null;
 const subs = new Set<() => void>();
+
+/** A round trip this quick is always taken; a slower one only if it is closer than the measure in use. */
+const QUICK_MS = 250;
+/** A measure from a slower round trip is taken again after this, a few times a page load. */
+const REMEASURE_MS = 5_000;
+let remeasures = 3;
+/** The device clock moved this far against the monotonic one: measure again. */
+const JUMP_MS = 1_000;
+
+/** Takes the server's time `server`, read between `t0` and `t1` (performance.now), unless the measure in use is closer. */
+function calibrate(server: number, t0: number, t1: number) {
+  const half = Math.max(0, t1 - t0) / 2;
+  if (half <= spread || 2 * half <= QUICK_MS) {
+    anchor = Date.now() - performance.now();
+    skew = server - (anchor + t0 + half);
+    spread = half;
+    measured = true;
+  }
+  if (2 * spread > QUICK_MS && remeasures > 0) {
+    remeasures--;
+    setTimeout(() => refreshService(), REMEASURE_MS);
+  }
+}
 
 /** Fetches again, unless `rev` (from the inbox poll) shows nothing changed since the last fetch. */
 export function refreshService(rev?: number) {
   if (rev !== undefined && status?.rev === rev) return;
+  const t0 = performance.now();
   pending ??= api<ServiceStatusDto>('/api/service/status')
     .then((r) => {
-      skew = r.now - Date.now();
+      calibrate(r.now, t0, performance.now());
       status = r;
       subs.forEach((f) => f());
     })
@@ -29,7 +61,18 @@ export function refreshService(rev?: number) {
 
 setMaintenanceListener(() => refreshService());
 
-export const serverNow = () => Date.now() + skew;
+export const serverNow = () => {
+  const now = Date.now();
+  const moved = now - performance.now() - anchor;
+  if (measured && Math.abs(moved) > JUMP_MS) {
+    // The device clock was set, or the device slept with performance.now() paused (some do): which one cannot be
+    // told, so the device clock stays the base and the server is asked again, its answer taken whatever its round trip.
+    anchor += moved;
+    spread = Infinity;
+    refreshService();
+  }
+  return now + skew;
+};
 
 /** Short local date and time, e.g. "10. 15. 오후 11:00" / "10/15, 11:00 PM". */
 export const when = (at: number, locale: string) =>

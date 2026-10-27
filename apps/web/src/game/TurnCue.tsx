@@ -1,13 +1,15 @@
 /**
  * My turn, said so it is hard to miss: a label with the time left above the action bar (TurnBanner), a sound and, when
  * asked for, a short vibration once per decision, and the tab's title while the page is hidden (useTurnCue). The time
- * left is the room's deadline (time bank included), read the same way as the seat's timer ring. Mute, a hidden page and
- * reduced motion are kept: the sound engine plays nothing muted or hidden, and the pulse stops under reduced motion.
+ * left is the room's deadline (time bank included) on the server's clock, read the same way as the seat's timer ring.
+ * Mute, a hidden page and reduced motion are kept: the sound engine plays nothing muted or hidden, and the pulse stops
+ * under reduced motion.
  */
 import { sound } from '@jc/audio';
 import { cx, TriangleAlertIcon } from '@jc/ui';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../lib/i18n';
+import { serverNow } from '../lib/service';
 
 /** From this much time left the clock reads low: the label turns to the warning colour and the timer beeps. */
 export const TURN_LOW_MS = 5_000;
@@ -96,9 +98,9 @@ export function useTurnCue(key: string | null, o: { vibrate: boolean; title: str
   useEffect(() => (key ? holdTurnTitle(document, title) : undefined), [key, title]);
 }
 
-/** Whole seconds left to `deadline` (epoch ms), counting down; null without one. */
+/** Whole seconds left to `deadline` (epoch ms, the room's clock), counting down; null without one. */
 export function useSecondsLeft(deadline: number | null): number | null {
-  const read = () => (deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null);
+  const read = () => (deadline ? Math.max(0, Math.ceil((deadline - serverNow()) / 1000)) : null);
   const [left, setLeft] = useState(read);
   useEffect(() => {
     setLeft(read());

@@ -3,7 +3,8 @@ import { checkOrCall, signUp, sitWith, standUp, test } from './helpers';
 
 /**
  * Counts the board cards' turns (jc-flip-in) starting (window.__flips): the cards that turned, the ones that started
- * turning again after they began (back to their first frame mid-turn), and the rivers (the board's fifth card).
+ * turning again after they began (back to their first frame mid-turn), and the rivers (the board's fifth card). The turn
+ * runs on the card's turntable (PlayingCard), so each counts against the card it turns.
  */
 function countFlips() {
   const w = window as unknown as { __flips: { cards: number; restarts: number; rivers: number } };
@@ -12,8 +13,8 @@ function countFlips() {
   addEventListener(
     'animationstart',
     (e) => {
-      const el = e.target as Element;
-      if (e.animationName !== 'jc-flip-in' || !el.closest?.('[data-testid=board]')) return;
+      const el = (e.target as Element).closest?.('.jc-card');
+      if (e.animationName !== 'jc-flip-in' || !el?.closest('[data-testid=board]')) return;
       if (seen.has(el)) {
         w.__flips.restarts += 1;
         return;

@@ -100,12 +100,22 @@ test('bot administration: the seated bot and its fund, a policy change with befo
   await expect(page.getByTestId('bot-profile-preview')).toBeDisabled();
   await page.getByTestId('bot-profile-level').selectOption('expert');
   await page.getByTestId('bot-profile-style').selectOption('tag');
+  // Its own buy-in in big blinds: out of range it cannot be previewed; 30 BB is 300 chips here (blinds 5/10, buy-in 100–1,000),
+  // where the default 100 BB sat it down with the table's maximum.
+  await expect(page.getByTestId('bot-profile-buyin-table')).toContainText('100–1,000칩');
+  await expect(page.getByTestId('bot-profile-buyin-table')).toContainText('1,000칩으로 앉았습니다');
+  await page.getByTestId('bot-profile-buyin').fill('501');
+  await expect(page.getByTestId('bot-profile-preview')).toBeDisabled();
+  await page.getByTestId('bot-profile-buyin').fill('30');
   await page.getByTestId('bot-profile-preview').click();
   const profileChange = page.getByTestId('bot-profile-change');
   await expect(profileChange).toContainText('테이블 설정 따르기 → 전문가');
   await expect(profileChange).toContainText('테이블 설정 따르기 → 타이트 어그레시브');
+  await expect(profileChange).toContainText('기본 100BB → 30BB');
   await expect(page.getByTestId('bot-profile-effective')).toContainText('→ 전문가 · 타이트 어그레시브');
   await expect(page.getByTestId('bot-profile-applies')).toContainText('다음 핸드부터 적용됩니다');
+  await expect(page.getByTestId('bot-profile-buyin-next')).toContainText('1,000 → 300');
+  await expect(page.getByTestId('bot-profile-buyin-applies')).toContainText('다음에 앉을 때부터 적용됩니다');
   await expect(page.getByTestId('bot-profile-apply')).toBeDisabled();
   await page.getByTestId('bot-profile-reason').fill('E2E 봇 개별 설정');
   await page.screenshot({ path: 'test-results/bots-admin-profile.png', animations: 'disabled' });
@@ -115,6 +125,9 @@ test('bot administration: the seated bot and its fund, a policy change with befo
   await expect(acct).toHaveAttribute('data-level', 'expert');
   await expect(acct).toHaveAttribute('data-style', 'tag');
   await expect(acct.getByTestId('bot-acct-level')).toContainText('계정');
+  // The seat it holds keeps the stack it sat down with.
+  await expect(acct.getByTestId('bot-acct-buyin')).toContainText('30BB');
+  await expect(acct.getByTestId('bot-acct-buyin')).toContainText('지금 자리 1,000칩');
   await page.screenshot({ path: 'test-results/bots-admin-accounts.png', fullPage: true, animations: 'disabled' });
   // At the member's table the bot plays from the next deal as set (the member folds the hands until then).
   await expect(async () => {

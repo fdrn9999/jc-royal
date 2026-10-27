@@ -91,6 +91,8 @@ const auditNames = labeler({
   'board.post.status': 'auditPostStatus',
   'hand.list': 'auditHandList',
   'hand.view_sensitive': 'auditHandView',
+  'integrity.review': 'auditIntegrityReview',
+  'integrity.view': 'auditIntegrityView',
   'ledger.view': 'auditLedgerView',
   'maintenance.cancel': 'auditMaintCancel',
   'maintenance.end': 'auditMaintEnd',
@@ -298,6 +300,7 @@ export const botStyleLabel = labeler({
   lag: 'botStyleLag',
   'tight-passive': 'botStyleTightPassive',
   'loose-passive': 'botStyleLoosePassive',
+  casual: 'botStyleCasual',
 });
 export const botEventKindLabel = labeler({ join: 'botEvJoin', leave: 'botEvLeave', fund_exhausted: 'botEvFundExhausted', join_failed: 'botEvJoinFailed', action_failed: 'botEvActionFailed' });
 const botCodes = labeler({

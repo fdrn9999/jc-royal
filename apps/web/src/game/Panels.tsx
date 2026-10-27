@@ -1,6 +1,6 @@
 import { sound, type AudioSettings } from '@jc/audio';
 import { SETTINGS_COLOR_VISIONS, type AutoBuyPolicy, type AutoBuyRequest, type ChatMessage, type TableView } from '@jc/types';
-import { Button, cx, Field, formatChips, Modal, SendHorizontalIcon, THEMES } from '@jc/ui';
+import { Button, cx, Field, formatChips, Modal, MusicIcon, SendHorizontalIcon, THEMES } from '@jc/ui';
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
@@ -725,6 +725,37 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
           <label className="flex items-center justify-between gap-3 text-sm">
             {t('settings.mute')}
             <input type="checkbox" checked={audio.muted} onChange={(e) => sound.update({ muted: e.target.checked })} className="size-4 accent-[var(--color-gold-500)]" />
+          </label>
+          {/* The table's background music: its own on/off and volume, under the master volume and mute. */}
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex items-center gap-2">
+              <MusicIcon className="size-4 text-ink-300" />
+              {t('settings.music')}
+            </span>
+            <input
+              type="checkbox"
+              checked={audio.musicOn}
+              onChange={(e) => sound.update({ musicOn: e.target.checked })}
+              className="size-4 accent-[var(--color-gold-500)]"
+              data-testid="settings-music"
+            />
+          </label>
+          <label className={cx('flex items-center justify-between gap-3 text-sm', !audio.musicOn && 'opacity-50')}>
+            {t('settings.musicVolume')}
+            <span className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={audio.music}
+                disabled={!audio.musicOn}
+                onChange={(e) => sound.update({ music: Number(e.target.value) })}
+                className="w-40"
+                data-testid="settings-music-volume"
+              />
+              <span className="w-9 text-right tabular-nums text-ink-300">{Math.round(audio.music * 100)}%</span>
+            </span>
           </label>
         </section>
         <div className="jc-divider" />

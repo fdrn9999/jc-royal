@@ -140,6 +140,18 @@ SOFTWARE.
 | `fold.mp3` | Playing Cards Throw | freesound_community | https://pixabay.com/sound-effects/household-playing-cards-throw-94502/ |
 | `win.mp3` | Handfull of Poker Chips | freesound_community | https://pixabay.com/sound-effects/film-special-effects-handfull-of-poker-chips-95810/ |
 
+## Background music — 검은 테이블의 리듬
+
+- File: `packages/audio/src/music/black-table-rhythm.mp3` (the original file as provided, unchanged; SHA-256
+  `6e894b93eb0e8f07e2e9f24877090f2bd2cd32f246f1e8d2c169ecff538d50b1`), 2:28, 48 kHz stereo.
+- Tags in the file: title "검은 테이블의 리듬", artist "ckato9173", comment "made with suno;
+  created=2026-10-26T15:17:57Z; id=15cf84a8-cdf1-40c6-82e6-5c91e12ddc36". It was generated with Suno (https://suno.com)
+  for this project.
+- Rights: Suno's terms tie ownership and commercial use of a song to the plan it was made on. Before the game is
+  deployed publicly, confirm that this song may be used in it (the plan of the account that made it, and the terms
+  in force on its creation date). Until then it is for development and private testing.
+- Use: streamed at a game table as background music. It is part of the game and is not offered for download on its own.
+
 ## Fonts
 
 - Cinzel — SIL Open Font License 1.1 (Google Fonts)

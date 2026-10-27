@@ -18,7 +18,7 @@ import { percentile } from '../src/ai/ranges';
 import { cardCode } from '../src/ai/score';
 import { strengthTable } from '../src/ai/strength';
 import { seating, walk, type PubAction } from '../src/ai/walk';
-import { addCounters, BOT_LEVELS, BOT_STYLES, botView, decideBot, emptyCounters, handCounters, HandEngine, standardDeck, type BotLevel, type BotStyle, type Counters, type MaxSeats } from '../src';
+import { addCounters, BOT_AUTO_STYLES, BOT_LEVELS, botView, decideBot, emptyCounters, handCounters, HandEngine, standardDeck, type BotLevel, type BotStyle, type Counters, type MaxSeats } from '../src';
 import { decideLegacy } from './legacy-bot';
 import { seeded } from './rng';
 import { decideUser, USER_KINDS, type UserKind } from './users';
@@ -142,7 +142,7 @@ async function session(out: SimOutput, mode: 'legacy' | 'new', seed: number, si:
   const players: Player[] = [];
   for (let seat = 0; seat < size; seat++) {
     if (seat === userSeat) players.push({ id: `u${seat}`, seat, user: scenario as UserKind });
-    else players.push({ id: `b${seat}`, seat, bot: { level: BOT_LEVELS[Math.floor(setup() * BOT_LEVELS.length)]!, style: BOT_STYLES[Math.floor(setup() * BOT_STYLES.length)]! } });
+    else players.push({ id: `b${seat}`, seat, bot: { level: BOT_LEVELS[Math.floor(setup() * BOT_LEVELS.length)]!, style: BOT_AUTO_STYLES[Math.floor(setup() * BOT_AUTO_STYLES.length)]! } });
   }
   // What the table has seen of each scripted player so far (the record a room keeps for people, not for bots).
   const record = new Map<number, Counters>();

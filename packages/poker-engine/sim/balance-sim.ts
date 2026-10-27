@@ -7,7 +7,7 @@
  *   pnpm exec tsx sim/balance-sim.ts --exp perf --hands 300 --seed 7 --out <file.json>
  *
  * field  Six seats: one bot against five players of one kind (sim/opponents.ts) or five bots of random levels and
- *        styles. Every level × style plays the same decks, from the same seat, against opponents drawing the same
+ *        styles (the auto styles, as a table on 'auto' deals them). Every level × style plays the same decks, from the same seat, against opponents drawing the same
  *        random numbers, so differences between levels or styles are paired session by session.
  * duel   Two bots heads-up for each pair of levels (balanced style), every deck dealt twice with the seats swapped.
  * perf   Six and nine bots of one level at one table: decision time per decision and for the whole table per hand.
@@ -22,7 +22,7 @@ import { percentile } from '../src/ai/ranges';
 import { cardCode } from '../src/ai/score';
 import { isStrongDraw, strengthTable } from '../src/ai/strength';
 import type { PubAction } from '../src/ai/walk';
-import { addCounters, BOT_LEVELS, BOT_STYLES, botView, decideBot, emptyCounters, handCounters, HandEngine, packCounters, type BotLevel, type BotStyle, type BotView, type Counters, type MaxSeats } from '../src';
+import { addCounters, BOT_AUTO_STYLES, BOT_LEVELS, BOT_STYLES, botView, decideBot, emptyCounters, handCounters, HandEngine, packCounters, type BotLevel, type BotStyle, type BotView, type Counters, type MaxSeats } from '../src';
 import type { ActionRequest } from '../src/hand';
 import { decideOpponent, OPPONENTS, type Opponent } from './opponents';
 import { seeded } from './rng';
@@ -56,9 +56,18 @@ export interface Grade {
   /** Calls of 20 big blinds or more; with a weak hand (outside the top 45% before the flop, strength under 0.4 after). */
   bigCalls: number;
   weakBigCalls: number;
+  /** After the flop, each bet or raise as a share of the pot (summed, over earlyBets + riverBets); those over the pot. */
+  sizeSum: number;
+  overbets: number;
+  /**
+   * Bets and raises all in; those out of line, as sim/table-sim.ts grades them: before the flop for 30 big blinds or
+   * more outside the top 25% of hands, after it for more than three times the pot with a strength under 0.3.
+   */
+  jams: number;
+  wildJams: number;
   decisions: number;
 }
-export const emptyGrade = (): Grade => ({ earlyBets: 0, earlyBluffs: 0, semiBluffs: 0, riverBets: 0, riverBluffs: 0, riverCalls: 0, badRiverCalls: 0, bigCalls: 0, weakBigCalls: 0, decisions: 0 });
+export const emptyGrade = (): Grade => ({ earlyBets: 0, earlyBluffs: 0, semiBluffs: 0, riverBets: 0, riverBluffs: 0, riverCalls: 0, badRiverCalls: 0, bigCalls: 0, weakBigCalls: 0, sizeSum: 0, overbets: 0, jams: 0, wildJams: 0, decisions: 0 });
 
 /** One player's session: chips, hands won, the public counters (packed, `STAT_KEYS` order) and the graded decisions. */
 export interface Rec {
@@ -135,8 +144,18 @@ function grade(g: Grade, v: BotView, req: ActionRequest) {
     g.bigCalls++;
     if (v.stage === 'preflop' ? percentile(classOf(v.hole)) > 0.45 : hs < 0.4) g.weakBigCalls++;
   }
+  // The street total it bets or raises to, and what that adds beyond a call against the pot once called.
+  const all = v.stack + v.streetBet;
+  const to = req.type === 'allin' ? (allin && 'amount' in allin ? allin.amount : all) : (req.amount ?? 0);
+  const share = (to - v.streetBet - v.toCall) / Math.max(1, v.pot + v.toCall);
+  if (raises && to >= all) {
+    g.jams++;
+    if (v.stage === 'preflop' ? to >= 30 * v.bigBlind && percentile(classOf(v.hole)) > 0.25 : share > 3 && hs < 0.3) g.wildJams++;
+  }
   if (v.stage === 'preflop') return;
   if (raises) {
+    g.sizeSum += share;
+    if (share > 1) g.overbets++;
     if (v.stage === 'river') {
       g.riverBets++;
       if (hs < 0.5) g.riverBluffs++;
@@ -240,7 +259,7 @@ async function fieldSession(out: BalanceOutput, seed: number, field: Field, si: 
   const others: Player[] = [];
   for (let seat = 0; seat < size; seat++) {
     if (seat === heroSeat) continue;
-    if (field === 'bots') others.push({ id: `b${seat}`, seat, bot: { level: BOT_LEVELS[Math.floor(setup() * BOT_LEVELS.length)]!, style: BOT_STYLES[Math.floor(setup() * BOT_STYLES.length)]! } });
+    if (field === 'bots') others.push({ id: `b${seat}`, seat, bot: { level: BOT_LEVELS[Math.floor(setup() * BOT_LEVELS.length)]!, style: BOT_AUTO_STYLES[Math.floor(setup() * BOT_AUTO_STYLES.length)]! } });
     else others.push({ id: `o${seat}`, seat, opp: field });
   }
   for (const level of BOT_LEVELS) {
@@ -301,7 +320,7 @@ async function duelSession(out: BalanceOutput, seed: number, pair: [BotLevel, Bo
 
 /** A whole table of one level: how long the bots take per decision and per hand together. */
 async function perfTable(out: BalanceOutput, seed: number, level: BotLevel, size: number, hands: number) {
-  const players: Player[] = Array.from({ length: size }, (_, seat) => ({ id: `b${seat}`, seat, bot: { level, style: BOT_STYLES[seat % BOT_STYLES.length]! } }));
+  const players: Player[] = Array.from({ length: size }, (_, seat) => ({ id: `b${seat}`, seat, bot: { level, style: BOT_AUTO_STYLES[seat % BOT_AUTO_STYLES.length]! } }));
   const table = (out.tables[`${level}|${size}`] ??= emptyTiming());
   for (let hn = 0; hn < hands; hn++) {
     const rand = seeded(mix(seed, 'perf', level, size, hn, 'act'));

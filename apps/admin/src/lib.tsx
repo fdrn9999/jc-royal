@@ -94,6 +94,8 @@ const BY_CODE: Record<string, Key> = {
   refill_no_policy: 'errRefillNoPolicy',
   ref_not_found: 'errRefNotFound',
   bot_account: 'errBotAccount',
+  not_flagged: 'errIntegrityNotFlagged',
+  already_reported: 'errAlreadyReported',
   bot_policy_conflict: 'errBotPolicyConflict',
   bot_policy_no_change: 'errBotPolicyNoChange',
   bot_profile_conflict: 'errBotProfileConflict',

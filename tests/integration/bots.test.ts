@@ -150,9 +150,9 @@ const account = async (id: string, c: Client = admin) => {
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return (r.body.items as BotAccount[]).find((b) => b.id === id)!;
 };
-/** What the room holds for its bot seat: the level and style of the hand dealt last, and the bot's settings it read. */
+/** What the room holds for its bot seat: the level and style of the hand dealt last, the bot's settings it read, and the chips it sat down with. */
 const roomBot = async (tableId: string, seat: number) =>
-  (await admin.get(`/api/admin/tables/${tableId}`)).body.live.seats[seat] as { userId: string; bot: BotLevel; botStyle: BotStyle; botProfile: BotProfile | null };
+  (await admin.get(`/api/admin/tables/${tableId}`)).body.live.seats[seat] as { userId: string; bot: BotLevel; botStyle: BotStyle; botProfile: BotProfile | null; buyIn: number };
 async function setProfile(botId: string, base: number | null, level: BotLevel | null, style: BotStyle | null, reason = 'bots test profile') {
   await reauth();
   const r = await admin.req('PUT', `/api/admin/bots/${botId}/profile`, { baseUpdatedAt: base, level, style, reason });
@@ -435,6 +435,14 @@ describe('table bots', () => {
     expect(after.seats[1]).toMatchObject({ userId: botId, bot: 'hard' });
     expect(await roomBot(T, 1)).toMatchObject({ bot: 'hard', botStyle: 'tag', botProfile: null });
 
+    // Casual, never dealt by the auto mix, plays where the table is set to it.
+    await reauth();
+    expect((await admin.patch(`/api/admin/tables/${T}`, { botStyle: 'casual' })).status).toBe(200);
+    const n3 = ws.state!.hand?.number ?? 0;
+    const casual = await ws.waitState((s) => (s.hand?.number ?? 0) > n3 + 1 && live(s), 90_000, 'a hand dealt on casual');
+    expect(casual.seats[1]).toMatchObject({ userId: botId, bot: 'hard', botStyle: 'casual' });
+    expect(await roomBot(T, 1)).toMatchObject({ bot: 'hard', botStyle: 'casual', botProfile: null });
+
     // Its play over the period comes from the recorded hands; nothing is counted that was not played.
     const row = await account(botId);
     expect(row.play.hands).toBeGreaterThanOrEqual(3);
@@ -474,6 +482,93 @@ describe('table bots', () => {
       await balanced(T, [m.me.id], before);
     } finally {
       if (bare.length) await d1(`DELETE FROM bot_profiles WHERE bot_id IN (${ids(bare)})`);
+    }
+  }, 300_000);
+
+  it('a bot sits down with its own buy-in within the table range; a new one counts the next time it sits, never at the seat it holds', async () => {
+    const T = 'it-bot-buyin';
+    // One bot to sit here: the other idle ones are held back (suspended, their wallets untouched) for the test.
+    const idle = (
+      await d1<{ id: string }>(
+        `SELECT u.id FROM users u WHERE u.is_bot = 1 AND u.status = 'active'
+            AND NOT EXISTS (SELECT 1 FROM table_sessions s WHERE s.user_id = u.id AND s.status = 'seated') ORDER BY u.balance DESC`,
+      )
+    ).map((r) => r.id);
+    expect(idle.length, 'bot accounts from the tests before').toBeGreaterThan(0);
+    const [target, ...held] = idle as [string, ...string[]];
+    const start = await account(target);
+    const m = await newUser();
+    const before = await books([m.me.id]);
+    if (held.length) await d1(`UPDATE users SET status = 'suspended' WHERE id IN (${ids(held)})`);
+    try {
+      const url = `/api/admin/bots/${target}/profile`;
+      const keep = { level: start.profile?.level ?? null, style: start.profile?.style ?? null };
+      const put = async (buyInBb: number | null | undefined, base: number | null, preview = false) => {
+        await reauth();
+        return admin.req('PUT', url, { ...(preview ? { preview } : { reason: 'bots test buy-in' }), baseUpdatedAt: base, ...keep, ...(buyInBb === undefined ? {} : { buyInBb }) });
+      };
+      // Whole big blinds from 10 to 500 only.
+      for (const bad of [5, 501, 2.5]) expect((await put(bad, start.updatedAt)).status, String(bad)).toBe(400);
+      const first = await put(30, start.updatedAt);
+      expect(first.status, JSON.stringify(first.body)).toBe(200);
+      expect(first.body).toMatchObject({ profile: { ...keep, buyInBb: 30 }, table: null, buyIn: null, appliesFrom: 'next_seat' });
+
+      // It sits down with 30 big blinds: 300 chips at the seat, in its table session and in the ledger.
+      const ws = await watch(m.client, T);
+      await sit(ws, 0, 500);
+      await ws.waitState((s) => s.seats[1]?.userId === target, 30_000, 'the bot to sit down');
+      expect(await roomBot(T, 1)).toMatchObject({ userId: target, buyIn: 300, botProfile: { buyInBb: 30 } });
+      const seatBuyIn = async () =>
+        Number((await d1<{ b: number }>(`SELECT buy_in AS b FROM table_sessions WHERE user_id = '${target}' AND table_id = '${T}' AND status = 'seated'`))[0]!.b);
+      expect(await seatBuyIn()).toBe(300);
+      const at = await account(target);
+      expect(at).toMatchObject({ profile: { buyInBb: 30 }, seat: { tableId: T, buyIn: 300, table: { bigBlind: 10, minBuyIn: 100, maxBuyIn: 2000 } } });
+
+      // 300 big blinds would be 3000 chips: the preview brings it within the table's 2000 and shows what it sat down with.
+      const pv = await put(300, at.updatedAt, true);
+      expect(pv.status, JSON.stringify(pv.body)).toBe(200);
+      expect(pv.body).toMatchObject({
+        from: { buyInBb: 30 },
+        to: { buyInBb: 300 },
+        table: { id: T, bigBlind: 10, minBuyIn: 100, maxBuyIn: 2000 },
+        buyIn: { from: 300, to: 2000, seated: 300 },
+      });
+      // Left out, the buy-in stays: the same settings are no change.
+      const same = await put(undefined, at.updatedAt);
+      expect([same.status, same.body.error?.code]).toEqual([400, 'bot_profile_no_change']);
+      const saved = await put(300, at.updatedAt);
+      expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+      expect(saved.body).toMatchObject({ profile: { buyInBb: 300 }, buyIn: { from: 300, to: 2000, seated: 300 }, roomConfirmed: true });
+      const [audit] = await d1<{ detail: string }>(`SELECT detail FROM admin_audit_log WHERE action = 'bots.profile' ORDER BY created_at DESC LIMIT 1`);
+      expect(JSON.parse(audit!.detail)).toMatchObject({ from: { buyInBb: 30 }, to: { buyInBb: 300 }, buyIn: { from: 300, to: 2000, seated: 300 }, table: T });
+
+      // The room reads it at once, and the seat keeps the chips it sat down with through the hands after.
+      const stop = autoplay([ws], careful(30));
+      const n = ws.state!.hand?.number ?? 0;
+      await ws.waitState((s) => (s.hand?.number ?? 0) > n + 1 && live(s), 90_000, 'two hands after the change');
+      expect(await roomBot(T, 1)).toMatchObject({ userId: target, buyIn: 300, botProfile: { buyInBb: 300 } });
+      expect(await seatBuyIn()).toBe(300);
+
+      // Standing up and sitting down again, it brings the new one, within the table's range.
+      await leave(ws);
+      await ws.waitState(empty, 90_000, 'the table to empty');
+      await stop();
+      await sit(ws, 0, 500);
+      await ws.waitState((s) => s.seats[1]?.userId === target, 30_000, 'the bot to sit down again');
+      expect(await roomBot(T, 1)).toMatchObject({ userId: target, buyIn: 2000, botProfile: { buyInBb: 300 } });
+      expect(await seatBuyIn()).toBe(2000);
+      await leave(ws);
+      await ws.waitState(empty, 90_000, 'the table to empty again');
+      const sessions = await balanced(T, [m.me.id], before);
+      expect([...sessions.values()].map((s) => s.amounts.buy_in ?? 0).sort((a, b) => b - a)).toEqual([-300, -2000]);
+      expect(await events(T, 'action_failed')).toEqual([]);
+    } finally {
+      if (held.length) await d1(`UPDATE users SET status = 'active' WHERE id IN (${ids(held)})`);
+      await d1(
+        start.profile
+          ? `UPDATE bot_profiles SET buy_in_bb = ${start.profile.buyInBb ?? 'NULL'} WHERE bot_id = '${target}'`
+          : `DELETE FROM bot_profiles WHERE bot_id = '${target}'`,
+      );
     }
   }, 300_000);
 

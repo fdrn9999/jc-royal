@@ -126,6 +126,8 @@
 | `user.view` | 회원 상세(생년월일·동의 기록 포함) | 대상 회원 |
 | `report.view` | 신고 목록(증거 포함) | `{status, userId, reporterId, severity, reason, targetType, assignee, sort, page, count, dm: [1:1 메시지 신고 ID]}` |
 | `report.note` | 신고 내부 메모 작성 | 메모 ID와 길이. 본문은 넣지 않음 |
+| `integrity.view` | 이상 플레이 신호 목록(회원 쌍, 같은 네트워크 여부) | `{days, pairs}`. 세션 IP는 D1 안에서 쌍끼리 겹치는지만 비교하고 화면·응답·감사 기록에 IP를 넣지 않음 |
+| `integrity.review` | 이상 신호로 검토 신고 열기 | 대상 = 칩을 받은 회원, `{reportId, partnerId, days, signals, risk, reason}`. 회원에게 알림 없음 |
 | `note.create`·`note.delete` | 관리자 메모 작성·삭제 | 메모 ID와 길이, 삭제는 작성자·작성 시각. 본문은 넣지 않음 |
 | `ledger.view` | 칩 원장 목록, 쪽마다(B9) | `{q, found, type, from, to, page, count}`, 회원을 찾으면 대상 회원. 찾지 못한 검색어도 남김 |
 | `hand.list` | 회원으로 좁힌 핸드 목록, 쪽마다(B9) | `{q, found, tableId, page, count}`, 대상 회원. 테이블만·전체 핸드 목록은 회원을 가리키지 않아 남기지 않음 |

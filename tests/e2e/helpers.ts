@@ -151,3 +151,20 @@ export async function setAccountPrefs(page: Page, prefs: Record<string, unknown>
   }, prefs);
   expect(status).toBe(200);
 }
+
+/**
+ * My cards on a seat in the order they were dealt (the order the room and the show buttons go by), read off the table,
+ * which draws them with the higher rank on the left: each is the card over its show button (show-card-N), so the show
+ * buttons must be up.
+ */
+export function dealtCards(page: Page, seat: string): Promise<string[]> {
+  return page.evaluate((seat) => {
+    const root = document.querySelector(`[data-testid=${seat}]`)!;
+    const cards = Array.from(root.querySelectorAll('.jc-card[data-card]')).map((c) => ({ card: c.getAttribute('data-card')!, x: c.getBoundingClientRect().left + c.getBoundingClientRect().width / 2 }));
+    return [0, 1].map((n) => {
+      const b = root.querySelector(`[data-testid=show-card-${n}], [data-testid=shown-card-${n}]`)!.getBoundingClientRect();
+      const x = b.left + b.width / 2;
+      return cards.reduce((best, c) => (Math.abs(c.x - x) < Math.abs(best.x - x) ? c : best)).card;
+    });
+  }, seat);
+}

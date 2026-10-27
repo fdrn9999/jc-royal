@@ -135,7 +135,12 @@ async function act(p: Page, prefer: 'check' | 'fold') {
   const order = prefer === 'fold' ? [/^(폴드|Fold)$/, /^(체크|Check)$/] : [/^(체크|Check)$/, /^(폴드|Fold)$/];
   for (const name of order) {
     const b = bar.getByRole('button', { name });
-    if (await b.isVisible().catch(() => false)) return b.click().catch(() => {});
+    if (!(await b.isVisible().catch(() => false))) continue;
+    await b.click().catch(() => {});
+    // A fold while the check is free asks for a second press (ActionBar's mis-tap guard), as it would of a player.
+    const again = bar.getByRole('button', { name: /^(한 번 더|Press again)/ });
+    if (await again.isVisible().catch(() => false)) await again.click().catch(() => {});
+    return;
   }
 }
 

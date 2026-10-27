@@ -33,7 +33,7 @@ const ALL = {
   no_glow: '.jc-winner,.jc-turn,.jc-pulse-gold,.animate-pulse,.jc-winner::after,.jc-turn::after,.jc-pulse-gold::after{animation:none!important}',
   no_blur: '*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
   no_timer: '[data-tour=timer]{visibility:hidden!important}',
-  no_card_anim: '.jc-flip-in,.jc-deal-in{animation:none!important}',
+  no_card_anim: '.jc-card-turn,.jc-deal-in{animation:none!important}',
   // Halves, to narrow down what is left.
   still: '*,*::before,*::after{animation:none!important;transition:none!important}',
   no_table: '[data-testid=table]{visibility:hidden!important}',

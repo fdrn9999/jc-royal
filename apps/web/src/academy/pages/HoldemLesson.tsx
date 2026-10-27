@@ -8,6 +8,7 @@ import { seatLayout } from '../../game/layout';
 import { TableScene, useBoxSize, useTableLayout } from '../../game/TableScene';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
+import { serverNow } from '../../lib/service';
 import { describeHand, l, useTr } from '../content';
 import { actingOrder, BEST_FIVE_DEMO, BOARD_PLAYS, POSITION_INFO, POSITION_QUIZ, positionNames, STAGES, TOUR, WALKTHROUGH } from '../data/holdem';
 import { PracticeSession } from '../practice/runner';
@@ -73,7 +74,7 @@ function useTourView(): TableView | null {
   return useMemo(() => {
     const sc = buildScenarios(me?.nickname ?? 'You').find((s) => s.id === 'H')!;
     const v = new PracticeSession(sc).view();
-    return { ...v, hand: v.hand && { ...v.hand, deadline: Date.now() + 25_000 } };
+    return { ...v, hand: v.hand && { ...v.hand, deadline: serverNow() + 25_000 } };
   }, [me?.nickname]);
 }
 

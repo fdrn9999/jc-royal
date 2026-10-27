@@ -14,7 +14,7 @@ import { applyInitialTheme, closeAccount, openAccount, setSyncState } from './li
 import { startPresence } from './lib/presence';
 import { followPushTaps } from './lib/push-nav';
 import { reportWebError, watchWebErrors } from './lib/webErrors';
-import { LoginPage, RegisterPage, ResetPage } from './pages/Auth';
+import { LoginPage, ResetPage } from './pages/Auth';
 import { LobbyPage } from './pages/Lobby';
 
 applyInitialTheme();
@@ -116,6 +116,8 @@ const loadMaintenance = () => import('./pages/Maintenance');
 const loadFriends = () => import('./pages/Friends');
 const loadMessages = () => import('./pages/Messages');
 const loadTournaments = () => import('./pages/Tournaments');
+/** Sign-up (its fields, consent and e-mail check) is opened once per member, so it is not in the first screen's code either. */
+const loadRegister = () => import('./pages/Register');
 /** The advanced (GTO) course is its own chunk: the beginner academy never fetches it. */
 const loadGto = () => import('./academy/gto/routes');
 
@@ -254,7 +256,7 @@ const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [
       { path: '/login', element: <GuestOnly><LoginPage /></GuestOnly> },
-      { path: '/register', element: <GuestOnly><RegisterPage /></GuestOnly> },
+      { path: '/register', element: <GuestOnly>{onDemand(loadRegister, 'RegisterPage')}</GuestOnly> },
       { path: '/reset', element: <ResetPage /> },
       // Public: sign-up links here before anyone has an account.
       { path: '/privacy', element: <Legal kind="privacy" /> },

@@ -4,12 +4,14 @@
  * decisions for the same seed. Spots are dealt by the real engine; `decideLegacy` (sim/legacy-bot) is the bot as it
  * played before 2.0, kept for the diagnosis cases only.
  */
-import type { Card } from '@jc/types';
+import { BOT_STYLE_TRAITS, type Card } from '@jc/types';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { decideLegacy } from '../sim/legacy-bot';
 import { seeded } from '../sim/rng';
+import { personaOf } from '../src/ai/persona';
 import {
+  BOT_AUTO_STYLES,
   BOT_LEVELS,
   BOT_STYLES,
   bigBetRead,
@@ -34,7 +36,7 @@ import {
   type MaxSeats,
 } from '../src';
 import { allCombos, classCombos, classId, className, NUM_CLASSES, TOTAL_COMBOS } from '../src/ai/classes';
-import { PLAY_ORDER, rangeShare, topRange } from '../src/ai/ranges';
+import { percentile, PLAY_ORDER, rangeShare, topRange } from '../src/ai/ranges';
 import { equityIfRaised, equityOf, readSpot } from '../src/ai/spot';
 import { seating } from '../src/ai/walk';
 
@@ -812,8 +814,12 @@ describe('Bot AI 2.0: levels and styles move separately', () => {
         expect(m[s].call / m[s].defend, `${level} ${s}`).toBeGreaterThan(m.balanced.call / m.balanced.defend);
         expect(m[s].raise, `${level} ${s}`).toBeLessThan(m.tag.raise);
       }
+      // Casual: the widest of all, and it raises what it plays.
+      for (const s of BOT_STYLES.filter((x) => x !== 'casual')) expect(m.casual.defend, `${level} casual vs ${s}`).toBeGreaterThan(m[s].defend);
+      expect(m.casual.raise, level).toBeGreaterThan(m.balanced.raise + 0.05);
+      expect(m.casual.call / m.casual.defend, level).toBeLessThanOrEqual(m.balanced.call / m.balanced.defend + 0.02);
     }
-  }, 240_000);
+  }, 300_000);
 
   it('lets an expert be passive and an easy bot aggressive, and keeps the expert’s passive calls by the price', async () => {
     const expertTp = await rangeMix(cbet, bot('expert', { style: 'tight-passive' }), 2, board);
@@ -833,6 +839,114 @@ describe('Bot AI 2.0: levels and styles move separately', () => {
     expect(airOver.defend).toBeLessThan(0.05);
     expect(top.defend).toBeGreaterThan(0.9);
     expect(over.defend).toBeLessThan(half.defend - 0.1);
+  }, 240_000);
+
+  // Heads-up to the river with nothing bet after the flop, the big blind checking to the button (seat 0) last.
+  const riverFirstBet = (hole: string) =>
+    viewAt(0, 2, { 0: hole }, [[0, 'raise', 25], [1, 'call'], [1, 'check'], [0, 'check'], [1, 'check'], [0, 'check'], [1, 'check']], { board: 'Kh 8d 4c 2s 9h' });
+  /** What its bets and raises add beyond a call, against the pot once called; and how many of them overbet the pot. */
+  const sizes = (v: BotView, decide: Decide, n: number) => {
+    const rand = seeded(5);
+    const out: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const r = decide(v, rand);
+      if (r.type === 'bet' || r.type === 'raise') out.push(((r.amount ?? 0) - v.streetBet - v.toCall) / (v.pot + v.toCall));
+    }
+    const mean = out.reduce((a, b) => a + b, 0) / Math.max(1, out.length);
+    return { bets: out.length, mean, over: out.filter((x) => x > 1).length / Math.max(1, out.length) };
+  };
+
+  it('plays casual: more pots, bigger bets and overbets with its best hands, by the cards and the price all the same', async () => {
+    for (const level of ['easy', 'normal', 'expert'] as const) {
+      const casual = bot(level, { style: 'casual' });
+      const balanced = bot(level, { style: 'balanced' });
+      // Bigger opens and c-bets than the balanced bot of the same level.
+      const open = await coFirstIn('Ah Kd');
+      const raiseTo = (d: Decide) => d(open, seeded(1));
+      expect(raiseTo(casual).type, level).toBe('raise');
+      expect(raiseTo(casual).amount!, level).toBeGreaterThan(raiseTo(balanced).amount! * 1.15);
+      const flop = await cbet('Ad 9d');
+      const cb = sizes(flop, casual, 200);
+      const bb = sizes(flop, balanced, 200);
+      // The river with top set: some of casual's value bets overbet, none of the balanced bot's below expert.
+      const river = await riverFirstBet('Kd Kc');
+      const rc = sizes(river, casual, 400);
+      const rb = sizes(river, balanced, 400);
+      console.log(`${level} casual vs balanced: open to ${raiseTo(casual).amount} vs ${raiseTo(balanced).amount} | flop c-bet ${cb.bets}× ${cb.mean.toFixed(2)} vs ${bb.bets}× ${bb.mean.toFixed(2)} pot | river top set ${rc.bets}× ${rc.mean.toFixed(2)} (over ${pct(rc.over)}) vs ${rb.bets}× ${rb.mean.toFixed(2)} (over ${pct(rb.over)})`);
+      expect(cb.bets, level).toBeGreaterThan(0);
+      expect(cb.mean, level).toBeGreaterThan(bb.mean * 1.15);
+      expect(rc.bets, level).toBeGreaterThan(50);
+      expect(rc.over, level).toBeGreaterThan(0.12);
+      expect(rc.over, level).toBeLessThan(0.45);
+      if (level !== 'expert') expect(rb.over, level).toBe(0);
+    }
+    // Its chance and the expert's own, each on its own: an expert casual overbets more than an expert balanced bot.
+    const river = await riverFirstBet('Kd Kc');
+    const ec = sizes(river, bot('expert', { style: 'casual' }), 600);
+    const eb = sizes(river, bot('expert', { style: 'balanced' }), 600);
+    console.log(`expert river top set overbets: casual ${pct(ec.over)} | balanced ${pct(eb.over)}`);
+    expect(eb.over).toBeGreaterThan(0);
+    expect(ec.over).toBeGreaterThan(eb.over + 0.1);
+  }, 120_000);
+
+  it('keeps casual from calling everything or going all in at random', async () => {
+    for (const level of BOT_LEVELS) {
+      const casual = bot(level, { style: 'casual' });
+      // Air folds to a flop overbet; top pair stays.
+      const air = spotMix(await bbFacingFlop(100)('7s 4d'), casual, 200);
+      const top = spotMix(await bbFacingFlop(25)('Kd Jc'), casual, 200);
+      expect(air.defend, level).toBeLessThan(0.1);
+      expect(top.defend, level).toBeGreaterThan(0.9);
+      // With 100 big blinds, nothing outside the top quarter of hands goes all in first in or against an open.
+      let jams = 0;
+      let wild = 0;
+      for (let id = 0; id < NUM_CLASSES; id++) {
+        const hole = holeOf(id);
+        for (const v of [await coFirstIn(hole), await bbVsBtn(25)(hole)]) {
+          for (let k = 0; k < 2; k++) {
+            if (casual(v, seeded(id * 7 + k)).type !== 'allin') continue;
+            jams++;
+            if (percentile(id) > 0.25) wild++;
+          }
+        }
+      }
+      console.log(`${level} casual 100BB preflop all-ins first in or against a 2.5BB open: ${jams} of ${NUM_CLASSES * 4}, ${wild} outside the top 25%`);
+      expect(wild, level).toBe(0);
+    }
+  }, 240_000);
+
+  it('plays casual by the stack it has: short, it pushes or folds and moves all in with top pair rather than bet into what is left', async () => {
+    const short = (bbs: number) => Array.from({ length: 6 }, () => bbs * BB);
+    for (const level of BOT_LEVELS) {
+      const casual = bot(level, { style: 'casual' });
+      const balanced = bot(level, { style: 'balanced' });
+      // 10 big blinds first in from the cutoff: all in or fold, never an open it would have to call off; wider than balanced.
+      const jams = { casual: 0, balanced: 0 };
+      for (let id = 0; id < NUM_CLASSES; id++) {
+        const v = await viewAt(5, 6, { 5: holeOf(id) }, [[3, 'fold'], [4, 'fold']], { stacks: short(10) });
+        for (const [name, decide] of [['casual', casual], ['balanced', balanced]] as const) {
+          const r = decide(v, seeded(id));
+          expect(['allin', 'fold'], `${level} ${name} ${className(id)} at 10BB`).toContain(r.type);
+          if (r.type === 'allin') jams[name]++;
+        }
+      }
+      // Top pair on the flop with as much behind as in the pot: all in or check (the easy level, which does not size its
+      // bets, mostly all in); with 100 big blinds, a bet well short of all in.
+      const steps: Step[] = [...FOLD_TO_BTN, [0, 'raise', 25], [1, 'fold'], [2, 'call'], [2, 'check']];
+      const shortFlop = await viewAt(0, 6, { 0: 'Ad 9d' }, steps, { board, stacks: short(8) });
+      const deepFlop = await viewAt(0, 6, { 0: 'Ad 9d' }, steps, { board });
+      const rand = seeded(11);
+      const shortMoves = Array.from({ length: 200 }, () => casual(shortFlop, rand).type);
+      const deepMoves = Array.from({ length: 200 }, () => casual(deepFlop, rand));
+      console.log(`${level} casual 10BB cutoff shoves ${jams.casual} of ${NUM_CLASSES} (balanced ${jams.balanced}) | top pair at SPR 1: ${shortMoves.filter((x) => x === 'allin').length} all in of 200`);
+      expect(jams.casual, level).toBeGreaterThan(jams.balanced);
+      const allIn = shortMoves.filter((x) => x === 'allin').length;
+      if (level === 'easy') expect(allIn, level).toBeGreaterThan(160);
+      else expect(new Set(shortMoves), level).toEqual(new Set(shortMoves.filter((x) => x === 'allin' || x === 'check')));
+      expect(allIn, level).toBeGreaterThan(150);
+      expect(deepMoves.some((r) => r.type === 'allin'), level).toBe(false);
+      expect(deepMoves.every((r) => r.type === 'check' || (r.amount ?? 0) < 0.25 * deepFlop.stack), level).toBe(true);
+    }
   }, 240_000);
 });
 
@@ -934,7 +1048,11 @@ describe('Bot AI 2.0: fairness and safety', () => {
     }
     expect(STRATEGY_VERSION).toBe('bot-ai-2.0');
     const styles = new Set(Array.from({ length: 100 }, (_, i) => styleFor(`bot-${i}`)));
-    expect(styles.size).toBe(BOT_STYLES.length);
+    // Only the auto styles, the hash as it was before 'casual' (an account set to no style keeps the one it had).
+    expect([...styles].sort()).toEqual([...BOT_AUTO_STYLES].sort());
+    expect(BOT_STYLES).toContain('casual');
+    expect(BOT_AUTO_STYLES).not.toContain('casual');
+    expect(Array.from({ length: 8 }, (_, i) => styleFor(`bot-${i}`))).toEqual(['tag', 'lag', 'loose-passive', 'balanced', 'lag', 'tight-passive', 'balanced', 'tag']);
     expect(styleFor('bot-7')).toBe(styleFor('bot-7'));
   });
 
@@ -977,3 +1095,12 @@ describe('Bot AI 2.0: fairness and safety', () => {
 
 /** A player whose big bets have been shown to be bluffs (for the fairness case: statistics do not change what is seen). */
 const PROFILES_FOR_FAIRNESS = counters({ hands: 300, vpipOpp: 300, vpip: 80, pfr: 60, postBets: 90, postCalls: 50, postBetOpp: 400, overbets: 60, bigBetsShown: 20, bigBetBluffsShown: 14 });
+
+describe('a bot card says what its style does', () => {
+  // The card's traits (BOT_STYLE_TRAITS) against the style's own numbers: more than balanced from 1.08, less to 0.92.
+  const tier = (v: number) => (v >= 1.08 ? 1 : v <= 0.92 ? -1 : 0);
+  it.each(BOT_STYLES)('%s: hands played, aggression, bet size and bluffs as it plays them', (style) => {
+    const p = personaOf(style);
+    expect(BOT_STYLE_TRAITS[style]).toEqual({ range: tier(p.open), aggression: tier(p.aggression), sizing: tier(p.sizing), bluff: tier(p.bluff) });
+  });
+});

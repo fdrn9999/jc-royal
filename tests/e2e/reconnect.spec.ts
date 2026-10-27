@@ -69,9 +69,13 @@ test('game reconnect: after the network drops, the seat, stack and own cards com
   const seatIndex = before.you.seatIndex!;
   expect(before.hand).not.toBeNull();
   expect(before.seats[seatIndex]!.holeCards).toHaveLength(2);
+  expect(before.hand!.deadline).not.toBeNull();
+  // The cards on screen are marked, to tell after the reconnect whether they were drawn again (and dealt over).
+  await mine.locator('[data-card]').evaluateAll((els) => els.forEach((e) => e.setAttribute('data-e2e-seen', '')));
 
   // The network drops mid-hand: A is told, and the table keeps A's seat while showing A as offline.
   await net.drop();
+  const atDrop = net.states[0]!.at(-1)!;
   await expect(lost).toBeVisible();
   await expect(aOnB).toContainText(/오프라인|Offline/);
   // The client retries on its own; with no network the retry hangs and the banner stays.
@@ -89,11 +93,18 @@ test('game reconnect: after the network drops, the seat, stack and own cards com
   expect(after.seats[seatIndex]!.userId).toBe(before.seats[seatIndex]!.userId);
   expect(after.seats[seatIndex]!.holeCards).toEqual(before.seats[seatIndex]!.holeCards);
   expect(after.seats[seatIndex]!.stack + after.seats[seatIndex]!.streetBet).toBe(before.seats[seatIndex]!.stack + before.seats[seatIndex]!.streetBet);
+  // Nobody acted while A was away, and the turn's clock is the room's: the reconnect neither moved nor extended it.
+  expect(after.hand!.seq).toBe(atDrop.hand!.seq);
+  expect(after.hand!.deadline).toBe(atDrop.hand!.deadline);
   await expect(lost).toBeHidden();
   await expect(aOnB).not.toContainText(/오프라인|Offline/);
   await expect(mine).toHaveAttribute('data-testid', seat!);
   await expect(mine.locator('[data-card]')).toHaveCount(2);
   expect(await faces()).toEqual(cards);
+  // The same card elements, not drawn again: nothing is dealt or turned over a second time.
+  await expect(mine.locator('[data-card][data-e2e-seen]')).toHaveCount(2);
+  const running = await mine.locator('[data-card]').evaluateAll((els) => els.flatMap((e) => e.getAnimations({ subtree: true })).filter((a) => a.playState === 'running').length);
+  expect(running).toBe(0);
   expect(net.sockets).toHaveLength(2);
   await a.page.screenshot({ path: 'test-results/reconnect-restored.png' });
 

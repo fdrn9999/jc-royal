@@ -320,9 +320,10 @@ test('9인과 2인 테이블: 이웃 좌석이 가까워도 지갑·반응 버�
 });
 
 /**
- * The column at a short screen's side scrolls when what it holds is taller than the screen. With the beginner aids above
- * the turn's buttons on a phone held sideways, its browser's bars shown (330px high: the sizing, opened, fits a 375px-high
- * column now), opening the raise panel makes it so (asserted, else this proves nothing):
+ * The column at a short screen's side scrolls when what it holds is taller than the screen. A beginner's aids take only
+ * the room the turn's controls leave and step aside while the raise panel is open (a 667×330 column holds the rest now),
+ * so it is the controls themselves that outgrow it: on a 360×640 phone held sideways, its browser's bars shown (280px
+ * high), opening the raise panel makes it so (asserted, else this proves nothing):
  * the bar and the panel lie whole on the screen and every control of them takes a tap at its middle, and what was
  * scrolled up is still there to scroll back to.
  */
@@ -335,7 +336,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
   await expect(filled(page)).toHaveCount(2, { timeout: 120_000 });
   const state = await page.context().storageState();
   await page.goto('/');
-  const ctx = await browser.newContext({ storageState: state, viewport: { width: 667, height: 330 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+  const ctx = await browser.newContext({ storageState: state, viewport: { width: 640, height: 280 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
   const p = await ctx.newPage();
   await p.goto('/table/e2e-ov2');
   await expect(filled(p)).toHaveCount(2);
@@ -370,7 +371,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
       .map((e) => e.getAttribute('aria-label') ?? e.textContent?.trim() ?? e.tagName);
     return { overflows: col.scrollHeight > col.clientHeight + 1, scrolled: col.scrollTop, barTop: r.top - c.top, barBelow: r.bottom - Math.min(vh, c.bottom), missed };
   });
-  await p.screenshot({ path: test.info().outputPath('overlap-column-667x330-beginner-raise.png') });
+  await p.screenshot({ path: test.info().outputPath('overlap-column-640x280-beginner-raise.png') });
   // Scrolled back to the top, the column's first line is in it again.
   const firstBack = await p.evaluate(() => {
     const col = document.querySelector('[data-testid=table-stack]')!;
@@ -378,7 +379,7 @@ test('가로 휴대폰에서 오른쪽 열이 화면보다 길어도: 내 차례
     const first = Array.from(col.children).find((k) => k.getBoundingClientRect().height > 1 && getComputedStyle(k).clipPath === 'none');
     return first ? Math.round(first.getBoundingClientRect().top - col.getBoundingClientRect().top) : -1;
   });
-  await p.screenshot({ path: test.info().outputPath('overlap-column-667x330-beginner-raise-top.png') });
+  await p.screenshot({ path: test.info().outputPath('overlap-column-640x280-beginner-raise-top.png') });
   console.log(`column ${JSON.stringify({ ...seen, firstBack })}`);
   expect(seen.overflows, 'the column is taller than the screen here, else this proves nothing').toBe(true);
   expect(seen.barBelow, 'the bar ends inside the screen').toBeLessThanOrEqual(0.5);

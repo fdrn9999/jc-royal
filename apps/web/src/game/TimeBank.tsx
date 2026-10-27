@@ -8,6 +8,7 @@ import { TIME_BANK_MIN_USE_MS, type TableView } from '@jc/types';
 import { cx, HourglassIcon } from '@jc/ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useI18n } from '../lib/i18n';
+import { serverNow } from '../lib/service';
 
 /** Draw the eye to the button this long before the turn runs out. */
 const URGENT_MS = 8_000;
@@ -41,7 +42,7 @@ export function TimeBankButton({
   useEffect(() => {
     setUrgent(false);
     if (!deadline) return;
-    const h = setTimeout(() => setUrgent(true), Math.max(0, deadline - URGENT_MS - Date.now()));
+    const h = setTimeout(() => setUrgent(true), Math.max(0, deadline - URGENT_MS - serverNow()));
     return () => clearTimeout(h);
   }, [deadline]);
 

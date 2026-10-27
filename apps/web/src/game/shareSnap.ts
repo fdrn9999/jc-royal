@@ -7,7 +7,7 @@
  * is one of its last step.
  */
 import { handLabelKey, type Card, type PublicRole, type VipColor } from '@jc/types';
-import { formatChips } from '@jc/ui';
+import { formatChips, inHoleOrder } from '@jc/ui';
 import type { MsgKey } from '../lib/i18n';
 import { betLine, betWord, type BetKind, type BetStage } from './betLine';
 import { replayPhase, type ReplayInput, type ReplayLinePart, type ReplayPhase, type ReplayStep } from './replay';
@@ -281,8 +281,9 @@ export function shareSnap(o: {
         bet: s.streetBet > 0 ? amount(s.streetBet) : null,
         action: s.lastAction ? t(`action.${s.lastAction.type}` as MsgKey) : null,
         actionType: s.lastAction?.type ?? null,
-        // Only what the step's view holds: its face-up cards, or backs for a hand still in.
-        cards: s.holeCards && s.holeCards.length > 0 ? [...s.holeCards] : s.hasCards ? [null, null] : [],
+        // Only what the step's view holds: its face-up cards (the higher rank first, as the table draws them), or backs
+        // for a hand still in.
+        cards: s.holeCards && s.holeCards.length > 0 ? inHoleOrder(s.holeCards) : s.hasCards ? [null, null] : [],
         button: h?.buttonSeat === s.seatIndex,
         win: w !== undefined && w > 0 ? amount(w) : null,
         rank: x && s.holeCards ? t(`hand.${handLabelKey(x.rankClass, x.bestFive)}` as MsgKey) : null,
@@ -318,7 +319,7 @@ export function shareSnap(o: {
       }),
     }),
   );
-  const showdown = bl.showdown?.map((x): ShareShow => ({ seat: x.seat, muck: x.muck, cards: x.cards ? [...x.cards] : [], rank: x.cards && x.rankClass ? t(`hand.${handLabelKey(x.rankClass, x.bestFive)}` as MsgKey) : null })) ?? null;
+  const showdown = bl.showdown?.map((x): ShareShow => ({ seat: x.seat, muck: x.muck, cards: x.cards ? inHoleOrder(x.cards) : [], rank: x.cards && x.rankClass ? t(`hand.${handLabelKey(x.rankClass, x.bestFive)}` as MsgKey) : null })) ?? null;
   const r = bl.result;
   const settle = r
     ? {

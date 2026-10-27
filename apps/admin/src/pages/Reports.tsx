@@ -26,6 +26,7 @@ import { auditActionLabel, contentStatusLabel, userStatusLabel, type Tr } from '
 import { ApiError, errText, useAdmin, useData } from '../lib';
 import { contentTone, Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
+import { IntegritySignals, SignalEvidence } from './Integrity';
 
 export const REASON: Record<ReportReason, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
 const TARGET: Record<ReportTarget, Key> = { post: 'targetPost', comment: 'targetComment', player: 'targetPlayer', dm: 'targetDm' };
@@ -64,6 +65,7 @@ function Evidence({ r }: { r: ReportDto }) {
   const { t, locale } = useT();
   const ctx = r.context;
   if (!ctx) return <p className="text-xs text-ink-400">{t('none')}</p>;
+  if (ctx.kind === 'signal') return <SignalEvidence ctx={ctx} target={r.target.nickname} />;
   if (ctx.kind === 'dm') {
     return (
       <div className="flex flex-col gap-2 text-sm" data-testid="report-dm">
@@ -602,7 +604,7 @@ const FILTER_KEYS = ['status', 'severity', 'reason', 'targetType', 'assignee', '
 export function ReportsPage() {
   const { t } = useT();
   const [params, setParams] = useSearchParams();
-  const view = params.get('view') === 'stats' ? 'stats' : 'list';
+  const view = params.get('view') === 'stats' ? 'stats' : params.get('view') === 'signals' ? 'signals' : 'list';
   const status = params.get('status') ?? 'open';
   const userId = params.get('userId');
   const reporterId = params.get('reporterId');
@@ -622,9 +624,9 @@ export function ReportsPage() {
     if (k !== 'page') next.delete('page');
     setParams(next);
   };
-  const tab = (v: 'list' | 'stats') => {
+  const tab = (v: 'list' | 'stats' | 'signals') => {
     const next = new URLSearchParams(params);
-    if (v === 'stats') next.set('view', 'stats');
+    if (v !== 'list') next.set('view', v);
     else next.delete('view');
     setParams(next);
   };
@@ -638,10 +640,13 @@ export function ReportsPage() {
         <div className="ml-auto flex gap-1" role="tablist" aria-label={t('reports')}>
           <Button size="sm" role="tab" aria-selected={view === 'list'} variant={view === 'list' ? 'gold' : 'outline'} onClick={() => tab('list')} data-testid="report-view-list">{t('reportViewList')}</Button>
           <Button size="sm" role="tab" aria-selected={view === 'stats'} variant={view === 'stats' ? 'gold' : 'outline'} onClick={() => tab('stats')} data-testid="report-view-stats">{t('reportViewStats')}</Button>
+          <Button size="sm" role="tab" aria-selected={view === 'signals'} variant={view === 'signals' ? 'gold' : 'outline'} onClick={() => tab('signals')} data-testid="report-view-signals">{t('reportViewSignals')}</Button>
         </div>
       </div>
       {view === 'stats' ? (
         <ReportStats />
+      ) : view === 'signals' ? (
+        <IntegritySignals />
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">

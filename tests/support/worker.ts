@@ -115,6 +115,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-bot-level', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'normal' } },
   // A bot's own level and style set while it plays (from the next hand), then the same accounts at another table.
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-bot-prof-${i}`, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, bots: { level: 'normal' as const } })),
+  // A bot's own buy-in: 100 to 2000 chips, so the default (100 big blinds, 1000) sits inside and 300 big blinds is cut down.
+  { id: 'it-bot-buyin', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 2000, turnSeconds: 60, bots: { level: 'normal' } },
   // Referral rewards: a new member plays the hand the policy asks for, heads-up so one fold ends it.
   { id: 'it-ref-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Account settings: the auto-muck an older device still saves, and an administrator's reset, while the member sits

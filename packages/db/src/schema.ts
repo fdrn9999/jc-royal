@@ -183,7 +183,7 @@ export const tables = sqliteTable(
     botsEnabled: integer('bots_enabled', { mode: 'boolean' }).notNull().default(false),
     botLevel: text('bot_level', { enum: ['easy', 'normal', 'hard', 'expert'] }).notNull().default('normal'),
     /** The bots' style here; 'auto' leaves it to each bot account (styleFor). A bot's own setting wins (bot_profiles). */
-    botStyle: text('bot_style', { enum: ['auto', 'balanced', 'tag', 'lag', 'tight-passive', 'loose-passive'] }).notNull().default('auto'),
+    botStyle: text('bot_style', { enum: ['auto', 'balanced', 'tag', 'lag', 'tight-passive', 'loose-passive', 'casual'] }).notNull().default('auto'),
     botMinHumans: integer('bot_min_humans').notNull().default(1),
     botMax: integer('bot_max').notNull().default(1),
     botFillTo: integer('bot_fill_to').notNull().default(2),
@@ -809,16 +809,19 @@ export const botFund = sqliteTable('bot_fund', {
 });
 
 /**
- * One bot account's own level and style, set by an administrator (PUT /api/admin/bots/:id/profile). A null column, or no
- * row at all, follows the table the bot sits at (tables.bot_level / bot_style); see botPlayOf in @jc/types. Kept apart
- * from users so a bot setting never touches the account's login, wallet or ledger.
+ * One bot account's own level, style and buy-in, set by an administrator (PUT /api/admin/bots/:id/profile). A null
+ * level or style, or no row at all, follows the table the bot sits at (tables.bot_level / bot_style); see botPlayOf in
+ * @jc/types. A null buy-in sits down with the default (botBuyInOf). Kept apart from users so a bot setting never touches
+ * the account's login, wallet or ledger.
  */
 export const botProfiles = sqliteTable('bot_profiles', {
   botId: text('bot_id')
     .primaryKey()
     .references(() => users.id),
   level: text('level', { enum: ['easy', 'normal', 'hard', 'expert'] }),
-  style: text('style', { enum: ['balanced', 'tag', 'lag', 'tight-passive', 'loose-passive'] }),
+  style: text('style', { enum: ['balanced', 'tag', 'lag', 'tight-passive', 'loose-passive', 'casual'] }),
+  /** Big blinds it sits down with, BOT_BUY_IN_BB.min to max; brought within each table's buy-in range. */
+  buyInBb: integer('buy_in_bb'),
   updatedBy: text('updated_by').references(() => users.id),
   updatedAt: integer('updated_at').notNull().default(now),
 });

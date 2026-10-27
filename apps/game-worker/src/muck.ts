@@ -20,7 +20,10 @@ export function addShown(shown: readonly number[], choice: ShowChoice): readonly
 
 /** From a hand settling to the next deal. */
 export const BETWEEN_HANDS_MS = 4_000;
-/** Added after a hand a member was dealt in: time to decide whether to show their cards. Table bots never show. */
+/**
+ * Added after a hand a member was dealt in: time to decide whether to show their cards. Table bots decide as the hand
+ * settles (bot-manners.ts) and add no time.
+ */
 export const SHOW_DECISION_MS = 1_500;
 
 /** How long after a hand settles the next one is dealt. */

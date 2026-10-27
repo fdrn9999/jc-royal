@@ -19,6 +19,7 @@ import {
   type AutoBuyPolicy,
   type AutoBuyRequest,
   blindsAt,
+  botBuyInOf,
   botPlayOf,
   type BotLevel,
   type BotProfile,
@@ -69,6 +70,7 @@ import {
   type TableRow,
 } from './settlement';
 import { botBuyIn, botEvent, pickBot, readBotProfiles, within, type BotEventKind } from './bots';
+import { botManners, emptyManners } from './bot-manners';
 import { addShown, afterHandMs } from './muck';
 import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
@@ -258,7 +260,6 @@ const BOT_THINK_MS = { min: 700, max: 2_200 };
 /** Back-off after a failed bot join, doubling with each failure in a row up to the maximum. */
 const BOT_RETRY_MS = { first: 60_000, max: 30 * 60_000 };
 /** A bot sits down with this many big blinds, within the table's buy-in range. */
-const BOT_BUY_IN_BB = 100;
 /** The seated bots' settings are read again at a deal this long after the last read, should a change not have reached the room. */
 const BOT_SYNC_MS = 5 * 60_000;
 /**
@@ -311,6 +312,8 @@ export class TableRoom extends DurableObject<Env> {
   private reactedAt = new Map<string, number[]>();
   /** When each player last posted a chat line (by player, as quick reactions: a new connection does not start the wait again). Memory only. */
   private chattedAt = new Map<string, number>();
+  /** The bots' last quick reactions after a hand (bot-manners.ts). Memory only. */
+  private botReacts = emptyManners();
   private lastStats = '';
   /** Operations counters (packages/db/src/ops.ts) and the latest problem, not written yet (see `publishStats`). */
   private ops = new OpsCounter();
@@ -1733,6 +1736,7 @@ export class TableRoom extends DurableObject<Env> {
     const now = Date.now();
     const firstTime = this.room.settledHandId !== h.handId;
     const tn = this.table?.roomType === 'tournament' ? (this.room.tourney ?? null) : null;
+    let reacts: Extract<ServerMessage, { t: 'react' }>[] = [];
     if (firstTime && tn) {
       const stacks = h.finalStacks();
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
@@ -1777,6 +1781,12 @@ export class TableRoom extends DurableObject<Env> {
       } catch (e) {
         console.error('bot play statistics', e instanceof Error ? e.message : e);
       }
+      // The bots' cards shown and reactions sent after the hand, saved with the result (manners only: never the play).
+      try {
+        reacts = this.botManners(h, entry.record, now);
+      } catch (e) {
+        console.error('bot manners', e instanceof Error ? e.message : e);
+      }
       // At a table with bots, what the members did goes into the bots' statistics in the same write as the result. They
       // are only a help to the bots: should counting fail, the hand settles all the same, uncounted.
       let opp: OppStats | null = null;
@@ -1795,6 +1805,7 @@ export class TableRoom extends DurableObject<Env> {
     // Results stay visible until the next hand starts. They go out before the D1 write: the result is already saved
     // here, nothing shown depends on D1 having it, and commands sent on seeing it wait in `run` until settle is done.
     this.broadcast(cues);
+    for (const r of reacts) for (const s of this.sockets()) this.send(s, r);
     if (tn) await this.syncTourney();
     else await this.retryUnrecorded();
     // Top-ups that waited for this hand and the automatic policy (rebuy, top-up) happen before busted players stand up.
@@ -2486,8 +2497,8 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   /**
-   * Seats one bot in the first free seat with BOT_BUY_IN_BB big blinds (within the table's range), the way `sit` seats a
-   * member: the seat is held durably before any chips move, so a restart half way is settled by `recoverPendingSeats`.
+   * Seats one bot in the first free seat with its own buy-in (botBuyInOf: its big blinds or the default, within the
+   * table's range), the way `sit` seats a member: the seat is held durably before any chips move, so a restart half way is settled by `recoverPendingSeats`.
    * When no bot can sit (bots switched off, the fund or the service's bot count used up, D1 unreachable), the next try
    * waits, longer after each failure in a row.
    */
@@ -2495,13 +2506,13 @@ export class TableRoom extends DurableObject<Env> {
     const t = this.table!;
     const seatIndex = this.room.seats.findIndex((s, i) => !s && i < t.maxSeats && !this.handHolds(i));
     if (seatIndex < 0) return;
-    const amount = Math.min(t.maxBuyIn, Math.max(t.minBuyIn, BOT_BUY_IN_BB * t.bigBlind));
     let failure: string = 'busy';
     try {
       const exclude = this.room.seats.flatMap((s) => (s?.bot ? [s.userId] : []));
       for (let attempt = 0; attempt < 3; attempt++) {
         const bot = await pickBot(this.env.DB, exclude);
         const play = botPlayOf(bot.id, bot.profile, t.bots);
+        const amount = botBuyInOf(bot.profile, t);
         const seat: SeatState = {
           userId: bot.id,
           nickname: bot.nickname,
@@ -3006,7 +3017,7 @@ export class TableRoom extends DurableObject<Env> {
         streetBet: hi?.streetBet ?? 0,
         // A table bot is played by the room itself: never shown as away.
         connected: !!s.bot || connected.has(s.userId),
-        ...(s.bot ? { bot: s.bot, ...(s.leaveAfterHand ? { botLeaving: true } : {}) } : {}),
+        ...(s.bot ? { bot: s.bot, botStyle: s.botStyle ?? styleFor(s.userId), ...(s.leaveAfterHand ? { botLeaving: true } : {}) } : {}),
         lastAction: hi?.lastAction ?? null,
         hasCards: !!hi?.inHand && !hi.folded,
         holeCards: hi?.holeCards ?? null,
@@ -3187,6 +3198,37 @@ export class TableRoom extends DurableObject<Env> {
       this.broadcast();
     }
     return this.seatIndexOf(userId) !== null;
+  }
+
+  /**
+   * After the settled hand `h` (record `rec`): the bots dealt in that turn over their cards (into `room.shown`, as a
+   * member's show) and the quick reactions to send once the result is out (bot-manners.ts). Only seats still held by
+   * the bot that played them; at most one reaction.
+   */
+  private botManners(h: HandEngine, rec: HandRecord, now: number): Extract<ServerMessage, { t: 'react' }>[] {
+    const reactionsOn = !!reactionRulesOf(this.table?.social);
+    const revealed = this.revealedSeats(h);
+    const out: Extract<ServerMessage, { t: 'react' }>[] = [];
+    for (const p of rec.players) {
+      const seat = this.botSeat(p.playerId);
+      if (!seat || this.room.seats[p.seatIndex] !== seat) continue;
+      const m = botManners(
+        p.playerId,
+        { level: seat.bot ?? 'normal', style: seat.botStyle ?? styleFor(p.playerId) },
+        { hole: p.holeCards, board: rec.board, bigBlind: h.rules.bigBlind, potTotal: rec.potTotal, net: p.net, wentToShowdown: p.wentToShowdown, shown: p.shown || revealed.has(p.seatIndex) },
+        this.room.handNumber,
+        now,
+        this.botReacts,
+        { reactionsOn, reactedThisHand: out.length > 0 },
+        Math.random,
+      );
+      if (m.show) {
+        const prev = this.room.shown?.handId === h.handId ? this.room.shown.cards : {};
+        this.room.shown = { handId: h.handId, cards: { ...prev, [p.playerId]: [...addShown(prev[p.playerId] ?? [], m.show)] } };
+      }
+      if (m.reaction) out.push({ t: 'react', seatIndex: p.seatIndex, userId: p.playerId, reaction: m.reaction, at: now });
+    }
+    return out;
   }
 
   /** Seats whose cards the showdown of the settled hand `h` turned over for everybody. */

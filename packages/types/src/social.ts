@@ -254,6 +254,24 @@ export type ReportContext =
       at: number;
       /** Up to five earlier messages from the same sender in that conversation, oldest first. */
       earlier: { id: string; body: string; at: number }[];
+    }
+  | {
+      /** Opened by an administrator from the integrity signs (GET /api/admin/integrity); the target received the chips. */
+      kind: 'signal';
+      /** The other member of the pair: the one whose chips went over. */
+      partnerId: string;
+      partnerNickname: string;
+      /** The period it was read over, and where it began. */
+      days: number;
+      since: number;
+      signals: IntegritySignal[];
+      risk: IntegrityRisk;
+      shared: number;
+      flowBb: number;
+      oneWay: number;
+      dumps: number;
+      /** The hands to look at first: ids, numbers and the big blinds that went over, never cards. */
+      hands: { id: string; number: number; tableId: string; bb: number; dump: boolean }[];
     };
 
 export interface ReportDto {
@@ -390,4 +408,54 @@ export interface ReportStatsDto {
     /** Suspensions ever given to the member. */
     suspensions: number;
   }[];
+}
+
+/**
+ * The signs of chips passed on purpose between two members: one way more than back ('flow'), hands given up to the
+ * same one without a showdown ('dumps'), and the same network ('network', never on its own).
+ */
+export const INTEGRITY_SIGNALS = ['flow', 'dumps', 'network'] as const;
+export type IntegritySignal = (typeof INTEGRITY_SIGNALS)[number];
+export type IntegrityRisk = 'low' | 'medium' | 'high';
+/** The periods the console offers, in days. */
+export const INTEGRITY_DAYS = [7, 30] as const;
+
+interface IntegrityMember {
+  id: string;
+  nickname: string | null;
+  status: 'active' | 'suspended' | 'deleted' | null;
+  /** Reports open on the member, of any kind. */
+  openReports: number;
+}
+
+/** GET /api/admin/integrity?days= — pairs for an operator to look into; nothing here acts on a member. */
+export interface IntegrityDto {
+  days: number;
+  since: number;
+  /** Where the hands read begin: `since`, or later when the period held more than the page reads. */
+  from: number;
+  capped: boolean;
+  /** Cash-table hands read. */
+  hands: number;
+  /** Pairs that met the signs: `pairs` lists the first `thresholds.maxPairs` of them, highest band first. */
+  found: number;
+  pairs: {
+    from: string;
+    to: string;
+    shared: number;
+    flowBb: number;
+    oneWay: number;
+    dumps: number;
+    signals: IntegritySignal[];
+    risk: IntegrityRisk;
+    hands: { id: string; tableId: string; handNumber: number; endedAt: number; bb: number; dump: boolean }[];
+    fromUser: IntegrityMember;
+    toUser: IntegrityMember;
+    /** The open review of this pair, if one is. */
+    review: string | null;
+  }[];
+  rowsRead: number;
+  thresholds: { minShared: number; minFlowBb: number; oneWay: number; dumpBb: number; minDumps: number; rowCap: number; maxPairs: number; evidence: number };
+  at: number;
+  d1Ms: number;
 }

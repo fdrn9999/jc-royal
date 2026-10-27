@@ -8,7 +8,8 @@
  *
  * Card and chip sounds play short recordings from Pixabay (Pixabay Content License; sources in
  * THIRD_PARTY_NOTICES.md). Until a recording is fetched and decoded — or if that fails — the
- * synthesized voice plays instead, so a sound is never silently lost.
+ * synthesized voice plays instead, so a sound is never silently lost. The table's background music is its own
+ * (music.ts, `sound.music`): its own on/off and volume, through the same master fader and mute.
  *
  * What plays is the mixer's call (mixer.ts): a burst plays once, and too much at once drops cards and chips first.
  * A sound only plays at once on a running context in a visible tab: one asked for while the tab is hidden or the
@@ -16,8 +17,11 @@
  * coming back or a reconnect never sets off a pile of old sounds.
  */
 import { Mixer } from './mixer';
+import { Music, MUSIC_DEFAULT } from './music';
 
 export { AMBIENT, GAP_MS, LENGTH_MS, MAX_VOICES, Mixer } from './mixer';
+export { LEAVE_GRACE_MS, Music, MUSIC_DEFAULT, MUSIC_TRIM } from './music';
+export type { MusicHost, MusicSettings } from './music';
 
 export type SoundId =
   | 'deal'
@@ -43,6 +47,9 @@ export interface AudioSettings {
   master: number;
   effects: number;
   muted: boolean;
+  /** The table's background music (music.ts): on unless turned off, at its own volume under the master's. */
+  musicOn: boolean;
+  music: number;
 }
 
 const KEY = 'jc.audio';
@@ -51,7 +58,9 @@ const KEY = 'jc.audio';
  * tap's click), not from touchstart or a touch's pointerdown.
  */
 const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
-const DEFAULTS: AudioSettings = { master: 0.8, effects: 0.8, muted: false };
+const DEFAULTS: AudioSettings = { master: 0.8, effects: 0.8, muted: false, musicOn: true, music: MUSIC_DEFAULT };
+/** Streamed by the page from its own static file (not in a script), only once a table opens with music on. */
+const MUSIC_URL = new URL('./music/black-table-rhythm.mp3', import.meta.url).href;
 
 /**
  * Recorded voices. The files are peak-normalised; `volume` brings each one to the loudness
@@ -73,7 +82,10 @@ const SAMPLES: Partial<Record<SoundId, { url: string; volume: number }>> = {
 function readSettings(): AudioSettings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<AudioSettings>) };
+    if (raw) {
+      const s = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<AudioSettings>) };
+      return { ...s, music: Number.isFinite(s.music) ? clamp01(s.music) : DEFAULTS.music, musicOn: s.musicOn !== false };
+    }
   } catch {
     /* storage unavailable */
   }
@@ -94,6 +106,15 @@ class SoundEngine {
   private gesture: (() => void) | null = null;
   private listeners = new Set<(s: AudioSettings) => void>();
   settings: AudioSettings = typeof window === 'undefined' ? { ...DEFAULTS } : readSettings();
+  /** The table's background music: into the master fader once audio is unlocked; a refused start waits for a gesture. */
+  readonly music = new Music(
+    {
+      output: () => (this.unlocked && this.ctx && this.master && this.ctx.state !== 'closed' ? { ctx: this.ctx, into: this.master } : null),
+      needGesture: () => this.listen(),
+      settings: () => this.settings,
+    },
+    MUSIC_URL,
+  );
 
   /** Must be called from a user gesture (click/keydown/touch). */
   unlock() {
@@ -109,7 +130,10 @@ class SoundEngine {
         this.master.connect(this.ctx.destination);
         this.applyGains();
         // iOS suspends ("interrupted") the context for a call or the app switcher: the next tap starts it again.
-        this.ctx.addEventListener('statechange', () => this.ctx && this.ctx.state !== 'running' && this.listen());
+        this.ctx.addEventListener('statechange', () => {
+          if (this.ctx && this.ctx.state !== 'running') this.listen();
+          this.music.sync();
+        });
       }
       const ctx = this.ctx;
       if (ctx.state !== 'running') void ctx.resume().then(() => ctx.state === 'running' && this.unlisten(), () => {});
@@ -121,6 +145,10 @@ class SoundEngine {
       src.start();
       this.unlocked = true;
       this.decode(ctx);
+      // Inside the gesture: a browser that refused the music before a tap lets it start now; started, the tap it
+      // waited for is not needed any more (refused again, it asks for the next one).
+      this.music.sync();
+      if (ctx.state === 'running') this.unlisten();
     } catch {
       /* audio unsupported */
     }
@@ -167,7 +195,8 @@ class SoundEngine {
   }
 
   private unlisten() {
-    if (!this.gesture) return;
+    // Music the browser refused to start before a tap still waits for one.
+    if (!this.gesture || this.music.blocked) return;
     for (const ev of GESTURES) window.removeEventListener(ev, this.gesture);
     this.gesture = null;
   }
@@ -176,12 +205,15 @@ class SoundEngine {
     this.settings = { ...this.settings, ...patch };
     this.settings.master = clamp01(this.settings.master);
     this.settings.effects = clamp01(this.settings.effects);
+    this.settings.music = clamp01(this.settings.music);
+    this.settings.musicOn = this.settings.musicOn !== false;
     try {
       localStorage.setItem(KEY, JSON.stringify(this.settings));
     } catch {
       /* ignore */
     }
     this.applyGains();
+    this.music.sync();
     for (const l of this.listeners) l(this.settings);
   }
 

@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cueTurn, holdTurnTitle, resetTurnCue, takeTurnCue, TURN_BUZZ, TURN_LOW_MS, TurnBanner } from '../src/game/TurnCue';
 import { I18nProvider } from '../src/lib/i18n';
 
+// The server's clock minus this device's (lib/service.ts sets it from /api/service/status); 0 unless a test sets it.
+const clock = vi.hoisted(() => ({ skew: 0 }));
+vi.mock('../src/lib/service', async (real) => ({ ...(await real<object>()), serverNow: () => Date.now() + clock.skew }));
+
 // The provider reads ?lang= from the address on its first render.
 (globalThis as { window?: unknown }).window ??= { location: { search: '' } };
 
@@ -199,6 +203,21 @@ describe('TurnBanner', () => {
     expect(low).toMatch(/data-testid="turn-left"><svg[^>]*lucide-triangle-alert[^>]*>.*?<\/svg>4초</);
     expect(low).toContain('시간이 얼마 남지 않았습니다');
     expect(low).toContain('text-danger-soft');
+  });
+
+  it("counts on the server's clock: a device 4 s off either way shows the seconds the room allows", () => {
+    try {
+      // The room's deadline is 12.3 s away on its clock; this device reads 4 s ahead of it (by its own clock, 8.3 s).
+      clock.skew = -4_000;
+      expect(html(1_000_000 - 4_000 + 12_300)).toMatch(/data-testid="turn-left">13초</);
+      // A device 4 s behind: low on time by the room's clock, though its own clock reads 9 s left.
+      clock.skew = 4_000;
+      const low = html(1_000_000 + 4_000 + TURN_LOW_MS);
+      expect(low).toContain('data-low=""');
+      expect(low).toMatch(/<\/svg>5초</);
+    } finally {
+      clock.skew = 0;
+    }
   });
 
   it('never counts below zero, and shows no clock without a deadline', () => {

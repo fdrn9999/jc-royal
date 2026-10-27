@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, test, widerThanDevice } from './helpers';
+import { checkOrCall, dealtCards, signUp, test, widerThanDevice } from './helpers';
 
 /** The cards resting by the board for a winner's seat: their boxes, and whether they lie clear of the board and every seat. */
 function restLayout(page: Page, seat: string) {
@@ -50,7 +50,8 @@ test('mobile: a winner shows one card, then the other; each slides to rest by th
       expect(done).not.toBeNull();
     }
     const seat = (await mine.getAttribute('data-testid'))!;
-    const cards = await a.page.locator(`[data-testid=${seat}] [data-card]`).evaluateAll((els) => els.map((e) => e.getAttribute('data-card')!));
+    // As dealt: the show buttons go by that order; A sees them drawn with the higher rank on the left.
+    const cards = await dealtCards(a.page, seat);
     expect(cards).toHaveLength(2);
     const onB = b.page.getByTestId(`reveal-${seat.slice(5)}`);
 

@@ -1,5 +1,5 @@
 import type { AuthorDto, CommentDto, HandSummaryDto, PostDetailDto, PostListItemDto, PostPageDto, PublicUserDto } from '@jc/types';
-import { Badge, Button, Empty, Field, formatDate, Input, Modal, Panel, PinIcon, PlayingCard } from '@jc/ui';
+import { Badge, Button, Empty, Field, formatDate, inHoleOrder, Input, Modal, Panel, PinIcon, PlayingCard } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { HandReview } from '../components/HandReview';
@@ -362,7 +362,7 @@ export function PostEditorPage() {
               <li key={h.id}>
                 <label className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 ${handIds.includes(h.id) ? 'border-gold-500/60 bg-gold-500/10' : 'border-white/5'}`}>
                   <input type="checkbox" checked={handIds.includes(h.id)} onChange={() => toggle(h.id)} disabled={!handIds.includes(h.id) && handIds.length >= 3} />
-                  <span className="flex gap-0.5">{h.holeCards.map((c) => <PlayingCard key={c} card={c as Card} size="1.4rem" />)}</span>
+                  <span className="flex gap-0.5">{inHoleOrder(h.holeCards).map((c) => <PlayingCard key={c} card={c as Card} size="1.4rem" />)}</span>
                   <span className="min-w-0 flex-1 truncate text-sm">{h.tableName} #{h.handNumber}</span>
                   <span className="text-xs text-ink-400">{formatDate(h.endedAt, locale)}</span>
                   <span className={`font-mono text-xs ${h.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{h.net > 0 ? '+' : ''}{h.net}</span>

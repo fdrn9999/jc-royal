@@ -229,12 +229,15 @@ service.notice.create, service.notice.update, service.notice.end, service.notice
 maintenance.schedule, maintenance.update, maintenance.end, maintenance.cancel,
 board.post.status, board.comment.status, message.send,
 report.view, report.resolved, report.dismissed, report.severity, report.assign, report.note,
+integrity.view, integrity.review,
 settings.reset, settings.restore, timebank.policy, table.timer_recover, social.policy, tournament.create, tournament.registration, tournament.start, tournament.cancel, tournament.pause, tournament.resume, tournament.abort, tournament.recover, tournament_template.create, tournament_template.update, tournament_template.status
 ```
 
 조회도 남긴다. `user.list`(회원 목록·검색: 검색어, 필터, 정렬, 건수), `user.view`(회원 상세: 생년월일·동의 기록 포함), `report.view`(신고 목록: 1:1 메시지 신고 ID 포함)는 화면을 열 때마다 1행씩 쌓인다. 1:1 대화를 읽는 관리자 API는 없고, 관리자가 보는 1:1 메시지는 신고 증거뿐이다. 보관 기간은 정하지 않았다(`docs/PRIVACY_OPERATIONS.md` 5·9절). 회원 상세의 "관리 이력·메모"는 이 감사 로그(그 회원 대상의 제재·권한·칩·재설정 링크·메모 삭제와 그 회원에 대한 신고 결정)와 메모를 시간순으로 보여 준다. 최근 참여 테이블과 신고 건수는 상세 조회(`user.view`)에 함께 담기고, 기간별 활동(`/activity`)과 이력(`/timeline`) 조회는 따로 기록하지 않는다(콘솔은 상세를 연 뒤에만 부른다).
 
 신고 처리: 심각도·담당자 변경은 `report.severity`·`report.assign`(변경 전후), 내부 메모는 `report.note`(메모 ID와 길이, 본문 없음)로 남는다. 신고에서 준 정지는 `user.suspend` 상세에 `reportId`가 들어간다. 신고 통계(`/reports/stats`: 건수와 회원 ID·닉네임만, 증거·본문 없음), 담당자 후보 목록, 신고별 처리 기록(`/reports/:id/events`: 목록 조회 `report.view` 뒤에만 연다) 조회는 기록하지 않는다. 심각도·담당자·처리는 감사 행을 먼저 쓰고 그 행이 있을 때만 변경을 반영하는 한 batch라, 동시에 같은 신고를 맡거나 닫아도 감사 행과 변경은 하나뿐이다. 실패한 시도(409·400)도 B7부터 아래 "실패 감사"로 남는다. 신고 수·통계로 자동 정지하는 경로는 없다.
+
+이상 플레이 신호(`/integrity`, 신고 관리의 "이상 신호" 탭, `reports` 스위치): 캐시 테이블 핸드에서 두 회원 사이 칩이 한쪽으로 넘어간 쌍을 위험도 순으로 보여 주는 운영자 검토 후보다. 목록은 어떤 회원이 쌍으로 게임했고 같은 네트워크였는지 드러내므로 열 때마다 `integrity.view`로 남는다. 같은 네트워크는 세션 IP를 D1 안에서 비교한 결과(예/아니오)뿐이고 IP는 응답에 없으며, 다른 신호와 함께일 때만 붙는다(공유기·회사·카페 때문에 같은 IP만으로는 아무 의미도 두지 않는다). 새 기기 지문은 모으지 않는다. "검토 시작"(`integrity.review`)은 서버가 그 쌍을 다시 계산해 칩을 받은 회원에게 운영자 이름의 `cheating` 신고를 신호·핸드 증거와 함께 여는 것뿐이고, 정지는 그 신고를 보고 기존처럼 `reportId`를 붙여 따로 준다. 칩 동결은 만들지 않았다: 잔액을 고쳐 흉내 내지 않고, 필요하면 기존 정지(바이인·리바이 차단)로 막는다.
 
 원장·핸드 목록(B9): 원장은 모든 회원의 잔액 이력이라 `ledger.view`를 쪽마다 1행씩 남긴다(검색어, 회원을 찾았는지, 종류·기간 필터, 첫 쪽·다음 쪽, 건수; 회원을 찾으면 그 회원이 대상). 찾지 못한 검색어도 남겨 누구를 찾아보려 했는지 알 수 있다. 핸드 목록은 카드 없이 테이블·보드·팟만 담지만, 회원으로 좁히면 그 회원이 언제 어디서 게임했는지가 드러나므로 그 조회만 `hand.list`로 남긴다. 테이블로만 좁히거나 전체를 넘겨 보는 핸드 목록과 테이블 목록은 회원을 가리키지 않는 운영 정보라 남기지 않는다(관리자가 화면을 넘길 때마다 쓰기가 생기지 않게). 카드를 담은 핸드 상세는 지금처럼 재확인과 `hand.view_sensitive`를 거친다.
 

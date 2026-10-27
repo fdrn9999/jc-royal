@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { checkOrCall, signUp, test, widerThanDevice } from './helpers';
+import { checkOrCall, dealtCards, signUp, test, widerThanDevice } from './helpers';
 
 /** What the page's room connection last reported: my seat, the hand on the table, and whether I may show cards from it. */
 function watch(page: Page) {
@@ -87,7 +87,8 @@ test('mobile: after folding, a player taps Show on one card and the other player
     const seat = wa.mySeat!;
     await expect(a.page.getByTestId('show-card-1')).toBeVisible({ timeout: 1_000 });
     const layout = await showButtonLayout(a.page, seat);
-    const card = (await a.page.locator(`[data-testid=seat-${seat}] [data-card]`).nth(1).getAttribute('data-card'))!;
+    // The second card as dealt (show-card-1 goes by that order; A sees them drawn with the higher rank on the left).
+    const card = (await dealtCards(a.page, `seat-${seat}`))[1]!;
     await a.page.getByTestId('show-card-1').tap();
     await expect(a.page.getByTestId('shown-card-1')).toBeVisible({ timeout: 1_500 });
     await expect(a.page.getByTestId('show-card-0')).toBeVisible();
@@ -107,7 +108,8 @@ test('mobile: after folding, a player taps Show on one card and the other player
   }).toPass({ timeout: 150_000 });
 
   const { layout } = done!;
-  expect(layout).toEqual([
+  // The buttons come in the order the cards are drawn (the higher rank on the left), so they are matched by name.
+  expect([...layout].sort((x, y) => x.id!.localeCompare(y.id!))).toEqual([
     { id: 'show-card-0', h: 24, inside: true, onTop: true, clear: true },
     { id: 'show-card-1', h: 24, inside: true, onTop: true, clear: true },
     { id: 'show-card-both', h: 24, inside: true, onTop: true, clear: true },
