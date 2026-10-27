@@ -6,10 +6,10 @@
  * in the player's unit, in big blinds of this hand's table when chosen (hands recorded without blinds stay in chips).
  */
 import { handLabelKey } from '@jc/types';
-import { ArrowDownIcon, Button, cardLabel, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, cx, Modal, PauseIcon, PlayIcon, RotateCcwIcon, SkipBackIcon, SkipForwardIcon } from '@jc/ui';
+import { ArrowDownIcon, Button, cardLabel, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, cx, LightbulbIcon, Modal, PauseIcon, PlayIcon, RotateCcwIcon, SkipBackIcon, SkipForwardIcon } from '@jc/ui';
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { LoadFailed } from '../components/Loading';
+import { LoadFailed, Loading } from '../components/Loading';
 import { MemberName } from '../components/MemberName';
 import { amounts, useAmounts, type Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -29,6 +29,11 @@ function ShareUnavailable({ onClose }: { onClose: () => void }) {
       <LoadFailed onRetry={() => location.reload()} />
     </Modal>
   );
+}
+/** The decision review (StrategyPanel), loaded only when opened; if it will not load, its place says so. */
+const StrategyPanel = lazyPart(() => import('./StrategyPanel').then((m) => m.default), StrategyUnavailable);
+function StrategyUnavailable() {
+  return <LoadFailed onRetry={() => location.reload()} className="py-6" testId="replay-strategy-failed" />;
 }
 
 const STEP_MS = 1400;
@@ -124,7 +129,8 @@ function useHeight<T extends HTMLElement>() {
   return [ref, h] as const;
 }
 
-export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: number | null }) {
+/** `review`: the viewer's own hand, whose decisions can be reviewed under the controls (StrategyPanel). */
+export function HandReplay({ hand, heroSeat, review = false }: { hand: ReplayInput; heroSeat: number | null; review?: boolean }) {
   const { t } = useI18n();
   const a = useAmounts(hand.bigBlind ?? 0);
   const steps = useMemo(() => buildReplay(hand, heroSeat), [hand, heroSeat]);
@@ -134,6 +140,7 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
   const [mode, setMode] = useState<ReplayMode>('normal');
   const [capturing, setCapturing] = useState(false);
+  const [studying, setStudying] = useState(false);
   const { fourColor } = usePrefs();
   // The share image's options, kept while the replay is open (its amounts at first as the player reads them); the step
   // it was asked for, taken then and kept (the dialog open on it); a quick save's progress.
@@ -333,16 +340,21 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
   // Measured afresh at another width (a phone turned), where it may take fewer lines.
   useLayoutEffect(() => setKeep(settleRef.current?.offsetHeight ?? 0), [band.w]);
   const potsRef = useRef<HTMLElement>(null);
-  // Brought between the header and the bottom bar (its top first when it is taller), and focused for the keyboard.
-  const toSettlement = () => {
-    const el = potsRef.current;
-    if (!el) return;
+  // Brought between the header and the bottom bar (its top first when it is taller).
+  const onScreen = (el: HTMLElement) => {
     const r = el.getBoundingClientRect();
     const top = r.top - (band.top + GAP);
     const by = top < 0 ? top : Math.max(0, Math.min(top, r.bottom - (band.bottom - GAP)));
     if (Math.abs(by) > 1) window.scrollBy({ top: by, behavior: reducedMotion ? 'auto' : 'smooth' });
+  };
+  // ...and focused for the keyboard.
+  const toSettlement = () => {
+    const el = potsRef.current;
+    if (!el) return;
+    onScreen(el);
     el.focus({ preventScroll: true });
   };
+  const studyRef = useRef<HTMLDivElement>(null);
   // Where a step sits along the slider: its thumb's centre at that value.
   const at = (k: number) => `calc(${THUMB_HALF}px + (100% - ${2 * THUMB_HALF}px) * ${last > 0 ? k / last : 0})`;
   const stepper = (dir: -1 | 1) => (
@@ -613,6 +625,24 @@ export function HandReplay({ hand, heroSeat }: { hand: ReplayInput; heroSeat: nu
         />
       )}
       {shareDialog && (capturing ? createPortal(shareDialog, document.body) : shareDialog)}
+      {/* Under the controls, not among them: opening it changes neither the table's size nor where the controls are. */}
+      {review && heroSeat !== null && (
+        <div ref={studyRef} className="flex flex-col gap-2">
+          {/* Its name wraps on a narrow phone rather than being cut short (the longer English one at 320px). */}
+          <Button variant="outline" className="h-auto! min-h-10 w-full justify-between! py-2! text-left whitespace-normal!" onClick={() => setStudying(!studying)} aria-expanded={studying} aria-controls="replay-strategy" data-testid="replay-strategy-toggle">
+            <span className="flex min-w-0 items-center gap-2">
+              <LightbulbIcon className="size-4 shrink-0" />
+              <span className="min-w-0">{t('replay.study')}</span>
+            </span>
+            {studying ? <ChevronUpIcon className="size-4 shrink-0" /> : <ChevronDownIcon className="size-4 shrink-0" />}
+          </Button>
+          {studying && (
+            <Suspense fallback={<Loading className="py-6" />}>
+              <StrategyPanel hand={hand} steps={steps} heroSeat={heroSeat} index={i} onGo={go} amounts={a} onShown={() => studyRef.current && onScreen(studyRef.current)} />
+            </Suspense>
+          )}
+        </div>
+      )}
       <div className={cx(keep === 0 && step.kind !== 'result' && 'hidden')} style={keep > 0 ? { minHeight: keep } : undefined}>
         <div ref={settleRef}>{step.kind === 'result' && <Settlement hand={hand} name={name} amounts={a} sectionRef={potsRef} />}</div>
       </div>

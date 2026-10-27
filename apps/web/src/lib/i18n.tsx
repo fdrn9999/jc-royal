@@ -637,6 +637,7 @@ const ko = {
   'replay.collapse': '조작 접기 · 테이블 크게',
   'replay.expand': '조작 펼치기',
   'replay.capture': '캡처 모드',
+  'replay.study': '내 결정 복기 · 학습용 전략 정보',
   'replay.captureHint': '← → 단계 이동 · Esc 닫기',
   'replay.captureClose': '닫기',
   'replay.hand': '핸드 #{n}',

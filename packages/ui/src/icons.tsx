@@ -23,6 +23,7 @@ export {
   CrownIcon,
   DicesIcon,
   HourglassIcon,
+  LightbulbIcon,
   LockIcon,
   LogOutIcon,
   MailIcon,

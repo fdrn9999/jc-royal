@@ -405,7 +405,7 @@ export function HandDetailPage() {
       >
         {/* Phones give the replay the panel's padding too: the table needs the width more than the frame does. */}
         <div className="-mx-4 sm:mx-0">
-          <HandReplay hand={data} heroSeat={data.players.find((p) => p.isYou)?.seatIndex ?? null} />
+          <HandReplay hand={data} heroSeat={data.players.find((p) => p.isYou)?.seatIndex ?? null} review />
         </div>
       </Panel>
       <HandNotePanel key={data.id} handId={data.id} initial={data.note} />

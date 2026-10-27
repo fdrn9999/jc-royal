@@ -637,6 +637,7 @@ export const en: Dict = {
   'replay.collapse': 'Collapse controls · bigger table',
   'replay.expand': 'Expand controls',
   'replay.capture': 'Capture mode',
+  'replay.study': 'Review my decisions · strategy notes for study',
   'replay.captureHint': '← → step · Esc to close',
   'replay.captureClose': 'Close',
   'replay.hand': 'Hand #{n}',
