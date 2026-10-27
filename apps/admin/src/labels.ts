@@ -91,6 +91,8 @@ const auditNames = labeler({
   'board.post.status': 'auditPostStatus',
   'hand.list': 'auditHandList',
   'hand.view_sensitive': 'auditHandView',
+  'integrity.review': 'auditIntegrityReview',
+  'integrity.view': 'auditIntegrityView',
   'ledger.view': 'auditLedgerView',
   'maintenance.cancel': 'auditMaintCancel',
   'maintenance.end': 'auditMaintEnd',

@@ -30,6 +30,7 @@ import { adminVipRoutes } from './admin-vip';
 import { adminTournamentRoutes } from './admin-tournaments';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
+import { adminIntegrityRoutes } from './admin-integrity';
 import { adminReportRoutes } from './reports';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
@@ -1403,4 +1404,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes).route('/', adminVipRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminIntegrityRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes).route('/', adminVipRoutes));
