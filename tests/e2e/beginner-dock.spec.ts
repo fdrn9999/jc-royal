@@ -177,10 +177,12 @@ test('beginner aids: nothing in the dock is cut or off the screen, nothing cover
         for (const x of c) report.push(`${sc.name} ${what}: ${x.what} ${x.how}`);
         for (const x of t.issues) {
           // The guide the player opened lies over the table (other seats, the board): what it must not cover, guide() says.
+          // What else covers the same piece is judged without it (a pot's chips over a seat's line beside the guide).
           const by = 'by' in x && typeof x.by === 'string' ? x.by.split(' | ') : [];
-          if (x.kind === 'covered' && by.length && by.every((b) => b.startsWith('action-help>'))) continue;
+          const rest = by.filter((b) => !b.startsWith('action-help>'));
+          if (x.kind === 'covered' && by.length && !rest.length) continue;
           // Pieces of the table over each other (the scene's own layout, where the screen leaves it less than it needs, aids or not) are listed apart.
-          const own = x.kind === 'overlap' || (x.kind === 'covered' && by.length > 0 && by.every((b) => /^(seat-\d+|pot|bet-\d+|board)>/.test(b)));
+          const own = x.kind === 'overlap' || (x.kind === 'covered' && rest.length > 0 && rest.every((b) => /^(seat-\d+|pot|bet-\d+|board)>/.test(b)));
           (own ? scene : report).push(`${sc.name} ${what}: table ${JSON.stringify(x)}`);
         }
         if (wide) report.push(`${sc.name} ${what}: page wider than the screen`);
