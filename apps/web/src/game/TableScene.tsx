@@ -377,12 +377,13 @@ export const TableScene = memo(function TableScene({
         </div>
       </div>
 
-      {/* pot, board and the status line, in the room the layout kept for them */}
-      <div className="absolute z-20 flex flex-col items-center gap-2" style={{ left: plan.block.x, top: plan.block.y, width: plan.block.w, height: plan.block.h }}>
-        <div className="flex shrink-0 items-center justify-center" style={{ height: plan.potRowH }} data-testid="pot">
+      {/* pot, board and the status line, in the room the layout kept for them. The room takes no taps, only what it
+          draws: on a small table it reaches over the seats beside it, whose level and style open a bot's card. */}
+      <div className="pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={{ left: plan.block.x, top: plan.block.y, width: plan.block.w, height: plan.block.h }}>
+        <div className="flex shrink-0 items-center justify-center [&>*]:pointer-events-auto" style={{ height: plan.potRowH }} data-testid="pot">
           {collected > 0 && <ChipStack amount={collected} size={`${plan.potChip}px`} text={amounts.fmt(collected, true)} />}
         </div>
-        <div className="flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
+        <div className="pointer-events-auto flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
           {Array.from({ length: 5 }, (_, i) => {
             const c = i < boardShown ? (hand?.board[i] as Card | undefined) : undefined;
             // A staged card turns when it is drawn; cards drawn at once (a street that arrived unstaged) one after another.
@@ -404,7 +405,7 @@ export const TableScene = memo(function TableScene({
             a hand note. */}
         {layout.footer && (
           // As wide as what it says (up to the block's width), so nothing round it counts as drawn.
-          <div className="flex h-6 max-w-full shrink-0 flex-col items-center justify-center text-center text-ink-200/80" data-testid="table-status" aria-live="polite">
+          <div className="pointer-events-auto flex h-6 max-w-full shrink-0 flex-col items-center justify-center text-center text-ink-200/80" data-testid="table-status" aria-live="polite">
             {status ? (
               <span className="text-xs tracking-[0.06em]">{status}</span>
             ) : (
