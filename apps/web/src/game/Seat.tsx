@@ -243,6 +243,15 @@ function SeatPlace(p: SeatProps) {
   const seenUp = cards.some(Boolean);
   if (!settled && seenUp) setOrder({ hand: p.newHandKey, at: holeOrder(cards) ?? dealt });
   const drawn = (settled ?? (seenUp ? (holeOrder(cards) ?? dealt) : dealt)).map((i) => ({ i, c: cards[i] ?? null }));
+  // A bot's level and the style it plays (the style's whole name in the title).
+  const botLevel = s.bot && s.bot !== true ? t(BOT_LEVEL_LABEL[s.bot]) : '';
+  const botTitle = s.botStyle ? `${botLevel} · ${t(`bot.style.${s.botStyle}` as MsgKey)}` : undefined;
+  const botLine = (
+    <>
+      {botLevel}
+      {s.botStyle && <span data-testid={`bot-style-${s.seatIndex}`}> · {t(`bot.styleShort.${s.botStyle}` as MsgKey)}</span>}
+    </>
+  );
   const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${p.amounts.fmt(s.lastAction.amount, true)}` : ''}` : null;
   // The colour vision modes swap these (styles.css); the label always says the action too.
   const actionTone =
@@ -445,7 +454,22 @@ function SeatPlace(p: SeatProps) {
           ) : actionLabel ? (
             <span className={actionTone}>{actionLabel}</span>
           ) : s.bot && s.bot !== true && !s.botLeaving ? (
-            <span className="text-[#8fd9cb]/80" data-testid={`bot-level-${s.seatIndex}`}>{t(BOT_LEVEL_LABEL[s.bot])}</span>
+            p.onPick ? (
+              // A tap on the bot's level and style opens its card (BotCard), as one on its avatar does.
+              <button
+                type="button"
+                className="min-w-0 truncate text-[#8fd9cb]/80 underline decoration-[#8fd9cb]/40 decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-gold-400"
+                title={botTitle}
+                onClick={p.onPick}
+                data-testid={`bot-level-${s.seatIndex}`}
+              >
+                {botLine}
+              </button>
+            ) : (
+              <span className="text-[#8fd9cb]/80" title={botTitle} data-testid={`bot-level-${s.seatIndex}`}>
+                {botLine}
+              </span>
+            )
           ) : null}
           {/* A bot giving up its seat plays the hand out first: its action stays readable beside the notice. */}
           {s.botLeaving && (

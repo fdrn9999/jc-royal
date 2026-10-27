@@ -1,4 +1,4 @@
-import { REPORT_REASONS, type FriendRequestResultDto, type PublicUserDto, type RelationDto, type RelationKind, type ReportReason, type ReportTarget, type SeatView } from '@jc/types';
+import { BOT_STYLE_TRAITS, BOT_TRAITS, REPORT_REASONS, type BotStyle, type BotTraitTier, type FriendRequestResultDto, type PublicUserDto, type RelationDto, type RelationKind, type ReportReason, type ReportTarget, type SeatView } from '@jc/types';
 import { Button, cx, Modal, Spinner } from '@jc/ui';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
@@ -142,6 +142,7 @@ export function BotCard({ seat, onClose }: { seat: SeatView | null; onClose: () 
               {seat.botLeaving && <div className="text-xs text-ink-300">{t('bot.leavingTitle')}</div>}
             </div>
           </div>
+          {seat.botStyle && <BotStyleInfo style={seat.botStyle} />}
           <p className="text-sm leading-relaxed text-ink-200">{t('bot.about')}</p>
           <div className="flex justify-end">
             <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
@@ -149,6 +150,44 @@ export function BotCard({ seat, onClose }: { seat: SeatView | null; onClose: () 
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Less, as much as or more than the balanced style: one, two or three of three steps lit. */
+function TraitMeter({ tier }: { tier: BotTraitTier }) {
+  return (
+    <span className="flex shrink-0 gap-0.5" aria-hidden>
+      {[-1, 0, 1].map((k) => (
+        <span key={k} className={cx('h-1.5 w-4 rounded-full', k <= tier ? 'bg-[#8fd9cb]' : 'bg-white/10')} />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * How a bot's style plays (BOT_STYLE_TRAITS, held to the bot's own numbers): its name, what it does, and each trait
+ * against the balanced style. Only the tendency anyone at the table could read; nothing of its cards or next move.
+ */
+function BotStyleInfo({ style }: { style: BotStyle }) {
+  const { t } = useI18n();
+  const traits = BOT_STYLE_TRAITS[style];
+  return (
+    <section className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-3" data-testid="bot-card-style" data-style={style}>
+      <div className="text-sm font-bold text-[#8fd9cb]" data-testid="bot-card-style-name">{t('bot.styleLine', { style: t(`bot.style.${style}` as MsgKey) })}</div>
+      <p className="text-sm leading-relaxed text-ink-100">{t(`bot.styleAbout.${style}` as MsgKey)}</p>
+      <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1.5 text-xs">
+        {BOT_TRAITS.map((k) => (
+          <div key={k} className="contents" data-testid={`bot-trait-${k}`} data-tier={traits[k]}>
+            <dt className="text-ink-300">{t(`bot.trait.${k}` as MsgKey)}</dt>
+            <dd className="flex items-center gap-2 text-ink-100">
+              <TraitMeter tier={traits[k]} />
+              {t(`bot.trait.${k}.${traits[k] + 1}` as MsgKey)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-xs leading-relaxed text-ink-400">{t('bot.styleNote')}</p>
+    </section>
   );
 }
 

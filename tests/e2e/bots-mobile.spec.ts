@@ -14,6 +14,9 @@ const seatsOffScreen = (page: Page) =>
       .filter((x) => x.left < 0 || x.right > 0);
   });
 
+/** The styles' names on a bot's card (the console's names). */
+const STYLE_KO: Record<string, string> = { balanced: '균형형', tag: '타이트 어그레시브', lag: '루즈 어그레시브', 'tight-passive': '타이트 패시브', 'loose-passive': '루즈 패시브' };
+
 /** Taps the first bot's seat and returns its card. */
 async function openBotCard(page: Page) {
   const seat = botSeats(page).first();
@@ -31,6 +34,8 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
 
   // The bots sit down one after another; each seat carries the BOT pill with its level.
   await expect(botSeats(page)).toHaveCount(2, { timeout: 30_000 });
+  // A bot's line, while it has no action to show: its level and its style.
+  await expect(page.locator('[data-testid^="bot-style-"]').first()).toHaveText(/^\s*· (균형형|TAG|LAG|타이트 패시브|루즈 패시브)$/, { timeout: 90_000 });
   for (const badge of await page.getByTestId('bot-badge').all()) {
     await expect(badge).toHaveAttribute('data-level', 'normal');
     await expect(badge).toHaveAttribute('title', '테이블 봇 · 보통');
@@ -46,11 +51,26 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
   // A bot's card says what it is; there is nothing to befriend, message, block or report.
   const card = await openBotCard(page);
   await expect(card.getByTestId('bot-card-level')).toHaveText('난이도 보통');
+  // Its style (the table leaves it to each bot): its name, what it does and four traits, a tendency and nothing more.
+  const style = card.getByTestId('bot-card-style');
+  const name = (await style.getAttribute('data-style')) ?? '';
+  expect(Object.keys(STYLE_KO)).toContain(name);
+  await expect(card.getByTestId('bot-card-style-name')).toHaveText(`스타일 ${STYLE_KO[name]}`);
+  await expect(style.locator('[data-testid^="bot-trait-"]')).toHaveCount(4);
+  await expect(style).toContainText('봇의 카드나 다음 행동은 알려 주지 않습니다');
+  await expect(card).toBeInViewport({ ratio: 1 });
   await expect(card).toContainText('친구 신청·대화·차단·신고 대상이 아닙니다');
   await expect(page.getByTestId('player-card')).toHaveCount(0);
   await expect(card.getByRole('button', { name: /친구|대화|메시지|차단|신고/ })).toHaveCount(0);
   expect(await widerThanDevice(page)).toBe(false);
   await page.screenshot({ path: 'test-results/bots-card-mobile.png', animations: 'disabled' });
+  await page.keyboard.press('Escape');
+  await expect(card).toHaveCount(0);
+  // The bot's level and style on its seat open the same card.
+  const line = page.locator('button[data-testid^="bot-level-"]').first();
+  await line.waitFor({ timeout: 90_000 });
+  await line.tap();
+  await expect(card.getByTestId('bot-card-style')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(card).toHaveCount(0);
 
@@ -75,6 +95,9 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
   await expect(page.getByTestId('bot-badge').first()).toHaveAttribute('title', 'Table bot · Normal');
   const en = await openBotCard(page);
   await expect(en.getByTestId('bot-card-level')).toHaveText('Level: Normal');
+  await expect(en.getByTestId('bot-card-style-name')).toHaveText(/^Style: (Balanced|Tight Aggressive|Loose Aggressive|Tight Passive|Loose Passive)$/);
+  await expect(en.getByTestId('bot-card-style')).toContainText('nothing here tells its cards or its next move');
+  await expect(en).toBeInViewport({ ratio: 1 });
   await expect(en).toContainText('It takes no friend requests, messages, blocks or reports.');
   expect(await widerThanDevice(page)).toBe(false);
   await page.screenshot({ path: 'test-results/bots-card-mobile-en.png', animations: 'disabled' });

@@ -4,11 +4,12 @@
  * decisions for the same seed. Spots are dealt by the real engine; `decideLegacy` (sim/legacy-bot) is the bot as it
  * played before 2.0, kept for the diagnosis cases only.
  */
-import type { Card } from '@jc/types';
+import { BOT_STYLE_TRAITS, type Card } from '@jc/types';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { decideLegacy } from '../sim/legacy-bot';
 import { seeded } from '../sim/rng';
+import { personaOf } from '../src/ai/persona';
 import {
   BOT_LEVELS,
   BOT_STYLES,
@@ -977,3 +978,12 @@ describe('Bot AI 2.0: fairness and safety', () => {
 
 /** A player whose big bets have been shown to be bluffs (for the fairness case: statistics do not change what is seen). */
 const PROFILES_FOR_FAIRNESS = counters({ hands: 300, vpipOpp: 300, vpip: 80, pfr: 60, postBets: 90, postCalls: 50, postBetOpp: 400, overbets: 60, bigBetsShown: 20, bigBetBluffsShown: 14 });
+
+describe('a bot card says what its style does', () => {
+  // The card's traits (BOT_STYLE_TRAITS) against the style's own numbers: more than balanced from 1.08, less to 0.92.
+  const tier = (v: number) => (v >= 1.08 ? 1 : v <= 0.92 ? -1 : 0);
+  it.each(BOT_STYLES)('%s: hands played, aggression, bet size and bluffs as it plays them', (style) => {
+    const p = personaOf(style);
+    expect(BOT_STYLE_TRAITS[style]).toEqual({ range: tier(p.open), aggression: tier(p.aggression), sizing: tier(p.sizing), bluff: tier(p.bluff) });
+  });
+});

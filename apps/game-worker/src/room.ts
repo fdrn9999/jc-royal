@@ -3006,7 +3006,7 @@ export class TableRoom extends DurableObject<Env> {
         streetBet: hi?.streetBet ?? 0,
         // A table bot is played by the room itself: never shown as away.
         connected: !!s.bot || connected.has(s.userId),
-        ...(s.bot ? { bot: s.bot, ...(s.leaveAfterHand ? { botLeaving: true } : {}) } : {}),
+        ...(s.bot ? { bot: s.bot, botStyle: s.botStyle ?? styleFor(s.userId), ...(s.leaveAfterHand ? { botLeaving: true } : {}) } : {}),
         lastAction: hi?.lastAction ?? null,
         hasCards: !!hi?.inHand && !hi.folded,
         holeCards: hi?.holeCards ?? null,

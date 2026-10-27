@@ -1,3 +1,4 @@
+import type { BotStyle } from './bots';
 import type { Card, HandRankClass } from './cards';
 import type { AutoBuyPolicy, ReactionRules } from './protocol';
 import type { PublicRole } from './social';
@@ -61,6 +62,11 @@ export interface SeatView {
    * in the replay of a past hand, which records that a seat was a bot but not how well it played.
    */
   bot?: BotLevel | true;
+  /**
+   * The style a bot plays in (with `bot`, live only): the one it decides with this hand, a tendency anyone may know, as
+   * a player's style is read at a table. Never in a replay.
+   */
+  botStyle?: BotStyle;
   /** A bot that gives up its seat once the current hand ends (to a member waiting for one, or the bots were turned off). */
   botLeaving?: boolean;
   /**

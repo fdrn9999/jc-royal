@@ -7,6 +7,23 @@ import type { BotLevel } from './table';
 export const BOT_STYLES = ['balanced', 'tag', 'lag', 'tight-passive', 'loose-passive'] as const;
 export type BotStyle = (typeof BOT_STYLES)[number];
 
+/**
+ * What a style does, as a bot's card says it (apps/web BotCard): how many hands it plays, how often it bets and raises
+ * rather than checks and calls, how big it bets and how often it bluffs, each less than (-1), as (0) or more than (1)
+ * the balanced style. The engine's tests hold it to the style's own numbers (persona.ts), so the card says what the bot
+ * does. A tendency, never a card or a next move.
+ */
+export const BOT_TRAITS = ['range', 'aggression', 'sizing', 'bluff'] as const;
+export type BotTrait = (typeof BOT_TRAITS)[number];
+export type BotTraitTier = -1 | 0 | 1;
+export const BOT_STYLE_TRAITS: Record<BotStyle, Record<BotTrait, BotTraitTier>> = {
+  balanced: { range: 0, aggression: 0, sizing: 0, bluff: 0 },
+  tag: { range: -1, aggression: 1, sizing: 0, bluff: -1 },
+  lag: { range: 1, aggression: 1, sizing: 0, bluff: 1 },
+  'tight-passive': { range: -1, aggression: -1, sizing: 0, bluff: -1 },
+  'loose-passive': { range: 1, aggression: -1, sizing: -1, bluff: -1 },
+};
+
 /** A table's style for its bots: one style for all of them, or 'auto' for each bot account's own (styleFor). */
 export const BOT_TABLE_STYLES = ['auto', ...BOT_STYLES] as const;
 export type BotTableStyle = (typeof BOT_TABLE_STYLES)[number];
