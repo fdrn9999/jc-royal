@@ -1,7 +1,7 @@
 // Signs of chips passed on purpose between two members (integrity.ts): how a hand's chips are shared out between a
 // pair, when a pair is listed and in which band, and the page's reading of D1 — run on SQLite with the real migrations.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { INTEGRITY, integrity, integrityPair, pairsOf, withNetwork, type IntegrityRow } from './integrity';
+import { fileReview, INTEGRITY, integrity, integrityPair, pairsOf, withNetwork, type IntegrityRow, type Review } from './integrity';
 
 interface SqliteStatement {
   all(...params: unknown[]): Record<string, unknown>[];
@@ -126,9 +126,13 @@ function database(): SqliteDb {
   ).run();
   return db;
 }
-/** D1 as the page reads it: statements, binds and batches, answered by SQLite. */
+/**
+ * D1 as the page reads it: statements, binds and batches, answered by SQLite. Each call waits a turn first, as one to D1
+ * waits on the network, so calls made at once (two administrators) run in turns, one statement at a time.
+ */
 function fakeD1(db: SqliteDb) {
   const exec = (sql: string, params: unknown[]) => ({ results: db.prepare(sql).all(...params), meta: { rows_read: 1 } });
+  const turn = () => new Promise((r) => setTimeout(r, 0));
   class Stmt {
     constructor(
       readonly sql: string,
@@ -139,6 +143,14 @@ function fakeD1(db: SqliteDb) {
     }
     async all() {
       return exec(this.sql, this.params);
+    }
+    async first() {
+      await turn();
+      return exec(this.sql, this.params).results[0] ?? null;
+    }
+    async run() {
+      await turn();
+      return { meta: { changes: Number(db.prepare(this.sql).run(...this.params).changes) } };
     }
   }
   return { prepare: (sql: string) => new Stmt(sql), batch: async (stmts: Stmt[]) => stmts.map((s) => exec(s.sql, s.params)) } as unknown as D1Database;
@@ -234,5 +246,45 @@ describe('the integrity page’s reading of D1', () => {
     expect(out.pairs).toHaveLength(1);
     expect(out.pairs[0]).toMatchObject({ from: 'u00', to: 'u01', signals: ['dumps', 'network'], risk: 'medium', flowBb: 20 });
     expect(out.found).toBe(300);
+  });
+});
+
+describe('opening a review of a pair', () => {
+  const staff = times(5, (i) => `s${i}`);
+  const setup = () => {
+    const db = database();
+    for (const s of staff) db.prepare(`INSERT INTO users (id, email, nickname, password_hash) VALUES (?1, ?1 || '@test.dev', 'nick-' || ?1, 'x')`).run(s);
+    return { db, D1: fakeD1(db) };
+  };
+  const review = (id: string, reporterId: string, from = 'a'): Review => ({
+    id,
+    reporterId,
+    to: 'b',
+    from,
+    reason: 'chips passed',
+    context: { kind: 'signal', partnerId: from } as Review['context'],
+    at: NOW,
+  });
+  const open = (db: SqliteDb) => db.prepare(`SELECT id FROM reports WHERE status = 'open' ORDER BY id`).all();
+
+  it('files one when administrators open the same pair at once, and shows the others the one filed', async () => {
+    const { db, D1 } = setup();
+    const out = await Promise.all(staff.map((s) => fileReview(D1, review(`r-${s}`, s))));
+    const one = out.findIndex((o) => o.filed);
+    expect(out.filter((o) => o.filed)).toHaveLength(1);
+    expect(out.filter((o) => !o.filed)).toEqual(times(4, () => ({ filed: false, openId: `r-${staff[one]}` })));
+    expect(open(db)).toEqual([{ id: `r-${staff[one]}` }]);
+  });
+
+  it('files another pair on the same member, files again once the open one is closed, and leaves a reporter’s own open report to the caller', async () => {
+    const { db, D1 } = setup();
+    expect(await fileReview(D1, review('r1', 's0'))).toEqual({ filed: true });
+    expect(await fileReview(D1, review('r2', 's1'))).toEqual({ filed: false, openId: 'r1' });
+    expect(await fileReview(D1, review('r3', 's1', 'c'))).toEqual({ filed: true });
+    // No review of this pair is open, but s0 has a report open on b: the one-open-report-per-member index refuses it.
+    await expect(fileReview(D1, review('r4', 's0', 'bot1'))).rejects.toThrow(/UNIQUE constraint failed: reports\.reporter_id/);
+    db.prepare(`UPDATE reports SET status = 'dismissed' WHERE id = 'r1'`).run();
+    expect(await fileReview(D1, review('r5', 's2'))).toEqual({ filed: true });
+    expect(open(db)).toEqual([{ id: 'r3' }, { id: 'r5' }]);
   });
 });

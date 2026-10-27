@@ -3,14 +3,13 @@
  * operator to look into. Nothing here sanctions anyone: a review opens a report with the evidence in the existing
  * report queue, where it is worked, decided and (if it comes to that) followed by a suspension like any other report.
  */
-import { schema } from '@jc/db';
 import { INTEGRITY_DAYS, type ReportContext } from '@jc/types';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { audit } from '../lib/audit';
 import { fail, parseBody } from '../lib/http';
-import { integrity, integrityPair } from '../lib/integrity';
+import { fileReview, integrity, integrityPair } from '../lib/integrity';
 import { looksPersonal } from '../lib/pii';
 import { isUniqueViolation } from './auth';
 
@@ -40,7 +39,8 @@ export const adminIntegrityRoutes = new Hono<AppEnv>()
   /**
    * Opens a review of one pair: a 'cheating' report on the member who received the chips, filed by the operator, with
    * the signs and hands worked out again here (not taken from the page) as its evidence and the other member named in
-   * it. Refused when the pair no longer meets the signs, for a table bot, and when one is already open for the pair.
+   * it. Refused when the pair no longer meets the signs, for a table bot, and when one is already open for the pair
+   * (looked for in the statement that files it, so administrators opening it at once file one).
    */
   .post('/integrity/review', async (c) => {
     const body = await parseBody(c, ReviewSchema);
@@ -54,13 +54,6 @@ export const adminIntegrityRoutes = new Hono<AppEnv>()
     const at = Date.now();
     const read = await integrityPair(DB, body.from, body.to, span, at);
     if (!read || read.pair.from !== body.from || read.pair.to !== body.to) fail(409, 'not_flagged', 'the pair no longer meets the signs');
-    const open = await DB.prepare(
-      `SELECT id FROM reports WHERE status = 'open' AND target_user_id = ?1 AND target_type = 'player'
-          AND json_extract(context, '$.kind') = 'signal' AND json_extract(context, '$.partnerId') = ?2 LIMIT 1`,
-    )
-      .bind(body.to, body.from)
-      .first<{ id: string }>();
-    if (open) fail(409, 'already_reported', 'a review of this pair is already open', { reportId: open.id });
     const { pair } = read;
     const partner = people.find((p) => p.id === body.from)!;
     const context: ReportContext = {
@@ -79,18 +72,9 @@ export const adminIntegrityRoutes = new Hono<AppEnv>()
     };
     const id = crypto.randomUUID();
     const me = c.var.user!.id;
+    let filed: Awaited<ReturnType<typeof fileReview>>;
     try {
-      await c.var.db.insert(schema.reports).values({
-        id,
-        reporterId: me,
-        targetType: 'player',
-        targetId: pair.to,
-        targetUserId: pair.to,
-        reason: 'cheating',
-        detail: body.reason,
-        context: JSON.stringify(context),
-        createdAt: at,
-      });
+      filed = await fileReview(DB, { id, reporterId: me, to: pair.to, from: pair.from, reason: body.reason, context, at });
     } catch (e) {
       // One open report per reporter and member: this operator already has one open on the receiver (another pair).
       if (!isUniqueViolation(e, 'reports.reporter_id')) throw e;
@@ -99,6 +83,7 @@ export const adminIntegrityRoutes = new Hono<AppEnv>()
         .first<{ id: string }>();
       fail(409, 'already_reported', 'you already have a report open on this member', { reportId: mine?.id ?? null });
     }
+    if (!filed.filed) fail(409, 'already_reported', 'a review of this pair is already open', { reportId: filed.openId });
     await audit(c, 'integrity.review', { type: 'user', id: pair.to }, { reportId: id, partnerId: pair.from, days: span, signals: pair.signals, risk: pair.risk, reason: body.reason });
     return c.json({ id }, 201);
   });

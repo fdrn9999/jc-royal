@@ -1,4 +1,4 @@
-import type { IntegrityRisk, IntegritySignal } from '@jc/types';
+import type { IntegrityRisk, IntegritySignal, ReportContext } from '@jc/types';
 
 const DAY = 86_400_000;
 
@@ -292,4 +292,39 @@ export async function integrityPair(db: D1Database, from: string, to: string, da
   const pair = pairsOf(rows<IntegrityRow>(read!)).find((p) => (p.from === from && p.to === to) || (p.from === to && p.to === from));
   if (!pair) return null;
   return { since, pair: withNetwork(pair, !!rows<{ shared: number }>(net!)[0]?.shared) };
+}
+
+/** The open review of a pair: a signal report on the member who received the chips (`to`) naming the other (`from`). */
+const openReview = (to: string, from: string) =>
+  `status = 'open' AND target_user_id = ${to} AND target_type = 'player' AND json_extract(context, '$.kind') = 'signal' AND json_extract(context, '$.partnerId') = ${from}`;
+
+export interface Review {
+  id: string;
+  reporterId: string;
+  /** The member who received the chips (the report's target) and the other member of the pair. */
+  to: string;
+  from: string;
+  reason: string;
+  context: ReportContext;
+  at: number;
+}
+
+/**
+ * Files a review of a pair as a 'cheating' report on the member who received the chips, unless one is open for the
+ * pair: in the one statement, so administrators opening it at once file one (a look first and a write after would let
+ * each of them see none). When it is not filed, the id of the review that is open. The reporter's own open report on
+ * the member (reports_open_uq) still throws, for the caller to tell apart.
+ */
+export async function fileReview(db: D1Database, r: Review): Promise<{ filed: true } | { filed: false; openId: string | null }> {
+  const res = await db
+    .prepare(
+      `INSERT INTO reports (id, reporter_id, target_type, target_id, target_user_id, reason, detail, context, created_at)
+       SELECT ?1, ?2, 'player', ?3, ?3, 'cheating', ?4, ?5, ?6
+        WHERE NOT EXISTS (SELECT 1 FROM reports WHERE ${openReview('?3', '?7')})`,
+    )
+    .bind(r.id, r.reporterId, r.to, r.reason, JSON.stringify(r.context), r.at, r.from)
+    .run();
+  if (res.meta.changes) return { filed: true };
+  const open = await db.prepare(`SELECT id FROM reports WHERE ${openReview('?1', '?2')} LIMIT 1`).bind(r.to, r.from).first<{ id: string }>();
+  return { filed: false, openId: open?.id ?? null };
 }

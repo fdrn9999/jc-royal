@@ -136,6 +136,26 @@ describe('integrity signs', () => {
     expect(twice.body.error).toMatchObject({ code: 'already_reported', details: { reportId: id } });
   });
 
+  // Whether the requests meet inside one statement here is up to timing: that they cannot both file is pinned by the
+  // unit test of fileReview (apps/api/src/lib/integrity.test.ts), which runs the calls in turns.
+  it('administrators opening a review of the same pair at once file one, and the others are shown it', async () => {
+    const [giver, taker] = await Promise.all([newUser(), newUser()]);
+    const race = `${tag}-race`;
+    await d1(`INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, status, room_type) VALUES ('${race}', '${race}', 6, 5, ${BB}, 200, 2000, 'closed', 'official')`);
+    await dumped(race, giver, taker, 12, Date.now() - 3_600_000);
+    const staff = await Promise.all(Array.from({ length: 5 }, () => staffWith(['reports'])));
+    const body = { from: giver.me.id, to: taker.me.id, days: 7, reason: `${tag} race` };
+    const res = await Promise.all(staff.map((s) => s.c.post('/api/admin/integrity/review', body)));
+    expect(res.map((r) => r.status).sort(), JSON.stringify(res.map((r) => r.body))).toEqual([201, 409, 409, 409, 409]);
+    const id = res.find((r) => r.status === 201)!.body.id as string;
+    for (const r of res.filter((r) => r.status === 409)) expect(r.body.error).toMatchObject({ code: 'already_reported', details: { reportId: id } });
+    expect(await d1(`SELECT id FROM reports WHERE status = 'open' AND target_user_id = '${taker.me.id}' AND json_extract(context, '$.kind') = 'signal'`)).toEqual([{ id }]);
+    // Any administrator asking after it is shown it.
+    const late = await admin.post('/api/admin/integrity/review', body);
+    expect(late.status).toBe(409);
+    expect(late.body.error).toMatchObject({ code: 'already_reported', details: { reportId: id } });
+  });
+
   it('is open to administrators with the reports switch only; members get nothing', async () => {
     const member = await newUser();
     expect((await member.client.get('/api/admin/integrity')).status).toBe(403);
