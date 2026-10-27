@@ -257,11 +257,28 @@
   position: relative;
   flex: none;
   user-select: none;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
   /* The fan (another player's two cards) and the lift (a winning card) are variables: the animations end on them. */
   transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-lift, 0px));
   /* A folded hand's cards darken, and brighten again when their owner shows one (a fade, once). */
   transition: filter 0.3s ease;
+}
+/* The turntable both sides of a card lie on, back to back (PlayingCard): the side facing away is hidden, so a card
+   turning over shows its back up to edge on and its face after. Each side has its own shadow, so the shadow turns with
+   the card instead of staying a flat box under it. Nothing here groups (no opacity, filter or overflow), which would
+   flatten the two sides into one. */
+.jc-card-turn {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform-style: preserve-3d;
+}
+.jc-card-face,
+.jc-card-back {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+.jc-card-under {
+  transform: rotateY(180deg);
 }
 .jc-card-face {
   position: absolute;
@@ -270,6 +287,8 @@
   background: linear-gradient(165deg, #fffdf7 0%, #f3ecdc 100%);
   border: 1px solid rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+  transition: box-shadow 0.25s ease;
 }
 .jc-card-face::after {
   content: '';
@@ -296,7 +315,7 @@
     repeating-linear-gradient(-45deg, rgba(212, 175, 55, 0.12) 0 2px, transparent 2px 7px),
     linear-gradient(160deg, #15161a, #070708);
   border: 1px solid rgba(212, 175, 55, 0.55);
-  box-shadow: inset 0 0 0 3px #0a0a0b, inset 0 0 0 4px rgba(212, 175, 55, 0.45);
+  box-shadow: inset 0 0 0 3px #0a0a0b, inset 0 0 0 4px rgba(212, 175, 55, 0.45), 0 4px 10px rgba(0, 0, 0, 0.45);
   display: grid;
   place-items: center;
 }
@@ -307,29 +326,33 @@
 }
 .jc-card.highlight {
   --card-lift: -4px;
+  transition: transform 0.25s ease, filter 0.3s ease;
+}
+.jc-card.highlight .jc-card-face {
   box-shadow: 0 0 0 2px var(--color-gold-400), 0 0 18px rgba(230, 197, 107, 0.55);
-  transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.3s ease;
 }
 .jc-card.dim {
   filter: brightness(0.55) saturate(0.6);
 }
 
-/* 3D flip used when a card is revealed (deal, board, showdown). Both animations end where the card rests (its fan and
-   lift) and hold their first frame through their delay only, so a card dealt or turned keeps its fan afterwards. */
+/* A card turning face up (deal, board, showdown): its turntable turns from back up to face up about its upright middle,
+   in perspective, evenly slowing in and out and never past face up (no overshoot, no change of size), so the edge-on
+   moment passes in one smooth frame. It holds its first frame (back up) through its delay. A card dealt flies in from
+   above (--deal-dx, --deal-dy) to where it rests (its fan and lift), slowing as it comes; dealt face down and turned
+   (deal-flip), its turn starts as it lands (--deal-turn-at). Transforms only, so both run off the main thread. */
 @keyframes jc-flip-in {
-  0% { transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-lift, 0px)) perspective(600px) rotateY(180deg) scale(0.6); opacity: 0; }
-  60% { transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-lift, 0px)) perspective(600px) rotateY(-10deg) scale(1.06); opacity: 1; }
-  100% { transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-lift, 0px)) perspective(600px) rotateY(0) scale(1); opacity: 1; }
+  0% { transform: perspective(calc(var(--card-w) * 5)) rotateY(180deg); }
+  100% { transform: perspective(calc(var(--card-w) * 5)) rotateY(0deg); }
 }
-.jc-flip-in {
-  animation: jc-flip-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
-  backface-visibility: hidden;
+.jc-flip-in > .jc-card-turn {
+  animation: jc-flip-in 0.5s cubic-bezier(0.45, 0, 0.2, 1) backwards;
 }
 @keyframes jc-deal-in {
   0% { transform: translate(var(--deal-dx, 0), var(--deal-dy, -120px)) rotate(-25deg) scale(0.4); opacity: 0; }
   100% { transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-lift, 0px)); opacity: 1; }
 }
 .jc-deal-in {
+  --deal-turn-at: 0.34s;
   animation: jc-deal-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
 /* A winner's cards shown after the hand (web Seat): they rest by the board, the move (--rx, --ry) and the size (--rs)
@@ -568,7 +591,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .jc-flip-in,
+  .jc-flip-in > .jc-card-turn,
   .jc-deal-in,
   .jc-reveal-in,
   .jc-pulse-gold::after,

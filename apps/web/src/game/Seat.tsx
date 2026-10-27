@@ -269,7 +269,8 @@ function SeatPlace(p: SeatProps) {
                   key={`${c ?? 'x'}-${i}`}
                   card={c ?? null}
                   size={cardSize}
-                  animate={p.still && (!c || p.still.has(c)) ? false : c ? 'flip' : 'deal'}
+                  // Mine are dealt face down like the rest and turn face up as they land.
+                  animate={p.still && (!c || p.still.has(c)) ? false : !c ? 'deal' : p.deal && p.isMe ? 'deal-flip' : 'flip'}
                   highlight={!!c && !!p.bestFive?.includes(c)}
                   dim={folded && !isShown(i)}
                   // Dealt round the table in order; cards turned later (a showdown) one after the other. The fan is a
