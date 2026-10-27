@@ -302,25 +302,78 @@ describe('the table’s background music', () => {
     expect(El.all[0]!.paused).toBe(false);
   });
 
-  it('in one tab at a time: a tab that starts it later takes it, and the first takes it back when focused', () => {
+  it('in one tab at a time: a tab that starts it later takes it, and the first takes it back when focused', async () => {
     vi.useFakeTimers();
     const now = vi.spyOn(Date, 'now');
     now.mockReturnValue(1_000);
     const a = setup();
     a.music.enter();
+    await vi.advanceTimersByTimeAsync(0);
     now.mockReturnValue(2_000);
     const b = setup();
     b.music.enter();
     const [elA, elB] = El.all;
-    vi.advanceTimersByTime(1_500);
+    await vi.advanceTimersByTimeAsync(1_500);
     expect(elA!.paused).toBe(true);
     expect(elB!.paused).toBe(false);
     expect(a.music.state().yielded).toBe(true);
     // Tab A focused again: it claims the music, and B yields.
     now.mockReturnValue(3_000);
     for (const fn of page.listeners.get('focus')?.slice(0, 1) ?? []) fn();
-    vi.advanceTimersByTime(1_500);
+    await vi.advanceTimersByTimeAsync(1_500);
     expect(elA!.paused).toBe(false);
     expect(elB!.paused).toBe(true);
+  });
+
+  it('a tab that cannot play takes nothing from the one playing: hidden, music off, audio locked or a play refused', async () => {
+    vi.useFakeTimers();
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000);
+    const a = setup();
+    a.music.enter();
+    await vi.advanceTimersByTimeAsync(0);
+    const elA = El.all[0]!;
+    const playsOn = async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(elA.paused).toBe(false);
+      expect(a.music.state().yielded).toBe(false);
+      expect(a.ctx.gains[0]!.gain.target).toBeCloseTo(MUSIC_TRIM * MUSIC_DEFAULT);
+    };
+
+    // A table opened in a background tab (B's page hidden while it opens: A is not told of it).
+    now.mockReturnValue(2_000);
+    const hidden = setup();
+    page.visibilityState = 'hidden';
+    hidden.music.enter();
+    page.visibilityState = 'visible';
+    await playsOn();
+    expect(hidden.music.state().playing).toBe(false);
+
+    // Music off, or audio not yet unlocked there.
+    now.mockReturnValue(3_000);
+    const off = setup({ musicOn: false });
+    off.music.enter();
+    const locked = setup();
+    locked.host.unlocked = false;
+    locked.music.enter();
+    await playsOn();
+
+    // A play the browser refuses before a tap.
+    now.mockReturnValue(4_000);
+    El.refuse = true;
+    const refused = setup();
+    refused.music.enter();
+    await playsOn();
+    expect(refused.music.state()).toMatchObject({ blocked: true, playing: false });
+    El.refuse = false;
+
+    // Once the locked tab is unlocked and plays, it takes the music and A yields.
+    now.mockReturnValue(5_000);
+    locked.host.unlocked = true;
+    locked.music.sync();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(locked.music.state().playing).toBe(true);
+    expect(a.music.state().yielded).toBe(true);
+    expect(elA.paused).toBe(true);
   });
 });

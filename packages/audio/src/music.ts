@@ -79,14 +79,17 @@ export class Music {
     private url: string,
   ) {}
 
-  /** A table opened: plays (or plays on, if it was being left for this one). */
+  /**
+   * A table opened: plays (or plays on, if it was being left for this one). It takes the music from another tab only
+   * once it plays itself: a hidden tab, one with the music off or audio still locked, opens its table in silence.
+   */
   enter() {
     if (this.leaving) clearTimeout(this.leaving);
     this.leaving = null;
     this.listen();
     if (!this.atTable) {
       this.atTable = true;
-      this.claim();
+      this.yielded = false;
     }
     this.sync();
   }
@@ -127,14 +130,24 @@ export class Music {
       this.gain.gain.setTargetAtTime(target, t, FADE_IN);
       const played = el.play();
       this.blocked = false;
-      void played?.catch((e: unknown) => {
-        // Refused before a gesture: the next one plays it. Any other failure: no music, the table as it is.
-        if (e instanceof Error && e.name === 'NotAllowedError') {
-          this.blocked = true;
-          this.host.needGesture();
-        }
-      });
-    } else this.gain.gain.setTargetAtTime(target, t, back ? FADE_IN : SLIDE);
+      // The other tabs are told once it plays, so a play refused takes nothing from them.
+      if (!played) this.claim();
+      void played?.then(
+        () => {
+          if (this.wanted()) this.claim();
+        },
+        (e: unknown) => {
+          // Refused before a gesture: the next one plays it. Any other failure: no music, the table as it is.
+          if (e instanceof Error && e.name === 'NotAllowedError') {
+            this.blocked = true;
+            this.host.needGesture();
+          }
+        },
+      );
+    } else {
+      if (back) this.claim();
+      this.gain.gain.setTargetAtTime(target, t, back ? FADE_IN : SLIDE);
+    }
   }
 
   private fadeOut() {
@@ -178,7 +191,6 @@ export class Music {
 
   /** Tells the other tabs this one plays now; the latest to say so plays. */
   private claim() {
-    this.yielded = false;
     this.claimedAt = Date.now();
     try {
       this.channel?.postMessage({ type: 'claim', tab: this.tab, at: this.claimedAt } satisfies Claim);
@@ -205,10 +217,9 @@ export class Music {
         this.channel = null;
       }
     }
-    // Shown or focused again, at a table: this tab takes the music back.
+    // Shown or focused again, at a table: this tab takes the music back, once it plays (sync).
     const back = () => {
-      if (!this.atTable || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return this.sync();
-      this.claim();
+      if (this.atTable && !(typeof document !== 'undefined' && document.visibilityState === 'hidden')) this.yielded = false;
       this.sync();
     };
     document.addEventListener('visibilitychange', back);
