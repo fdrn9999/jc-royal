@@ -26,6 +26,7 @@ const ko = {
   'table.currentHandTiny': '공개 카드 기준',
   'table.actionHelp': '액션 도움말',
   'table.canDo': '할 수 있는 행동',
+  'table.guide': '지금 안내',
   'table.toAcademy': '포커 아카데미',
   'stageInfo.preflop': '프리플랍 · 홀카드 2장으로 하는 첫 베팅 라운드',
   'stageInfo.flop': '플랍 · 커뮤니티 카드 3장 공개, 두 번째 베팅 라운드',

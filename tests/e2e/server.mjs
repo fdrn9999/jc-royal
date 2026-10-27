@@ -48,6 +48,8 @@ writeFileSync(
    ('e2e-tx6', 'E2E Text 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-tx9', 'E2E Text 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-stable', 'E2E Stable', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-stable-c', 'E2E Stable Coach', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6),
    ('e2e-deep', 'E2E Deep', 2, 1, 3, 30, 10000, 60, 1, 'normal', 1, 2);
+   INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, bots_enabled, bot_level, bot_max, bot_fill_to, beginner) VALUES
+   ('e2e-dock-bots', 'E2E Dock Bots', 6, 1, 2, 20, 200, 60, 1, 'normal', 3, 4, 0);
    INSERT INTO bot_policies (version, enabled, fund_limit, max_bots, change, reason) VALUES (2, 1, 1000000, 20, 'policy', 'e2e seed');
    INSERT INTO referral_policies (version, enabled, paused, referrer_amount, invitee_amount, daily_cap, total_cap, min_hands, burst_limit, change, reason) VALUES (2, 1, 0, 1000, 1000, 5, 50, 0, 20, 'policy', 'e2e seed');`,
 );

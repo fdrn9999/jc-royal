@@ -26,6 +26,7 @@ export const en: Dict = {
   'table.currentHandTiny': 'from cards shown',
   'table.actionHelp': 'Action help',
   'table.canDo': 'You can',
+  'table.guide': 'Right now',
   'table.toAcademy': 'Poker Academy',
   'stageInfo.preflop': 'Preflop · first betting round on your two hole cards',
   'stageInfo.flop': 'Flop · three community cards, second betting round',

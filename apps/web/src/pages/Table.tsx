@@ -30,7 +30,7 @@ import { LinkShare } from '../components/Share';
 import { ANY, parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
 import type { ReportSubject } from '../components/Social';
-import { ActionHelp, CurrentHandPill, StageNote } from '../game/BeginnerAids';
+import { ActionHelp, CurrentHandPill, StageNote, useNotesFit } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
 import { TimeBankButton } from '../game/TimeBank';
@@ -88,12 +88,14 @@ const secondsTo = (target: number) => Math.max(0, Math.ceil((target - Date.now()
  * time bank over the action bar, and in the raise panel's card while it is open (ActionBar's `bank`: 168px holds the card
  * alone, and a 375×667 phone's table stays 431px high, where nine seats keep inside the screen and six keep their bets by
  * them), and keeps the reaction tray two rows high; wider, they are beside it and one row. The notes and the tip have
- * room of their own only while it leaves the table `--dock-max` (about 18rem high, Table): past that they scroll in what
- * is left (dock-notes), and the time bank and the action bar keep theirs.
+ * room of their own only while it leaves the table `--dock-max` (`--table-min` high: what six seats need to lie clear of
+ * each other and the board, layout.ts, about 22.5rem on a phone and 20rem wider, with the table's top margin): past
+ * that they step down to fewer lines (useNotesFit) and at last scroll in what is left (dock-notes), and the time bank and
+ * the action bar keep theirs. A phone's beginner band keeps at least the one line the notes step down to (13.25rem).
  */
 function dockBand(beginner: boolean, coach: boolean) {
-  if (beginner && coach) return '[--dock:max(11rem,min(24.5rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(18rem,var(--dock-max,100vh)))]';
-  if (beginner) return '[--dock:max(11rem,min(19rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(14rem,var(--dock-max,100vh)))]';
+  if (beginner && coach) return '[--dock:max(13.25rem,min(24.5rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(18rem,var(--dock-max,100vh)))]';
+  if (beginner) return '[--dock:max(13.25rem,min(19rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(14rem,var(--dock-max,100vh)))]';
   if (coach) return '[--dock:max(11rem,min(19.25rem,var(--dock-max,100vh)))] sm:[--dock:max(11rem,min(15rem,var(--dock-max,100vh)))]';
   return '[--dock:10.5rem]';
 }
@@ -495,6 +497,12 @@ export function TablePage() {
   const turnNote = useMemo(() => (!short && myTurn ? <TurnBanner deadline={deadline} inSeat /> : undefined), [short, myTurn, deadline]);
   const handNoteOn = !short && !prefs.beginner && prefs.showHand && seated;
   const handNote = useMemo(() => (handNoteOn && s ? <CurrentHandPill s={s} inline /> : undefined), [handNoteOn, s]);
+  // A beginner's notes in the band (dock-notes): as many as its room holds, one less each step (useNotesFit): the street's
+  // note, my hand on one line, then only one line, my hand and the "?" whose guide says all of it.
+  const [notesBox, setNotesBox] = useState<HTMLDivElement | null>(null);
+  const myView = mySeat !== null ? s?.seats[mySeat] : undefined;
+  const notesKey = [hand?.id, hand?.stage, hand?.board.length, JSON.stringify(myView?.holeCards ?? null), myView?.state, s?.you.legal.map((o) => o.type).join(), myTurn, locale, tip?.key, short, prefs.showHand].join('|');
+  const notesFit = useNotesFit(notesBox, prefs.beginner && hand ? 3 : 0, notesKey);
 
   // After every hook: a draw that returned before them would run fewer hooks than the one before, which React refuses.
   if (sock.status === 'unauthorized') {
@@ -653,11 +661,11 @@ export function TablePage() {
           ref={colRef}
           className={cx(
             'jc-game-surface relative flex min-w-0 flex-1 flex-col',
-            !short && '[--dock-b:max(0.5rem,env(safe-area-inset-bottom))] sm:[--dock-b:1.5rem]',
+            !short && '[--dock-b:max(0.5rem,env(safe-area-inset-bottom))] sm:[--dock-b:1.5rem] [--table-min:22.75rem] sm:[--table-min:21.5rem]',
             !short && dockBand(prefs.beginner, coachBand.current),
           )}
-          // The most of the column the notes may take: what leaves the table about 18rem (its top margin included).
-          style={!short && col.h > 0 ? { ['--dock-max' as string]: `calc(${col.h}px - var(--dock-b) - 18.25rem)` } : undefined}
+          // The most of the column the notes may take: what leaves the table `--table-min` (its top margin included).
+          style={!short && col.h > 0 ? { ['--dock-max' as string]: `calc(${col.h}px - var(--dock-b) - var(--table-min))` } : undefined}
         >
           {/* The table's area: the column less the dock's band below it (short: less the dock's column beside it). */}
           <div
@@ -744,18 +752,18 @@ export function TablePage() {
               <CurrentHandPill s={s} compact className="group-has-[[data-raise-open]]/stack:hidden" />
             )}
             {s && ((prefs.beginner && hand) || tip) && (
-              // A beginner's notes and the coach's tip, one part of the band: it scrolls in what the time bank and the action
-              // bar leave it (nothing but its gap, at the least), so they never push the bar out of the band. Short, the
-              // column scrolls as a whole instead, as it did.
+              // A beginner's notes and the coach's tip, one part of the band: what the time bank and the action bar leave
+              // it, so they never push the bar out of the band. What its room does not hold steps down to the "?" and its
+              // guide (notesFit), which is a panel over the page; it scrolls only past the last step.
               <div
-                className={cx('flex w-full flex-col gap-[inherit]', short ? 'shrink-0 items-stretch *:w-full! *:max-w-none!' : 'min-h-0 items-center overflow-y-auto sm:items-end')}
+                ref={setNotesBox}
+                className={cx('flex min-h-0 w-full flex-1 flex-col justify-end-safe gap-[inherit] overflow-y-auto', short ? 'items-stretch *:w-full! *:max-w-none!' : 'items-center sm:items-end')}
                 data-testid="dock-notes"
               >
-                {prefs.beginner && hand && (
-                  // The street note (the header names the street too) gives the raise panel its line; both give the help theirs.
-                  <div className="flex flex-col items-center gap-1.5 group-has-[[data-testid=action-help]]/stack:hidden sm:items-end">
-                    <StageNote s={s} className="group-has-[[data-raise-open]]/stack:hidden" />
-                    {seated && prefs.showHand && <CurrentHandPill s={s} />}
+                {prefs.beginner && hand && notesFit < 3 && (
+                  <div className="flex flex-col items-center gap-1.5 sm:items-end">
+                    {notesFit < 2 && <StageNote s={s} className="group-has-[[data-raise-open]]/stack:hidden" />}
+                    {seated && prefs.showHand && (notesFit === 0 ? <CurrentHandPill s={s} /> : <CurrentHandPill s={s} compact wrap />)}
                   </div>
                 )}
                 {tip && (
@@ -774,7 +782,9 @@ export function TablePage() {
                     </button>
                   </div>
                 )}
-                {myTurn && prefs.beginner && <ActionHelp s={s} className="group-has-[[data-raise-open]]/stack:hidden" />}
+                {prefs.beginner && hand && (myTurn || notesFit >= 3) && (
+                  <ActionHelp s={s} merged={notesFit >= 3} showHand={seated && prefs.showHand} area={colRef} sides={short ? ['left', 'top'] : ['top', 'bottom']} className="group-has-[[data-raise-open]]/stack:hidden" />
+                )}
               </div>
             )}
             {s && myTurn && (

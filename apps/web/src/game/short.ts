@@ -1,13 +1,13 @@
 /**
- * A short, wide screen: a phone held sideways (844×390, 800×360) or a short window. The table screen then keeps its
+ * A short, wide screen: a phone held sideways (844×390, 800×360, the smallest 568×320) or a short window. The table screen then keeps its
  * controls in a column at the right edge and gives the felt the full height, which nine seats with cards need (a bar
- * below the table leaves them 286px of the 354px or more they take). Wider than a phone held upright, so the column
+ * below the table leaves them 286px of the 354px or more they take; a 568×320 one, 80px). Wider than a phone held upright, so the column
  * never takes a phone's width; no taller than a landscape phone, so a tablet or a laptop keeps the bar below.
  */
 import { useSyncExternalStore } from 'react';
 import type { LayoutOptions } from './TableScene';
 
-export const SHORT_QUERY = '(min-width: 640px) and (max-height: 500px)';
+export const SHORT_QUERY = '(min-width: 560px) and (max-height: 500px)';
 
 function subscribe(onChange: () => void) {
   const m = window.matchMedia?.(SHORT_QUERY);
