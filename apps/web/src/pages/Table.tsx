@@ -180,6 +180,11 @@ export function TablePage() {
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => sound.installAutoUnlock(), []);
+  // The table's music: on for the table's whole life (a hand, a reconnect, a move to another table goes on with it).
+  useEffect(() => {
+    sound.music.enter();
+    return () => sound.music.leave();
+  }, []);
   // iOS Safari ignores user-scalable=no; block pinch zoom on the game screen except in the chat panel.
   useEffect(() => {
     const block = (e: Event) => {

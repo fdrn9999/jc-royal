@@ -425,6 +425,8 @@ export const en: Dict = {
   'settings.master': 'Master volume',
   'settings.effects': 'Effects volume',
   'settings.mute': 'Mute',
+  'settings.music': 'Background music',
+  'settings.musicVolume': 'Music volume',
   'settings.theme': 'Table theme',
   'settings.language': 'Language',
   'settings.amountUnit': 'Amounts in',

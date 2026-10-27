@@ -29,6 +29,7 @@ export {
   MedalIcon,
   MessageCircleIcon,
   MinusIcon,
+  MusicIcon,
   PauseIcon,
   PencilIcon,
   PinIcon,

@@ -425,6 +425,8 @@ const ko = {
   'settings.master': '마스터 볼륨',
   'settings.effects': '효과음 볼륨',
   'settings.mute': '음소거',
+  'settings.music': '배경음악',
+  'settings.musicVolume': '배경음악 볼륨',
   'settings.theme': '테이블 테마',
   'settings.language': '언어',
   'settings.amountUnit': '금액 표시 단위',

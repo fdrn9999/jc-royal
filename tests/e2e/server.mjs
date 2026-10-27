@@ -42,6 +42,7 @@ writeFileSync(
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, bots_enabled, bot_level, bot_max, bot_fill_to) VALUES
    ('e2e-bots-m', 'E2E Bots Mobile', 6, 5, 10, 100, 1000, 60, 1, 'normal', 2, 3), ('e2e-bots-admin', 'E2E Bots Admin', 2, 5, 10, 100, 1000, 60, 1, 'hard', 1, 2),
    ('e2e-nine', 'E2E Nine', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9), ('e2e-sound', 'E2E Sound', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2),
+   ('e2e-music', 'E2E Music', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-music-b', 'E2E Music B', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2),
    ('e2e-phones', 'E2E Phones', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-flip', 'E2E Flip', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2),
    ('e2e-ov2', 'E2E Overlap 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-ov6', 'E2E Overlap 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-ov9', 'E2E Overlap 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-bd2', 'E2E Board 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-bd6', 'E2E Board 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-bd9', 'E2E Board 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
