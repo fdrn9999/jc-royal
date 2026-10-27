@@ -1,0 +1,1 @@
+ALTER TABLE `bot_profiles` ADD `buy_in_bb` integer;

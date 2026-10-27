@@ -19,6 +19,7 @@ import {
   type AutoBuyPolicy,
   type AutoBuyRequest,
   blindsAt,
+  botBuyInOf,
   botPlayOf,
   type BotLevel,
   type BotProfile,
@@ -259,7 +260,6 @@ const BOT_THINK_MS = { min: 700, max: 2_200 };
 /** Back-off after a failed bot join, doubling with each failure in a row up to the maximum. */
 const BOT_RETRY_MS = { first: 60_000, max: 30 * 60_000 };
 /** A bot sits down with this many big blinds, within the table's buy-in range. */
-const BOT_BUY_IN_BB = 100;
 /** The seated bots' settings are read again at a deal this long after the last read, should a change not have reached the room. */
 const BOT_SYNC_MS = 5 * 60_000;
 /**
@@ -2497,8 +2497,8 @@ export class TableRoom extends DurableObject<Env> {
   }
 
   /**
-   * Seats one bot in the first free seat with BOT_BUY_IN_BB big blinds (within the table's range), the way `sit` seats a
-   * member: the seat is held durably before any chips move, so a restart half way is settled by `recoverPendingSeats`.
+   * Seats one bot in the first free seat with its own buy-in (botBuyInOf: its big blinds or the default, within the
+   * table's range), the way `sit` seats a member: the seat is held durably before any chips move, so a restart half way is settled by `recoverPendingSeats`.
    * When no bot can sit (bots switched off, the fund or the service's bot count used up, D1 unreachable), the next try
    * waits, longer after each failure in a row.
    */
@@ -2506,13 +2506,13 @@ export class TableRoom extends DurableObject<Env> {
     const t = this.table!;
     const seatIndex = this.room.seats.findIndex((s, i) => !s && i < t.maxSeats && !this.handHolds(i));
     if (seatIndex < 0) return;
-    const amount = Math.min(t.maxBuyIn, Math.max(t.minBuyIn, BOT_BUY_IN_BB * t.bigBlind));
     let failure: string = 'busy';
     try {
       const exclude = this.room.seats.flatMap((s) => (s?.bot ? [s.userId] : []));
       for (let attempt = 0; attempt < 3; attempt++) {
         const bot = await pickBot(this.env.DB, exclude);
         const play = botPlayOf(bot.id, bot.profile, t.bots);
+        const amount = botBuyInOf(bot.profile, t);
         const seat: SeatState = {
           userId: bot.id,
           nickname: bot.nickname,

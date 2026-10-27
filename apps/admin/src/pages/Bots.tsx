@@ -8,7 +8,7 @@
  * applies at each table between hands; a bot in a hand plays it out.
  */
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
-import { BOT_LEVELS, BOT_STYLES, type BotLevel, type BotPlay, type BotProfile, type BotStyle, type BotTableStyle } from '@jc/types';
+import { BOT_BUY_IN_BB, BOT_LEVELS, BOT_STYLES, type BotLevel, type BotPlay, type BotProfile, type BotStyle, type BotTableStyle } from '@jc/types';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
@@ -712,15 +712,26 @@ interface BotAccount {
   updatedBy: string | null;
   /** The style a table on `auto` gives it. */
   auto: BotStyle;
-  seat: { tableId: string; tableName: string; seatIndex: number; since: number; table: { level: BotLevel; style: BotTableStyle } } | null;
+  /** `buyIn`: the chips it sat down with there. */
+  seat: { tableId: string; tableName: string; seatIndex: number; since: number; buyIn: number; table: { level: BotLevel; style: BotTableStyle } & TableBuyIn } | null;
   /** How it plays at that table from the next hand. */
   effective: BotPlay | null;
   play: { hands: number; counted: number; vpip: number; pfr: number; net: number; af: { hands: number; aggressive: number; calls: number } };
   result: number;
 }
 interface BotAccounts { days: number; total: number; limit: number; offset: number; afHands: number; items: BotAccount[] }
-interface ProfileTable { id: string; name: string; level: BotLevel; style: BotTableStyle }
-interface ProfilePreview { from: BotProfile; to: BotProfile; auto: BotStyle; table: ProfileTable | null; effective: { from: BotPlay; to: BotPlay } | null; appliesFrom: 'next_hand' | 'next_seat' }
+interface TableBuyIn { bigBlind: number; minBuyIn: number; maxBuyIn: number }
+interface ProfileTable extends TableBuyIn { id: string; name: string; level: BotLevel; style: BotTableStyle }
+/** `buyIn`: the chips it would sit down with at that table, before and after (`seated`: what it sat down with now). */
+interface ProfilePreview {
+  from: BotProfile;
+  to: BotProfile;
+  auto: BotStyle;
+  table: ProfileTable | null;
+  effective: { from: BotPlay; to: BotPlay } | null;
+  appliesFrom: 'next_hand' | 'next_seat';
+  buyIn: { from: number; to: number; seated: number } | null;
+}
 
 /** Where a level or style comes from: the account's own, the table's, or the account's auto style. */
 function From({ from }: { from: BotPlay['styleFrom'] }) {
@@ -781,6 +792,7 @@ function AccountsPanel({ days, onNote }: { days: number; onNote: (n: Note) => vo
               t('botsColBotId'),
               t('botsLevel'),
               t('botsStyle'),
+              t('botsBuyIn'),
               t('botsColTableNow'),
               t('status'),
               t('botsColHands'),
@@ -798,6 +810,14 @@ function AccountsPanel({ days, onNote }: { days: number; onNote: (n: Note) => vo
                 <td className={`${td} max-w-[9rem] truncate font-mono text-[11px] text-ink-400`} title={r.id}>{r.id}</td>
                 <td className={`${td} whitespace-nowrap`} data-testid="bot-acct-level">{level(r)}</td>
                 <td className={`${td} whitespace-nowrap`} data-testid="bot-acct-style">{style(r)}</td>
+                <td className={`${td} whitespace-nowrap`} data-testid="bot-acct-buyin">
+                  {r.profile?.buyInBb ? (
+                    <>{t('botsBuyInBb', { n: r.profile.buyInBb })} <From from="bot" /></>
+                  ) : (
+                    <span className="text-ink-400">{t('botsBuyInDefault', { n: BOT_BUY_IN_BB.default })}</span>
+                  )}
+                  {r.seat && <p className="text-[11px] text-ink-400">{t('botsBuyInSeat', { n: formatChips(r.seat.buyIn) })}</p>}
+                </td>
                 <td className={`${td} text-xs`}>
                   {r.seat ? (
                     <>
@@ -847,21 +867,27 @@ function AccountsPanel({ days, onNote }: { days: number; onNote: (n: Note) => vo
 }
 
 /**
- * A bot's own level and style, each set or left to the table: a preview of the old and new values (and how it plays at
- * the table it sits at), then the password and a reason. Another administrator's change meanwhile reloads the list.
+ * A bot's own level, style and buy-in, each set or left to the table (the buy-in to the default): a preview of the old
+ * and new values (how it plays at the table it sits at, and what it would sit down with there), then the password and a
+ * reason. Another administrator's change meanwhile reloads the list.
  */
 function ProfileEditor({ bot, onClose, onDone }: { bot: BotAccount; onClose: () => void; onDone: (n: Note) => Promise<void> }) {
   const { t } = useT();
   const { api } = useAdmin();
   const [level, setLevel] = useState<BotLevel | ''>(bot.profile?.level ?? '');
   const [style, setStyle] = useState<BotStyle | ''>(bot.profile?.style ?? '');
+  const [bb, setBb] = useState(bot.profile?.buyInBb ? String(bot.profile.buyInBb) : '');
   const [pv, setPv] = useState<ProfilePreview | null>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const body = { baseUpdatedAt: bot.updatedAt, level: level || null, style: style || null };
-  const same = (bot.profile?.level ?? null) === body.level && (bot.profile?.style ?? null) === body.style;
+  const buyInBb = bb.trim() === '' ? null : Number(bb);
+  const bbBad = buyInBb !== null && !(Number.isInteger(buyInBb) && buyInBb >= BOT_BUY_IN_BB.min && buyInBb <= BOT_BUY_IN_BB.max);
+  const body = { baseUpdatedAt: bot.updatedAt, level: level || null, style: style || null, buyInBb };
+  const same = (bot.profile?.level ?? null) === body.level && (bot.profile?.style ?? null) === body.style && (bot.profile?.buyInBb ?? null) === body.buyInBb;
   const table = bot.seat?.table ?? null;
+  const bbText = (n: number | null | undefined) => (n ? t('botsBuyInBb', { n }) : t('botsBuyInDefault', { n: BOT_BUY_IN_BB.default }));
+  const bbRange = t('botsBuyInRange', { min: BOT_BUY_IN_BB.min, max: BOT_BUY_IN_BB.max, n: BOT_BUY_IN_BB.default });
   const tableStyle = (s: BotTableStyle) => (s === 'auto' ? `${botStyleLabel(t, 'auto')} (${botStyleLabel(t, bot.auto)})` : botStyleLabel(t, s));
   const own = (v: string | null, label: (x: string) => string) => (v ? label(v) : t('botsFollowTable'));
   const play = (p: BotPlay) => `${botLevelLabel(t, p.level)} · ${botStyleLabel(t, p.style)}`;
@@ -912,7 +938,7 @@ function ProfileEditor({ bot, onClose, onDone }: { bot: BotAccount; onClose: () 
         ) : (
           <>
             <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
-            <Button type="submit" form="bot-profile-form" disabled={same} loading={busy} data-testid="bot-profile-preview">{t('refillPreviewBtn')}</Button>
+            <Button type="submit" form="bot-profile-form" disabled={same || bbBad} loading={busy} data-testid="bot-profile-preview">{t('refillPreviewBtn')}</Button>
           </>
         )
       }
@@ -924,6 +950,7 @@ function ProfileEditor({ bot, onClose, onDone }: { bot: BotAccount; onClose: () 
               [
                 ['botsLevel', own(pv.from.level, (x) => botLevelLabel(t, x)), own(pv.to.level, (x) => botLevelLabel(t, x))],
                 ['botsStyle', own(pv.from.style, (x) => botStyleLabel(t, x)), own(pv.to.style, (x) => botStyleLabel(t, x))],
+                ['botsBuyIn', bbText(pv.from.buyInBb), bbText(pv.to.buyInBb)],
               ] as [Key, string, string][]
             ).map(([k, from, to]) => (
               <li key={k} className={from === to ? 'text-ink-400' : 'font-semibold'} data-changed={from !== to}>
@@ -936,9 +963,21 @@ function ProfileEditor({ bot, onClose, onDone }: { bot: BotAccount; onClose: () 
               <span className="text-ink-400">{t('botsProfilePlays', { table: pv.table.name })}:</span> {t('histChange', { from: play(pv.effective.from), to: play(pv.effective.to) })}
             </p>
           )}
-          <p className="rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2 text-ink-200" data-testid="bot-profile-applies">
-            {pv.table ? t('botsProfileApplyHand', { table: pv.table.name }) : t('botsProfileApplySeat')}
-          </p>
+          {pv.table && pv.buyIn && pv.buyIn.from !== pv.buyIn.to && (
+            <p className="text-ink-200" data-testid="bot-profile-buyin-next">
+              <span className="text-ink-400">{t('botsBuyInNext', { table: pv.table.name })}:</span> {t('histChange', { from: formatChips(pv.buyIn.from), to: formatChips(pv.buyIn.to) })}
+            </p>
+          )}
+          {(pv.from.level !== pv.to.level || pv.from.style !== pv.to.style) && (
+            <p className="rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2 text-ink-200" data-testid="bot-profile-applies">
+              {pv.table ? t('botsProfileApplyHand', { table: pv.table.name }) : t('botsProfileApplySeat')}
+            </p>
+          )}
+          {(pv.from.buyInBb ?? null) !== (pv.to.buyInBb ?? null) && (
+            <p className="rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2 text-ink-200" data-testid="bot-profile-buyin-applies">
+              {t('botsBuyInApplies')}
+            </p>
+          )}
           <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="bot-profile-reason" />}</Field>
           <p className="text-xs text-ink-400">{t('pvBasis')}</p>
         </div>
@@ -965,16 +1004,39 @@ function ProfileEditor({ bot, onClose, onDone }: { bot: BotAccount; onClose: () 
               </select>
             )}
           </Field>
+          <Field label={t('botsBuyIn')} hint={bbRange} error={bbBad ? bbRange : null}>
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                inputMode="numeric"
+                min={BOT_BUY_IN_BB.min}
+                max={BOT_BUY_IN_BB.max}
+                step={1}
+                value={bb}
+                placeholder={bbText(null)}
+                aria-invalid={bbBad}
+                onChange={(e) => setBb(e.target.value)}
+                data-testid="bot-profile-buyin"
+              />
+            )}
+          </Field>
+          {bot.seat && table && (
+            <p className="-mt-1 text-xs text-ink-400" data-testid="bot-profile-buyin-table">
+              {t('botsBuyInTable', { table: bot.seat.tableName, min: formatChips(table.minBuyIn), max: formatChips(table.maxBuyIn), now: formatChips(bot.seat.buyIn) })}
+            </p>
+          )}
           {bot.profile && (
             <Button
               type="button"
               variant="subtle"
               size="sm"
               className="self-start"
-              disabled={level === '' && style === ''}
+              disabled={level === '' && style === '' && bb === ''}
               onClick={() => {
                 setLevel('');
                 setStyle('');
+                setBb('');
               }}
               data-testid="bot-profile-reset"
             >

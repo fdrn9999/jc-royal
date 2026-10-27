@@ -12,7 +12,7 @@
  * twice; chips issued for a buy-in that then did not happen stay in the bot's wallet for its next one.
  */
 import { applyLedger } from '@jc/db';
-import { BOT_LEVELS, BOT_STYLES, type BotLevel, type BotProfile, type BotStyle } from '@jc/types';
+import { BOT_BUY_IN_BB, BOT_LEVELS, BOT_STYLES, type BotLevel, type BotProfile, type BotStyle } from '@jc/types';
 import { buyIn } from './settlement';
 
 export interface BotAccount {
@@ -23,12 +23,14 @@ export interface BotAccount {
   profile: BotProfile | null;
 }
 
-/** A bot_profiles row as the room uses it: a value this build does not know follows the table, as if unset. */
-export function profileOf(r: { level?: unknown; style?: unknown } | null | undefined): BotProfile | null {
+/** A bot_profiles row as the room uses it: a value this build does not know follows the table (or the default), as if unset. */
+export function profileOf(r: { level?: unknown; style?: unknown; buyInBb?: unknown } | null | undefined): BotProfile | null {
   if (!r) return null;
+  const bb = Number(r.buyInBb);
   return {
     level: BOT_LEVELS.includes(r.level as BotLevel) ? (r.level as BotLevel) : null,
     style: BOT_STYLES.includes(r.style as BotStyle) ? (r.style as BotStyle) : null,
+    buyInBb: r.buyInBb != null && Number.isInteger(bb) && bb >= BOT_BUY_IN_BB.min && bb <= BOT_BUY_IN_BB.max ? bb : null,
   };
 }
 
@@ -36,9 +38,9 @@ export function profileOf(r: { level?: unknown; style?: unknown } | null | undef
 export async function readBotProfiles(d1: D1Database, ids: string[]): Promise<Map<string, BotProfile>> {
   if (!ids.length) return new Map();
   const { results } = await d1
-    .prepare(`SELECT bot_id AS id, level, style FROM bot_profiles WHERE bot_id IN (${ids.map((_, i) => `?${i + 1}`).join(', ')})`)
+    .prepare(`SELECT bot_id AS id, level, style, buy_in_bb AS buyInBb FROM bot_profiles WHERE bot_id IN (${ids.map((_, i) => `?${i + 1}`).join(', ')})`)
     .bind(...ids)
-    .all<{ id: string; level: unknown; style: unknown }>();
+    .all<{ id: string; level: unknown; style: unknown; buyInBb: unknown }>();
   return new Map(results.map((r) => [r.id, profileOf(r)!]));
 }
 
@@ -74,13 +76,13 @@ export async function pickBot(d1: D1Database, exclude: string[]): Promise<BotAcc
   const marks = exclude.map((_, i) => `?${i + 1}`).join(', ');
   const r = await d1
     .prepare(
-      `SELECT u.id, u.nickname, u.balance, p.bot_id AS profiled, p.level, p.style FROM users u LEFT JOIN bot_profiles p ON p.bot_id = u.id
+      `SELECT u.id, u.nickname, u.balance, p.bot_id AS profiled, p.level, p.style, p.buy_in_bb AS buyInBb FROM users u LEFT JOIN bot_profiles p ON p.bot_id = u.id
         WHERE u.is_bot = 1 AND u.status = 'active'${exclude.length ? ` AND u.id NOT IN (${marks})` : ''}
          AND NOT EXISTS (SELECT 1 FROM table_sessions s WHERE s.user_id = u.id AND s.status = 'seated')
        ORDER BY u.balance DESC LIMIT 1`,
     )
     .bind(...exclude)
-    .first<{ id: string; nickname: string; balance: number; profiled: string | null; level: unknown; style: unknown }>();
+    .first<{ id: string; nickname: string; balance: number; profiled: string | null; level: unknown; style: unknown; buyInBb: unknown }>();
   return r ? { id: r.id, nickname: r.nickname, balance: Number(r.balance), profile: r.profiled ? profileOf(r) : null } : createBot(d1);
 }
 

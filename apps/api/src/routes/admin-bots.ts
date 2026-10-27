@@ -9,15 +9,16 @@
  * - Anyone with the feature may switch bots off in an emergency (password and reason); only a super admin switches
  *   them on again, through the policy.
  * - Which tables allow bots, and how (level, style, counts, giving up a seat), is each table's setting (PATCH /tables/:id).
- * - Each bot account may have its own level and style (bot_profiles), over the table's (BotProfile, botPlayOf): anyone
- *   with the feature, with the password, a reason and a preview. The table it sits at reads it again at once and deals
- *   it from the next hand; a hand under way is played out as it was dealt.
+ * - Each bot account may have its own level and style (bot_profiles), over the table's (BotProfile, botPlayOf), and its
+ *   own buy-in in big blinds (botBuyInOf): anyone with the feature, with the password, a reason and a preview. The table
+ *   it sits at reads it again at once and deals it from the next hand; a hand under way is played out as it was dealt.
+ *   The buy-in counts from the next time it sits down: the stack at a seat it holds never changes.
  * - The fund's books are read here, never corrected here: what the fund issued (bot_fund.issued) must equal its ledger
  *   rows, each bot's wallet its ledger, and the bots' result against members is
  *   bot wallets + chips bots took to tables − issued. A correction goes through reconciliation like any other.
  */
 import { BOT_STAT_KEYS, botStatMetric, dayStart, statsDay, STATS_DAY, type BotStatKey } from '@jc/db';
-import { BOT_LEVELS, BOT_STYLES, botPlayOf, styleFor, type BotLevel, type BotProfile, type BotStyle, type BotTableStyle } from '@jc/types';
+import { BOT_BUY_IN_BB, BOT_LEVELS, BOT_STYLES, botBuyInOf, botPlayOf, styleFor, type BotLevel, type BotProfile, type BotStyle, type BotTableStyle } from '@jc/types';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -44,6 +45,8 @@ const ProfileFields = {
   /** Null follows the table the bot sits at. */
   level: z.enum(BOT_LEVELS).nullable(),
   style: z.enum(BOT_STYLES).nullable(),
+  /** Big blinds it sits down with; null: the default; left out: as it is now. */
+  buyInBb: z.number().int().min(BOT_BUY_IN_BB.min).max(BOT_BUY_IN_BB.max).nullable().optional(),
 };
 const ProfileSchema = z.object({ ...ProfileFields, reason: ReasonSchema });
 const ProfilePreviewSchema = z.object({ ...ProfileFields, reason: ReasonSchema.optional() });
@@ -91,13 +94,26 @@ function conflict(current: BotPolicy | null): never {
 const levelOf = (v: unknown): BotLevel | null => (BOT_LEVELS.includes(v as BotLevel) ? (v as BotLevel) : null);
 const styleOf = (v: unknown): BotStyle | null => (BOT_STYLES.includes(v as BotStyle) ? (v as BotStyle) : null);
 const tableStyleOf = (v: unknown): BotTableStyle => (v === 'auto' ? 'auto' : (styleOf(v) ?? 'auto'));
+const buyInBbOf = (v: unknown): number | null => {
+  const n = Number(v);
+  return v != null && Number.isInteger(n) && n >= BOT_BUY_IN_BB.min && n <= BOT_BUY_IN_BB.max ? n : null;
+};
+/** A bot_profiles row (`profiled`: the row's key, null without one). */
+const profileRow = (r: Record<string, unknown>): BotProfile | null =>
+  r.profiled ? { level: levelOf(r.level), style: styleOf(r.style), buyInBb: buyInBbOf(r.buyInBb) } : null;
+/** A table's blinds and buy-in range, as botBuyInOf reads them. */
+const tableBuyIn = (r: Record<string, unknown>) => ({ bigBlind: Number(r.bigBlind), minBuyIn: Number(r.minBuyIn), maxBuyIn: Number(r.maxBuyIn) });
 
-/** A bot's own settings, the table it sits at (if any) with that table's, and the account's automatic style. */
+/**
+ * A bot's own settings, the table it sits at (if any) with that table's (and its blinds and buy-in range), the chips it
+ * sat down there with, and the account's automatic style.
+ */
 async function botProfile(db: D1Database, id: string) {
   const r = await db
     .prepare(
-      `SELECT u.id, u.nickname, u.is_bot AS isBot, p.bot_id AS profiled, p.level, p.style, p.updated_at AS updatedAt,
-              s.table_id AS tableId, t.name AS tableName, t.bot_level AS tableLevel, t.bot_style AS tableStyle
+      `SELECT u.id, u.nickname, u.is_bot AS isBot, p.bot_id AS profiled, p.level, p.style, p.buy_in_bb AS buyInBb, p.updated_at AS updatedAt,
+              s.table_id AS tableId, s.buy_in AS seatBuyIn, t.name AS tableName, t.bot_level AS tableLevel, t.bot_style AS tableStyle,
+              t.big_blind AS bigBlind, t.min_buy_in AS minBuyIn, t.max_buy_in AS maxBuyIn
          FROM users u LEFT JOIN bot_profiles p ON p.bot_id = u.id
          LEFT JOIN table_sessions s ON s.user_id = u.id AND s.status = 'seated' LEFT JOIN tables t ON t.id = s.table_id
         WHERE u.id = ?1 LIMIT 1`,
@@ -105,9 +121,11 @@ async function botProfile(db: D1Database, id: string) {
     .bind(id)
     .first<Record<string, unknown>>();
   if (!r || Number(r.isBot) !== 1) fail(404, 'not_found', 'bot not found');
-  const profile: BotProfile | null = r.profiled ? { level: levelOf(r.level), style: styleOf(r.style) } : null;
-  const table = r.tableId ? { id: String(r.tableId), name: String(r.tableName), level: levelOf(r.tableLevel) ?? 'normal', style: tableStyleOf(r.tableStyle) } : null;
-  return { id: String(r.id), nickname: String(r.nickname), profile, updatedAt: profile ? Number(r.updatedAt) : null, table };
+  const profile = profileRow(r);
+  const table = r.tableId
+    ? { id: String(r.tableId), name: String(r.tableName), level: levelOf(r.tableLevel) ?? 'normal', style: tableStyleOf(r.tableStyle), ...tableBuyIn(r) }
+    : null;
+  return { id: String(r.id), nickname: String(r.nickname), profile, updatedAt: profile ? Number(r.updatedAt) : null, table, seatBuyIn: table ? Number(r.seatBuyIn) : null };
 }
 
 function profileConflict(current: Awaited<ReturnType<typeof botProfile>>): never {
@@ -301,7 +319,7 @@ export const adminBotRoutes = new Hono<AppEnv>()
       db
         .prepare(
           `SELECT u.id, u.nickname, u.status, u.balance, u.created_at AS createdAt, p.bot_id AS profiled, p.level, p.style,
-                  p.updated_at AS updatedAt, pu.nickname AS updatedBy
+                  p.buy_in_bb AS buyInBb, p.updated_at AS updatedAt, pu.nickname AS updatedBy
              FROM users u LEFT JOIN bot_profiles p ON p.bot_id = u.id LEFT JOIN users pu ON pu.id = p.updated_by
             WHERE u.is_bot = 1 ORDER BY u.created_at, u.id LIMIT ?1 OFFSET ?2`,
         )
@@ -309,6 +327,7 @@ export const adminBotRoutes = new Hono<AppEnv>()
       db
         .prepare(
           `SELECT s.user_id AS id, s.table_id AS tableId, t.name AS tableName, t.bot_level AS tableLevel, t.bot_style AS tableStyle,
+                  t.big_blind AS bigBlind, t.min_buy_in AS minBuyIn, t.max_buy_in AS maxBuyIn,
                   s.seat_index AS seatIndex, s.buy_in AS buyIn, s.created_at AS since
              FROM (${PAGE}) b CROSS JOIN table_sessions s ON s.user_id = b.id AND s.status = 'seated' JOIN tables t ON t.id = s.table_id
             ORDER BY s.created_at`,
@@ -363,9 +382,9 @@ export const adminBotRoutes = new Hono<AppEnv>()
     const funded = by(5);
     const items = rows(1).map((r) => {
       const id = String(r.id);
-      const profile: BotProfile | null = r.profiled ? { level: levelOf(r.level), style: styleOf(r.style) } : null;
+      const profile = profileRow(r);
       const s = seats.get(id);
-      const table = s ? { level: levelOf(s.tableLevel) ?? 'normal', style: tableStyleOf(s.tableStyle) } : null;
+      const table = s ? { level: levelOf(s.tableLevel) ?? 'normal', style: tableStyleOf(s.tableStyle), ...tableBuyIn(s) } : null;
       const p = play.get(id);
       const a = af.get(id);
       return {
@@ -378,7 +397,9 @@ export const adminBotRoutes = new Hono<AppEnv>()
         updatedAt: profile ? Number(r.updatedAt) : null,
         updatedBy: profile ? ((r.updatedBy as string | null) ?? null) : null,
         auto: styleFor(id),
-        seat: s ? { tableId: String(s.tableId), tableName: String(s.tableName), seatIndex: Number(s.seatIndex), since: Number(s.since), table } : null,
+        seat: s
+          ? { tableId: String(s.tableId), tableName: String(s.tableName), seatIndex: Number(s.seatIndex), since: Number(s.since), buyIn: Number(s.buyIn), table }
+          : null,
         // How it plays at that table from the next hand (the one under way was dealt with what the room had then).
         effective: table ? botPlayOf(id, profile, table) : null,
         play: {
@@ -404,10 +425,12 @@ export const adminBotRoutes = new Hono<AppEnv>()
     });
   })
   /**
-   * A bot's own level and style; null for either follows the table it sits at (both null: back to the table's, the row
-   * removed). `preview`: the old and new settings and, when it sits at a table, how it plays there now and after. The
-   * table is told to read it again (once more if it does not answer); `roomConfirmed` false: the table picks it up at a
-   * deal within a few minutes, or when the bot next sits down.
+   * A bot's own level and style; null for either follows the table it sits at. Its buy-in in big blinds: null sits down
+   * with the default, left out keeps it (all three null: back to the table's, the row removed). `preview`: the old and
+   * new settings and, when it sits at a table, how it plays there now and after and (`buyIn`) the chips it would sit
+   * down there with before and after, and with what it sat down now. The table is told to read it again (once more if it
+   * does not answer); `roomConfirmed` false: the table picks it up at a deal within a few minutes, or when the bot next
+   * sits down. A buy-in counts only from the next time it sits down: the stack at its seat now never changes.
    */
   .put('/bots/:id/profile', async (c) => {
     const preview = await isPreview(c);
@@ -415,39 +438,42 @@ export const adminBotRoutes = new Hono<AppEnv>()
     const db = c.env.DB;
     const current = await botProfile(db, c.req.param('id'));
     if (current.updatedAt !== body.baseUpdatedAt) profileConflict(current);
-    const from: BotProfile = current.profile ?? { level: null, style: null };
-    const to: BotProfile = { level: body.level, style: body.style };
-    if (from.level === to.level && from.style === to.style) fail(400, 'bot_profile_no_change', 'the settings are the same as now');
+    const from: BotProfile = { level: current.profile?.level ?? null, style: current.profile?.style ?? null, buyInBb: current.profile?.buyInBb ?? null };
+    const to: BotProfile = { level: body.level, style: body.style, buyInBb: body.buyInBb === undefined ? from.buyInBb : body.buyInBb };
+    if (from.level === to.level && from.style === to.style && from.buyInBb === to.buyInBb) fail(400, 'bot_profile_no_change', 'the settings are the same as now');
+    const none = to.level === null && to.style === null && to.buyInBb === null;
     const table = current.table;
     const effective = table ? { from: botPlayOf(current.id, current.profile, table), to: botPlayOf(current.id, to, table) } : null;
+    const buyIn = table ? { from: botBuyInOf(from, table), to: botBuyInOf(to, table), seated: current.seatBuyIn ?? 0 } : null;
     if (preview) {
-      return c.json({ preview: true, bot: { id: current.id, nickname: current.nickname }, from, to, auto: styleFor(current.id), table, effective, appliesFrom: table ? 'next_hand' : 'next_seat' });
+      return c.json({ preview: true, bot: { id: current.id, nickname: current.nickname }, from, to, auto: styleFor(current.id), table, effective, buyIn, appliesFrom: table ? 'next_hand' : 'next_seat' });
     }
     const now = Math.max(Date.now(), (current.updatedAt ?? 0) + 1);
     const actor = c.var.user!.id;
     // Written only over the profile that was read (a second administrator's change meanwhile is a conflict, not lost).
     const r =
-      to.level === null && to.style === null
+      none
         ? await db.prepare(`DELETE FROM bot_profiles WHERE bot_id = ?1 AND updated_at = ?2`).bind(current.id, current.updatedAt).run()
         : current.updatedAt === null
           ? await db
-              .prepare(`INSERT INTO bot_profiles (bot_id, level, style, updated_by, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (bot_id) DO NOTHING`)
-              .bind(current.id, to.level, to.style, actor, now)
+              .prepare(`INSERT INTO bot_profiles (bot_id, level, style, buy_in_bb, updated_by, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (bot_id) DO NOTHING`)
+              .bind(current.id, to.level, to.style, to.buyInBb, actor, now)
               .run()
           : await db
-              .prepare(`UPDATE bot_profiles SET level = ?2, style = ?3, updated_by = ?4, updated_at = ?5 WHERE bot_id = ?1 AND updated_at = ?6`)
-              .bind(current.id, to.level, to.style, actor, now, current.updatedAt)
+              .prepare(`UPDATE bot_profiles SET level = ?2, style = ?3, buy_in_bb = ?4, updated_by = ?5, updated_at = ?6 WHERE bot_id = ?1 AND updated_at = ?7`)
+              .bind(current.id, to.level, to.style, to.buyInBb, actor, now, current.updatedAt)
               .run();
     if (!r.meta.changes) profileConflict(await botProfile(db, current.id));
     const live = table ? ((await roomCall(c, table.id, 'bot-profiles')) ?? (await roomCall(c, table.id, 'bot-profiles'))) : null;
     const roomConfirmed = table ? !!live : null;
-    await audit(c, 'bots.profile', { type: 'user', id: current.id }, { from, to, reason: body.reason, table: table?.id ?? null, effective: effective?.to ?? null, roomConfirmed });
+    await audit(c, 'bots.profile', { type: 'user', id: current.id }, { from, to, reason: body.reason, table: table?.id ?? null, effective: effective?.to ?? null, buyIn, roomConfirmed });
     return c.json({
       ok: true,
-      profile: to.level === null && to.style === null ? null : to,
-      updatedAt: to.level === null && to.style === null ? null : now,
+      profile: none ? null : to,
+      updatedAt: none ? null : now,
       table,
       effective: effective?.to ?? null,
+      buyIn,
       appliesFrom: table ? 'next_hand' : 'next_seat',
       roomConfirmed,
     });

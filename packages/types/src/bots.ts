@@ -46,6 +46,20 @@ export function styleFor(id: string): BotStyle {
 export interface BotProfile {
   level: BotLevel | null;
   style: BotStyle | null;
+  /** Big blinds it sits down with (botBuyInOf); null: the default. Absent from a seat saved before buy-ins existed. */
+  buyInBb?: number | null;
+}
+
+/** A bot's buy-in in big blinds: the default, and the range an administrator may set (whole numbers). */
+export const BOT_BUY_IN_BB = { default: 100, min: 10, max: 500 } as const;
+
+/**
+ * The chips a bot sits down with at a table: its own buy-in (else the default) in the table's big blinds, brought
+ * within the table's buy-in range. Only when it sits down: a stack at a seat it holds never changes with it.
+ */
+export function botBuyInOf(profile: BotProfile | null | undefined, table: { bigBlind: number; minBuyIn: number; maxBuyIn: number }): number {
+  const bb = profile?.buyInBb ?? BOT_BUY_IN_BB.default;
+  return Math.min(table.maxBuyIn, Math.max(table.minBuyIn, bb * table.bigBlind));
 }
 
 export interface BotPlay {
