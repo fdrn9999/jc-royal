@@ -38,8 +38,10 @@ export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amou
 
   // The room it took stays while it is open, so stepping from a decision to a step with less to say never shortens the
   // page and pulls what lies under a finger (the slider) down the screen.
-  // Measured afresh at another width (a phone turned), where it may take fewer lines. What it keeps is its own height,
-  // its padding and border included: the content's and what lies around it, read as it first shows (nothing kept yet).
+  // Kept for each width it has been drawn at, where it may take fewer lines (a phone turned): back at a width, even for a
+  // moment elsewhere (a window resized, a full-page capture), it has the room it took there again. What it keeps is its
+  // own height, its padding and border included: the content's and what lies around it, read as it first shows (nothing
+  // kept yet).
   const boxRef = useRef<HTMLElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [keep, setKeep] = useState(0);
@@ -47,12 +49,11 @@ export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amou
     const el = innerRef.current;
     if (!el || !boxRef.current) return;
     const around = boxRef.current.offsetHeight - el.offsetHeight;
-    let w = el.offsetWidth;
+    const kept = new Map<number, number>();
     const ro = new ResizeObserver(() => {
-      const h = el.offsetHeight + around;
-      const turned = el.offsetWidth !== w;
-      w = el.offsetWidth;
-      setKeep((x) => (turned ? h : Math.max(x, h)));
+      const h = Math.max(kept.get(el.offsetWidth) ?? 0, el.offsetHeight + around);
+      kept.set(el.offsetWidth, h);
+      setKeep(h);
     });
     ro.observe(el);
     onShown?.();

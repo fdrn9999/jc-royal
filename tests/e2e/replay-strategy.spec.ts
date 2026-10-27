@@ -131,6 +131,13 @@ test('replay decision review: opened under the controls at every size, it moves 
     await expect(index).toHaveText('12/22');
     await expect(p.getByTestId('replay-strategy-pick')).toBeVisible();
     expect((await review(p)).height, `${where}: off a decision`).toBeGreaterThanOrEqual(tallest - 0.5);
+    // Drawn for a moment at another width and back (a window resized, a phone turned and back; a full-page capture on
+    // CI): the room it kept at this width is the room it has again.
+    await p.setViewportSize({ width: sc.width + 48, height: sc.height });
+    await settled(p);
+    await p.setViewportSize({ width: sc.width, height: sc.height });
+    await settled(p);
+    expect((await review(p)).height, `${where}: another width and back`).toBeGreaterThanOrEqual(tallest - 0.5);
 
     // Closed: gone, and the areas where they were with it open at this step.
     const open12 = await settled(p);
