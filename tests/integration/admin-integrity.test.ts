@@ -34,11 +34,23 @@ async function dumped(t: string, giver: User, taker: User, hands: number, at: nu
 }
 
 async function staffWith(grants: readonly string[]) {
-  const u = await newUser();
-  await d1(promoteSql(`id = '${u.me.id}'`, grants));
-  const c = new Client(ADMIN_ORIGIN);
-  expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
-  return { c, id: u.me.id };
+  return (await staffOf(1, grants))[0]!;
+}
+
+/**
+ * `n` administrators made together: promoted in one statement and only then signed in. A write from this process
+ * locks the local D1 file, and a login the worker answers meanwhile fails on it (SQLITE_BUSY, a 500).
+ */
+async function staffOf(n: number, grants: readonly string[]) {
+  const us = await Promise.all(Array.from({ length: n }, () => newUser()));
+  await d1(promoteSql(`id IN (${us.map((u) => `'${u.me.id}'`).join(', ')})`, grants));
+  return Promise.all(
+    us.map(async (u) => {
+      const c = new Client(ADMIN_ORIGIN);
+      expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
+      return { c, id: u.me.id };
+    }),
+  );
 }
 
 const pairOf = (body: any, from: string, to: string) => (body.pairs as any[]).find((p) => p.from === from && p.to === to);
@@ -143,7 +155,7 @@ describe('integrity signs', () => {
     const race = `${tag}-race`;
     await d1(`INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, status, room_type) VALUES ('${race}', '${race}', 6, 5, ${BB}, 200, 2000, 'closed', 'official')`);
     await dumped(race, giver, taker, 12, Date.now() - 3_600_000);
-    const staff = await Promise.all(Array.from({ length: 5 }, () => staffWith(['reports'])));
+    const staff = await staffOf(5, ['reports']);
     const body = { from: giver.me.id, to: taker.me.id, days: 7, reason: `${tag} race` };
     const res = await Promise.all(staff.map((s) => s.c.post('/api/admin/integrity/review', body)));
     expect(res.map((r) => r.status).sort(), JSON.stringify(res.map((r) => r.body))).toEqual([201, 409, 409, 409, 409]);
