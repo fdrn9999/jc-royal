@@ -15,7 +15,7 @@ import { BB, BIN, FIELDS, PAIRS, type BalanceOutput, type Field, type Grade, typ
 import { OPPONENT_LABELS } from './opponents';
 
 const LEVEL_KO: Record<BotLevel, string> = { easy: '쉬움', normal: '보통', hard: '어려움', expert: '전문가' };
-const STYLE_KO: Record<BotStyle, string> = { balanced: '균형형', tag: '타이트 어그레시브', lag: '루즈 어그레시브', 'tight-passive': '타이트 패시브', 'loose-passive': '루즈 패시브' };
+const STYLE_KO: Record<BotStyle, string> = { balanced: '균형형', tag: '타이트 어그레시브', lag: '루즈 어그레시브', 'tight-passive': '타이트 패시브', 'loose-passive': '루즈 패시브', casual: '캐주얼' };
 const ci = (k: string) => STAT_KEYS.indexOf(k as (typeof STAT_KEYS)[number]);
 
 /** A metric: a count over its chances for one session record. */
@@ -23,8 +23,8 @@ interface Metric {
   label: string;
   num: (r: Rec) => number;
   den: (r: Rec) => number;
-  /** Shown as a percentage (×100), as big blinds per 100 hands, or as a plain ratio. */
-  fmt: 'pct' | 'bb100' | 'ratio';
+  /** Shown as a percentage (×100), as big blinds or times per 100 hands, or as a plain ratio. */
+  fmt: 'pct' | 'bb100' | 'per100' | 'ratio';
 }
 const c = (k: string) => (r: Rec) => r.c[ci(k)]!;
 const g = (k: keyof Grade) => (r: Rec) => r.g[k];
@@ -44,6 +44,10 @@ const M = {
   riverBluff: { label: '리버 블러프 비율', num: g('riverBluffs'), den: g('riverBets'), fmt: 'pct' },
   badCall: { label: '리버 나쁜 콜 비율', num: g('badRiverCalls'), den: g('riverCalls'), fmt: 'pct' },
   weakBig: { label: '20BB+ 약한 콜 비율', num: g('weakBigCalls'), den: g('bigCalls'), fmt: 'pct' },
+  size: { label: '평균 베팅 크기(팟 대비)', num: g('sizeSum'), den: (r) => r.g.earlyBets + r.g.riverBets, fmt: 'ratio' },
+  overbet: { label: '오버벳 비율', num: g('overbets'), den: (r) => r.g.earlyBets + r.g.riverBets, fmt: 'pct' },
+  jam: { label: '올인 벳·레이즈/100핸드', num: g('jams'), den: (r) => r.hands / 100, fmt: 'per100' },
+  wildJam: { label: '비정상 올인/100핸드', num: g('wildJams'), den: (r) => r.hands / 100, fmt: 'per100' },
 } satisfies Record<string, Metric>;
 type MetricKey = keyof typeof M;
 
@@ -178,7 +182,7 @@ export function report(outs: BalanceOutput[]): string {
 
   p('# 봇 난이도·스타일 밸런싱 시뮬레이션');
   p();
-  p(`- field: ${hands('field').toLocaleString()} 핸드 (상대 유형 ${FIELDS.length}종 × 난이도 4 × 스타일 5 × 세션 ${sessions}, 6인 100BB, 세션마다 ${Math.round(field[0] ? field[0].hands : 0)}핸드)`);
+  p(`- field: ${hands('field').toLocaleString()} 핸드 (상대 유형 ${FIELDS.length}종 × 난이도 4 × 스타일 ${BOT_STYLES.length} × 세션 ${sessions}, 6인 100BB, 세션마다 ${Math.round(field[0] ? field[0].hands : 0)}핸드)`);
   p(`- duel: ${hands('duel').toLocaleString()} 핸드 (난이도 쌍 ${PAIRS.length}개, 헤즈업 100BB, 같은 덱을 자리 바꿔 두 번)`);
   p(`- perf: ${hands('perf').toLocaleString()} 핸드 (한 난이도의 봇만 6석·9석)`);
   p(`- 오류(거부된 액션·핸드 미종료·칩 불일치): ${errors.length}건${errors.length ? ` — ${errors.slice(0, 5).join(' / ')}` : ''}`);
@@ -215,7 +219,7 @@ export function report(outs: BalanceOutput[]): string {
     p(`| ${LEVEL_KO[a]} − ${LEVEL_KO[b]} | ${diffKeys.map((k) => showDiff(diff(ra, rb, M[k], byFieldSession), M[k])).join(' | ')} |`);
   }
   p();
-  p('## 2. 상대 유형 × 난이도: BB/100 (스타일 5종 합계)');
+  p(`## 2. 상대 유형 × 난이도: BB/100 (스타일 ${BOT_STYLES.length}종 합계)`);
   p();
   p(`| 상대 유형 | ${BOT_LEVELS.map((l) => LEVEL_KO[l]).join(' | ')} | 전문가 − 어려움 | 전문가 − 쉬움 |`);
   p(`|---|${BOT_LEVELS.map(() => '---:').join('|')}|---|---|`);
@@ -224,7 +228,7 @@ export function report(outs: BalanceOutput[]): string {
     p(`| ${OPPONENT_LABELS[f as Field]} | ${BOT_LEVELS.map((l) => show(ratio(at(l), M.bb100, byFieldSession), M.bb100)).join(' | ')} | ${showDiff(diff(at('expert'), at('hard'), M.bb100, byFieldSession), M.bb100)} | ${showDiff(diff(at('expert'), at('easy'), M.bb100, byFieldSession), M.bb100)} |`);
   }
   p();
-  p('## 3. 상대 유형 × 난이도: 플레이 지표 (스타일 5종 합계)');
+  p(`## 3. 상대 유형 × 난이도: 플레이 지표 (스타일 ${BOT_STYLES.length}종 합계)`);
   p();
   const fk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'af', 'cbet', 'foldCbet', 'wtsd', 'wsd', 'riverBluff', 'badCall'];
   p(`| 상대 유형 | 난이도 | ${fk.map((k) => M[k].label).join(' | ')} |`);
@@ -251,7 +255,7 @@ export function report(outs: BalanceOutput[]): string {
   p();
 
   // Styles.
-  const sk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'af', 'cbet', 'wtsd', 'earlyBluff', 'riverBluff', 'bb100'];
+  const sk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'af', 'cbet', 'wtsd', 'earlyBluff', 'riverBluff', 'size', 'overbet', 'jam', 'wildJam', 'bb100'];
   p('## 5. 스타일별 (모든 상대 유형·난이도 합계)');
   p();
   p(`| 스타일 | ${sk.map((k) => M[k].label).join(' | ')} |`);
@@ -263,7 +267,7 @@ export function report(outs: BalanceOutput[]): string {
   p();
   p('### 5-1. 균형형 대비 차이 (같은 난이도·덱·상대로 짝지음)');
   p();
-  const dk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'af', 'cbet'];
+  const dk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'af', 'cbet', 'size', 'overbet', 'wildJam'];
   p(`| 스타일 | ${dk.map((k) => M[k].label).join(' | ')} |`);
   p(`|---|${dk.map(() => '---').join('|')}|`);
   const bal = sel((x) => x.style === 'balanced');
@@ -300,8 +304,16 @@ export function report(outs: BalanceOutput[]): string {
     { label: 'LP: AF < 균형형', test: (at) => sig(diff(at('loose-passive'), at('balanced'), M.af, byFieldSession), -1) },
     { label: 'TP: VPIP < 균형형', test: (at) => sig(diff(at('tight-passive'), at('balanced'), M.vpip, byFieldSession), -1) },
     { label: 'TP: AF < 균형형', test: (at) => sig(diff(at('tight-passive'), at('balanced'), M.af, byFieldSession), -1) },
+    { label: '캐주얼: VPIP > 균형형', test: (at) => sig(diff(at('casual'), at('balanced'), M.vpip, byFieldSession), 1) },
+    { label: '캐주얼: PFR > 균형형', test: (at) => sig(diff(at('casual'), at('balanced'), M.pfr, byFieldSession), 1) },
+    { label: '캐주얼: AF > 균형형', test: (at) => sig(diff(at('casual'), at('balanced'), M.af, byFieldSession), 1) },
+    { label: '캐주얼: 평균 베팅 크기 > 균형형', test: (at) => sig(diff(at('casual'), at('balanced'), M.size, byFieldSession), 1) },
+    { label: '캐주얼: 오버벳 비율 > 균형형', test: (at) => sig(diff(at('casual'), at('balanced'), M.overbet, byFieldSession), 1) },
+    { label: '캐주얼: VPIP > LAG', test: (at) => sig(diff(at('casual'), at('lag'), M.vpip, byFieldSession), 1) },
+    { label: '캐주얼: 평균 베팅 크기 > LAG', test: (at) => sig(diff(at('casual'), at('lag'), M.size, byFieldSession), 1) },
+    { label: '캐주얼: 비정상 올인이 균형형보다 많지 않음', test: (at) => !sig(diff(at('casual'), at('balanced'), M.wildJam, byFieldSession), 1) },
     {
-      label: '균형형: VPIP·AF가 극단이 아님 (다섯 스타일 중 최소·최대가 아님)',
+      label: `균형형: VPIP·AF가 극단이 아님 (${BOT_STYLES.length}개 스타일 중 최소·최대가 아님)`,
       test: (at) =>
         (['vpip', 'af'] as const).every((k) => {
           const v = BOT_STYLES.map((s) => ratio(at(s), M[k], byFieldSession).r);
@@ -323,6 +335,8 @@ export function report(outs: BalanceOutput[]): string {
   const row = (label: string, a: Rec[], b: Rec[]) => p(`| ${label} | ${(['vpip', 'pfr', 'af', 'cbet', 'bb100', 'badCall', 'weakBig'] as const).map((k) => showDiff(diff(a, b, M[k], byFieldSession), M[k])).join(' | ')} |`);
   row('전문가 − 쉬움 (스타일 합계)', sel((x) => x.level === 'expert'), sel((x) => x.level === 'easy'));
   row('루즈 어그레시브 − 타이트 패시브 (난이도 합계)', sel((x) => x.style === 'lag'), sel((x) => x.style === 'tight-passive'));
+  row('캐주얼 − 균형형 (난이도 합계)', sel((x) => x.style === 'casual'), sel((x) => x.style === 'balanced'));
+  row('쉬움·캐주얼 − 전문가·캐주얼', sel((x) => x.level === 'easy' && x.style === 'casual'), sel((x) => x.level === 'expert' && x.style === 'casual'));
   row('전문가·타이트 패시브 − 쉬움·루즈 어그레시브', sel((x) => x.level === 'expert' && x.style === 'tight-passive'), sel((x) => x.level === 'easy' && x.style === 'lag'));
   p();
 

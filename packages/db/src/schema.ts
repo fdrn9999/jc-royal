@@ -183,7 +183,7 @@ export const tables = sqliteTable(
     botsEnabled: integer('bots_enabled', { mode: 'boolean' }).notNull().default(false),
     botLevel: text('bot_level', { enum: ['easy', 'normal', 'hard', 'expert'] }).notNull().default('normal'),
     /** The bots' style here; 'auto' leaves it to each bot account (styleFor). A bot's own setting wins (bot_profiles). */
-    botStyle: text('bot_style', { enum: ['auto', 'balanced', 'tag', 'lag', 'tight-passive', 'loose-passive'] }).notNull().default('auto'),
+    botStyle: text('bot_style', { enum: ['auto', 'balanced', 'tag', 'lag', 'tight-passive', 'loose-passive', 'casual'] }).notNull().default('auto'),
     botMinHumans: integer('bot_min_humans').notNull().default(1),
     botMax: integer('bot_max').notNull().default(1),
     botFillTo: integer('bot_fill_to').notNull().default(2),
@@ -818,7 +818,7 @@ export const botProfiles = sqliteTable('bot_profiles', {
     .primaryKey()
     .references(() => users.id),
   level: text('level', { enum: ['easy', 'normal', 'hard', 'expert'] }),
-  style: text('style', { enum: ['balanced', 'tag', 'lag', 'tight-passive', 'loose-passive'] }),
+  style: text('style', { enum: ['balanced', 'tag', 'lag', 'tight-passive', 'loose-passive', 'casual'] }),
   updatedBy: text('updated_by').references(() => users.id),
   updatedAt: integer('updated_at').notNull().default(now),
 });

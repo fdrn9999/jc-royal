@@ -298,6 +298,7 @@ export const botStyleLabel = labeler({
   lag: 'botStyleLag',
   'tight-passive': 'botStyleTightPassive',
   'loose-passive': 'botStyleLoosePassive',
+  casual: 'botStyleCasual',
 });
 export const botEventKindLabel = labeler({ join: 'botEvJoin', leave: 'botEvLeave', fund_exhausted: 'botEvFundExhausted', join_failed: 'botEvJoinFailed', action_failed: 'botEvActionFailed' });
 const botCodes = labeler({

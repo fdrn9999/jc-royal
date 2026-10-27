@@ -15,7 +15,7 @@ const seatsOffScreen = (page: Page) =>
   });
 
 /** The styles' names on a bot's card (the console's names). */
-const STYLE_KO: Record<string, string> = { balanced: '균형형', tag: '타이트 어그레시브', lag: '루즈 어그레시브', 'tight-passive': '타이트 패시브', 'loose-passive': '루즈 패시브' };
+const STYLE_KO: Record<string, string> = { balanced: '균형형', tag: '타이트 어그레시브', lag: '루즈 어그레시브', 'tight-passive': '타이트 패시브', 'loose-passive': '루즈 패시브', casual: '캐주얼' };
 
 /** Taps the first bot's seat and returns its card. */
 async function openBotCard(page: Page) {
@@ -35,7 +35,7 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
   // The bots sit down one after another; each seat carries the BOT pill with its level.
   await expect(botSeats(page)).toHaveCount(2, { timeout: 30_000 });
   // A bot's line, while it has no action to show: its level and its style.
-  await expect(page.locator('[data-testid^="bot-style-"]').first()).toHaveText(/^\s*· (균형형|TAG|LAG|타이트 패시브|루즈 패시브)$/, { timeout: 90_000 });
+  await expect(page.locator('[data-testid^="bot-style-"]').first()).toHaveText(/^\s*· (균형형|TAG|LAG|타이트 패시브|루즈 패시브|캐주얼)$/, { timeout: 90_000 });
   for (const badge of await page.getByTestId('bot-badge').all()) {
     await expect(badge).toHaveAttribute('data-level', 'normal');
     await expect(badge).toHaveAttribute('title', '테이블 봇 · 보통');
@@ -95,7 +95,7 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
   await expect(page.getByTestId('bot-badge').first()).toHaveAttribute('title', 'Table bot · Normal');
   const en = await openBotCard(page);
   await expect(en.getByTestId('bot-card-level')).toHaveText('Level: Normal');
-  await expect(en.getByTestId('bot-card-style-name')).toHaveText(/^Style: (Balanced|Tight Aggressive|Loose Aggressive|Tight Passive|Loose Passive)$/);
+  await expect(en.getByTestId('bot-card-style-name')).toHaveText(/^Style: (Balanced|Tight Aggressive|Loose Aggressive|Tight Passive|Loose Passive|Casual)$/);
   await expect(en.getByTestId('bot-card-style')).toContainText('nothing here tells its cards or its next move');
   await expect(en).toBeInViewport({ ratio: 1 });
   await expect(en).toContainText('It takes no friend requests, messages, blocks or reports.');

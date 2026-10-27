@@ -23,7 +23,7 @@ import type { HandFacts } from './ai/profile';
 
 export { BOT_LEVELS, type BotLevel };
 export { cardCode, quickScore, legalize };
-export { BOT_STYLES, styleFor, type BotStyle } from './ai/persona';
+export { BOT_AUTO_STYLES, BOT_STYLES, styleFor, type BotStyle } from './ai/persona';
 export { addCounters, BIG_BET_SAMPLE, bigBetRead, emptyCounters, handCounters, packCounters, playerType, STAT_KEYS, tendencies, unpackCounters, type BigBetRead, type Counters, type HandFacts, type PlayerType, type Tendencies } from './ai/profile';
 export type { DecideOptions, PubSeat } from './ai/spot';
 export type { PubAction } from './ai/walk';

@@ -6,7 +6,7 @@
 import type { BotLevel, BotStyle } from '@jc/types';
 
 // The styles and an account's automatic one live with the shared types, so the API and the console can name them.
-export { BOT_STYLES, styleFor, type BotStyle } from '@jc/types';
+export { BOT_AUTO_STYLES, BOT_STYLES, styleFor, type BotStyle } from '@jc/types';
 
 export interface Persona {
   /** Opening range width. */
@@ -28,14 +28,21 @@ export interface Persona {
   limp: number;
   /** Continuation bet frequency. */
   cbet: number;
+  /**
+   * Share of its very strong turn and river value bets heads-up that overbet the pot, a chance of its own beside its
+   * level's (LevelParams.overbet); 0 leaves overbets to the level.
+   */
+  overbet: number;
 }
 
 const PERSONAS: Record<BotStyle, Persona> = {
-  balanced: { open: 1, call: 1, threeBet: 1, bluff: 1, aggression: 1, sizing: 1, limp: 0, cbet: 1 },
-  tag: { open: 0.92, call: 0.92, threeBet: 1.15, bluff: 0.9, aggression: 1.15, sizing: 1.05, limp: 0, cbet: 1.05 },
-  lag: { open: 1.3, call: 1.02, threeBet: 1.45, bluff: 1.4, aggression: 1.4, sizing: 1.05, limp: 0, cbet: 1.25 },
-  'tight-passive': { open: 0.8, call: 0.98, threeBet: 0.6, bluff: 0.45, aggression: 0.7, sizing: 0.95, limp: 0.12, cbet: 0.75 },
-  'loose-passive': { open: 1.12, call: 1.12, threeBet: 0.6, bluff: 0.5, aggression: 0.72, sizing: 0.92, limp: 0.3, cbet: 0.7 },
+  balanced: { open: 1, call: 1, threeBet: 1, bluff: 1, aggression: 1, sizing: 1, limp: 0, cbet: 1, overbet: 0 },
+  tag: { open: 0.92, call: 0.92, threeBet: 1.15, bluff: 0.9, aggression: 1.15, sizing: 1.05, limp: 0, cbet: 1.05, overbet: 0 },
+  lag: { open: 1.3, call: 1.02, threeBet: 1.45, bluff: 1.4, aggression: 1.4, sizing: 1.05, limp: 0, cbet: 1.25, overbet: 0 },
+  'tight-passive': { open: 0.8, call: 0.98, threeBet: 0.6, bluff: 0.45, aggression: 0.7, sizing: 0.95, limp: 0.12, cbet: 0.75, overbet: 0 },
+  'loose-passive': { open: 1.12, call: 1.12, threeBet: 0.6, bluff: 0.5, aggression: 0.72, sizing: 0.92, limp: 0.3, cbet: 0.7, overbet: 0 },
+  // Plays the most pots, bets the biggest and overbets its strongest hands; its ranges, pot odds and stacks still decide.
+  casual: { open: 1.4, call: 1.1, threeBet: 1.35, bluff: 1.25, aggression: 1.35, sizing: 1.3, limp: 0, cbet: 1.2, overbet: 0.25 },
 };
 
 export const personaOf = (style: BotStyle | undefined): Persona => PERSONAS[style ?? 'balanced'] ?? PERSONAS.balanced;

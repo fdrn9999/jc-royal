@@ -130,13 +130,15 @@ function notFacing(s: Spot, h: Hand): ActionRequest {
   return { type: 'check' };
 }
 
-/** A bet sized by street and board; very strong hands may overbet at the levels that do; all in when the stacks are short. */
+/** A bet sized by street and board; very strong hands may overbet at the levels and styles that do; all in when the stacks are short. */
 function bet(s: Spot, h: Hand, value: boolean, wet: number): ActionRequest {
   const { v, lp, persona, rand } = s;
   const spr = sprOf(s);
   if (spr <= 1.2 && (value || h.bucket === DRAW)) return shove(v) ?? { type: 'check' };
   let f = !lp.sizes ? 0.5 : v.stage === 'flop' ? (wet >= 0.45 ? 0.66 : 0.33) : v.stage === 'turn' ? 0.66 : 0.7;
-  if (value && lp.overbet > 0 && v.stage !== 'flop' && h.heads && h.e >= 0.85 && rand() < lp.overbet) f = 1.25;
+  // The level's chance and the style's, each on its own (a style without one leaves the level's as it was).
+  const over = persona.overbet > 0 ? 1 - (1 - lp.overbet) * (1 - persona.overbet) : lp.overbet;
+  if (value && over > 0 && v.stage !== 'flop' && h.heads && h.e >= 0.85 && rand() < over) f = 1.25;
   f *= persona.sizing;
   const to = potSized(v, f);
   const all = v.stack + v.streetBet;
