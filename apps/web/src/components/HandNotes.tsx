@@ -3,7 +3,7 @@
  * hand list, and the note panel of a hand's detail. Only the member ever sees these; the server keeps them per member.
  */
 import { HAND_MEMO_MAX, HAND_TAGS, handLabelKey, type HandNoteDto, type HandSummaryDto, type HandTag } from '@jc/types';
-import { BookmarkIcon, Button, cx, formatChips, formatDate, Panel, PencilIcon, PlayingCard } from '@jc/ui';
+import { BookmarkIcon, Button, cx, formatChips, formatDate, inHoleOrder, Panel, PencilIcon, PlayingCard } from '@jc/ui';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { api, ApiError } from '../lib/api';
@@ -69,7 +69,7 @@ export function HandRow({ hand, onChange }: { hand: HandSummaryDto; onChange: (h
   return (
     <li className="flex items-center gap-2 py-2.5 sm:gap-3" data-testid="hand-row" data-hand={hand.id}>
       <span className="flex shrink-0 gap-0.5">
-        {hand.holeCards.map((c) => (
+        {inHoleOrder(hand.holeCards).map((c) => (
           <PlayingCard key={c} card={c as Card} size="1.6rem" />
         ))}
       </span>

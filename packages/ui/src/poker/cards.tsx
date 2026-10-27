@@ -11,6 +11,24 @@ import { cx, formatChips } from '../util';
 const SUIT_GLYPH = { s: '♠', h: '♥', d: '♦', c: '♣' } as const;
 const RANK_LABEL: Record<string, string> = { T: '10' };
 
+const RANKS = '23456789TJQKA';
+
+/**
+ * The order two (or more) hole cards are drawn in: the higher rank on the left (A, K, … 2), cards of one rank in the
+ * order they came (suits have no order in hold'em). Indices into `cards`, which stays as dealt (what is sent, kept and
+ * replayed); null while any of them is unknown (face down), so a hand is put in order only once all of it shows.
+ */
+export function holeOrder(cards: readonly (Card | string | null | undefined)[]): number[] | null {
+  if (!cards.length || cards.some((c) => !c)) return null;
+  return cards.map((_, i) => i).sort((a, b) => RANKS.indexOf(cards[b]![0]!) - RANKS.indexOf(cards[a]![0]!) || a - b);
+}
+
+/** Hole cards as drawn (holeOrder): a copy in order, or as they came while any is face down. */
+export function inHoleOrder<T extends Card | string | null | undefined>(cards: readonly T[]): T[] {
+  const order = holeOrder(cards);
+  return order ? order.map((i) => cards[i]!) : [...cards];
+}
+
 export function cardLabel(card: Card): string {
   return `${RANK_LABEL[card[0]!] ?? card[0]}${SUIT_GLYPH[card[1] as keyof typeof SUIT_GLYPH]}`;
 }

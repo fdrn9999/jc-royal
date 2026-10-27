@@ -4,7 +4,7 @@
  * rebuilt for the server-projected SeatView and the JC ROYAL style.
  */
 import type { SeatView } from '@jc/types';
-import { CrownIcon, cx, HourglassIcon, PlayingCard, PlusIcon } from '@jc/ui';
+import { CrownIcon, cx, holeOrder, HourglassIcon, PlayingCard, PlusIcon } from '@jc/ui';
 import { memo, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
@@ -185,6 +185,10 @@ function SeatPlace(p: SeatProps) {
     const id = setTimeout(() => setShowing([]), 5_000);
     return () => clearTimeout(id);
   }, [showing]);
+  // The order the cards are drawn in (higher rank on the left, holeOrder), settled once a hand, when a card first shows:
+  // as dealt when one showed before the other, so a card seen face up never moves. Indices into the cards as dealt, which
+  // the rest goes by (showing one, which rests by the board).
+  const [order, setOrder] = useState<{ hand: string | null; at: readonly number[] }>({ hand: null, at: [] });
 
   if (s.state === 'empty') {
     return (
@@ -234,6 +238,11 @@ function SeatPlace(p: SeatProps) {
   };
   const showCards = s.hasCards || (s.holeCards && s.holeCards.length > 0) || !!shown;
   const cards = s.holeCards && s.holeCards.length ? s.holeCards : (shown ?? (showCards ? [null, null] : []));
+  const dealt = cards.map((_, i) => i);
+  const settled = order.hand === p.newHandKey && order.at.length === cards.length ? order.at : null;
+  const seenUp = cards.some(Boolean);
+  if (!settled && seenUp) setOrder({ hand: p.newHandKey, at: holeOrder(cards) ?? dealt });
+  const drawn = (settled ?? (seenUp ? (holeOrder(cards) ?? dealt) : dealt)).map((i) => ({ i, c: cards[i] ?? null }));
   const actionLabel = s.lastAction ? `${t(`action.${s.lastAction.type}` as MsgKey)}${s.lastAction.amount > 0 ? ` ${p.amounts.fmt(s.lastAction.amount, true)}` : ''}` : null;
   // The colour vision modes swap these (styles.css); the label always says the action too.
   const actionTone =
@@ -261,27 +270,27 @@ function SeatPlace(p: SeatProps) {
             folded seat's bet then read as its neighbour's on a small phone) and drop as they are dealt. */}
         {cards.length > 0 ? (
           <div className={cx('relative flex', z.cards, p.isMe ? 'gap-1' : z.spread)} key={p.newHandKey ?? 'cards'}>
-            {cards.map((c, i) =>
+            {drawn.map(({ i, c }, at) =>
               rests(i) ? (
                 <span key={`rest-${i}`} aria-hidden className="block shrink-0" style={{ width: cardSize, height: `calc(${cardSize} * 1.4)` }} />
               ) : (
                 <PlayingCard
-                  key={`${c ?? 'x'}-${i}`}
+                  key={`${c ?? 'x'}-${at}`}
                   card={c ?? null}
                   size={cardSize}
                   // Mine are dealt face down like the rest and turn face up as they land.
                   animate={p.still && (!c || p.still.has(c)) ? false : !c ? 'deal' : p.deal && p.isMe ? 'deal-flip' : 'flip'}
                   highlight={!!c && !!p.bestFive?.includes(c)}
                   dim={folded && !isShown(i)}
-                  // Dealt round the table in order; cards turned later (a showdown) one after the other. The fan is a
-                  // variable, so the card's lift and its animations keep it.
-                  style={{ animationDelay: `${p.deal && (p.isMe || !c) ? p.deal[i] : i * 90}ms`, ['--card-rot' as string]: !p.isMe ? `${i === 0 ? -6 : 6}deg` : undefined }}
+                  // Dealt round the table in order, the left card first; cards turned later (a showdown) one after the
+                  // other. The fan is a variable, so the card's lift and its animations keep it.
+                  style={{ animationDelay: `${p.deal && (p.isMe || !c) ? p.deal[at] : at * 90}ms`, ['--card-rot' as string]: !p.isMe ? `${at === 0 ? -6 : 6}deg` : undefined }}
                 />
               ),
             )}
             {p.onShow && (
               <div className={cx('absolute left-0 flex gap-1', p.showOver ? 'bottom-2 z-10' : 'bottom-full mb-1')} data-testid="show-cards">
-                {cards.map((_, i) =>
+                {drawn.map(({ i }, at) =>
                   isShown(i) ? (
                     <span
                       key={i}
@@ -300,7 +309,8 @@ function SeatPlace(p: SeatProps) {
                       aria-busy={showing.includes(i) || undefined}
                       className={SHOW_BTN}
                       style={{ width: cardSize }}
-                      aria-label={t('table.showCardAria', { n: i + 1 })}
+                      // Counted as drawn, from the left (the room goes by the cards as dealt: i).
+                      aria-label={t('table.showCardAria', { n: at + 1 })}
                       data-testid={`show-card-${i}`}
                     >
                       {t('table.showCard')}
@@ -339,8 +349,8 @@ function SeatPlace(p: SeatProps) {
             style={{ top: `calc(${cardSize} * 0.7)`, ['--rx' as string]: `${rest.x}px`, ['--ry' as string]: `${rest.y}px`, ['--rs' as string]: rest.s }}
             data-testid={`reveal-${s.seatIndex}`}
           >
-            {cards.map((c, i) => {
-              const side = i === 0 ? -1 : 1;
+            {drawn.map(({ i, c }, at) => {
+              const side = at === 0 ? -1 : 1;
               return rests(i) && c ? (
                 <span
                   key={`${c}-${i}`}

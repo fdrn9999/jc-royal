@@ -1,5 +1,5 @@
 import { handLabelKey, NICKNAME_RE, passwordOk, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
-import { Badge, Button, Empty, Field, Figure, formatChips, formatDate, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
+import { Badge, Button, Empty, Field, Figure, formatChips, formatDate, inHoleOrder, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { BadgeShelf } from '../academy/Badges';
@@ -432,7 +432,7 @@ export function HandDetailPage() {
             {data.players.map((p) => (
               <li key={p.seatIndex} className="flex items-center gap-2 py-2.5 sm:gap-3">
                 <span className="w-6 text-xs text-ink-400">#{p.seatIndex + 1}</span>
-                <span className="flex gap-0.5">{(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.7rem" />)}</span>
+                <span className="flex gap-0.5">{inHoleOrder(p.holeCards ?? [null, null]).map((c, i) => <PlayingCard key={i} card={(c as Card) ?? null} size="1.7rem" />)}</span>
                 <span className="flex min-w-0 flex-1 text-sm">
                   <MemberName name={p.nickname} role={p.role} vip={p.vip} bot={p.bot} className={p.isYou ? 'font-semibold text-gold-300' : undefined} />
                 </span>
