@@ -173,8 +173,13 @@ const ROW = `h.id AS handId, h.table_id AS tableId, h.hand_number AS handNumber,
  * Both members signed in from the same network in the period: compared inside D1, so no address leaves it. A shared
  * flat, office or café network does this too, which is why it only ever stands beside another sign.
  */
-const NETWORK = `EXISTS (SELECT 1 FROM sessions s1 JOIN sessions s2 ON s2.ip = s1.ip AND s2.user_id = ?2 AND s2.kind = 'user' AND s2.last_seen_at >= ?3
-                  WHERE s1.user_id = ?1 AND s1.kind = 'user' AND s1.ip IS NOT NULL AND s1.last_seen_at >= ?3)`;
+const network = (a: string, b: string, since: string) => `EXISTS (SELECT 1 FROM sessions s1 JOIN sessions s2 ON s2.ip = s1.ip AND s2.user_id = ${b} AND s2.kind = 'user' AND s2.last_seen_at >= ${since}
+                  WHERE s1.user_id = ${a} AND s1.kind = 'user' AND s1.ip IS NOT NULL AND s1.last_seen_at >= ${since})`;
+const NETWORK = network('?1', '?2', '?3');
+/** The pairs of a JSON array of [from, to] that share a network, by their place in it. */
+const NETWORKS = `SELECT j.key AS i FROM json_each(?1) j WHERE ${network(`json_extract(j.value, '$[0]')`, `json_extract(j.value, '$[1]')`, '?2')}`;
+/** Pairs per NETWORKS statement, so one statement's bound array stays small whatever the period holds. */
+const NETWORK_CHUNK = 200;
 
 type Read<T> = D1Result<T>;
 const rows = <T>(r: Read<unknown>) => (r.results ?? []) as T[];
@@ -194,9 +199,11 @@ interface OpenReport {
 /**
  * The integrity page: pairs of members whose cash-table hands of the last `days` days meet INTEGRITY, highest band
  * first, each with its evidence hands, the two members, whether they share a network and the reports open on them.
- * Read when an administrator opens the page (never polled). Cost: the period's hands through hands_table_idx (tables
- * first, as the statistics do), their players by primary key, newest first up to INTEGRITY.rowCap rows; then one small
- * batch for the listed pairs only. `rowsRead` reports what a call cost.
+ * The network sign can move a pair up a band, so it is read for every pair found before the list is cut to
+ * INTEGRITY.maxPairs; `found` says how many there were. Read when an administrator opens the page (never polled). Cost:
+ * the period's hands through hands_table_idx (tables first, as the statistics do), their players by primary key,
+ * newest first up to INTEGRITY.rowCap rows; then one batch for the pairs found (their networks, NETWORK_CHUNK pairs a
+ * statement, the two members and the reports open on them). `rowsRead` reports what a call cost.
  */
 export async function integrity(db: D1Database, days: number, now = Date.now(), t: IntegrityThresholds = INTEGRITY) {
   const since = now - days * DAY;
@@ -218,26 +225,30 @@ export async function integrity(db: D1Database, days: number, now = Date.now(), 
   if (capped) hands = hands.filter((r) => r.handId !== hands.at(-1)!.handId);
   const from = capped && hands.length ? hands.at(-1)!.endedAt : since;
   let rowsRead = read.meta.rows_read ?? 0;
-  let pairs = pairsOf(hands, t).slice(0, t.maxPairs);
-  const ids = [...new Set(pairs.flatMap((p) => [p.from, p.to]))];
+  let found = pairsOf(hands, t);
   const users = new Map<string, UserRow>();
   const reports: OpenReport[] = [];
-  if (pairs.length) {
+  if (found.length) {
+    const ids = JSON.stringify([...new Set(found.flatMap((p) => [p.from, p.to]))]);
+    const chunks: IntegrityPair[][] = [];
+    for (let i = 0; i < found.length; i += NETWORK_CHUNK) chunks.push(found.slice(i, i + NETWORK_CHUNK));
     const results = await db.batch([
-      db.prepare(`SELECT id, nickname, status FROM users WHERE id IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(ids)),
+      db.prepare(`SELECT id, nickname, status FROM users WHERE id IN (SELECT value FROM json_each(?1))`).bind(ids),
       db
         .prepare(
           `SELECT id, target_user_id AS userId, json_extract(context, '$.kind') AS kind, json_extract(context, '$.partnerId') AS partnerId
              FROM reports WHERE status = 'open' AND target_user_id IN (SELECT value FROM json_each(?1))`,
         )
-        .bind(JSON.stringify(ids)),
-      ...pairs.map((p) => db.prepare(`SELECT ${NETWORK} AS shared`).bind(p.from, p.to, since)),
+        .bind(ids),
+      ...chunks.map((c) => db.prepare(NETWORKS).bind(JSON.stringify(c.map((p) => [p.from, p.to])), since)),
     ]);
     rowsRead += results.reduce((a, r) => a + (r.meta.rows_read ?? 0), 0);
     for (const u of rows<UserRow>(results[0]!)) users.set(u.id, u);
     reports.push(...rows<OpenReport>(results[1]!));
-    pairs = pairs.map((p, i) => withNetwork(p, !!rows<{ shared: number }>(results[i + 2]!)[0]?.shared)).sort(byRisk);
+    const shared = new Set(chunks.flatMap((_, c) => rows<{ i: number }>(results[c + 2]!).map((r) => c * NETWORK_CHUNK + Number(r.i))));
+    found = found.map((p, i) => withNetwork(p, shared.has(i))).sort(byRisk);
   }
+  const pairs = found.slice(0, t.maxPairs);
   const person = (id: string) => ({ id, nickname: users.get(id)?.nickname ?? null, status: users.get(id)?.status ?? null, openReports: reports.filter((r) => r.userId === id).length });
   return {
     days,
@@ -245,6 +256,7 @@ export async function integrity(db: D1Database, days: number, now = Date.now(), 
     from,
     capped,
     hands: new Set(hands.map((r) => r.handId)).size,
+    found: found.length,
     pairs: pairs.map((p) => ({
       ...p,
       fromUser: person(p.from),

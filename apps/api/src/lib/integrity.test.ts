@@ -170,7 +170,7 @@ describe('the integrity page’s reading of D1', () => {
       NOW - DAY,
     );
     const out = await integrity(fakeD1(db), 7, NOW);
-    expect(out).toMatchObject({ days: 7, since: NOW - 7 * DAY, from: NOW - 7 * DAY, capped: false, hands: 15 });
+    expect(out).toMatchObject({ days: 7, since: NOW - 7 * DAY, from: NOW - 7 * DAY, capped: false, hands: 15, found: 1 });
     expect(out.pairs).toHaveLength(1);
     const [p] = out.pairs;
     expect(p).toMatchObject({ from: 'a', to: 'b', shared: 15, dumps: 3, signals: ['flow', 'dumps'], risk: 'medium', review: 'r1' });
@@ -201,6 +201,38 @@ describe('the integrity page’s reading of D1', () => {
     times(5, (i) => store(db, 'cash', NOW - (i + 1) * 60_000, [['a', -250], ['b', 200], ['c', 50]]));
     const out = await integrity(fakeD1(db), 7, NOW, { ...INTEGRITY, rowCap: 7 });
     // Seven rows: two whole hands and one of the third's players.
-    expect(out).toMatchObject({ capped: true, hands: 2, from: NOW - 2 * 60_000, pairs: [] });
+    expect(out).toMatchObject({ capped: true, hands: 2, from: NOW - 2 * 60_000, found: 0, pairs: [] });
+  });
+
+  it('reads the network of every pair found before the list is cut to its length, and says how many were found', async () => {
+    const db = database();
+    db.prepare(`INSERT INTO users (id, email, nickname, password_hash) VALUES ('d', 'd@test.dev', 'nick-d', 'x')`).run();
+    // C → D: the larger flow, one sign. A → B: a smaller flow, but the two share a network, which makes two.
+    times(12, (i) => store(db, 'cash', NOW - DAY - i * 60_000, [['c', -100], ['d', 100]]));
+    times(12, (i) => store(db, 'cash', NOW - 2 * DAY - i * 60_000, [['a', -50], ['b', 50]]));
+    session(db, 'a', '10.0.0.9', NOW - DAY);
+    session(db, 'b', '10.0.0.9', NOW - DAY);
+    const one = await integrity(fakeD1(db), 7, NOW, { ...INTEGRITY, maxPairs: 1 });
+    expect(one.pairs.map((p) => `${p.from}>${p.to}:${p.risk}`)).toEqual(['a>b:medium']);
+    expect(one.pairs[0]!.toUser.nickname).toBe('nick-b');
+    expect(one.found).toBe(2);
+    const all = await integrity(fakeD1(db), 7, NOW);
+    expect(all.pairs.map((p) => `${p.from}>${p.to}:${p.risk}`)).toEqual(['a>b:medium', 'c>d:low']);
+    expect(all.found).toBe(2);
+  });
+
+  it('reads the networks of many pairs in parts and puts each answer on its own pair', async () => {
+    const db = database();
+    const us = times(25, (i) => `u${String(i).padStart(2, '0')}`);
+    for (const u of us) db.prepare(`INSERT INTO users (id, email, nickname, password_hash) VALUES (?1, ?1 || '@test.dev', 'nick-' || ?1, 'x')`).run(u);
+    // 300 pairs, one dump each, the first pair's the smallest: last of the 300, past the first part of the reading.
+    let k = 0;
+    for (let i = 0; i < us.length; i++) for (let j = i + 1; j < us.length; j++, k++) store(db, 'cash', NOW - DAY - k * 1_000, [[us[i]!, -(200 + k)], [us[j]!, 200 + k]]);
+    session(db, 'u00', '10.0.0.9', NOW - DAY);
+    session(db, 'u01', '10.0.0.9', NOW - DAY);
+    const out = await integrity(fakeD1(db), 7, NOW, { ...INTEGRITY, minDumps: 1, maxPairs: 1 });
+    expect(out.pairs).toHaveLength(1);
+    expect(out.pairs[0]).toMatchObject({ from: 'u00', to: 'u01', signals: ['dumps', 'network'], risk: 'medium', flowBb: 20 });
+    expect(out.found).toBe(300);
   });
 });

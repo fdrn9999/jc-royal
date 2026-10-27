@@ -77,6 +77,9 @@ export function IntegritySignals() {
         <p>{t('integrityHint')}</p>
         <p>{t('integrityRules', { shared: th.minShared, flow: th.minFlowBb, pct: Math.round(th.oneWay * 100), dump: th.dumpBb, dumps: th.minDumps })}</p>
         {data.capped && <p className="text-gold-300" data-testid="integrity-capped">{t('integrityCapped', { from: formatDate(data.from, locale) })}</p>}
+        {data.found > data.pairs.length && (
+          <p className="text-gold-300" data-testid="integrity-more">{t('integrityMore', { shown: formatChips(data.pairs.length), n: formatChips(data.found) })}</p>
+        )}
       </div>
       <Feedback note={msg} pin />
       <Panel>

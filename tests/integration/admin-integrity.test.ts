@@ -90,9 +90,10 @@ describe('integrity signs', () => {
     expect((list.body.pairs as any[]).some((p) => p.from === bystander.me.id || p.to === bystander.me.id)).toBe(false);
     // No address is sent, only whether the two shared one.
     expect(JSON.stringify(list.body)).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|::1/);
-    // Every look is recorded with the period and how many pairs it showed.
+    // Every look is recorded with the period, how many pairs it showed and how many met the signs.
+    expect(list.body.found).toBeGreaterThanOrEqual(list.body.pairs.length);
     const views = await audits('integrity.view', me);
-    expect(JSON.parse(views.at(-1)!.detail!)).toEqual({ days: 7, pairs: list.body.pairs.length });
+    expect(JSON.parse(views.at(-1)!.detail!)).toEqual({ days: 7, pairs: list.body.pairs.length, found: list.body.found });
 
     // A review: a reason without personal data, two different members, neither a table bot, the pair as listed.
     const review = (body: Record<string, unknown>) => admin.post('/api/admin/integrity/review', { from: giver.me.id, to: taker.me.id, days: 7, reason: `${tag} chips one way`, ...body });

@@ -437,6 +437,8 @@ export interface IntegrityDto {
   capped: boolean;
   /** Cash-table hands read. */
   hands: number;
+  /** Pairs that met the signs: `pairs` lists the first `thresholds.maxPairs` of them, highest band first. */
+  found: number;
   pairs: {
     from: string;
     to: string;

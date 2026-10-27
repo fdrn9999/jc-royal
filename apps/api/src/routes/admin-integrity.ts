@@ -34,7 +34,7 @@ export const adminIntegrityRoutes = new Hono<AppEnv>()
     const out = await integrity(c.env.DB, span, at);
     const d1Ms = Date.now() - at;
     // The list says which members played as pairs and shared a network, so every look is recorded.
-    await audit(c, 'integrity.view', undefined, { days: span, pairs: out.pairs.length });
+    await audit(c, 'integrity.view', undefined, { days: span, pairs: out.pairs.length, found: out.found });
     return c.json({ ...out, at, d1Ms });
   })
   /**

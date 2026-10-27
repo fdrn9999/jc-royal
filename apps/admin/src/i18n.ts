@@ -757,6 +757,7 @@ const ko = {
   integrityRules:
     '기준: 함께 {shared}핸드 이상 앉았고 한쪽으로 {flow}BB 이상, 오간 칩의 {pct}% 이상이 넘어감 · 또는 쇼다운 없이 {dump}BB 이상 내주고 상대가 혼자 가져간 핸드가 {dumps}번 이상',
   integrityCapped: '기간 안의 핸드가 많아 {from} 이후 핸드만 읽었습니다.',
+  integrityMore: '기준에 걸린 {n}쌍 가운데 위험도가 높은 순으로 {shown}쌍만 보입니다.',
   integrityNone: '기준에 걸린 회원 쌍이 없습니다.',
   integrityOpenReports: '열린 신고 {n}건',
   integrityTo: '칩을 받은 회원',
@@ -2873,6 +2874,7 @@ const en: Dict = {
   integrityRules:
     'Rules: at least {shared} hands together and {flow} BB or more one way, at least {pct}% of what passed between them · or {dumps} or more hands given up without a showdown for {dump} BB or more, the other the only winner',
   integrityCapped: 'The period held more hands than the page reads: only hands since {from} were read.',
+  integrityMore: '{n} pairs met the signs: the {shown} highest-risk are listed.',
   integrityNone: 'No pair meets the rules.',
   integrityOpenReports: '{n} open reports',
   integrityTo: 'received by',
