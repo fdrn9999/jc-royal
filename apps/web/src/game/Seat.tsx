@@ -12,13 +12,15 @@ import type { Density } from './layout';
 import { cardsToShow } from './olderRooms';
 import type { RevealSpot } from './reveal';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { serverNow } from '../lib/service';
 import { ReactionBubble, type SeatReaction } from './Reactions';
 
+/** The server's clock (the deadline is the room's), so a device whose clock is off still shows the time the room allows. */
 function useNow(active: boolean) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(serverNow);
   useEffect(() => {
     if (!active) return;
-    const h = setInterval(() => setNow(Date.now()), 250);
+    const h = setInterval(() => setNow(serverNow()), 250);
     return () => clearInterval(h);
   }, [active]);
   return now;

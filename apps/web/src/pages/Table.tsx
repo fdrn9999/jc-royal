@@ -49,7 +49,7 @@ import { lobbyHref } from '../lib/lobbyReturn';
 import { siteUrl } from '../lib/share';
 import { pullSettings, usePrefs } from '../lib/prefs';
 import { useAmounts } from '../lib/amount';
-import { when } from '../lib/service';
+import { serverNow, when } from '../lib/service';
 import { ServiceBanner } from '../components/ServiceBanner';
 import { LoadFailed } from '../components/Loading';
 import { lazyPart } from '../lib/lazyPart';
@@ -79,7 +79,8 @@ function tournamentStalled(s: TableView): boolean {
 /** Free to sit in now: a seat whose player folded and stood up mid-hand stays out of reach until that hand ends. */
 const isFree = (x: SeatView) => x.state === 'empty' && !x.held;
 
-const secondsTo = (target: number) => Math.max(0, Math.ceil((target - Date.now()) / 1000));
+/** Whole seconds to a time the room set (its clock: a device whose clock is off counts the same seconds). */
+const secondsTo = (target: number) => Math.max(0, Math.ceil((target - serverNow()) / 1000));
 
 /**
  * The dock's band under the table (`--dock`, the safe edge `--dock-b` below it): room for the most it holds at once with
@@ -338,7 +339,7 @@ export function TablePage() {
   useEffect(() => {
     if (!myTurn || !hand?.deadline) return;
     const h = setInterval(() => {
-      const left = hand.deadline! - Date.now();
+      const left = hand.deadline! - serverNow();
       if (left < TURN_LOW_MS && left > 0 && Date.now() - lastBeep.current > 950) {
         lastBeep.current = Date.now();
         sound.play('timer');
@@ -435,7 +436,7 @@ export function TablePage() {
                         ? t('tn.paused')
                         : tournamentStalled(s)
                           ? t('tn.allAway')
-                          : s.maintenance && s.maintenance.startsAt - Date.now() < 3600_000
+                          : s.maintenance && s.maintenance.startsAt - serverNow() < 3600_000
                         ? t('table.maintenanceSoon', { start: when(s.maintenance.startsAt, locale) })
                         : null;
 
