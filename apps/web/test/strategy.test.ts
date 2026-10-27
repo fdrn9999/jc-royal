@@ -97,6 +97,36 @@ describe('decisionsOf: the viewer’s own decisions, from the record alone', () 
     expect(decisions(shove)[0]).toMatchObject({ toCall: 2000, stack: 2000, options: ['fold', 'call'], did: 'call', allIn: true, facing: { kind: 'raise', to: 5000, raises: 1 } });
   });
 
+  it('offers a raise again after acting only once the bet grew by a full raise, as the engine does', () => {
+    // The viewer opens to 300 (a raise of 200); the small blind shoves 400 (a raise of 100) or 500 (a full raise of 200);
+    // the big blind, yet to act, may raise either way, and calls.
+    const shove = (to: number) => {
+      const h = hand({
+        actions: [
+          a(4, 'preflop', 'post-sb', 50),
+          a(5, 'preflop', 'post-bb', 100),
+          a(0, 'preflop', 'raise', 300),
+          a(1, 'preflop', 'fold'),
+          a(2, 'preflop', 'fold'),
+          a(3, 'preflop', 'fold'),
+          a(4, 'preflop', 'allin', to - 50),
+          a(5, 'preflop', 'call', to - 100),
+          a(0, 'preflop', 'call', to - 300),
+        ],
+      });
+      h.players[4] = player(4, to);
+      return h;
+    };
+    expect(decisions(shove(400), 5)[0]).toMatchObject({ toCall: 300, options: ['fold', 'call', 'raise'] });
+    expect(decisions(shove(400))[1]).toMatchObject({ toCall: 100, facing: { kind: 'raise', to: 400 }, options: ['fold', 'call'], did: 'call' });
+    expect(decisions(shove(500))[1]).toMatchObject({ toCall: 200, options: ['fold', 'call', 'raise'] });
+
+    // Facing a lone all-in the table still offers a raise (the engine's own options), so the record does too.
+    const lone = hand({ actions: [a(4, 'preflop', 'post-sb', 50), a(5, 'preflop', 'post-bb', 100), a(0, 'preflop', 'raise', 300), a(1, 'preflop', 'fold'), a(2, 'preflop', 'fold'), a(3, 'preflop', 'allin', 2000), a(4, 'preflop', 'fold'), a(5, 'preflop', 'fold'), a(0, 'preflop', 'call', 1700)] });
+    lone.players[3] = player(3, 2000);
+    expect(decisions(lone)[1]).toMatchObject({ toCall: 1700, options: ['fold', 'call', 'raise'] });
+  });
+
   it('marks a choice the clock made', () => {
     const h = hand({ actions: [a(4, 'preflop', 'post-sb', 50), a(5, 'preflop', 'post-bb', 100), a(0, 'preflop', 'timeout-fold')] });
     expect(decisions(h)[0]).toMatchObject({ did: 'fold', timedOut: true });

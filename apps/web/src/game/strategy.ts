@@ -86,6 +86,10 @@ export function decisionsOf(hand: ReplayInput, steps: readonly ReplayStep[], her
   let top = 0;
   let facing: Decision['facing'] = null;
   let raises = 0;
+  // The street's largest raise (blinds not counted) and its highest total just after each player's last action on it:
+  // what decides, as the engine rules it, whether raising is still open to a player who already acted.
+  let raiseSize = 0;
+  const actedAt = new Map<number, number>();
   let streetPot = 0;
   let streetBehind = new Map<number, number>();
   let voluntary = false;
@@ -98,6 +102,8 @@ export function decisionsOf(hand: ReplayInput, steps: readonly ReplayStep[], her
       top = 0;
       facing = null;
       raises = 0;
+      raiseSize = 0;
+      actedAt.clear();
       streetPot = sum(put.values());
       streetBehind = new Map(hand.players.map((p) => [p.seatIndex, behind(p.seatIndex)]));
     }
@@ -112,6 +118,10 @@ export function decisionsOf(hand: ReplayInput, steps: readonly ReplayStep[], her
       const on = (street.get(me.seatIndex) ?? 0) + added;
       const allIn = a.type === 'allin' || (left > 0 && added >= left);
       const did: Choice = FOLDS.has(a.type) ? 'fold' : added === 0 ? 'check' : on <= top ? 'call' : top === 0 ? 'bet' : 'raise';
+      // After acting, the viewer may raise again only once the bet has grown by a full raise: an all-in short of one
+      // leaves them to call or fold. Facing a lone all-in the table still offers a raise, and so does this.
+      const acted = actedAt.get(me.seatIndex);
+      const reopened = acted === undefined || top - acted >= Math.max(raiseSize, bb);
       out.push({
         step: steps.findIndex((x) => x.kind === 'action' && x.actions[0] === a),
         action: k,
@@ -126,7 +136,7 @@ export function decisionsOf(hand: ReplayInput, steps: readonly ReplayStep[], her
         streetPot,
         facing: owed > 0 ? facing : null,
         unopened: s === 'preflop' && !voluntary,
-        options: owed === 0 ? ['check', top > 0 ? 'raise' : 'bet'] : left > owed ? ['fold', 'call', 'raise'] : ['fold', 'call'],
+        options: owed === 0 ? ['check', top > 0 ? 'raise' : 'bet'] : left > owed && reopened ? ['fold', 'call', 'raise'] : ['fold', 'call'],
         did,
         allIn,
         timedOut: TIMEOUTS.has(a.type),
@@ -149,8 +159,10 @@ export function decisionsOf(hand: ReplayInput, steps: readonly ReplayStep[], her
     if (on > top) {
       raises += 1;
       facing = { kind: top === 0 ? 'bet' : 'raise', to: on, potBefore, raises };
+      raiseSize = Math.max(raiseSize, on - top);
       top = on;
     }
+    actedAt.set(a.seatIndex, top);
     if (added > 0) voluntary = true;
   });
   return out;
