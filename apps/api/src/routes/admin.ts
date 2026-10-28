@@ -1148,7 +1148,7 @@ const admin = new Hono<AppEnv>()
     const h = await c.var.db.query.hands.findFirst({ where: eq(schema.hands.id, id) });
     if (!h) fail(404, 'not_found', 'hand not found');
     const players = await c.var.db
-      .select({ hp: schema.handPlayers, nickname: schema.users.nickname })
+      .select({ hp: schema.handPlayers, nickname: schema.users.nickname, isBot: schema.users.isBot })
       .from(schema.handPlayers)
       .innerJoin(schema.users, eq(schema.users.id, schema.handPlayers.userId))
       .where(eq(schema.handPlayers.handId, id));
@@ -1158,9 +1158,11 @@ const admin = new Hono<AppEnv>()
       hand: { id: h.id, tableId: h.tableId, handNumber: h.handNumber, startedAt: h.startedAt, endedAt: h.endedAt, board: JSON.parse(h.board), potTotal: h.potTotal, engineVersion: h.engineVersion },
       actions: log.actions,
       engineLogGzipBase64: log.engine,
-      players: players.map(({ hp, nickname }) => ({
+      players: players.map(({ hp, nickname, isBot }) => ({
         userId: hp.userId,
         nickname,
+        // A seat a table bot played (as on a member's replay): only when it was one.
+        ...(isBot ? { bot: true as const } : {}),
         seatIndex: hp.seatIndex,
         holeCards: JSON.parse(hp.holeCards),
         stackStart: hp.stackStart,

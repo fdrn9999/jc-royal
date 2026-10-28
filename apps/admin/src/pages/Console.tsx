@@ -1,4 +1,4 @@
-import { ArrowRightIcon, Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat, XIcon } from '@jc/ui';
+import { ArrowRightIcon, Badge, BotIcon, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat, XIcon } from '@jc/ui';
 import { academyItemName, ageOn, BOT_LEVELS, BOT_TABLE_STYLES, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type BotTableStyle, type VipColor } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
@@ -1431,7 +1431,7 @@ export function TableDetailPage() {
                   <li key={i} className="flex justify-between gap-2 py-1.5">
                     <span className="flex min-w-0 flex-wrap items-center gap-1">
                       #{s.seatIndex + 1} {s.nickname}
-                      {s.bot && <Badge tone="blue">{t('botBadge')} · {botLevelLabel(t, s.bot)}{s.botStyle ? ` · ${botStyleLabel(t, s.botStyle)}` : ''}</Badge>}
+                      {s.bot && <Badge tone="blue"><BotIcon className="size-3" />{t('botBadge')} · {botLevelLabel(t, s.bot)}{s.botStyle ? ` · ${botStyleLabel(t, s.botStyle)}` : ''}</Badge>}
                       {!s.connected && <Badge>{t('offline')}</Badge>}
                       {s.sittingOut && <Badge>{t('sittingOut')}</Badge>}
                       {s.phase && s.phase !== 'seated' && <Badge tone="gold">{seatPhaseLabel(t, s.phase)}</Badge>}
@@ -1753,7 +1753,7 @@ export function HandsPage() {
 interface HandAudit {
   hand: { id: string; tableId: string; handNumber: number; endedAt: number; board: string[]; potTotal: number; engineVersion: string };
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
-  players: { userId: string; nickname: string; seatIndex: number; holeCards: string[]; stackStart: number; stackEnd: number; net: number; won: number; rankClass: string | null; bestFive: string[] | null; wentToShowdown: boolean }[];
+  players: { userId: string; nickname: string; bot?: true; seatIndex: number; holeCards: string[]; stackStart: number; stackEnd: number; net: number; won: number; rankClass: string | null; bestFive: string[] | null; wentToShowdown: boolean }[];
   settlementBalanced: boolean;
 }
 
@@ -1778,7 +1778,10 @@ export function HandDetailPage() {
               <li key={p.userId} className="flex items-center gap-2 py-2">
                 <span className="w-6 text-xs text-ink-400">#{p.seatIndex + 1}</span>
                 <span className="flex gap-0.5">{p.holeCards.map((c) => <PlayingCard key={c} card={c as Card} size="1.6rem" />)}</span>
-                <Link to={`/users/${p.userId}`} className="flex-1 truncate text-gold-300">{p.nickname}</Link>
+                <span className="flex min-w-0 flex-1 items-center gap-1">
+                  <Link to={`/users/${p.userId}`} className="truncate text-gold-300">{p.nickname}</Link>
+                  {p.bot && <Badge tone="blue" className="shrink-0"><BotIcon className="size-3" />{t('botBadge')}</Badge>}
+                </span>
                 <span className="text-xs text-ink-300">{handRankLabel(t, p.rankClass, p.bestFive)}</span>
                 <span className="font-mono">{p.net > 0 ? '+' : ''}{formatChips(p.net)}</span>
               </li>
