@@ -31,6 +31,8 @@ export interface Env {
   RATE_LIMIT_IP_SCALE?: string;
   /** Local tests only: members' empty rooms close after this many ms instead of MEMBER_IDLE_CLOSE_MS. */
   MEMBER_IDLE_CLOSE_MS?: string;
+  /** Local measurement only (lib/d1-stats.ts): `1` adds each response's D1 row counts as x-d1-* headers. */
+  D1_STATS?: string;
   /** Web Push (VAPID, RFC 8292) key pair, base64url: the 65-byte public point and the 32-byte private scalar (secrets). Without both, no push is sent. */
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;

@@ -250,6 +250,8 @@ export async function startWorker(port: number, state: string): Promise<RunningW
       '--var', `VAPID_PUBLIC_KEY:${vapid.publicKey}`,
       '--var', `VAPID_PRIVATE_KEY:${vapid.privateKey}`,
       ...(sink ? ['--var', `PUSH_SINK_URL:${sink}`] : []),
+      // The load runs read each response's D1 row counts (apps/api/src/lib/d1-stats.ts).
+      ...(process.env.TEST_D1_STATS === '1' ? ['--var', 'D1_STATS:1'] : []),
     ],
     {
       cwd: root,

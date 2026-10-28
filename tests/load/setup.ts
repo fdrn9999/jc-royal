@@ -18,6 +18,8 @@ export async function setup() {
   // wrangler dev records every invocation in a local trace store (on by default). Under this load it stalled the
   // whole local runtime for up to a second at a time (docs/LOAD_TEST.md), so it is off unless asked for.
   process.env.X_LOCAL_OBSERVABILITY ??= 'false';
+  // TEST_D1_STATS=1 has each response say how many D1 rows it read and wrote (apps/api/src/lib/d1-stats.ts; never on in
+  // a deployment). It runs some reads twice, so the timings of a run with it are not the API's own.
   worker = await startWorker(Number(process.env.LOAD_PORT ?? 8796), state);
   process.env.TEST_BASE_URL = worker.url;
   process.env.LOAD_STATE = state;
