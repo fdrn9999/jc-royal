@@ -112,7 +112,7 @@ function MyGames({ tables }: { tables: LobbyTableDto[] }) {
   const { t } = useI18n();
   if (tables.length === 0) return null;
   return (
-    <section className="flex flex-col gap-2" aria-labelledby="lobby-my-games-title" data-testid="lobby-my-games">
+    <section id="lobby-my-games" className="flex scroll-mt-20 flex-col gap-2" aria-labelledby="lobby-my-games-title" data-testid="lobby-my-games">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
         <h2 id="lobby-my-games-title" className="text-sm font-bold tracking-wide text-gold-300">{t('lobby.myGames')}</h2>
         <p className="text-xs text-ink-300">{t('lobby.myGamesHint')}</p>
@@ -281,7 +281,7 @@ export function LobbyPage() {
 
       <InstallOfferLazy />
       {paused && <MaintenanceNote m={paused} what="games" />}
-      <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} paused={!!paused} />
+      <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} paused={!!paused} mine={mine} />
 
       <div className="flex flex-col gap-2">
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1" role="tablist">
