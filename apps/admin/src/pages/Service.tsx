@@ -2,9 +2,11 @@ import { Badge, Button, Empty, Field, formatDate, Input, Panel } from '@jc/ui';
 import type { NoticeKind } from '@jc/types';
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { byKind, MAINTENANCE_TEMPLATES, maintenanceVars, NOTICE_TEMPLATES, REASONS } from '../adminTemplates';
 import { useT } from '../i18n';
 import { maintStateLabel, noticeKindLabel, noticeStateLabel } from '../labels';
 import { ApiError, errText, hasGrant, useAdmin, useData } from '../lib';
+import { AdminReasonField, ContentTemplateFields, TemplateMissing, TemplatePreview, TemplateTooLong, useContentTemplate } from '../templateFields';
 import { Feedback, LoadError, Modal, type Note } from '../ui';
 
 interface NoticeRow {
@@ -86,7 +88,19 @@ function MaintenancePanel() {
   const fromWindow = (w: WindowRow): MaintForm => ({ id: w.id, started: w.state === 'active', start: toInput(w.startsAt), end: toInput(w.endsAt), blockLogin: w.blockLogin, messageKo: w.messageKo ?? '', messageEn: w.messageEn ?? '', reason: '' });
   const startMs = form ? (form.started ? null : (fromInput(form.start) ?? Date.now())) : null;
   const endMs = form ? fromInput(form.end) : null;
-  const formOk = !!form && endMs !== null && endMs > Date.now() && endMs > (startMs ?? 0) && form.reason.trim().length >= 2;
+  // The member message's times come from the form (a window under way keeps its start); the template writes nothing else.
+  const tpl = useContentTemplate({
+    templates: MAINTENANCE_TEMPLATES,
+    values: { bodyKo: form?.messageKo ?? '', bodyEn: form?.messageEn ?? '' },
+    apply: (patch) => setForm((f) => f && { ...f, messageKo: patch.bodyKo ?? f.messageKo, messageEn: patch.bodyEn ?? f.messageEn }),
+    auto: maintenanceVars(form ? (startMs ?? fromInput(form.start)) : null, endMs),
+    limits: { bodyKo: 2000, bodyEn: 2000 },
+  });
+  const edit = (f: MaintForm) => {
+    tpl.reset();
+    setForm(f);
+  };
+  const formOk = !!form && endMs !== null && endMs > Date.now() && endMs > (startMs ?? 0) && form.reason.trim().length >= 2 && !tpl.blocked;
 
   async function run(fn: () => Promise<{ rooms: RoomFanOut }>, done: string) {
     setBusy(true);
@@ -142,9 +156,17 @@ function MaintenancePanel() {
             {!form && (
               <div className="mt-3 flex flex-col gap-2">
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setForm(fromWindow(current))} data-testid="maint-edit">{t('maintEdit')}</Button>
+                  <Button size="sm" variant="outline" onClick={() => edit(fromWindow(current))} data-testid="maint-edit">{t('maintEdit')}</Button>
                 </div>
-                <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={stopReason} maxLength={200} onChange={(e) => setStopReason(e.target.value)} data-testid="maint-stop-reason" />}</Field>
+                <AdminReasonField
+                  label={t('reasonRequired')}
+                  templates={current.state === 'active' ? REASONS.maintenance.end : REASONS.maintenance.cancel}
+                  value={stopReason}
+                  onChange={setStopReason}
+                  maxLength={200}
+                  testid="maint-stop-reason"
+                />
+                <p className="text-xs text-ink-400" data-testid="maint-stop-note">{t(current.state === 'active' ? 'maintStopNote' : 'maintCancelNote')}</p>
                 <Button variant="danger" disabled={stopReason.trim().length < 2 || busy} onClick={() => setConfirm('stop')} data-testid="maint-stop">
                   {current.state === 'active' ? t('maintStop') : t('maintCancel')}
                 </Button>
@@ -155,7 +177,7 @@ function MaintenancePanel() {
           !form && (
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-ink-300">{t('maintNone')}</span>
-              <Button onClick={() => setForm(blank())} data-testid="maint-new">{t('maintSchedule')}</Button>
+              <Button onClick={() => edit(blank())} data-testid="maint-new">{t('maintSchedule')}</Button>
             </div>
           )
         )}
@@ -172,12 +194,30 @@ function MaintenancePanel() {
               <input type="checkbox" className="mt-1" checked={form.blockLogin} onChange={(e) => setForm({ ...form, blockLogin: e.target.checked })} data-testid="maint-block-login" />
               <span>{t('maintBlockLogin')}</span>
             </label>
+            <p className="text-xs text-ink-400">{t('maintTplNote')}</p>
+            <ContentTemplateFields tpl={tpl} testid="maint-tpl" />
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label={t('maintMsgKo')}>{(fid) => <textarea id={fid} rows={3} maxLength={2000} value={form.messageKo} onChange={(e) => setForm({ ...form, messageKo: e.target.value })} className={textarea} />}</Field>
-              <Field label={t('maintMsgEn')}>{(fid) => <textarea id={fid} rows={3} maxLength={2000} value={form.messageEn} onChange={(e) => setForm({ ...form, messageEn: e.target.value })} className={textarea} />}</Field>
+              <Field label={t('maintMsgKo')}>{(fid) => <textarea id={fid} rows={6} maxLength={2000} value={form.messageKo} onChange={(e) => setForm({ ...form, messageKo: e.target.value })} className={textarea} data-testid="maint-msg-ko" />}</Field>
+              <Field label={t('maintMsgEn')}>{(fid) => <textarea id={fid} rows={6} maxLength={2000} value={form.messageEn} onChange={(e) => setForm({ ...form, messageEn: e.target.value })} className={textarea} data-testid="maint-msg-en" />}</Field>
             </div>
-            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={form.reason} maxLength={200} onChange={(e) => setForm({ ...form, reason: e.target.value })} data-testid="maint-reason" />}</Field>
+            <TemplatePreview
+              testid="maint-preview"
+              items={[
+                { label: t('langKo'), body: form.messageKo },
+                { label: t('langEn'), body: form.messageEn },
+              ]}
+            />
+            <AdminReasonField
+              label={t('reasonRequired')}
+              templates={form.id ? REASONS.maintenance.change : REASONS.maintenance.schedule}
+              value={form.reason}
+              onChange={(v) => setForm((f) => f && { ...f, reason: v })}
+              maxLength={200}
+              testid="maint-reason"
+            />
             {endMs !== null && endMs <= (startMs ?? Date.now()) && <p className="text-xs text-danger">{t('errMaintEnd')}</p>}
+            <TemplateMissing tpl={tpl} testid="maint-missing" />
+            <TemplateTooLong tpl={tpl} testid="maint-too-long" names={{ bodyKo: t('maintMsgKo'), bodyEn: t('maintMsgEn') }} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="ghost" onClick={() => setForm(null)}>{t('cancel')}</Button>
               <Button disabled={!formOk || busy} onClick={() => setConfirm('save')} data-testid="maint-save">{form.id ? t('maintEdit') : t('maintSchedule')}</Button>
@@ -265,10 +305,22 @@ function NoticesPanel() {
 
   const blank = (): NoticeForm => ({ kind: 'general', titleKo: '', titleEn: '', bodyKo: '', bodyEn: '', start: '', end: '', postToBoard: false, sendInbox: false });
   const fromRow = (n: NoticeRow): NoticeForm => ({ id: n.id, kind: n.kind, titleKo: n.titleKo, titleEn: n.titleEn, bodyKo: n.bodyKo ?? '', bodyEn: n.bodyEn ?? '', start: toInput(n.startsAt), end: toInput(n.endsAt), postToBoard: false, sendInbox: false });
+  const tpl = useContentTemplate({
+    templates: byKind(NOTICE_TEMPLATES, form?.kind ?? 'general', { suited: t('tplSuited'), others: t('tplOthers') }),
+    values: { titleKo: form?.titleKo ?? '', titleEn: form?.titleEn ?? '', bodyKo: form?.bodyKo ?? '', bodyEn: form?.bodyEn ?? '' },
+    apply: (patch) => setForm((f) => f && { ...f, ...patch }),
+    limits: { titleKo: 100, titleEn: 100, bodyKo: 2000, bodyEn: 2000 },
+  });
+  const open = (f: NoticeForm) => {
+    tpl.reset();
+    setForm(f);
+  };
   const titlesOk = !!form && form.titleKo.trim().length >= 2 && form.titleEn.trim().length >= 2;
   const endMs = form ? fromInput(form.end) : null;
   const startMs = form ? fromInput(form.start) : null;
   const windowOk = endMs === null || (endMs > Date.now() && endMs > (startMs ?? Date.now()));
+  // A board post and inbox messages go out on saving, not at the start: said plainly when the start is later.
+  const later = !form?.id && startMs !== null && startMs > Date.now() && (form?.postToBoard || form?.sendInbox);
 
   async function act(fn: () => Promise<string>) {
     setBusy(true);
@@ -285,6 +337,7 @@ function NoticesPanel() {
   }
   const save = () =>
     form &&
+    !tpl.blocked &&
     act(async () => {
       const body = { kind: form.kind, titleKo: form.titleKo, titleEn: form.titleEn, bodyKo: form.bodyKo, bodyEn: form.bodyEn, endsAt: endMs };
       if (form.id) {
@@ -300,7 +353,7 @@ function NoticesPanel() {
   return (
     <Panel
       title={t('noticesTitle')}
-      actions={<Button size="sm" onClick={() => setForm(blank())} data-testid="notice-new">{t('noticeNew')}</Button>}
+      actions={<Button size="sm" onClick={() => open(blank())} data-testid="notice-new">{t('noticeNew')}</Button>}
     >
       <div className="flex flex-col gap-3 text-sm" data-testid="notices-panel">
         <div className="flex flex-wrap items-center gap-2">
@@ -332,7 +385,7 @@ function NoticesPanel() {
                   <span>{n.author ?? '—'}</span>
                   {n.postId && <span>{t('noticeOnBoard')}</span>}
                   <span className="ml-auto flex flex-wrap gap-1.5">
-                    {n.state !== 'deleted' && n.state !== 'ended' && <Button size="sm" variant="subtle" onClick={() => setForm(fromRow(n))}>{t('edit')}</Button>}
+                    {n.state !== 'deleted' && n.state !== 'ended' && <Button size="sm" variant="subtle" onClick={() => open(fromRow(n))}>{t('edit')}</Button>}
                     {(n.state === 'live' || n.state === 'scheduled') && <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(async () => (await api(`/api/admin/service/notices/${n.id}/end`, { body: {} }), t('saved')))} data-testid="notice-end">{t('noticeEnd')}</Button>}
                     {n.state !== 'deleted' && <Button size="sm" variant="danger" onClick={() => setConfirm({ kind: 'delete', row: n })}>{t('delete')}</Button>}
                   </span>
@@ -356,7 +409,7 @@ function NoticesPanel() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setForm(null)}>{t('cancel')}</Button>
-            <Button disabled={!titlesOk || !windowOk || busy} onClick={() => (form?.sendInbox ? setConfirm({ kind: 'inbox' }) : void save())} data-testid="notice-save">{t('save')}</Button>
+            <Button disabled={!titlesOk || !windowOk || tpl.blocked || busy} onClick={() => (form?.sendInbox ? setConfirm({ kind: 'inbox' }) : void save())} data-testid="notice-save">{t('save')}</Button>
           </>
         }
       >
@@ -371,11 +424,21 @@ function NoticesPanel() {
                 </select>
               )}
             </Field>
+            <ContentTemplateFields tpl={tpl} testid="notice-tpl" />
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t('noticeTitleKo')}>{(fid) => <Input id={fid} value={form.titleKo} maxLength={100} onChange={(e) => setForm({ ...form, titleKo: e.target.value })} data-testid="notice-title-ko" />}</Field>
               <Field label={t('noticeTitleEn')}>{(fid) => <Input id={fid} value={form.titleEn} maxLength={100} onChange={(e) => setForm({ ...form, titleEn: e.target.value })} data-testid="notice-title-en" />}</Field>
-              <Field label={t('noticeBodyKo')}>{(fid) => <textarea id={fid} rows={4} maxLength={2000} value={form.bodyKo} onChange={(e) => setForm({ ...form, bodyKo: e.target.value })} className={textarea} />}</Field>
-              <Field label={t('noticeBodyEn')}>{(fid) => <textarea id={fid} rows={4} maxLength={2000} value={form.bodyEn} onChange={(e) => setForm({ ...form, bodyEn: e.target.value })} className={textarea} />}</Field>
+              <Field label={t('noticeBodyKo')}>{(fid) => <textarea id={fid} rows={6} maxLength={2000} value={form.bodyKo} onChange={(e) => setForm({ ...form, bodyKo: e.target.value })} className={textarea} data-testid="notice-body-ko" />}</Field>
+              <Field label={t('noticeBodyEn')}>{(fid) => <textarea id={fid} rows={6} maxLength={2000} value={form.bodyEn} onChange={(e) => setForm({ ...form, bodyEn: e.target.value })} className={textarea} data-testid="notice-body-en" />}</Field>
+            </div>
+            <TemplatePreview
+              testid="notice-preview"
+              items={[
+                { label: t('langKo'), title: form.titleKo, body: form.bodyKo },
+                { label: t('langEn'), title: form.titleEn, body: form.bodyEn },
+              ]}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t('noticeStarts')}>{(fid) => <Input id={fid} type="datetime-local" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} data-testid="notice-start" />}</Field>
               <Field label={t('noticeEnds')}>{(fid) => <Input id={fid} type="datetime-local" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} data-testid="notice-end-at" />}</Field>
             </div>
@@ -387,14 +450,31 @@ function NoticesPanel() {
               <>
                 <label className="flex items-start gap-2">
                   <input type="checkbox" className="mt-1" checked={form.postToBoard} onChange={(e) => setForm({ ...form, postToBoard: e.target.checked })} data-testid="notice-board" />
-                  <span>{t('noticeBoard')}</span>
+                  <span className="flex flex-col gap-0.5">
+                    <span>{t('noticeBoard')}</span>
+                    <span className="text-xs text-ink-400">{t('noticeBoardWhen')}</span>
+                  </span>
                 </label>
                 <label className="flex items-start gap-2">
                   <input type="checkbox" className="mt-1" checked={form.sendInbox} onChange={(e) => setForm({ ...form, sendInbox: e.target.checked })} data-testid="notice-inbox" />
-                  <span>{t('noticeInbox')}</span>
+                  <span className="flex flex-col gap-0.5">
+                    <span>{t('noticeInbox')}</span>
+                    <span className="text-xs text-ink-400">{t('noticeInboxWhen')}</span>
+                  </span>
                 </label>
+                {later && startMs !== null && (
+                  <p className="rounded-lg border border-gold-500/40 bg-gold-500/10 p-3 text-xs text-gold-200" data-testid="notice-later-warn">
+                    {t('noticeLaterWarn', { at: time(startMs) })}
+                  </p>
+                )}
               </>
             )}
+            <TemplateMissing tpl={tpl} testid="notice-missing" />
+            <TemplateTooLong
+              tpl={tpl}
+              testid="notice-too-long"
+              names={{ titleKo: t('noticeTitleKo'), titleEn: t('noticeTitleEn'), bodyKo: t('noticeBodyKo'), bodyEn: t('noticeBodyEn') }}
+            />
           </div>
         )}
       </Modal>
@@ -421,6 +501,7 @@ function NoticesPanel() {
         }
       >
         <p className="text-sm">{confirm?.kind === 'delete' ? t('noticeDeleteConfirm', { title: confirm.row?.titleKo ?? '' }) : t('noticeInboxConfirm')}</p>
+        {confirm?.kind === 'inbox' && later && startMs !== null && <p className="mt-2 text-sm text-gold-200">{t('noticeLaterWarn', { at: time(startMs) })}</p>}
       </Modal>
     </Panel>
   );

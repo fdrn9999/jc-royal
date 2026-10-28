@@ -19,11 +19,13 @@ import {
   type ReportTarget,
 } from '@jc/types';
 import { Badge, Button, ChevronDownIcon, ChevronUpIcon, Empty, formatChips, formatDate, Input, Panel, Stat, XIcon } from '@jc/ui';
-import { useId, useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { auditActionLabel, contentStatusLabel, userStatusLabel, type Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { contentTone, Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
 import { IntegritySignals, SignalEvidence } from './Integrity';
@@ -254,14 +256,25 @@ type Decision = 'resolved' | 'dismissed';
 function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone: (note: Note) => void }) {
   const { t, locale } = useT();
   const { api, me } = useAdmin();
-  const fid = useId();
   const [note, setNote] = useState('');
   const [hide, setHide] = useState(false);
   const [notifyReporter, setNotifyReporter] = useState(false);
   const [notifyTarget, setNotifyTarget] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const [suspend, setSuspend] = useState<{ reason: string; error: string | null } | null>(null);
+  // `lang`: the member's language as the server last said it, when they switched it after this list loaded.
+  const [suspend, setSuspend] = useState<{ reason: string; error: string | null; lang?: 'ko' | 'en' } | null>(null);
+  const targetLang = suspend?.lang ?? r.target.locale;
+  // Bumped when the dialog opens or closes: an answer that comes back after it did is for a dialog no longer there.
+  const suspendSeq = useRef(0);
+  const openSuspend = () => {
+    suspendSeq.current++;
+    setSuspend({ reason: '', error: null });
+  };
+  const closeSuspend = () => {
+    suspendSeq.current++;
+    setSuspend(null);
+  };
   // A decision waits in a confirmation that shows the server's preview of it (reports closed with it, content hidden, messages sent).
   const [decide, setDecide] = useState<{ status: Decision; pv: { data: DecisionPreview } | { error: unknown } | null } | null>(null);
   const pvSeq = useRef(0);
@@ -317,13 +330,24 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
   const pvError = decide?.pv && 'error' in decide.pv ? errText(decide.pv.error, t) : null;
   const confirmSuspend = async () => {
     if (!suspend) return;
+    const seq = suspendSeq.current;
+    const sentLang = targetLang;
     setBusy(true);
     try {
-      await api(`/api/admin/users/${r.target.id}/suspend`, { body: { reason: suspend.reason.trim(), reportId: r.id } });
-      setSuspend(null);
+      await api(`/api/admin/users/${r.target.id}/suspend`, { body: { reason: suspend.reason.trim(), reportId: r.id, reasonLocale: sentLang } });
+      if (seq === suspendSeq.current) closeSuspend();
       onDone({ ok: true, text: t('reportSuspended', { name: r.target.nickname }) });
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setSuspend({ ...suspend, error: errText(e, t) });
+      // Only the dialog it was sent from takes the answer, and it keeps what was typed while it was on its way.
+      if (seq !== suspendSeq.current) return;
+      if (e instanceof ApiError && e.code === 'locale_changed') {
+        // Written again in the member's language now (the field does it); the note stays until the dialog closes.
+        const lang = (e.details as { locale?: 'ko' | 'en' } | undefined)?.locale ?? (sentLang === 'en' ? 'ko' : 'en');
+        setSuspend((s) => s && { ...s, lang, error: null });
+      } else if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) {
+        const error = errText(e, t);
+        setSuspend((s) => s && { ...s, error });
+      }
     } finally {
       setBusy(false);
     }
@@ -405,7 +429,7 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
           {showLog ? <ChevronUpIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
         </Button>
         {r.target.status === 'active' && (
-          <Button size="sm" variant="danger" disabled={busy} onClick={() => setSuspend({ reason: '', error: null })} data-testid="report-suspend">{t('suspendFromReport')}</Button>
+          <Button size="sm" variant="danger" disabled={busy} onClick={openSuspend} data-testid="report-suspend">{t('suspendFromReport')}</Button>
         )}
       </div>
       {showLog && <ReportLog key={`${r.status}|${r.severity}|${r.assignee?.id}|${r.target.status}|${r.sanctions.length}`} r={r} />}
@@ -465,12 +489,12 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
       </Modal>
       <Modal
         open={suspend !== null}
-        onClose={() => setSuspend(null)}
+        onClose={closeSuspend}
         title={t('suspendFromReport')}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setSuspend(null)}>{t('cancel')}</Button>
-            <Button variant="danger" loading={busy} disabled={!suspend || suspend.reason.trim().length < 2} onClick={() => void confirmSuspend()} data-testid="report-suspend-confirm">
+            <Button variant="ghost" onClick={closeSuspend}>{t('cancel')}</Button>
+            <Button variant="danger" loading={busy} disabled={!suspend || suspend.reason.trim().length < 2 || suspend.reason.trim().length > 200} onClick={() => void confirmSuspend()} data-testid="report-suspend-confirm">
               {t('confirm')}
             </Button>
           </>
@@ -479,14 +503,20 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
         <div className="flex flex-col gap-2 text-sm">
           <p>{t('suspendConfirm', { name: r.target.nickname })}</p>
           <p className="text-xs text-ink-300">{t('suspendFromReportHint')}</p>
-          <label htmlFor={fid} className="text-xs text-ink-400">{t('reason')}</label>
-          <Input
-            id={fid}
+          <AdminReasonField
+            label={t('reason')}
+            templates={REASONS.suspend}
             value={suspend?.reason ?? ''}
+            onChange={(v) => setSuspend((s) => s && { ...s, reason: v, error: null })}
             maxLength={200}
-            onChange={(e) => suspend && setSuspend({ reason: e.target.value, error: null })}
-            data-testid="report-suspend-reason"
+            lang={targetLang}
+            follow
+            hint={t('suspendReasonHint', { lang: targetLang === 'en' ? t('langEn') : t('langKo') })}
+            testid="report-suspend-reason"
           />
+          {suspend?.lang && (
+            <p className="text-xs text-gold-300" role="status" data-testid="report-suspend-relang">{t('errLocaleChanged')}</p>
+          )}
           {suspend?.error && <p className="text-xs text-danger" role="alert">{suspend.error}</p>}
         </div>
       </Modal>

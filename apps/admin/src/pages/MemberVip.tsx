@@ -9,15 +9,24 @@
  * server refuses them too); a color such an account still has can be ended.
  */
 import { VIP_COLORS, VIP_DEFAULT_COLOR, type AdminVipDto, type AdminVipPreviewDto, type AdminVipResultDto, type VipColor } from '@jc/types';
-import { Badge, Button, Field, formatDate, Input, Panel } from '@jc/ui';
+import { Badge, Button, formatDate, Panel } from '@jc/ui';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT } from '../i18n';
 import type { Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, jumpTarget, Modal, PageState, type Note } from '../ui';
 
 type Change = { enabled: true; color: VipColor } | { enabled: false };
+
+/** The reasons that fit the change: making a member VIP, changing the color of one, or ending it. */
+const vipReasons = (c: Change | null, isVip: boolean) => {
+  const give = c?.enabled === true;
+  const fits: Record<string, boolean> = { 'vip.assign': give && !isVip, 'vip.color': give && isVip, 'vip.event': give, 'vip.remove': c?.enabled === false };
+  return REASONS.vip.filter((x) => fits[x.id] ?? true);
+};
 type Kind = 'assign' | 'color' | 'remove';
 const kindOf = (from: VipColor | null, c: Change): Kind => (!c.enabled ? 'remove' : from === null ? 'assign' : 'color');
 export const vipColorLabel = (t: Tr, c: VipColor | null) => (c ? t(`vipColor_${c}`) : t('vipNone'));
@@ -247,7 +256,7 @@ export function MemberVipPanel({ userId, onChanged }: { userId: string; onChange
               <p className="text-xs text-ink-400">{t('pvBasis')}</p>
             </>
           )}
-          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="vip-reason" />}</Field>
+          <AdminReasonField label={t('reasonRequired')} templates={vipReasons(act, d.color !== null)} value={reason} onChange={setReason} maxLength={200} testid="vip-reason" />
         </div>
       </Modal>
     </Panel>

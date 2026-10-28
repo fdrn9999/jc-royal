@@ -8,11 +8,13 @@
  * member changes nothing. Both show their scope first (the server's preview), then take a reason and the password.
  */
 import { SETTINGS_RESTORE_MS, SYNCED_PREF_KEYS, type AdminSettingsDiagDto } from '@jc/types';
-import { Badge, Button, Field, formatDate, Input, Panel, Stat } from '@jc/ui';
+import { Badge, Button, formatDate, Panel, Stat } from '@jc/ui';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT } from '../i18n';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, LoadError, Modal, PageState, type Note } from '../ui';
 
 type Kind = 'reset' | 'restore';
@@ -177,7 +179,7 @@ export function MemberSettingsPanel({ userId }: { userId: string }) {
             </ul>
           )}
           {pvData && <p className="text-xs text-ink-400">{t('pvBasis')}</p>}
-          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="settings-act-reason" />}</Field>
+          <AdminReasonField label={t('reasonRequired')} templates={act ? REASONS.settings[act] : []} value={reason} onChange={setReason} maxLength={200} testid="settings-act-reason" />
         </div>
       </Modal>
     </Panel>

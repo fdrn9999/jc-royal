@@ -283,7 +283,8 @@ export interface ReportDto {
   status: ReportStatus;
   createdAt: number;
   reporter: { id: string; nickname: string };
-  target: { id: string; nickname: string; status: 'active' | 'suspended' | 'deleted' };
+  /** `locale` is the language the member reads in: a suspension given from the report reaches them with its reason as written. */
+  target: { id: string; nickname: string; status: 'active' | 'suspended' | 'deleted'; locale: 'ko' | 'en' };
   context: ReportContext | null;
   /** Current visibility of the reported post or comment. */
   contentStatus: 'visible' | 'hidden' | 'deleted' | null;

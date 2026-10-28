@@ -6,9 +6,11 @@
  */
 import { Badge, Button, Empty, formatDate, Input, Panel } from '@jc/ui';
 import { useEffect, useMemo, useState } from 'react';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { auditActionLabel, grantLabel, roleLabel, userStatusLabel } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 
 type Level = 'all' | 'some' | 'none';
@@ -111,6 +113,10 @@ export function AdminGrantsPanel({ features, grantKeys }: { features: FeatureRow
 
   const editable = !!admin && admin.role === 'admin' && admin.id !== me?.user.id;
   const dirty = !!admin && !same(draft, saved);
+  // A "granted" reason only when something opens, a "withdrawn" one only when something closes.
+  const opens = draft.some((g) => !saved.includes(g));
+  const closes = saved.some((g) => !draft.includes(g));
+  const reasons = REASONS.adminGrants.filter((x) => (x.id === 'grants.new' ? opens : x.id === 'grants.revoke' ? closes : true));
   const toggle = (g: string) => setDraft((d) => (d.includes(g) ? d.filter((x) => x !== g) : [...d, g]));
 
   const pick = (id: string) => {
@@ -320,10 +326,8 @@ export function AdminGrantsPanel({ features, grantKeys }: { features: FeatureRow
                           <Button size="sm" variant="ghost" disabled={busy || !dirty} onClick={() => setDraft(saved)} data-testid="grants-undo">{t('grantsUndo')}</Button>
                         </div>
                         {dirty && <p className="text-xs text-gold-300" role="status">{t('grantsUnsaved')}</p>}
-                        <div className="flex flex-col gap-2 sm:flex-row">
-                          <Input className="min-w-0 sm:flex-1" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder={t('grantsReasonPh')} aria-label={t('reason')} data-testid="grants-reason" />
-                          <Button disabled={!dirty || reason.trim().length < 2} loading={busy && !preview} onClick={() => void review()} data-testid="grants-review">{t('grantsReview')}</Button>
-                        </div>
+                        <AdminReasonField label={t('reason')} templates={reasons} value={reason} onChange={setReason} maxLength={200} placeholder={t('grantsReasonPh')} testid="grants-reason" />
+                        <Button className="self-start" disabled={!dirty || reason.trim().length < 2} loading={busy && !preview} onClick={() => void review()} data-testid="grants-review">{t('grantsReview')}</Button>
                       </div>
                     )}
                   </>

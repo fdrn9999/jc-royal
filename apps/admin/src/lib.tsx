@@ -86,6 +86,7 @@ const BY_CODE: Record<string, Key> = {
   reconcile_stale: 'errReconcileStale',
   already_resolved: 'errAlreadyResolved',
   already_suspended: 'errAlreadySuspended',
+  locale_changed: 'errLocaleChanged',
   maintenance: 'errMaintenance',
   refill_policy_conflict: 'errRefillConflict',
   refill_no_change: 'errRefillNoChange',

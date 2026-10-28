@@ -11,9 +11,11 @@
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { userStatusLabel, type Tr } from '../labels';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { Table } from './Console';
 
@@ -283,7 +285,7 @@ function PolicyView({ o, superAdmin, onChanged }: { o: Overview; superAdmin: boo
       >
         <div className="flex flex-col gap-2 text-sm">
           <p>{ask === 'resume' ? t('referralResumeConfirm', { n: waiting }) : t('referralPauseConfirm', { n: waiting })}</p>
-          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="referral-switch-reason" />}</Field>
+          <AdminReasonField label={t('reasonRequired')} templates={ask ? REASONS.referralSwitch[ask] : []} value={reason} onChange={setReason} maxLength={200} testid="referral-switch-reason" />
         </div>
       </Modal>
     </div>
@@ -407,7 +409,7 @@ function PolicyForm({ o, onChanged }: { o: Overview; onChanged: (n: Note) => Pro
             <p className="rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2 text-ink-200" data-testid="referral-applies">{t('referralApplies', { n: pv.waiting })}</p>
             {pv.to.paused && <p className="text-xs text-danger">{t('referralPausedKept')}</p>}
             {pv.from?.enabled && !pv.to.enabled && <p className="text-xs text-ink-300">{t('referralTurnOffNote')}</p>}
-            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="referral-reason" />}</Field>
+            <AdminReasonField label={t('reasonRequired')} templates={REASONS.referralPolicy} value={reason} onChange={setReason} maxLength={200} testid="referral-reason" />
             <p className="text-xs text-ink-400">{t('pvBasis')}</p>
           </div>
         )}
@@ -655,7 +657,7 @@ function ReferralList({ user, setUser, onChanged }: { user: string; setUser: (u:
             </p>
             <Sides r={act.item} />
             <p>{act.kind === 'approve' ? t('referralApproveConfirm') : t('referralRejectConfirm')}</p>
-            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="referral-act-reason" />}</Field>
+            <AdminReasonField label={t('reasonRequired')} templates={REASONS.referralAct[act.kind]} value={reason} onChange={setReason} maxLength={200} testid="referral-act-reason" />
           </div>
         )}
       </Modal>

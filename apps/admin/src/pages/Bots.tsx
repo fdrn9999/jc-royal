@@ -11,9 +11,11 @@ import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Sta
 import { BOT_BUY_IN_BB, BOT_LEVELS, BOT_STYLES, type BotLevel, type BotPlay, type BotProfile, type BotStyle, type BotTableStyle } from '@jc/types';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { botEventCodeLabel, botEventKindLabel, botLevelLabel, botStyleLabel, userStatusLabel } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { Table } from './Console';
 
@@ -225,7 +227,7 @@ function PolicyView({ o, superAdmin, onChanged }: { o: Overview; superAdmin: boo
       >
         <div className="flex flex-col gap-2 text-sm">
           <p>{t('botsStopConfirm', { n: o.chips.seated, tables: o.tables.length })}</p>
-          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="bots-stop-reason" />}</Field>
+          <AdminReasonField label={t('reasonRequired')} templates={REASONS.botsStop} value={reason} onChange={setReason} maxLength={200} testid="bots-stop-reason" />
         </div>
       </Modal>
     </div>
@@ -332,7 +334,7 @@ function PolicyForm({ o, onChanged }: { o: Overview; onChanged: (n: Note) => Pro
             <p className="text-xs text-ink-300">{t('botsFundAfter', { issued: formatChips(pv.issued), left: formatChips(pv.fundLeft) })}</p>
             {pv.to.fundLimit < pv.issued && <p className="text-xs text-gold-200">{t('botsLimitUnderIssued')}</p>}
             {!pv.to.enabled && pv.from?.enabled && <p className="text-xs text-danger">{t('botsTurnOffNote')}</p>}
-            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="bots-reason" />}</Field>
+            <AdminReasonField label={t('reasonRequired')} templates={REASONS.botsPolicy} value={reason} onChange={setReason} maxLength={200} testid="bots-reason" />
             <p className="text-xs text-ink-400">{t('pvBasis')}</p>
           </div>
         )}
@@ -978,7 +980,7 @@ function ProfileEditor({ bot, onClose, onDone }: { bot: BotAccount; onClose: () 
               {t('botsBuyInApplies')}
             </p>
           )}
-          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="bot-profile-reason" />}</Field>
+          <AdminReasonField label={t('reasonRequired')} templates={REASONS.botsProfile} value={reason} onChange={setReason} maxLength={200} testid="bot-profile-reason" />
           <p className="text-xs text-ink-400">{t('pvBasis')}</p>
         </div>
       ) : (

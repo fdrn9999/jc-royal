@@ -8,9 +8,11 @@
 import { Badge, Button, Empty, Field, formatDate, Input, Panel, Stat } from '@jc/ui';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { roleLabel, type Tr } from '../labels';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, LoadError, Modal, PageState, type Note } from '../ui';
 import { Table } from './Console';
 
@@ -272,7 +274,7 @@ function PolicyForm({ o, onChanged }: { o: Overview; onChanged: (n: Note) => Pro
               <li data-testid="so-applies">{t('soApplies', { tables: pv.tables })}</li>
               {pv.more && <li className="text-gold-200">{t('soAppliesMore', { n: o.tables.reloadMax })}</li>}
             </ul>
-            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="so-reason" />}</Field>
+            <AdminReasonField label={t('reasonRequired')} templates={REASONS.social} value={reason} onChange={setReason} maxLength={200} testid="so-reason" />
             <p className="text-xs text-ink-400">{t('pvBasis')}</p>
           </div>
         )}

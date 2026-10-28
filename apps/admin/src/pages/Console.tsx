@@ -2,6 +2,7 @@ import { ArrowRightIcon, Badge, BotIcon, Button, Empty, Field, formatChips, form
 import { academyItemName, ageOn, BOT_LEVELS, BOT_TABLE_STYLES, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type BotTableStyle, type VipColor } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
+import { REASONS, type AdminTemplate } from '../adminTemplates';
 import { useT } from '../i18n';
 import {
   academyKindLabel,
@@ -22,6 +23,7 @@ import {
   userStatusLabel,
 } from '../labels';
 import { ApiError, canDo, errText, hasGrant, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { dayStart, Feedback, JumpNav, jumpTarget, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 import { MemberSettingsPanel } from './MemberSettings';
@@ -33,6 +35,11 @@ type Card = Parameters<typeof PlayingCard>[0]['card'];
 const newKey = () => crypto.randomUUID().replace(/-/g, '').slice(0, 24);
 /** The API's LARGE_ADJUSTMENT: an adjustment this large is left to a super admin (the server enforces it). */
 const LARGE_ADJUSTMENT = 100_000;
+/** The role reasons that fit the change: a first grant only from member, a withdrawal only back to member. */
+const roleReasons = (from: string, to: string): AdminTemplate[] =>
+  REASONS.role.filter((x) =>
+    x.id === 'role.grant' ? from === 'user' : x.id === 'role.revoke' ? to === 'user' : x.id === 'role.adjust' ? from !== 'user' && to !== 'user' : true,
+  );
 
 type Locale = 'ko' | 'en';
 /** Account language: mail, reset links and system messages to this member use it. */
@@ -453,8 +460,16 @@ export function UserDetailPage() {
   const { api, me } = useAdmin();
   const { data, error, reload } = useData<UserDetail>(`/api/admin/users/${id}`);
   const [note, setNote] = useState<Note>(null);
-  const [amount, setAmount] = useState('');
+  const [amount, setAmountText] = useState('');
   const [memo, setMemo] = useState('');
+  // Grant or deduction, the memos offered follow: kept while the amount is retyped, so a memo is dropped only when
+  // the sign really turns.
+  const [chipSign, setChipSign] = useState(0);
+  const setAmount = (v: string) => {
+    setAmountText(v);
+    const n = Number(v);
+    if (n) setChipSign(Math.sign(n));
+  };
   const [reason, setReason] = useState('');
   const [reset, setReset] = useState<ResetLink | null>(null);
   const [confirm, setConfirm] = useState<Pending>(null);
@@ -472,8 +487,11 @@ export function UserDetailPage() {
   const chipForm = useRef<HTMLDivElement>(null);
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
-  // Another administrator suspended the member after this page loaded: show the member as they are now.
-  const outdated = (e: unknown): e is ApiError => e instanceof ApiError && e.code === 'already_suspended';
+  // The member changed after this page loaded (another administrator suspended them, or they switched language and the
+  // reason has to be written in the new one): show the member as they are now.
+  const outdated = (e: unknown): e is ApiError => e instanceof ApiError && (e.code === 'already_suspended' || e.code === 'locale_changed');
+  // The language the suspension reason was written in, for the server to check it is still the member's.
+  const reasonLocale = data?.user.locale;
   const run = async (fn: () => Promise<unknown>) => {
     setNote(null);
     setReset(null);
@@ -501,7 +519,7 @@ export function UserDetailPage() {
     const seq = ++previewSeq.current;
     const body =
       p.kind === 'suspend'
-        ? { preview: true, reason }
+        ? { preview: true, reason, reasonLocale }
         : p.kind === 'disconnect'
           ? { preview: true, reason: dReason, removeFromTable: removeSeat }
           : p.kind === 'role'
@@ -534,6 +552,7 @@ export function UserDetailPage() {
     setChipKey(null);
     setChipRef(null);
     setAmount('');
+    setChipSign(0);
     setMemo('');
   };
   // Taking back a refill: what is left of it, as a negative adjustment linked to it, checked in the dialog like any other.
@@ -559,7 +578,7 @@ export function UserDetailPage() {
     void run(async () => {
       setKick(
         kind === 'suspend'
-          ? await api<{ kick: KickReport }>(`/api/admin/users/${id}/suspend`, { body: { reason } })
+          ? await api<{ kick: KickReport }>(`/api/admin/users/${id}/suspend`, { body: { reason, reasonLocale } })
           : await api<{ kick: KickReport; sessions: number }>(`/api/admin/users/${id}/disconnect`, { body: { reason: dReason, removeFromTable: removeSeat } }),
       );
       // A used reason is not offered again for the next action.
@@ -686,10 +705,22 @@ export function UserDetailPage() {
             >
               {(fid) => <Input id={fid} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d-]/g, ''))} data-testid="chip-amount" />}
             </Field>
-            <Field label={t('memo')}>{(fid) => <Input id={fid} value={memo} onChange={(e) => setMemo(e.target.value)} data-testid="chip-memo" />}</Field>
+            {/* The member reads this memo in the chip notice, in their own language. It does not `follow` a change of it:
+                the memo is part of a retried adjustment's key, so only the admin changes it. */}
+            <AdminReasonField
+              label={t('memo')}
+              templates={chipSign > 0 ? REASONS.chipGrant : chipSign < 0 ? REASONS.chipDeduct : []}
+              value={memo}
+              onChange={setMemo}
+              maxLength={200}
+              lang={u.locale}
+              emptyText={t('chipMemoNoAmount')}
+              hint={t('chipMemoVisible', { lang: u.locale === 'en' ? t('langEn') : t('langKo') })}
+              testid="chip-memo"
+            />
             {chipRef && <RefillRefLine r={{ type: 'free_refill', amount: chipRef.amount, createdAt: chipRef.at, seq: chipRef.seq }} onClear={() => setChipRef(null)} />}
             <p className="text-xs text-ink-400">{t('chipPreviewHint')}</p>
-            <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2} data-testid="chip-submit">{t('confirm')}</Button>
+            <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2 || memo.trim().length > 200} data-testid="chip-submit">{t('confirm')}</Button>
           </form>
           </div>
         </Panel>
@@ -698,9 +729,20 @@ export function UserDetailPage() {
         <Panel title={t('status')} id="member-status" className={jumpTarget}>
           <div className="flex flex-col gap-3">
             {!on('sanctions') ? null : u.status === 'active' && me?.user.id !== u.id ? (
-              <form className="flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'suspend' }); }}>
-                <Input placeholder={t('reason')} aria-label={t('reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
-                <Button type="submit" variant="danger" disabled={reason.trim().length < 2} data-testid="suspend">{t('suspend')}</Button>
+              <form className="flex flex-col gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'suspend' }); }}>
+                {/* The member reads this reason in the suspension notice, in their own language. */}
+                <AdminReasonField
+                  label={t('reason')}
+                  templates={REASONS.suspend}
+                  value={reason}
+                  onChange={setReason}
+                  maxLength={200}
+                  lang={u.locale}
+                  follow
+                  hint={t('suspendReasonHint', { lang: u.locale === 'en' ? t('langEn') : t('langKo') })}
+                  testid="suspend-reason"
+                />
+                <Button type="submit" variant="danger" className="self-start" disabled={reason.trim().length < 2 || reason.trim().length > 200} data-testid="suspend">{t('suspend')}</Button>
               </form>
             ) : u.status === 'suspended' ? (
               <Button variant="outline" onClick={() => ask({ kind: 'unsuspend' })} data-testid="unsuspend">{t('unsuspend')} ({u.suspendedReason})</Button>
@@ -749,7 +791,7 @@ export function UserDetailPage() {
           {canModerate && on('disconnect') && (
             <form className="flex min-w-0 flex-col gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'disconnect' }); }} data-testid="disconnect-form">
               <p className="text-xs text-ink-300">{t('disconnectHint')}</p>
-              <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={dReason} onChange={(e) => setDReason(e.target.value)} />}</Field>
+              <AdminReasonField label={t('reasonLogged')} templates={REASONS.disconnect} value={dReason} onChange={setDReason} maxLength={200} testid="disconnect-reason" />
               <label className="flex items-start gap-2 text-sm">
                 <input type="checkbox" className={`${checkbox} mt-0.5 shrink-0`} checked={removeSeat} onChange={(e) => setRemoveSeat(e.target.checked)} data-testid="remove-from-table" />
                 <span>{t('removeFromTable')}</span>
@@ -813,7 +855,15 @@ export function UserDetailPage() {
             <p className="break-all text-ink-300">{t('currentSuspendReason', { r: (pvData as UnsuspendPreview | null)?.suspendedReason ?? u.suspendedReason ?? '' })}</p>
           )}
           {needsReason ? (
-            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={cReason} maxLength={200} onChange={(e) => setCReason(e.target.value)} data-testid="confirm-reason" />}</Field>
+            <AdminReasonField
+              key={confirm?.kind === 'role' ? `role-${confirm.role}` : 'unsuspend'}
+              label={t('reasonRequired')}
+              templates={confirm?.kind === 'role' ? roleReasons(u.role, confirm.role) : REASONS.unsuspend}
+              value={cReason}
+              onChange={setCReason}
+              maxLength={200}
+              testid="confirm-reason"
+            />
           ) : confirm?.kind === 'chips' ? null : (
             <p className="break-all text-ink-300">{t('reason')}: {confirm?.kind === 'suspend' ? reason : dReason}</p>
           )}
@@ -1311,7 +1361,7 @@ function TimerPanel({ id, live, issues, open, onDone }: { id: string; live: Live
       >
         <div className="flex flex-col gap-2 text-sm">
           <p>{t('tbRecoverConfirm')}</p>
-          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="timer-recover-reason" />}</Field>
+          <AdminReasonField label={t('reasonRequired')} templates={REASONS.timerRecover} value={reason} onChange={setReason} maxLength={200} testid="timer-recover-reason" />
         </div>
       </Modal>
     </Panel>
@@ -1335,6 +1385,7 @@ export function TableDetailPage() {
   const closeSeq = useRef(0);
   const [control, setControl] = useState<TableControl | null>(null);
   const [cReason, setCReason] = useState('');
+  const [cPicked, setCPicked] = useState<AdminTemplate | null>(null);
   const [edit, setEdit] = useState<{ smallBlind?: number; bigBlind?: number; minBuyIn?: number; maxBuyIn?: number }>({});
   // Bumped after a conflict so the blinds form starts again from the reloaded values (its inputs are uncontrolled).
   const [blindsForm, setBlindsForm] = useState(0);
@@ -1361,6 +1412,7 @@ export function TableDetailPage() {
       const r = await api<{ paused: boolean; handInProgress: boolean }>(`/api/admin/tables/${id}/control`, { body: { action, reason: cReason } });
       setNote({ ok: true, text: action === 'pause' && r.handInProgress ? `${t('saved')} ${t('pausedAfterHand')}` : t('saved') });
       setCReason('');
+      setCPicked(null);
       await reload();
     } catch (e) {
       setNote({ ok: false, text: errText(e, t) });
@@ -1388,6 +1440,10 @@ export function TableDetailPage() {
   const diag = data.diagnosis;
   const time = (ms: number | null | undefined) => (ms ? formatDate(ms, locale) : t('none'));
   const controllable = tb.status === 'open';
+  const handAction: TableControl = tb.handsPaused ? 'resume' : 'pause';
+  const entryAction: TableControl = tb.entryBlocked ? 'unblock' : 'block';
+  // A reason typed by hand fits either button; one picked from the list fits the action it was written for.
+  const fits = (a: TableControl) => !cPicked?.action || cPicked.action === a;
   // A tournament's table is paused, closed and set up from its tournament (the API refuses these here: tournament_table).
   const tn = tb.roomType === 'tournament' ? (data.tournament ?? null) : null;
   const tnTable = tb.roomType === 'tournament';
@@ -1468,12 +1524,27 @@ export function TableDetailPage() {
         ) : (
         <Panel title={t('emergencyTitle')} id="table-emergency" className={jumpTarget}>
           <div className="flex flex-col gap-3" data-testid="emergency">
-            <Field label={t('reasonLogged')}>{(fid) => <Input id={fid} value={cReason} onChange={(e) => setCReason(e.target.value)} disabled={!controllable} data-testid="control-reason" />}</Field>
+            {/* The reasons offered are for the two things this table can do now; one picked is for its own button only. */}
+            <AdminReasonField
+              label={t('reasonLogged')}
+              templates={[
+                { label: tb.handsPaused ? t('resumeHands') : t('pauseHands'), items: REASONS.control[handAction] },
+                { label: tb.entryBlocked ? t('unblockEntry') : t('entryBlocked'), items: REASONS.control[entryAction] },
+              ]}
+              value={cReason}
+              onChange={(v, picked) => {
+                setCReason(v);
+                setCPicked(picked);
+              }}
+              maxLength={200}
+              disabled={!controllable}
+              testid="control-reason"
+            />
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button variant={tb.handsPaused ? 'gold' : 'outline'} disabled={!controllable || cReason.trim().length < 2} onClick={() => setControl(tb.handsPaused ? 'resume' : 'pause')} data-testid="toggle-pause">
+              <Button variant={tb.handsPaused ? 'gold' : 'outline'} disabled={!controllable || cReason.trim().length < 2 || !fits(handAction)} onClick={() => setControl(handAction)} data-testid="toggle-pause">
                 {tb.handsPaused ? t('resumeHands') : t('pauseHands')}
               </Button>
-              <Button variant="outline" disabled={!controllable || cReason.trim().length < 2} onClick={() => setControl(tb.entryBlocked ? 'unblock' : 'block')} data-testid="toggle-block">
+              <Button variant="outline" disabled={!controllable || cReason.trim().length < 2 || !fits(entryAction)} onClick={() => setControl(entryAction)} data-testid="toggle-block">
                 {tb.entryBlocked ? t('unblockEntry') : t('entryBlocked')}
               </Button>
             </div>

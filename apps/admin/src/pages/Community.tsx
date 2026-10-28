@@ -1,8 +1,10 @@
 import { Badge, Button, Field, formatDate, Input, MessageCircleIcon, Panel, PinIcon, XIcon } from '@jc/ui';
 import { useState, type FormEvent } from 'react';
+import { BOARD_TEMPLATES, MESSAGE_TEMPLATES, type MessageCategory } from '../adminTemplates';
 import { useT } from '../i18n';
 import { categoryLabel, contentStatusLabel, type Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { ContentTemplateFields, TemplateMissing, TemplatePreview, TemplateTooLong, useContentTemplate } from '../templateFields';
 import { contentTone, Feedback, ListState, LoadError, Modal, Pager, type Note } from '../ui';
 import { LangBadge } from './Console';
 
@@ -49,6 +51,12 @@ export function BoardAdminPage() {
   const [del, setDel] = useState<AdminPost | null>(null);
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
+  const tpl = useContentTemplate({
+    templates: BOARD_TEMPLATES,
+    values: { title: notice?.title ?? '', body: notice?.body ?? '' },
+    apply: (patch) => setNotice((n) => n && { ...n, ...patch }),
+    limits: { title: 100, body: 10_000 },
+  });
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setNote(null);
@@ -65,6 +73,7 @@ export function BoardAdminPage() {
   const setStatus = (p: AdminPost, status: AdminPost['status']) => act(() => api(`/api/admin/board/posts/${p.id}/status`, { body: { status } }));
   async function openNotice(id?: string) {
     setNote(null);
+    tpl.reset();
     if (!id) return setNotice({ title: '', body: '' });
     try {
       const p = await api<{ title: string; body: string }>(`/api/admin/board/posts/${id}`);
@@ -155,16 +164,18 @@ export function BoardAdminPage() {
           <>
             <Button variant="ghost" onClick={() => setNotice(null)}>{t('cancel')}</Button>
             <Button
-              disabled={!notice || notice.title.trim().length < 2 || !notice.body.trim()}
+              disabled={!notice || notice.title.trim().length < 2 || !notice.body.trim() || tpl.blocked}
               loading={busy}
               onClick={() =>
                 notice &&
+                !tpl.blocked &&
                 act(async () => {
                   if (notice.id) await api(`/api/admin/board/notices/${notice.id}`, { method: 'PATCH', body: { title: notice.title, body: notice.body } });
                   else await api('/api/admin/board/notices', { body: { title: notice.title, body: notice.body } });
                   setNotice(null);
                 })
               }
+              data-testid="board-notice-save"
             >
               {t('save')}
             </Button>
@@ -172,9 +183,13 @@ export function BoardAdminPage() {
         }
       >
         {notice && (
-          <div className="flex flex-col gap-3">
-            <Field label={t('titleLabel')}>{(id) => <Input id={id} value={notice.title} maxLength={100} onChange={(e) => setNotice({ ...notice, title: e.target.value })} />}</Field>
-            <Field label={t('bodyLabel')}>{(id) => <textarea id={id} rows={8} maxLength={10000} value={notice.body} onChange={(e) => setNotice({ ...notice, body: e.target.value })} className="w-full rounded-lg border border-white/10 bg-ink-850 p-3" />}</Field>
+          <div className="flex flex-col gap-3" data-testid="board-notice-form">
+            <ContentTemplateFields tpl={tpl} testid="board-tpl" />
+            <Field label={t('titleLabel')}>{(id) => <Input id={id} value={notice.title} maxLength={100} onChange={(e) => setNotice({ ...notice, title: e.target.value })} data-testid="board-notice-title" />}</Field>
+            <Field label={t('bodyLabel')}>{(id) => <textarea id={id} rows={8} maxLength={10000} value={notice.body} onChange={(e) => setNotice({ ...notice, body: e.target.value })} className="w-full rounded-lg border border-white/10 bg-ink-850 p-3" data-testid="board-notice-body" />}</Field>
+            <TemplatePreview testid="board-preview" items={[{ title: notice.title, body: notice.body }]} />
+            <TemplateMissing tpl={tpl} testid="board-missing" />
+            <TemplateTooLong tpl={tpl} testid="board-too-long" />
           </div>
         )}
       </Modal>
@@ -193,9 +208,18 @@ export function MessagesAdminPage() {
   const [searching, setSearching] = useState(false);
   const [searchNote, setSearchNote] = useState<Note>(null);
   const [picked, setPicked] = useState<UserRow[]>([]);
-  const [category, setCategory] = useState<'event' | 'notice' | 'admin' | 'sanction'>('notice');
+  const [category, setCategory] = useState<MessageCategory>('notice');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const tpl = useContentTemplate({
+    templates: MESSAGE_TEMPLATES[category],
+    values: { title, body },
+    apply: (patch) => {
+      if (patch.title !== undefined) setTitle(patch.title);
+      if (patch.body !== undefined) setBody(patch.body);
+    },
+    limits: { title: 100, body: 2000 },
+  });
   const [note, setNote] = useState<Note>(null);
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
@@ -218,6 +242,7 @@ export function MessagesAdminPage() {
   const en = picked.filter((u) => u.locale === 'en').length;
   const ko = picked.length - en;
   async function send() {
+    if (tpl.blocked) return;
     setNote(null);
     setSending(true);
     try {
@@ -226,6 +251,7 @@ export function MessagesAdminPage() {
       setPicked([]);
       setTitle('');
       setBody('');
+      tpl.reset();
       setConfirming(false);
       if (offset) setOffset(0);
       else await history.reload();
@@ -273,17 +299,21 @@ export function MessagesAdminPage() {
               </p>
             )}
             <Field label={t('category')}>{(id) => (
-              <select id={id} value={category} onChange={(e) => setCategory(e.target.value as typeof category)} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3">
+              <select id={id} value={category} onChange={(e) => setCategory(e.target.value as MessageCategory)} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3" data-testid="msg-category">
                 <option value="notice">{t('catNotice')}</option>
                 <option value="event">{t('catEvent')}</option>
                 <option value="admin">{t('catAdmin')}</option>
                 <option value="sanction">{t('catSanction')}</option>
               </select>
             )}</Field>
-            <Field label={t('titleLabel')}>{(id) => <Input id={id} value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />}</Field>
-            <Field label={t('bodyLabel')}>{(id) => <textarea id={id} rows={5} maxLength={2000} value={body} onChange={(e) => setBody(e.target.value)} className="w-full rounded-lg border border-white/10 bg-ink-850 p-3" />}</Field>
+            <ContentTemplateFields tpl={tpl} testid="msg-tpl" />
+            <Field label={t('titleLabel')}>{(id) => <Input id={id} value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} data-testid="msg-title" />}</Field>
+            <Field label={t('bodyLabel')}>{(id) => <textarea id={id} rows={5} maxLength={2000} value={body} onChange={(e) => setBody(e.target.value)} className="w-full rounded-lg border border-white/10 bg-ink-850 p-3" data-testid="msg-body" />}</Field>
+            <TemplatePreview testid="msg-preview" items={[{ title, body }]} />
+            <TemplateMissing tpl={tpl} testid="msg-missing" />
+            <TemplateTooLong tpl={tpl} testid="msg-too-long" />
             <Feedback note={note} />
-            <Button disabled={picked.length === 0 || !title.trim() || !body.trim()} onClick={() => { setNote(null); setConfirming(true); }} data-testid="send-message">{t('send')} ({picked.length})</Button>
+            <Button disabled={picked.length === 0 || !title.trim() || !body.trim() || tpl.blocked} onClick={() => { setNote(null); setConfirming(true); }} data-testid="send-message">{t('send')} ({picked.length})</Button>
           </div>
         </Panel>
       </div>

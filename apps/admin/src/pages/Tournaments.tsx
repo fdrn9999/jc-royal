@@ -23,6 +23,7 @@ import {
 } from '@jc/types';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { REASONS, type AdminTemplate } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import {
   auditActionLabel,
@@ -36,6 +37,7 @@ import {
   type Tr,
 } from '../labels';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { Table } from './Console';
 
@@ -424,6 +426,8 @@ const ACT: Record<Act, { title: Key; hint: Key; reason: 'required' | 'optional' 
   abort: { title: 'tnActAbort', hint: 'tnHintAbort', reason: 'required', danger: true },
   recover: { title: 'tnActRecover', hint: 'tnHintRecover', reason: 'optional' },
 };
+/** The reasons offered for each control that asks one (opening and closing registration ask none). */
+const ACT_REASONS: Partial<Record<Act, AdminTemplate[]>> = REASONS.tournamentAct;
 /** The codes after which what the page shows is out of date: it loads again. */
 const STALE = new Set(['tournament_conflict', 'tournament_state', 'tournament_started', 'tournament_not_found', 'tournament_not_ready']);
 
@@ -618,9 +622,14 @@ export function TournamentDetailPage() {
             {act.act === 'start' && <p className="text-xs text-ink-300">{t('tnStartCheck', { n: r.registered, min: r.minPlayers, cap: r.capacity })}</p>}
             {(act.act === 'cancel' || act.act === 'abort') && <p className="text-xs text-gold-200">{t('tnNotifyNote')}</p>}
             {spec.reason !== 'none' && (
-              <Field label={t(spec.reason === 'required' ? 'reasonRequired' : 'tnReasonOptional')}>
-                {(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="tn-act-reason" />}
-              </Field>
+              <AdminReasonField
+                label={t(spec.reason === 'required' ? 'reasonRequired' : 'tnReasonOptional')}
+                templates={ACT_REASONS[act.act] ?? []}
+                value={reason}
+                onChange={setReason}
+                maxLength={200}
+                testid="tn-act-reason"
+              />
             )}
             {act.act === 'abort' && (
               // Not a Field: its label is set in capitals, and the name must be typed exactly as it is.
@@ -902,7 +911,7 @@ function TemplateStatusDialog({ tpl, onClose, onChanged }: { tpl: TournamentTemp
     >
       <div className="flex flex-col gap-3 text-sm">
         <p className="text-ink-200">{t(to === 'archived' ? 'tplArchiveHint' : 'tplActivateHint', { name: tpl.name })}</p>
-        <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="tpl-status-reason" />}</Field>
+        <AdminReasonField label={t('reasonRequired')} templates={REASONS.tournamentTplStatus[to]} value={reason} onChange={setReason} maxLength={200} testid="tpl-status-reason" />
         {error && <p className="text-sm text-danger" role="alert">{error}</p>}
       </div>
     </Modal>
@@ -1120,7 +1129,7 @@ function TemplateEditor({ tpl, onClose, onChanged }: { tpl: TournamentTemplateDt
             })}
           </ul>
           {tpl && <p className="rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2 text-ink-200" data-testid="tpl-open-note">{t('tplOpenNote', { n: pv.openTournaments ?? 0 })}</p>}
-          <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="tpl-reason" />}</Field>
+          <AdminReasonField label={t('reasonRequired')} templates={REASONS.tournamentTpl[tpl ? 'edit' : 'create']} value={reason} onChange={setReason} maxLength={200} testid="tpl-reason" />
           <p className="text-xs text-ink-400">{t('pvBasis')}</p>
           {error && <p className="text-sm text-danger" role="alert">{error}</p>}
           <div className="flex flex-wrap justify-end gap-2">
