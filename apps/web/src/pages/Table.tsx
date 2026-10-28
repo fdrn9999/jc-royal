@@ -20,7 +20,7 @@ import {
   XIcon,
 } from '@jc/ui';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
@@ -44,7 +44,7 @@ import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { rememberVisit } from '../lib/lobby';
+import { isResume, rememberVisit } from '../lib/lobby';
 import { lobbyHref } from '../lib/lobbyReturn';
 import { siteUrl } from '../lib/share';
 import { pullSettings, usePrefs } from '../lib/prefs';
@@ -206,7 +206,7 @@ export function TablePage() {
   // leaving the page stops it. The full-table note stays a little longer; it says what to do next.
   useEffect(() => {
     if (!toast) return;
-    const h = setTimeout(() => setToast(null), toast === t('invite.fullNow') ? 5_000 : 3_500);
+    const h = setTimeout(() => setToast(null), toast === t('invite.fullNow') || toast === t('lobby.seatGone') ? 5_000 : 3_500);
     return () => clearTimeout(h);
   }, [toast, t]);
 
@@ -252,6 +252,19 @@ export function TablePage() {
     );
     reopen();
   }, [codeThen, setParams, reopen]);
+
+  // 계속 플레이 from the lobby, whose list is a few seconds old: if the room no longer has my seat (I stood up elsewhere,
+  // an admin let me go, the table closed), say so over the table as it is now. Nothing here takes a seat. The mark is
+  // dropped from the history entry at once, so a reload later does not say it again.
+  const loc = useLocation();
+  const resume = useRef(isResume(loc.state));
+  useEffect(() => {
+    if (!resume.current) return;
+    if (loc.state !== null) nav({ pathname: loc.pathname, search: loc.search }, { replace: true, state: null });
+    if (!s) return;
+    resume.current = false;
+    if (s.you.seatIndex === null) setToast(t('lobby.seatGone'));
+  }, [s, loc, nav, t]);
 
   // ?sit=1 from the lobby: open the buy-in dialog on the first free seat. A private table waits for the join code.
   useEffect(() => {

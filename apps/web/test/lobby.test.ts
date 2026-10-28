@@ -152,6 +152,17 @@ describe('entryOf', () => {
     expect(entryOf({ ...tb, seated: 2, entryBlocked: true })).toBe('blocked');
     expect(entryOf({ ...tb, status: 'closed' })).toBe('closing');
   });
+
+  it("sends a player back to their own seat before anything the table offers newcomers", () => {
+    const mine = { ...tb, myParticipation: { status: 'seated' as const } };
+    expect(entryOf(mine)).toBe('continue');
+    expect(entryOf({ ...mine, seated: 2 })).toBe('continue');
+    expect(entryOf({ ...mine, entryBlocked: true })).toBe('continue');
+    expect(entryOf({ ...mine, status: 'closed' })).toBe('continue');
+    // No seat, or an older server that says nothing: the usual choices.
+    expect(entryOf({ ...tb, seated: 2, myParticipation: { status: 'none' } })).toBe('wait');
+    expect(entryOf({ ...tb, myParticipation: undefined })).toBe('join');
+  });
 });
 
 describe('table prefs', () => {

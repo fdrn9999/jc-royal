@@ -7,16 +7,26 @@ import type { LobbyTableDto } from '@jc/types';
 import { useEffect, useSyncExternalStore } from 'react';
 
 /**
- * The main action a table card offers. A full table offers the waitlist (never a seat, and never a plain visit that
- * would only look like watching); a table that takes no entries or is closing offers nothing.
+ * The main action a table card offers. The player's own seat comes first: whatever the table takes from newcomers
+ * (full, closing, blocked, private, no spectators), they go back to it. A full table offers the waitlist (never a seat,
+ * and never a plain visit that would only look like watching); a table that takes no entries or is closing offers
+ * nothing. Only a guide: the table room decides once the player is there.
  */
-export type Entry = 'join' | 'wait' | 'blocked' | 'closing';
+export type Entry = 'continue' | 'join' | 'wait' | 'blocked' | 'closing';
 
-export function entryOf(tb: Pick<LobbyTableDto, 'status' | 'entryBlocked' | 'seated' | 'maxSeats'>): Entry {
+export function entryOf(tb: Pick<LobbyTableDto, 'status' | 'entryBlocked' | 'seated' | 'maxSeats' | 'myParticipation'>): Entry {
+  if (tb.myParticipation?.status === 'seated') return 'continue';
   if (tb.status !== 'open') return 'closing';
   if (tb.entryBlocked) return 'blocked';
   return tb.seated >= tb.maxSeats ? 'wait' : 'join';
 }
+
+/**
+ * Navigation state of a way back to the player's own seat (계속 플레이). The table page says so when the seat turns out
+ * to be gone already (the lobby list is a few seconds old); it never makes a new one from it.
+ */
+export const RESUME = { resume: true } as const;
+export const isResume = (state: unknown) => !!state && typeof state === 'object' && (state as { resume?: unknown }).resume === true;
 
 export interface Latest {
   /** Starts a request unless one is out; `replace` drops the one out and starts afresh. Returns whether one started. */
