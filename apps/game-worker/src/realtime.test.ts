@@ -3,7 +3,20 @@
 // tested in tests/integration/realtime.test.ts.
 import { REALTIME_SHARDS, RealtimeClientFrameSchema, RealtimeEventSchema, realtimeShardOf, type RealtimeEvent } from '@jc/types';
 import { describe, expect, it } from 'vitest';
-import { liveSessionsSql, parseIdentity, REALTIME_MAX_AGE_MS, revokes, stale, SWEEP_CHUNK, SWEEP_MS, sweepMsOf, wants, type RealtimeIdentity } from './realtime-rules';
+import {
+  liveSessionsSql,
+  parseIdentity,
+  REALTIME_MAX_AGE_MS,
+  REVOKE_WINDOW_MS,
+  revokes,
+  stale,
+  SWEEP_CHUNK,
+  SWEEP_MS,
+  sweepAlarmFor,
+  sweepMsOf,
+  wants,
+  type RealtimeIdentity,
+} from './realtime-rules';
 
 const T0 = 1_800_000_000_000;
 const me = (over: Partial<RealtimeIdentity> = {}): RealtimeIdentity => ({ userId: 'u1', sessionId: 's1', authAt: T0, expiresAt: T0 + 86_400_000, ...over });
@@ -58,6 +71,20 @@ describe('sweep', () => {
     expect(sql).toContain("s.kind = 'user'");
     expect(sql).toContain("u.status = 'active'");
     expect(liveSessionsSql(SWEEP_CHUNK).match(/\?/g)).toHaveLength(100);
+  });
+
+  it('a new socket is checked within one period, whatever alarm the hub already had', () => {
+    const every = 15_000;
+    expect(sweepAlarmFor(null, T0, every)).toBe(T0 + every);
+    // one due sooner (another socket's sweep) stays
+    expect(sweepAlarmFor(T0 + 3_000, T0, every)).toBeNull();
+    expect(sweepAlarmFor(T0 + every, T0, every)).toBeNull();
+    // a sign-out on a hub with no sockets keeps its revoke REVOKE_WINDOW_MS: that wake comes too late for this socket
+    expect(REVOKE_WINDOW_MS).toBeGreaterThan(every);
+    expect(sweepAlarmFor(T0 + REVOKE_WINDOW_MS, T0, every)).toBe(T0 + every);
+    // with the production period such an alarm is the sooner one
+    expect(REVOKE_WINDOW_MS).toBeLessThan(SWEEP_MS);
+    expect(sweepAlarmFor(T0 + REVOKE_WINDOW_MS, T0, SWEEP_MS)).toBeNull();
   });
 });
 

@@ -39,6 +39,13 @@ export const sweepMsOf = (raw: string | null): number | null => {
   return raw && Number.isInteger(n) && n >= 1_000 && n <= SWEEP_MS ? n : null;
 };
 
+/**
+ * The alarm a new socket needs: the hub's next wake within one sweep of now. One already due sooner stays (null: leave
+ * it); one further off, as a sign-out on a hub with no sockets sets to forget its revoke (REVOKE_WINDOW_MS, longer than
+ * the tests' sweep), is brought forward, or this socket would go unchecked past its period.
+ */
+export const sweepAlarmFor = (alarm: number | null, now: number, every: number): number | null => (alarm === null || alarm > now + every ? now + every : null);
+
 /** The SQL the sweep asks D1 with: which of `n` session ids are still a member's sign-in, for an active account. */
 export const liveSessionsSql = (n: number) =>
   `SELECT s.id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id IN (${Array.from({ length: n }, () => '?').join(', ')}) AND s.kind = 'user' AND u.status = 'active'`;

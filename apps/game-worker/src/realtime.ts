@@ -13,6 +13,7 @@ import {
   SWEEP_CHUNK,
   SWEEP_MS,
   SWEEP_RETRY_MS,
+  sweepAlarmFor,
   sweepMsOf,
   wants,
   type RealtimeAttachment,
@@ -90,7 +91,8 @@ export class RealtimeHub extends DurableObject<Env> {
     // Local tests only: the api passes a shorter sweep (REALTIME_SWEEP_MS), kept for the alarms after this one.
     const every = sweepMsOf(request.headers.get('x-jc-sweep-ms'));
     if (every !== null && every !== (await this.ctx.storage.get<number>(SWEEP_KEY))) await this.ctx.storage.put(SWEEP_KEY, every);
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + (every ?? (await this.sweepMs())));
+    const due = sweepAlarmFor(await this.ctx.storage.getAlarm(), now, every ?? (await this.sweepMs()));
+    if (due !== null) await this.ctx.storage.setAlarm(due);
     return new Response(null, { status: 101, webSocket: client });
   }
 
