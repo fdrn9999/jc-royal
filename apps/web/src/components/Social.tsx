@@ -138,6 +138,8 @@ export function BotCard({ seat, onClose }: { seat: SeatView | null; onClose: () 
             <Avatar user={{ nickname: seat.nickname ?? '', avatarUrl: null }} size="size-14" />
             <div className="min-w-0">
               <MemberName name={seat.nickname ?? ''} bot={level} className="text-lg font-bold text-ivory" />
+              {/* What the robot mark on its seat means, for a phone that has no hover. */}
+              <div className="text-xs text-ink-300" data-testid="bot-card-kind">{t('bot.label')}</div>
               {level !== true && <div className="text-sm text-[#8fd9cb]" data-testid="bot-card-level">{t('bot.levelLine', { level: t(BOT_LEVEL_LABEL[level]) })}</div>}
               {seat.botLeaving && <div className="text-xs text-ink-300">{t('bot.leavingTitle')}</div>}
             </div>

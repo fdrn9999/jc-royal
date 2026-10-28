@@ -527,21 +527,20 @@
   background: linear-gradient(135deg, #1d4fbf, #1877b4);
   border-color: rgba(160, 215, 255, 0.55);
   color: #fff;
-}/* A table bot (web MemberName's BotBadge): a quiet teal pill, apart from the staff colors. */
-.jc-bot-badge {
+}
+/*
+ * A table bot (web MemberName's BotBadge): the icon set's robot in front of the name, in the bot teal (--bot-mark), at
+ * 1.15em, inside the name's line height so a seat keeps its height, with no pill around it. The shape says "bot", so
+ * no colour vision mode needs another colour.
+ */
+.jc-bot-icon {
   display: inline-flex;
   flex-shrink: 0;
-  align-items: center;
-  border: 1px solid rgba(111, 216, 198, 0.55);
-  border-radius: 9999px;
-  padding: 0 0.35rem;
-  background: rgba(16, 58, 56, 0.9);
-  color: #a6efe2;
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 15px;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
+  color: var(--bot-mark);
+}
+.jc-bot-icon > svg.lucide {
+  width: 1.15em;
+  height: 1.15em;
 }
 /* A staff member's line in the table chat: a quiet tint, not a banner. */
 .jc-role-line {
@@ -672,6 +671,8 @@
   --vip-badge-bg: #17130a;
   --vip-badge-fg: #f3d27a;
   --vip-rim: #c9a54a;
+  /* A table bot's mark (the robot in front of its name), the teal of its seat's level line. */
+  --bot-mark: #8fd9cb;
 }
 
 /* Red-weak and green-weak: fold vermilion, call blue, all-in magenta; success blue, danger orange; online blue; the chips that

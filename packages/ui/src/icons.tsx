@@ -15,6 +15,7 @@ export {
   ArrowRightIcon,
   ArrowUpFromLineIcon,
   BookmarkIcon,
+  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,

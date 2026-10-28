@@ -83,6 +83,14 @@ test('bot administration: the seated bot and its fund, a policy change with befo
   await expect(page.getByTestId('table-bots-live')).toContainText('지금 봇 착석 가능');
   await expect(page.getByTestId('bot-level')).toHaveValue('hard');
   await expect(page.getByTestId('bot-style')).toHaveValue('auto');
+  // Its live seats: the robot on the bot's badge (with its level), none by the member.
+  const liveSeats = page.locator('#table-live li');
+  await expect(liveSeats).toHaveCount(2);
+  const botSeat = liveSeats.filter({ has: page.locator('svg.lucide-bot') });
+  await expect(botSeat).toHaveCount(1);
+  await expect(botSeat).toContainText('BOT · 어려움');
+  await expect(liveSeats.filter({ hasText: m.nickname }).locator('svg.lucide-bot')).toHaveCount(0);
+  await page.locator('#table-live').screenshot({ path: 'test-results/bots-admin-live-seats.png', animations: 'disabled' });
   await page.getByTestId('table-bots-link').click();
   await expect(page).toHaveURL(/\/bots\?table=e2e-bots-admin$/);
   await expect(page.getByTestId('bots-events-table')).toHaveValue('e2e-bots-admin');
@@ -135,6 +143,21 @@ test('bot administration: the seated bot and its fund, a policy change with befo
     if (await fold.isVisible().catch(() => false)) await fold.click().catch(() => {});
     await expect(m.page.getByTestId('bot-badge')).toHaveAttribute('data-level', 'expert', { timeout: 1_000 });
   }).toPass({ timeout: 60_000 });
+  // The audit of a hand they played: the robot on the bot's row only (in another tab, the bots page stays).
+  const handId = await m.page.evaluate(async () => {
+    const list = (await (await fetch('/api/me/hands')).json()) as { id: string; tableId: string }[];
+    return list.find((h) => h.tableId === 'e2e-bots-admin')!.id;
+  });
+  const audit = await ctx.newPage();
+  await audit.goto(`${ADMIN}/hands/${encodeURIComponent(handId)}`);
+  const players = audit.locator('li').filter({ has: audit.locator('a[href^="/users/"]') });
+  await expect(players).toHaveCount(2);
+  const botRow = players.filter({ has: audit.locator('svg.lucide-bot') });
+  await expect(botRow).toHaveCount(1);
+  await expect(botRow).toContainText('BOT');
+  await expect(players.filter({ hasText: m.nickname }).locator('svg.lucide-bot')).toHaveCount(0);
+  await audit.screenshot({ path: 'test-results/bots-admin-hand-audit.png', animations: 'disabled' });
+  await audit.close();
 
   // A new policy: the change is shown before it is saved, with a reason and the password.
   await page.getByTestId('bots-max').fill('10');

@@ -6,7 +6,7 @@
 import type { SeatView } from '@jc/types';
 import { CrownIcon, cx, holeOrder, HourglassIcon, PlayingCard, PlusIcon } from '@jc/ui';
 import { memo, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
+import { BOT_LEVEL_LABEL, botLabel, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import type { Density } from './layout';
 import { cardsToShow } from './olderRooms';
@@ -156,6 +156,11 @@ export interface SeatProps {
   reaction?: SeatReaction | null;
   /** Said in the status line in place of the rest (my turn's label on a phone upright, where the stack keeps no line). */
   turnNote?: ReactNode;
+  /**
+   * The table's edge cuts off the plate's start, avatar and all (nine seats in a box too narrow for them, layout.ts):
+   * a bot's mark goes after the name, on the part still drawn.
+   */
+  startCut?: boolean;
   density: Density;
   amounts: Amounts;
   style: CSSProperties;
@@ -248,6 +253,9 @@ function SeatPlace(p: SeatProps) {
   // A bot's level and the style it plays (the style's whole name in the title).
   const botLevel = s.bot && s.bot !== true ? t(BOT_LEVEL_LABEL[s.bot]) : '';
   const botTitle = s.botStyle ? `${botLevel} · ${t(`bot.style.${s.botStyle}` as MsgKey)}` : undefined;
+  // The plate's button covers the robot mark, so it carries the mark's title (and the style): what a pointer resting on
+  // a bot's seat reads. A tap opens the bot's card.
+  const pickTitle = s.bot ? [botLabel(t, s.bot), s.botStyle && t(`bot.style.${s.botStyle}` as MsgKey)].filter(Boolean).join(' · ') : undefined;
   const botLine = (
     <>
       {botLevel}
@@ -408,7 +416,7 @@ function SeatPlace(p: SeatProps) {
           <span className="flex min-w-0 flex-col leading-tight">
             {/* The width cap sits on a wrapper: MemberName's own max-w-full comes later in the stylesheet and would win. */}
             <span className={cx('flex min-w-0', z.name)}>
-              <MemberName name={s.nickname ?? ''} role={s.role} vip={s.bot ? undefined : s.vip} bot={s.bot} className={cx('font-semibold', z.nameText, p.isMe ? 'text-gold-300' : 'text-ivory')} />
+              <MemberName name={s.nickname ?? ''} role={s.role} vip={s.bot ? undefined : s.vip} bot={s.bot} botAfter={p.startCut} className={cx('font-semibold', z.nameText, p.isMe ? 'text-gold-300' : 'text-ivory')} />
             </span>
             <span className={cx('font-mono font-semibold text-[#9fd8b6] tabular-nums', z.stack)} data-testid={`stack-${s.seatIndex}`}>
               {p.amounts.fmt(s.stack, compact)}
@@ -432,7 +440,7 @@ function SeatPlace(p: SeatProps) {
             </span>
           )}
           {p.onPick && (
-            <button type="button" className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400" onClick={p.onPick} aria-label={s.nickname} data-testid={`seat-pick-${s.seatIndex}`} />
+            <button type="button" className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400" onClick={p.onPick} aria-label={s.nickname} title={pickTitle} data-testid={`seat-pick-${s.seatIndex}`} />
           )}
         </div>
         {/* status line: no wider than the seat (layout.ts); what does not fit is cut short, whole in its title */}

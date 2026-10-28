@@ -154,6 +154,8 @@ const INK_300 = '#8d929c';
 const GOLD_300 = '#f3dd9b';
 const WIN = '#9fd8b6';
 const ROLE_COLOR: Record<PublicRole, string> = { super_admin: '#f8e3b0', admin: '#8fd0ff' };
+/** A table bot's mark (styles.css --bot-mark). */
+const BOT_MARK = '#8fd9cb';
 const M = 56;
 const HEAD = 112;
 
@@ -619,42 +621,52 @@ function who(pen: Pen, seat: ShareSeat) {
   return { text: named ? seat.nickname : seat.label, role, vip, bot: seat.bot, color: role ? ROLE_COLOR[role] : vip ? pen.pal.vip[vip] : IVORY };
 }
 
+/** A table bot's mark: the icon set's robot (Lucide's bot, as on the table), `k` square, in the bot teal at the icons' stroke. */
+function botMark(ctx: Ctx, x: number, y: number, k: number) {
+  const X = (v: number) => x + (v / 24) * k;
+  const Y = (v: number) => y + (v / 24) * k;
+  ctx.lineWidth = (1.8 / 24) * k;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = BOT_MARK;
+  rr(ctx, X(4), Y(8), (16 / 24) * k, (12 / 24) * k, (2 / 24) * k);
+  ctx.stroke();
+  ctx.beginPath();
+  // The antenna, the ears and the eyes.
+  ctx.moveTo(X(12), Y(8));
+  ctx.lineTo(X(12), Y(4));
+  ctx.lineTo(X(8), Y(4));
+  for (const [x0, y0, x1, y1] of [[2, 14, 4, 14], [20, 14, 22, 14], [15, 13, 15, 15], [9, 13, 9, 15]] as const) {
+    ctx.moveTo(X(x0), Y(y0));
+    ctx.lineTo(X(x1), Y(y1));
+  }
+  ctx.stroke();
+}
+
 /**
- * A player's name centred on `cx` in at most `maxW`: the staff or VIP mark in front, the BOT pill after, the name
- * between, shrunk and then cut (the marks always stay whole).
+ * A player's name centred on `cx` in at most `maxW`: the staff, VIP or bot mark in front, then the name, shrunk and
+ * then cut (the marks always stay whole).
  */
 function nameLine(pen: Pen, seat: ShareSeat, cx: number, cy: number, maxW: number, size: number, min: number, id: string, align: 'center' | 'left' = 'center') {
   const { ctx } = pen;
   const p = who(pen, seat);
   const mark = p.role || p.vip ? size * 0.95 : 0;
   const markGap = mark ? size * 0.25 : 0;
-  setFont(ctx, size * 0.6, 800);
-  const botW = p.bot ? width(ctx, 'BOT') + size * 0.6 : 0;
-  const botGap = p.bot ? size * 0.3 : 0;
-  const f = fit(ctx, p.text, Math.max(size, maxW - mark - markGap - botW - botGap), size, min, 700);
-  const total = mark + markGap + f.w + botGap + botW;
+  const bot = p.bot ? size * 1.05 : 0;
+  const botGap = bot ? size * 0.25 : 0;
+  const f = fit(ctx, p.text, Math.max(size, maxW - mark - markGap - bot - botGap), size, min, 700);
+  const total = mark + markGap + bot + botGap + f.w;
   let x = align === 'center' ? cx - total / 2 : cx;
   if (p.role) roleMark(ctx, p.role, x, cy - mark / 2, mark);
   else if (p.vip) vipMark(ctx, x, cy - mark / 2, mark, pen.pal.vipMark);
   if (mark) record(pen, 'mark', `${id}-mark`, x, cy - mark / 2, mark, mark);
   x += mark + markGap;
-  put(pen, f, x, cy, p.color, id, { weight: 700 });
-  x += f.w + botGap;
-  if (p.bot) {
-    const h = size * 0.92;
-    rr(ctx, x, cy - h / 2, botW, h, h / 2);
-    ctx.fillStyle = 'rgba(16, 58, 56, 0.9)';
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(166, 239, 226, 0.35)';
-    ctx.stroke();
-    setFont(ctx, size * 0.6, 800);
-    ctx.fillStyle = '#a6efe2';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('BOT', x + botW / 2, cy + size * 0.02);
-    record(pen, 'mark', `${id}-bot`, x, cy - h / 2, botW, h);
+  if (bot) {
+    botMark(ctx, x, cy - bot / 2, bot);
+    record(pen, 'mark', `${id}-bot`, x, cy - bot / 2, bot, bot);
   }
+  x += bot + botGap;
+  put(pen, f, x, cy, p.color, id, { weight: 700 });
   return total;
 }
 
@@ -1844,7 +1856,7 @@ function heroHand(pen: Pen, hero: ShareSeat, x: number, y: number, hw: number, m
   const pos = hero.pos ? fit(ctx, hero.pos, tw * 0.4, 24 * z, 14, 800) : null;
   setFont(ctx, size, 700);
   const p = who(pen, hero);
-  const nameW = width(ctx, p.text) + (p.role || p.vip ? size * 1.2 : 0) + (p.bot ? size * 2.2 : 0);
+  const nameW = width(ctx, p.text) + (p.role || p.vip ? size * 1.2 : 0) + (p.bot ? size * 1.3 : 0);
   const apart = !!pos && pos.w + 12 * z + nameW > tw;
   // The lines' heights, centred on the cards.
   const rows = [apart ? 1.25 * pos!.size : 0, 1.3 * size, hero.rank ? 1.3 * 24 * z : 0];

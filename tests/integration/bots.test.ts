@@ -260,10 +260,16 @@ describe('table bots', () => {
 
     // The member's replay marks the bot's seat.
     const list = (await m.client.get('/api/me/hands')).body as { id: string; tableId: string }[];
-    const detail = (await m.client.get(`/api/me/hands/${list.find((h) => h.tableId === T)!.id}`)).body as HandDetailDto;
+    const handId = list.find((h) => h.tableId === T)!.id;
+    const detail = (await m.client.get(`/api/me/hands/${handId}`)).body as HandDetailDto;
     expect(detail.players.find((p) => p.seatIndex === 1)).toMatchObject({ bot: true, userId: botId });
     expect(detail.players.find((p) => p.isYou)!.bot).toBeUndefined();
     expect(detail.players.reduce((a, p) => a + p.net, 0)).toBe(0);
+    // The console's audit of the same hand marks the bot's seat, and only it.
+    await reauth();
+    const audited = (await admin.get(`/api/admin/hands/${encodeURIComponent(handId)}`)).body as { players: { userId: string; bot?: true }[] };
+    expect(audited.players.find((p) => p.userId === botId)!.bot).toBe(true);
+    expect('bot' in audited.players.find((p) => p.userId === m.me.id)!).toBe(false);
 
     const sessions = await balanced(T, [m.me.id], before);
     expect(sessions.size).toBe(1);

@@ -312,6 +312,30 @@ describe('the share image shows only what the replay step shows', () => {
     }
   });
 
+  it("marks a table bot with the robot in front of its name, square on the name's line, and nobody else; no BOT text", () => {
+    const hand = table(6, { long: true });
+    const none = table(6, { long: true });
+    for (const p of none.players) delete p.bot;
+    const snap = snapOf(hand, 0, buildReplay(hand, 0).length - 1);
+    const plain = snapOf(none, 0, buildReplay(none, 0).length - 1);
+    expect(snap.seats.filter((s) => s.bot).map((s) => s.seat)).toEqual([5]);
+    // A bot is no one's identity: its mark stays with the names off, as the seat's label does.
+    for (const tpl of SHARE_TEMPLATES)
+      for (const names of [true, false]) {
+        const { boxes } = draw(snap, { template: tpl, names });
+        expect(boxes.some((b) => /\bBOT\b/.test(b.text ?? ''))).toBe(false);
+        const bots = boxes.filter((b) => b.id.endsWith('-bot'));
+        if (tpl === 'classic') expect(bots.map((b) => b.id)).toContain('name-5-bot');
+        for (const m of bots) {
+          const name = boxes.find((b) => b.id === m.id.slice(0, -'-bot'.length))!;
+          expect(m.w).toBeCloseTo(m.h);
+          expect(m.x + m.w).toBeLessThanOrEqual(name.x + EPS);
+          expect(Math.abs(m.y + m.h / 2 - (name.y + name.h / 2))).toBeLessThan(1.5);
+        }
+        expect(draw(plain, { template: tpl, names }).boxes.filter((b) => b.id.endsWith('-bot'))).toEqual([]);
+      }
+  });
+
   it('says "You" and "Seat 3" with the names off, in the lines too', () => {
     const hand = table(3, { long: true });
     const steps = buildReplay(hand, 1);

@@ -335,6 +335,9 @@ export const TableScene = memo(function TableScene({
   const latest = useRef({ s, onSit, onSeatClick, onShow });
   latest.current = { s, onSit, onSeatClick, onShow };
   const places = useMemo(() => geometry.map((g) => ({ left: `${g.seat.x}%`, top: `${g.seat.y}%` })), [geometry]);
+  // Where nothing fits, the layout may lay a seat across the table's left edge (nine seats on a 320px phone): its plate's
+  // start (inside the badges poking out past it) is cut off there.
+  const cut = useMemo(() => plan.rooms.map((r) => r.x + plan.dims.overhang < -0.5), [plan]);
   // Another player's bet once they fold, their cards gone, lies where it still reads as theirs (layout's `folds`), and
   // its chips fly to the pot from there.
   const foldedKey = s.seats
@@ -464,6 +467,7 @@ export const TableScene = memo(function TableScene({
               showOver={showOnCards}
               reveal={spots?.get(seat.seatIndex) ?? null}
               reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
+              startCut={cut[seat.seatIndex]}
               density={density}
               amounts={amounts}
               style={places[seat.seatIndex]!}

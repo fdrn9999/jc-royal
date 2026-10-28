@@ -54,21 +54,42 @@ describe('MemberName', () => {
     expect(out.indexOf('role-badge')).toBeGreaterThan(out.indexOf('a'.repeat(16)));
   });
 
-  it('marks a table bot with the BOT pill after the name, its level for screen readers and on hover', () => {
+  it('marks a table bot with the icon set’s robot in front of the name, its level for screen readers and on hover', () => {
     const out = html(h(MemberName, { name: 'Bot-K4P2', bot: 'hard' }));
-    expect(out).toMatch(/data-level="hard" data-testid="bot-badge"><span aria-hidden="true">BOT<\/span><span class="sr-only">테이블 봇 · 어려움<\/span>/);
-    expect(out).toContain('title="테이블 봇 · 어려움"');
-    expect(out.indexOf('bot-badge')).toBeGreaterThan(out.indexOf('Bot-K4P2'));
+    // The Lucide bot, hidden from screen readers (the label beside it is what they read), in the mark's own class.
+    expect(out).toMatch(/<span class="jc-bot-icon" title="AI 봇 플레이어 · 어려움" data-level="hard" data-testid="bot-badge"><svg[^>]*class="lucide lucide-bot"[^>]*aria-hidden="true"/);
+    expect(out).toContain('<span class="sr-only">AI 봇 플레이어 · 어려움</span>');
+    expect(out.indexOf('bot-badge')).toBeLessThan(out.indexOf('Bot-K4P2'));
+    // Outside the part a long name is cut from.
+    expect(out.indexOf('bot-badge')).toBeLessThan(out.indexOf('min-w-0 truncate'));
+    // No emoji, no BOT word: the drawn icon only.
+    expect(out).not.toContain('🤖');
+    expect(out).not.toMatch(/>BOT</);
     // Not a staff member, and no badge flag needed: a bot is always marked.
     expect(out).not.toContain('jc-role-name');
     expect(out).not.toContain('role-badge');
   });
 
-  it('marks a bot of a past hand (level not recorded) without a level, and members not at all', () => {
+  it('puts the robot after the name, still whole and outside the cut part, where the seat’s start is cut off (botAfter)', () => {
+    const out = html(h(MemberName, { name: 'Bot-K4P2', bot: 'normal', botAfter: true }));
+    expect(out.match(/data-testid="bot-badge"/g)).toHaveLength(1);
+    expect(out.indexOf('Bot-K4P2')).toBeLessThan(out.indexOf('bot-badge'));
+    // The name's own span closes before the mark opens.
+    expect(out).toMatch(/Bot-K4P2<\/span><span class="jc-bot-icon"/);
+    // A member is not marked, after or before.
+    expect(html(h(MemberName, { name: 'PokerBot_01', botAfter: true }))).not.toContain('bot-badge');
+  });
+
+  it('marks a bot of a past hand (level not recorded) without a level, and members not at all, whatever their name says', () => {
     const out = html(h(MemberName, { name: 'Bot-K4P2', bot: true }));
-    expect(out).toContain('<span class="sr-only">테이블 봇</span>');
+    expect(out).toContain('<span class="sr-only">AI 봇 플레이어</span>');
     expect(out).not.toContain('data-level');
-    expect(html(h(MemberName, { name: 'river_rat' }))).not.toContain('bot-badge');
+    // Only the server's flag marks a bot: a member named like one is a member.
+    for (const name of ['river_rat', 'PokerBot_01', 'bot', 'Bot-K4P2', '로봇']) {
+      const member = html(h(MemberName, { name }));
+      expect(member, name).not.toContain('bot-badge');
+      expect(member, name).not.toContain('lucide-bot');
+    }
   });
 });
 
