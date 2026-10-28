@@ -14,7 +14,8 @@ export const REALTIME_PROTOCOL = 1;
 /**
  * Realtime hubs: a member's sockets live on hub `realtimeShardOf(userId)`, and a public event goes to every hub. The API
  * and the game worker both read this constant (an env var could differ between them); changing it needs both deployed,
- * and every socket reconnects then anyway. See docs/REALTIME.md for the measurement behind the number.
+ * and every socket reconnects then anyway. 4 is a starting value, not a measured one: docs/REALTIME.md (2) says why
+ * and what to measure after a deploy before changing it.
  */
 export const REALTIME_SHARDS = 4;
 
