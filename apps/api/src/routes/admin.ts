@@ -867,8 +867,10 @@ const admin = new Hono<AppEnv>()
     // The same request again (a retry, a double click): nothing changed, and that is on record. A first try whose audit
     // row was not written (below) gets it now, marked late, so every adjustment has its `user.chips` row.
     if (r.status === 'duplicate') {
+      // `+action` keeps the planner on audit_target_idx (this member's rows): with no ANALYZE statistics it chose
+      // audit_action_idx, every `user.chips` row ever written (docs/LOAD_TEST.md).
       const recorded = await c.env.DB.prepare(
-        `SELECT 1 AS x FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?1 AND action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?2 LIMIT 1`,
+        `SELECT 1 AS x FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?1 AND +action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?2 LIMIT 1`,
       )
         .bind(id, r.ledgerId)
         .first();
