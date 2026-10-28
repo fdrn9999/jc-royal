@@ -326,6 +326,21 @@ export function fill(text: string, vars: Record<string, string | undefined>): st
   });
 }
 
+/**
+ * The fields longer than the server takes (it trims first, so this does too). A field's own limit only stops typing:
+ * text a template writes in, with the values filled, can still run past it. The page refuses to send it rather than
+ * cut what the admin wrote.
+ */
+export function overLimit<K extends string>(values: Partial<Record<K, string>>, limits: Partial<Record<K, number>>): { key: K; length: number; max: number }[] {
+  const out: { key: K; length: number; max: number }[] = [];
+  for (const key of Object.keys(limits) as K[]) {
+    const max = limits[key]!;
+    const length = (values[key] ?? '').trim().length;
+    if (length > max) out.push({ key, length, max });
+  }
+  return out;
+}
+
 // ─── B, C, D. Notices, maintenance messages, board notices and operator messages ───────────────────────────────
 
 const HELLO_KO = '안녕하세요, JC ROYAL입니다.';
@@ -514,6 +529,18 @@ export function matchReason(list: AdminTemplate[], value: string, lang: Lang): {
     const l = label(t, lang);
     if (value === l) return { tpl: t, detail: '' };
     if (value.startsWith(l + SEP)) return { tpl: t, detail: value.slice(l.length + SEP.length) };
+  }
+  return null;
+}
+
+/**
+ * Like matchReason, in whichever language the reason was written: `lang` first, then the other. The console's
+ * language can change while a reason is being written; the detail typed so far is still found, with the language it is in.
+ */
+export function readReason(list: AdminTemplate[], value: string, lang: Lang): { tpl: AdminTemplate; detail: string; lang: Lang } | null {
+  for (const l of [lang, lang === 'en' ? 'ko' : 'en'] as const) {
+    const m = matchReason(list, value, l);
+    if (m) return { ...m, lang: l };
   }
   return null;
 }

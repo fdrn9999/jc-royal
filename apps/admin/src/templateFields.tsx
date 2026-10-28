@@ -12,8 +12,9 @@ import {
   fill,
   flatten,
   label as labelOf,
-  matchReason,
+  overLimit,
   part,
+  readReason,
   unfilled,
   varOf,
   type AdminTemplate,
@@ -48,7 +49,7 @@ function Options({ list, lang }: { list: AdminTemplate[] | TemplateGroup[]; lang
 /** The choice a reason reads as: the template it was written from, typed by hand, or nothing yet. */
 function pickFor(list: AdminTemplate[], value: string, lang: Lang): string {
   if (!value) return '';
-  return matchReason(list, value, lang)?.tpl.id ?? CUSTOM;
+  return readReason(list, value, lang)?.tpl.id ?? CUSTOM;
 }
 
 /**
@@ -93,7 +94,11 @@ export function AdminReasonField({
   const [own, setOwn] = useState(() => pickFor(items, value, locale));
   const pick = value === emitted.current ? own : pickFor(items, value, locale);
   const tpl = items.find((x) => x.id === pick) ?? null;
-  const detail = tpl ? (matchReason([tpl], value, locale)?.detail ?? '') : '';
+  // Read in the language it was written in: the console's can change while it is being written. More detail keeps
+  // that language, unless the reason is for someone else to read (`lang`), whose language it is always in.
+  const read = tpl ? readReason([tpl], value, locale) : null;
+  const detail = read?.detail ?? '';
+  const writeIn = lang ?? read?.lang ?? locale;
 
   const emit = (next: string, nextPick: string, picked: AdminTemplate | null) => {
     emitted.current = next;
@@ -116,7 +121,7 @@ export function AdminReasonField({
     emit(composeReason(next, (tpl ? detail : value).slice(0, room), locale), id, next);
   };
   const type = (text: string) => {
-    if (tpl) return emit(composeReason(tpl, text, locale), tpl.id, tpl);
+    if (tpl) return emit(composeReason(tpl, text, writeIn), tpl.id, tpl);
     emit(text, text || pick === CUSTOM ? CUSTOM : '', null);
   };
 
@@ -155,7 +160,7 @@ export function AdminReasonField({
           <Input
             id={fid}
             value={tpl ? detail : value}
-            maxLength={tpl ? Math.max(0, maxLength - labelOf(tpl, locale).length - SEP.length) : maxLength}
+            maxLength={tpl ? Math.max(0, maxLength - labelOf(tpl, writeIn).length - SEP.length) : maxLength}
             placeholder={tpl ? t(tpl.detailRequired ? 'tplDetailRequired' : 'tplDetailOptional') : (placeholder ?? t('tplCustomPh'))}
             onChange={(e) => type(e.target.value)}
             disabled={disabled}
@@ -212,19 +217,23 @@ const slotOf = (k: SlotKey, lang: Lang): { which: 'title' | 'body'; lang: Lang }
  * old time wherever it is written.
  *
  * Changing template over text the admin wrote or changed asks first (`pending`); "write your own" keeps the text.
- * `missing` lists the blanks still in braces in what would be sent: the page refuses to save or send them.
+ * `missing` lists the blanks still in braces in what would be sent, and `tooLong` the fields past what the server takes
+ * (a template's text with long values in it): the page refuses to save or send either (`blocked`).
  */
 export function useContentTemplate({
   templates,
   values,
   apply,
   auto,
+  limits,
   lang: initialLang = 'ko',
 }: {
   templates: AdminTemplate[] | TemplateGroup[];
   values: Slots;
   apply: (patch: Slots) => void;
   auto?: Record<string, string>;
+  /** The most each field may hold, as the server counts it. */
+  limits: Partial<Record<SlotKey, number>>;
   /** The language of a one-language form, to start with. */
   lang?: Lang;
 }) {
@@ -340,6 +349,7 @@ export function useContentTemplate({
 
   const sent = keys.map((k) => values[k] ?? '');
   const missing = unfilled(sent);
+  const tooLong = overLimit(values, limits);
   const asked = tpl ? unfilled(keys.map((k) => part(tpl, slotOf(k, lang).which, slotOf(k, lang).lang))) : [];
   // A time the form writes is not asked for; a form without times (a notice) asks for it like any other value.
   const needed = [...asked, ...missing.filter((k) => !asked.includes(k))]
@@ -359,6 +369,8 @@ export function useContentTemplate({
     commitVar,
     needed,
     missing,
+    tooLong,
+    blocked: missing.length > 0 || tooLong.length > 0,
     pending: pending ? (items.find((x) => x.id === pending.id) ?? null) : null,
     confirm: () => {
       const x = pending && items.find((y) => y.id === pending.id);
@@ -518,5 +530,27 @@ export function TemplateMissing({ tpl, testid }: { tpl: ContentTemplate; testid:
     <p role="alert" className="text-xs text-danger" data-testid={testid}>
       {t('tplMissing', { v: missingNames(tpl, locale, t).join(', ') })}
     </p>
+  );
+}
+
+/** The fields too long to send, each with how far over it is, said where the save button is. `names` are the page's own field labels. */
+export function TemplateTooLong({ tpl, testid, names }: { tpl: ContentTemplate; testid: string; names?: Partial<Record<SlotKey, string>> }) {
+  const { t, locale } = useT();
+  if (!tpl.tooLong.length) return null;
+  const n = (x: number) => x.toLocaleString(locale === 'en' ? 'en-US' : 'ko-KR');
+  const name = (k: SlotKey) => {
+    if (names?.[k]) return names[k];
+    const s = slotOf(k, 'ko');
+    const base = t(s.which === 'title' ? 'titleLabel' : 'bodyLabel');
+    return k === 'title' || k === 'body' ? base : `${base} · ${t(s.lang === 'en' ? 'langEn' : 'langKo')}`;
+  };
+  return (
+    <div role="alert" className="flex flex-col gap-0.5 text-xs text-danger" data-testid={testid}>
+      {tpl.tooLong.map((x) => (
+        <p key={x.key} data-testid={`${testid}-${x.key}`}>
+          {t('tplTooLong', { v: name(x.key), max: n(x.max), n: n(x.length) })}
+        </p>
+      ))}
+    </div>
   );
 }

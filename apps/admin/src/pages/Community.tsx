@@ -4,7 +4,7 @@ import { BOARD_TEMPLATES, MESSAGE_TEMPLATES, type MessageCategory } from '../adm
 import { useT } from '../i18n';
 import { categoryLabel, contentStatusLabel, type Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
-import { ContentTemplateFields, TemplateMissing, TemplatePreview, useContentTemplate } from '../templateFields';
+import { ContentTemplateFields, TemplateMissing, TemplatePreview, TemplateTooLong, useContentTemplate } from '../templateFields';
 import { contentTone, Feedback, ListState, LoadError, Modal, Pager, type Note } from '../ui';
 import { LangBadge } from './Console';
 
@@ -55,6 +55,7 @@ export function BoardAdminPage() {
     templates: BOARD_TEMPLATES,
     values: { title: notice?.title ?? '', body: notice?.body ?? '' },
     apply: (patch) => setNotice((n) => n && { ...n, ...patch }),
+    limits: { title: 100, body: 10_000 },
   });
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -163,11 +164,11 @@ export function BoardAdminPage() {
           <>
             <Button variant="ghost" onClick={() => setNotice(null)}>{t('cancel')}</Button>
             <Button
-              disabled={!notice || notice.title.trim().length < 2 || !notice.body.trim() || tpl.missing.length > 0}
+              disabled={!notice || notice.title.trim().length < 2 || !notice.body.trim() || tpl.blocked}
               loading={busy}
               onClick={() =>
                 notice &&
-                !tpl.missing.length &&
+                !tpl.blocked &&
                 act(async () => {
                   if (notice.id) await api(`/api/admin/board/notices/${notice.id}`, { method: 'PATCH', body: { title: notice.title, body: notice.body } });
                   else await api('/api/admin/board/notices', { body: { title: notice.title, body: notice.body } });
@@ -188,6 +189,7 @@ export function BoardAdminPage() {
             <Field label={t('bodyLabel')}>{(id) => <textarea id={id} rows={8} maxLength={10000} value={notice.body} onChange={(e) => setNotice({ ...notice, body: e.target.value })} className="w-full rounded-lg border border-white/10 bg-ink-850 p-3" data-testid="board-notice-body" />}</Field>
             <TemplatePreview testid="board-preview" items={[{ title: notice.title, body: notice.body }]} />
             <TemplateMissing tpl={tpl} testid="board-missing" />
+            <TemplateTooLong tpl={tpl} testid="board-too-long" />
           </div>
         )}
       </Modal>
@@ -216,6 +218,7 @@ export function MessagesAdminPage() {
       if (patch.title !== undefined) setTitle(patch.title);
       if (patch.body !== undefined) setBody(patch.body);
     },
+    limits: { title: 100, body: 2000 },
   });
   const [note, setNote] = useState<Note>(null);
   const [confirming, setConfirming] = useState(false);
@@ -239,7 +242,7 @@ export function MessagesAdminPage() {
   const en = picked.filter((u) => u.locale === 'en').length;
   const ko = picked.length - en;
   async function send() {
-    if (tpl.missing.length) return;
+    if (tpl.blocked) return;
     setNote(null);
     setSending(true);
     try {
@@ -308,8 +311,9 @@ export function MessagesAdminPage() {
             <Field label={t('bodyLabel')}>{(id) => <textarea id={id} rows={5} maxLength={2000} value={body} onChange={(e) => setBody(e.target.value)} className="w-full rounded-lg border border-white/10 bg-ink-850 p-3" data-testid="msg-body" />}</Field>
             <TemplatePreview testid="msg-preview" items={[{ title, body }]} />
             <TemplateMissing tpl={tpl} testid="msg-missing" />
+            <TemplateTooLong tpl={tpl} testid="msg-too-long" />
             <Feedback note={note} />
-            <Button disabled={picked.length === 0 || !title.trim() || !body.trim() || tpl.missing.length > 0} onClick={() => { setNote(null); setConfirming(true); }} data-testid="send-message">{t('send')} ({picked.length})</Button>
+            <Button disabled={picked.length === 0 || !title.trim() || !body.trim() || tpl.blocked} onClick={() => { setNote(null); setConfirming(true); }} data-testid="send-message">{t('send')} ({picked.length})</Button>
           </div>
         </Panel>
       </div>

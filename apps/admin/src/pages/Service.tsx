@@ -6,7 +6,7 @@ import { byKind, MAINTENANCE_TEMPLATES, maintenanceVars, NOTICE_TEMPLATES, REASO
 import { useT } from '../i18n';
 import { maintStateLabel, noticeKindLabel, noticeStateLabel } from '../labels';
 import { ApiError, errText, hasGrant, useAdmin, useData } from '../lib';
-import { AdminReasonField, ContentTemplateFields, TemplateMissing, TemplatePreview, useContentTemplate } from '../templateFields';
+import { AdminReasonField, ContentTemplateFields, TemplateMissing, TemplatePreview, TemplateTooLong, useContentTemplate } from '../templateFields';
 import { Feedback, LoadError, Modal, type Note } from '../ui';
 
 interface NoticeRow {
@@ -94,12 +94,13 @@ function MaintenancePanel() {
     values: { bodyKo: form?.messageKo ?? '', bodyEn: form?.messageEn ?? '' },
     apply: (patch) => setForm((f) => f && { ...f, messageKo: patch.bodyKo ?? f.messageKo, messageEn: patch.bodyEn ?? f.messageEn }),
     auto: maintenanceVars(form ? (startMs ?? fromInput(form.start)) : null, endMs),
+    limits: { bodyKo: 2000, bodyEn: 2000 },
   });
   const edit = (f: MaintForm) => {
     tpl.reset();
     setForm(f);
   };
-  const formOk = !!form && endMs !== null && endMs > Date.now() && endMs > (startMs ?? 0) && form.reason.trim().length >= 2 && !tpl.missing.length;
+  const formOk = !!form && endMs !== null && endMs > Date.now() && endMs > (startMs ?? 0) && form.reason.trim().length >= 2 && !tpl.blocked;
 
   async function run(fn: () => Promise<{ rooms: RoomFanOut }>, done: string) {
     setBusy(true);
@@ -216,6 +217,7 @@ function MaintenancePanel() {
             />
             {endMs !== null && endMs <= (startMs ?? Date.now()) && <p className="text-xs text-danger">{t('errMaintEnd')}</p>}
             <TemplateMissing tpl={tpl} testid="maint-missing" />
+            <TemplateTooLong tpl={tpl} testid="maint-too-long" names={{ bodyKo: t('maintMsgKo'), bodyEn: t('maintMsgEn') }} />
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="ghost" onClick={() => setForm(null)}>{t('cancel')}</Button>
               <Button disabled={!formOk || busy} onClick={() => setConfirm('save')} data-testid="maint-save">{form.id ? t('maintEdit') : t('maintSchedule')}</Button>
@@ -307,6 +309,7 @@ function NoticesPanel() {
     templates: byKind(NOTICE_TEMPLATES, form?.kind ?? 'general', { suited: t('tplSuited'), others: t('tplOthers') }),
     values: { titleKo: form?.titleKo ?? '', titleEn: form?.titleEn ?? '', bodyKo: form?.bodyKo ?? '', bodyEn: form?.bodyEn ?? '' },
     apply: (patch) => setForm((f) => f && { ...f, ...patch }),
+    limits: { titleKo: 100, titleEn: 100, bodyKo: 2000, bodyEn: 2000 },
   });
   const open = (f: NoticeForm) => {
     tpl.reset();
@@ -334,7 +337,7 @@ function NoticesPanel() {
   }
   const save = () =>
     form &&
-    !tpl.missing.length &&
+    !tpl.blocked &&
     act(async () => {
       const body = { kind: form.kind, titleKo: form.titleKo, titleEn: form.titleEn, bodyKo: form.bodyKo, bodyEn: form.bodyEn, endsAt: endMs };
       if (form.id) {
@@ -406,7 +409,7 @@ function NoticesPanel() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setForm(null)}>{t('cancel')}</Button>
-            <Button disabled={!titlesOk || !windowOk || tpl.missing.length > 0 || busy} onClick={() => (form?.sendInbox ? setConfirm({ kind: 'inbox' }) : void save())} data-testid="notice-save">{t('save')}</Button>
+            <Button disabled={!titlesOk || !windowOk || tpl.blocked || busy} onClick={() => (form?.sendInbox ? setConfirm({ kind: 'inbox' }) : void save())} data-testid="notice-save">{t('save')}</Button>
           </>
         }
       >
@@ -467,6 +470,11 @@ function NoticesPanel() {
               </>
             )}
             <TemplateMissing tpl={tpl} testid="notice-missing" />
+            <TemplateTooLong
+              tpl={tpl}
+              testid="notice-too-long"
+              names={{ titleKo: t('noticeTitleKo'), titleEn: t('noticeTitleEn'), bodyKo: t('noticeBodyKo'), bodyEn: t('noticeBodyEn') }}
+            />
           </div>
         )}
       </Modal>

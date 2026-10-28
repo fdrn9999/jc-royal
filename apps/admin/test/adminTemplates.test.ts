@@ -15,7 +15,9 @@ import {
   formatPeriod,
   maintenanceVars,
   matchReason,
+  overLimit,
   part,
+  readReason,
   unfilled,
   varOf,
   type AdminTemplate,
@@ -191,6 +193,14 @@ describe('reasons', () => {
     expect(matchReason(REASONS.chipDeduct, '이벤트 보상 지급', 'ko')).toBeNull();
   });
 
+  it('reads a reason in the language it was written in, whatever the console shows now', () => {
+    // Written in Korean, then the console switched to English: the detail is still found, with its language.
+    expect(readReason(REASONS.chipGrant, '이벤트 보상 지급 - 10월 출석', 'en')).toEqual({ tpl: event, detail: '10월 출석', lang: 'ko' });
+    expect(readReason(REASONS.chipGrant, 'Event reward - October check-in', 'ko')).toEqual({ tpl: event, detail: 'October check-in', lang: 'en' });
+    expect(readReason(REASONS.chipGrant, '이벤트 보상 지급', 'ko')).toEqual({ tpl: event, detail: '', lang: 'ko' });
+    expect(readReason(REASONS.chipGrant, '무료 보충 #1 회수', 'en')).toBeNull();
+  });
+
   it('groups templates suited to a notice kind first, without dropping any', () => {
     const groups = byKind(NOTICE_TEMPLATES, 'urgent', { suited: 'S', others: 'O' });
     expect(groups.map((g) => g.label)).toEqual(['S', 'O']);
@@ -214,6 +224,28 @@ describe('blanks', () => {
   it('finds nothing left in a template once every value is given', () => {
     const vars = Object.fromEntries(VARS.map((v) => [v.key, `<${v.key}>`]));
     for (const t of contents) expect(unfilled(texts(t).map((s) => fill(s, vars))), t.id).toEqual([]);
+  });
+
+  it('finds the fields longer than the server takes, counted as it counts them', () => {
+    const limits = { title: 100, body: 2000 };
+    expect(overLimit({ title: 'x'.repeat(100), body: 'y'.repeat(2000) }, limits)).toEqual([]);
+    // The server trims first: spaces around the text do not count.
+    expect(overLimit({ title: ` ${'x'.repeat(100)} `, body: '' }, limits)).toEqual([]);
+    expect(overLimit({ title: 'x'.repeat(101), body: 'y'.repeat(2001) }, limits)).toEqual([
+      { key: 'title', length: 101, max: 100 },
+      { key: 'body', length: 2001, max: 2000 },
+    ]);
+    // A field the form does not have is not counted.
+    expect(overLimit({ title: 'x' }, { title: 100, body: 2000 })).toEqual([]);
+  });
+
+  it('can write more than a notice takes when long values go into a template, which the form then finds', () => {
+    // Each value field takes 1,000 characters; two of them in the event notice pass the 2,000 a body may hold.
+    const ev = NOTICE_TEMPLATES.find((t) => t.id === 'notice.event')!;
+    const long = { eventName: '출석', eventPeriod: '10월', participation: 'p'.repeat(1000), reward: 'r'.repeat(1000) };
+    const bodyKo = fill(ev.bodyKo!, long);
+    expect(unfilled([bodyKo])).toEqual([]);
+    expect(overLimit({ bodyKo }, { bodyKo: 2000 })).toEqual([{ key: 'bodyKo', length: bodyKo.trim().length, max: 2000 }]);
   });
 
   it('reads a part in the language asked', () => {
