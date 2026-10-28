@@ -30,7 +30,6 @@ let gen = 0;
 let ws: WebSocket | null = null;
 let status: RealtimeStatus = 'off';
 let attempt = 0;
-let opened = false;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let ping: ReturnType<typeof setInterval> | undefined;
 let pongWait: ReturnType<typeof setTimeout> | undefined;
@@ -71,9 +70,9 @@ function connect(g: number) {
       attempt = 0;
       setStatus('open');
       sendTopics();
-      // A socket opened again may have missed events in between: screens read what they show once more.
-      if (opened) for (const f of [...resyncs]) f();
-      opened = true;
+      // The hub keeps nothing for a socket that was not there: what changed before this one opened (since the screens'
+      // first read, or while a socket was down) arrives as no event. Screens read what they show once more.
+      for (const f of [...resyncs]) f();
       return;
     }
     if (frame.t !== 'event') return;
@@ -163,7 +162,6 @@ export function startRealtime(accountId: string, signedOut: () => void) {
 export function stopRealtime() {
   gen++;
   account = null;
-  opened = false;
   parked = false;
   attempt = 0;
   clearTimeout(retry);
@@ -189,7 +187,7 @@ export function onRealtime<T extends RealtimeEventType>(type: T, h: (e: Realtime
   return () => set.delete(h as Handler);
 }
 
-/** Called each time the socket opens again after it was down. */
+/** Called each time a socket opens, the first one too (what changed before it opened arrives as no event). */
 export function onRealtimeResync(f: () => void): () => void {
   resyncs.add(f);
   return () => resyncs.delete(f);
