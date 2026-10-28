@@ -18,11 +18,28 @@ type TableRow = typeof schema.tables.$inferSelect;
 /** Tables quick play asks the room about, best ranked first, before giving up with tables_full. */
 const QUICK_PLAY_CHECKS = 5;
 
+type Participation = NonNullable<LobbyTableDto['myParticipation']>;
+const NONE: Participation = { status: 'none' };
+
 /**
- * `badge` (badgesFor): the host's staff badge, when the social policy shows it. `seated`: the caller holds a seat here
- * (seatedTables).
+ * The caller's place at `t`: their seat (`seated`, from seatedTables), else their place on the waitlist the table room
+ * mirrors with its occupancy (live_waitlist_users, already in the row: no query or room call per table). Only their own
+ * place is read from it; the list itself never leaves here.
  */
-export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null, badge: Badge = publicRole, seated = false): LobbyTableDto {
+export function participationOf(t: TableRow, userId: string, seated: boolean): Participation {
+  if (seated) return { status: 'seated' };
+  if (t.status !== 'open' || !t.liveWaitlistUsers) return NONE;
+  try {
+    const ids: unknown = JSON.parse(t.liveWaitlistUsers);
+    const i = Array.isArray(ids) ? ids.indexOf(userId) : -1;
+    return i === -1 ? NONE : { status: 'waiting', position: i + 1 };
+  } catch {
+    return NONE;
+  }
+}
+
+/** `badge` (badgesFor): the host's staff badge, when the social policy shows it. `mine`: the caller's place (participationOf). */
+export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null, badge: Badge = publicRole, mine: Participation = NONE): LobbyTableDto {
   const role = badge(hostUser?.role);
   const vip = hostUser ? shownVip(hostUser) : undefined;
   return {
@@ -46,7 +63,7 @@ export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null, badge:
     playing: t.livePlaying,
     waitlist: t.liveWaitlist,
     spectators: t.liveSpectators,
-    myParticipation: { status: seated ? 'seated' : 'none' },
+    myParticipation: mine,
   };
 }
 
@@ -107,8 +124,9 @@ export const tableRoutes = new Hono<AppEnv>()
       .orderBy(desc(schema.tables.roomType), asc(schema.tables.bigBlind), asc(schema.tables.name));
     const badge = await badgesFor(c, rows.map((r) => (r.t.roomType === 'member' ? r.host?.role : null)));
     // The caller's own seats (each reply is theirs alone: /api replies are never cached, lib/http.ts).
-    const mine = await seatedTables(c, c.var.user!.id);
-    return c.json(rows.map((r) => toLobbyDto(r.t, r.host, badge, mine.has(r.t.id))));
+    const me = c.var.user!.id;
+    const mine = await seatedTables(c, me);
+    return c.json(rows.map((r) => toLobbyDto(r.t, r.host, badge, participationOf(r.t, me, mine.has(r.t.id)))));
   })
   /**
    * Quick play: picks a public open table for the caller. Newcomers (under NEWCOMER_HANDS hands) get beginner tables
@@ -157,7 +175,7 @@ export const tableRoutes = new Hono<AppEnv>()
     for (const r of ranked.slice(0, QUICK_PLAY_CHECKS)) {
       const check = await roomCall(c, r.t.id, 'seat-check', { user: me.id });
       if (check?.ok === true && typeof check.seatIndex === 'number') {
-        const out: QuickPlayDto = { table: toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null])), seatIndex: check.seatIndex };
+        const out: QuickPlayDto = { table: toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null]), participationOf(r.t, me.id, false)), seatIndex: check.seatIndex };
         return c.json(out);
       }
     }
@@ -166,8 +184,9 @@ export const tableRoutes = new Hono<AppEnv>()
   .get('/:id', async (c) => {
     const [r] = await withHost(c).where(eq(schema.tables.id, c.req.param('id')));
     if (!r) fail(404, 'not_found', 'table not found');
-    const mine = await seatedTables(c, c.var.user!.id, r.t.id);
-    return c.json(toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null]), mine.has(r.t.id)));
+    const me = c.var.user!.id;
+    const mine = await seatedTables(c, me, r.t.id);
+    return c.json(toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null]), participationOf(r.t, me, mine.has(r.t.id))));
   })
   /**
    * Exchanges a private table's join code for a short-lived ticket cookie (see room-access.ts). Public tables and the

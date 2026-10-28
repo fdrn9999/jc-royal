@@ -11,7 +11,7 @@ import {
   type LobbyTableDto,
   type SocialSettingsDto,
 } from '@jc/types';
-import { ArrowLeftIcon, Button, cx, Empty, formatChips, Input, LockIcon, Modal, Panel, PlayIcon, Spinner } from '@jc/ui';
+import { ArrowLeftIcon, Button, cx, Empty, formatChips, HourglassIcon, Input, LockIcon, Modal, Panel, PlayIcon, Spinner } from '@jc/ui';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
@@ -23,7 +23,7 @@ import { Avatar, BlockConfirm, ReportModal, type ReportSubject } from '../compon
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
-import { entryOf, RESUME } from '../lib/lobby';
+import { entryOf, RESUME, RESUME_WAIT } from '../lib/lobby';
 import { setPrefs, usePrefs } from '../lib/prefs';
 import { setPresenceView, sortFriends, useFriendsLastOnline, useFriendsPresence } from '../lib/presence';
 import { closeReadPushes } from '../lib/push';
@@ -456,7 +456,7 @@ const dayKey = (ms: number) => new Date(ms).toDateString();
 function InviteCard({ m }: { m: DirectMessageDto }) {
   const { t, err } = useI18n();
   const nav = useNavigate();
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'checking' } | { kind: 'seated' } | { kind: 'closed' } | { kind: 'full'; spectate: boolean } | { kind: 'error'; text: string }>({ kind: 'idle' });
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'checking' } | { kind: 'seated' } | { kind: 'waiting'; position: number } | { kind: 'closed' } | { kind: 'full'; spectate: boolean } | { kind: 'error'; text: string }>({ kind: 'idle' });
   const [codeFor, setCodeFor] = useState<LobbyTableDto | null>(null);
   const expired = Date.now() - m.at > INVITE_FRESH_MS;
 
@@ -471,8 +471,10 @@ function InviteCard({ m }: { m: DirectMessageDto }) {
       else setState({ kind: 'error', text: err(x instanceof ApiError ? x.code : null) });
       return;
     }
-    // Already seated there: the way back to that seat, not a second buy-in, a waitlist or the code again.
+    // Already seated there: the way back to that seat, not a second buy-in, a waitlist or the code again. Already on its
+    // waitlist: a look at it (signing up again would put me at the back).
     if (entryOf(tb) === 'continue') return setState({ kind: 'seated' });
+    if (entryOf(tb) === 'waiting' && tb.myParticipation?.status === 'waiting') return setState({ kind: 'waiting', position: tb.myParticipation.position });
     if (tb.status !== 'open' || tb.entryBlocked) return setState({ kind: 'closed' });
     if (tb.seated >= tb.maxSeats) return setState({ kind: 'full', spectate: tb.allowSpectators });
     setState({ kind: 'idle' });
@@ -499,6 +501,15 @@ function InviteCard({ m }: { m: DirectMessageDto }) {
           <Button size="sm" variant="gold" onClick={() => nav(`/table/${m.tableId}`, { state: RESUME })} data-testid="dm-invite-continue">
             <PlayIcon />
             {t('lobby.continue')}
+          </Button>
+        </div>
+      )}
+      {state.kind === 'waiting' && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gold-200" role="status" data-testid="dm-invite-status">
+          <span>{t('invite.waitingHere', { n: state.position })}</span>
+          <Button size="sm" variant="gold" onClick={() => nav(`/table/${m.tableId}`, { state: RESUME_WAIT })} data-testid="dm-invite-view-waitlist">
+            <HourglassIcon />
+            {t('lobby.viewWaitlist')}
           </Button>
         </div>
       )}

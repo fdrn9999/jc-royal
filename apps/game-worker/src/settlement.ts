@@ -361,6 +361,9 @@ export interface LiveStats {
   bots: number;
   playing: boolean;
   waitlist: number;
+  /** The waitlist's member ids in order: the lobby reads only the caller's own place from them. */
+  waitlistUsers: string[];
+  /** Connected, neither seated nor waiting, where spectators are allowed. */
   spectators: number;
   connections: number;
 }
@@ -375,15 +378,16 @@ export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveS
     d1
       .prepare(
         `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
-                live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue), live_bots = ?8
+                live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue), live_bots = ?8,
+                live_waitlist_users = ?9
          WHERE id = ?1`,
       )
-      .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue, s.bots),
+      .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue, s.bots, JSON.stringify(s.waitlistUsers)),
     ...opsUpserts(d1, ops),
   ]);
   return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
 }
 
 export async function markTableClosed(d1: D1Database, tableId: string): Promise<void> {
-  await d1.prepare(`UPDATE tables SET status = 'closed', live_seated = 0, live_bots = 0, live_playing = 0, updated_at = (unixepoch('subsec') * 1000) WHERE id = ?1`).bind(tableId).run();
+  await d1.prepare(`UPDATE tables SET status = 'closed', live_seated = 0, live_bots = 0, live_playing = 0, live_waitlist = 0, live_waitlist_users = NULL, updated_at = (unixepoch('subsec') * 1000) WHERE id = ?1`).bind(tableId).run();
 }

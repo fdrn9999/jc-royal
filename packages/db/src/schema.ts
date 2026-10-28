@@ -165,6 +165,11 @@ export const tables = sqliteTable(
     liveConnections: integer('live_connections').notNull().default(0),
     /** Of live_seated, the table bots. */
     liveBots: integer('live_bots').notNull().default(0),
+    /**
+     * The waitlist's member ids in order, as a JSON array (null: the room has not written it yet). Read only for the
+     * caller's own place (routes/tables.ts), never sent to anyone as it is.
+     */
+    liveWaitlistUsers: text('live_waitlist_users'),
     handsPlayed: integer('hands_played').notNull().default(0),
     lastIssue: text('last_issue'),
     liveUpdatedAt: integer('live_updated_at'),

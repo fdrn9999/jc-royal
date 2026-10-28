@@ -253,6 +253,13 @@
       "when": 1793094940111,
       "tag": "0035_bot_buy_in",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1793170878795,
+      "tag": "0036_live_waitlist_users",
+      "breakpoints": true
     }
   ]
 }

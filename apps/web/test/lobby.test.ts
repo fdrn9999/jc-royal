@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrivalOf, entryOf, FAV_MAX, IDLE_AFTER_MS, IDLE_POLL_MS, latest, lobbyPoller, parsePrefs, POLL_MS, RECENT_MAX, seatHeld, withFav, withVisit } from '../src/lib/lobby';
+import { arrivalOf, entryOf, FAV_MAX, IDLE_AFTER_MS, IDLE_POLL_MS, latest, lobbyPoller, parsePrefs, POLL_MS, RECENT_MAX, RESUME, RESUME_WAIT, resumeOf, seatHeld, withFav, withVisit } from '../src/lib/lobby';
 
 /** A request whose answer the test decides; it rejects like fetch when aborted. */
 function deferred<T>() {
@@ -162,6 +162,26 @@ describe('entryOf', () => {
     // No seat, or an older server that says nothing: the usual choices.
     expect(entryOf({ ...tb, seated: 2, myParticipation: { status: 'none' } })).toBe('wait');
     expect(entryOf({ ...tb, myParticipation: undefined })).toBe('join');
+  });
+
+  it('a place on the waitlist is a look at it, never a second sign-up, while the table is open', () => {
+    const waiting = { ...tb, seated: 2, myParticipation: { status: 'waiting' as const, position: 2 } };
+    expect(entryOf(waiting)).toBe('waiting');
+    // A free seat or stopped entries do not hide the place I already have.
+    expect(entryOf({ ...waiting, seated: 1 })).toBe('waiting');
+    expect(entryOf({ ...waiting, entryBlocked: true })).toBe('waiting');
+    // A closing table drops its waitlist.
+    expect(entryOf({ ...waiting, status: 'closed' })).toBe('closing');
+  });
+});
+
+describe('resumeOf', () => {
+  it('reads only the marks the lobby sets', () => {
+    expect(resumeOf(RESUME)).toBe('seat');
+    expect(resumeOf(RESUME_WAIT)).toBe('wait');
+    expect(resumeOf(null)).toBeNull();
+    expect(resumeOf({ resume: true })).toBeNull();
+    expect(resumeOf('seat')).toBeNull();
   });
 });
 

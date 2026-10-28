@@ -8,25 +8,32 @@ import { useEffect, useSyncExternalStore } from 'react';
 
 /**
  * The main action a table card offers. The player's own seat comes first: whatever the table takes from newcomers
- * (full, closing, blocked, private, no spectators), they go back to it. A full table offers the waitlist (never a seat,
- * and never a plain visit that would only look like watching); a table that takes no entries or is closing offers
- * nothing. Only a guide: the table room decides once the player is there.
+ * (full, closing, blocked, private, no spectators), they go back to it. Their place on its waitlist next: a look at it
+ * (`waiting`), never a second sign-up, which would put them at the back. A full table offers the waitlist (never a
+ * seat, and never a plain visit that would only look like watching); a table that takes no entries or is closing
+ * offers nothing. Only a guide: the table room decides once the player is there.
  */
-export type Entry = 'continue' | 'join' | 'wait' | 'blocked' | 'closing';
+export type Entry = 'continue' | 'waiting' | 'join' | 'wait' | 'blocked' | 'closing';
 
 export function entryOf(tb: Pick<LobbyTableDto, 'status' | 'entryBlocked' | 'seated' | 'maxSeats' | 'myParticipation'>): Entry {
   if (tb.myParticipation?.status === 'seated') return 'continue';
   if (tb.status !== 'open') return 'closing';
+  if (tb.myParticipation?.status === 'waiting') return 'waiting';
   if (tb.entryBlocked) return 'blocked';
   return tb.seated >= tb.maxSeats ? 'wait' : 'join';
 }
 
 /**
- * Navigation state of a way back to the player's own seat (계속 플레이). The table page says so when the seat turns out
- * to be gone already (the lobby list is a few seconds old); it never makes a new one from it.
+ * Navigation state of a way back to the player's own seat (계속 플레이) or place on the waitlist (대기 현황 확인). The
+ * table page says so when it turns out to be gone already (the lobby list is a few seconds old); it never makes a new
+ * one from it.
  */
-export const RESUME = { resume: true } as const;
-export const isResume = (state: unknown) => !!state && typeof state === 'object' && (state as { resume?: unknown }).resume === true;
+export const RESUME = { resume: 'seat' } as const;
+export const RESUME_WAIT = { resume: 'wait' } as const;
+export function resumeOf(state: unknown): 'seat' | 'wait' | null {
+  const r = state && typeof state === 'object' ? (state as { resume?: unknown }).resume : null;
+  return r === 'seat' || r === 'wait' ? r : null;
+}
 
 /**
  * What a player sent to a table to sit (?sit) or wait (?wait) finds there, when it is not a seat to take: read off the

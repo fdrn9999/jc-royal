@@ -88,4 +88,73 @@ describe('lobby participation', () => {
     const refused = await sock(stranger.client, id, { noState: true });
     expect(await refused.waitClose()).toBe(4003);
   });
+
+  it("tells each player only their own place on the waitlist, kept away from the table page, until they leave it or sit", async () => {
+    const host = await newUser();
+    const { id } = (await host.client.post('/api/rooms', room({ maxSeats: 6 }))).body;
+    const wh = await sock(host.client, id);
+    expect(await wh.request({ t: 'sit', seatIndex: 0, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    const a = await newUser();
+    const b = await newUser();
+    const other = await newUser();
+    const wa = await sock(a.client, id);
+    expect(await wa.request({ t: 'waitlist', join: true })).toMatchObject({ t: 'ack' });
+    const wb = await sock(b.client, id);
+    expect(await wb.request({ t: 'waitlist', join: true })).toMatchObject({ t: 'ack' });
+
+    // In the order the room keeps, the same in the list and the table; everyone else reads their own state only.
+    await expect.poll(async () => (await one(b.client, id)).myParticipation, { timeout: 10_000 }).toEqual({ status: 'waiting', position: 2 });
+    expect((await one(a.client, id)).myParticipation).toEqual({ status: 'waiting', position: 1 });
+    expect((await list(a.client)).find((t) => t.id === id)?.myParticipation).toEqual({ status: 'waiting', position: 1 });
+    expect((await one(host.client, id)).myParticipation).toEqual({ status: 'seated' });
+    expect((await one(other.client, id)).myParticipation).toEqual({ status: 'none' });
+    const seen = await list(other.client);
+    expect(seen.find((t) => t.id === id)?.waitlist).toBe(2);
+    // Nobody else's id or place is in any reply.
+    expect(JSON.stringify(seen)).not.toContain(a.me.id);
+    expect(JSON.stringify(await one(a.client, id))).not.toContain(b.me.id);
+
+    // Going back to the lobby keeps the place; leaving the waitlist ends it (the one behind moves up). The list after
+    // that change still has the one who left the table page.
+    wa.close();
+    expect(await wb.request({ t: 'waitlist', join: false })).toMatchObject({ t: 'ack' });
+    await expect.poll(async () => (await one(b.client, id)).myParticipation, { timeout: 10_000 }).toEqual({ status: 'none' });
+    expect((await one(a.client, id)).myParticipation).toEqual({ status: 'waiting', position: 1 });
+
+    // Taking a seat ends it too.
+    const back = await sock(a.client, id);
+    expect(back.state!.you.inWaitlist).toBe(true);
+    expect(await back.request({ t: 'sit', seatIndex: 1, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    await expect.poll(async () => (await list(other.client)).find((t) => t.id === id)?.waitlist, { timeout: 10_000 }).toBe(0);
+    expect((await one(a.client, id)).myParticipation).toEqual({ status: 'seated' });
+  });
+
+  it('counts as watching only the members connected to watch: not those waiting, and nobody at a table without spectators', async () => {
+    const host = await newUser();
+    const { id } = (await host.client.post('/api/rooms', room())).body;
+    const wh = await sock(host.client, id);
+    expect(await wh.request({ t: 'sit', seatIndex: 0, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    const p = await newUser();
+    const wp = await sock(p.client, id);
+    expect(await wp.request({ t: 'sit', seatIndex: 1, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    const w = await newUser();
+    const ww = await sock(w.client, id);
+    expect(await ww.request({ t: 'waitlist', join: true })).toMatchObject({ t: 'ack' });
+    const s = await newUser();
+    const ws = await sock(s.client, id);
+    await ws.waitState((v) => v.spectatorCount === 1, 10_000, 'one spectator');
+    await expect.poll(async () => (await list(host.client)).find((t) => t.id === id)?.spectators, { timeout: 10_000 }).toBe(1);
+    expect(wh.state!.spectatorCount).toBe(1);
+
+    // Without spectators, the ones connected are there for a seat: nobody is watching, and nobody sees the hands.
+    const { id: hidden } = (await host.client.post('/api/rooms', room({ name: '관전 불가 방', allowSpectators: false }))).body;
+    const hh = await sock(host.client, hidden);
+    expect(await hh.request({ t: 'sit', seatIndex: 0, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    const hw = await sock(w.client, hidden);
+    expect(await hw.request({ t: 'waitlist', join: true })).toMatchObject({ t: 'ack' });
+    await sock(s.client, hidden);
+    await expect.poll(async () => (await one(w.client, hidden)).myParticipation, { timeout: 10_000 }).toEqual({ status: 'waiting', position: 1 });
+    expect((await one(host.client, hidden)).spectators).toBe(0);
+    expect(hh.state!.spectatorCount).toBe(0);
+  });
 });

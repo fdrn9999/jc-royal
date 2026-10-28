@@ -44,7 +44,7 @@ import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { arrivalOf, isResume, lobbyNoteSeen, markLobbyNote, rememberVisit, seatHeld, type Arrival } from '../lib/lobby';
+import { arrivalOf, lobbyNoteSeen, markLobbyNote, rememberVisit, resumeOf, seatHeld, type Arrival } from '../lib/lobby';
 import { lobbyHref } from '../lib/lobbyReturn';
 import { siteUrl } from '../lib/share';
 import { pullSettings, usePrefs } from '../lib/prefs';
@@ -78,7 +78,7 @@ function tournamentStalled(s: TableView): boolean {
 
 /** Free to sit in now: a seat whose player folded and stood up mid-hand stays out of reach until that hand ends. */
 const isFree = (x: SeatView) => x.state === 'empty' && !x.held;
-const ARRIVAL_TEXT: Record<Arrival | 'gone', MsgKey> = {
+const ARRIVAL_TEXT: Record<Arrival | 'gone' | 'waitGone', MsgKey> = {
   seated: 'arrive.seated',
   waiting: 'arrive.waiting',
   full: 'invite.fullNow',
@@ -87,6 +87,7 @@ const ARRIVAL_TEXT: Record<Arrival | 'gone', MsgKey> = {
   maintenance: 'arrive.maintenance',
   unavailable: 'arrive.unavailable',
   gone: 'lobby.seatGone',
+  waitGone: 'lobby.waitGone',
 };
 
 /** Whole seconds to a time the room set (its clock: a device whose clock is off counts the same seconds). */
@@ -192,7 +193,7 @@ export function TablePage() {
   const [lobbyAsk, setLobbyAsk] = useState(false);
   const lobbyBox = useRef<HTMLSpanElement>(null);
   // Sent here to sit or wait (or back to my seat) and the room had something else to say: what, and what next.
-  const [arrived, setArrived] = useState<Arrival | 'gone' | null>(null);
+  const [arrived, setArrived] = useState<Arrival | 'gone' | 'waitGone' | null>(null);
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => sound.installAutoUnlock(), []);
@@ -274,17 +275,19 @@ export function TablePage() {
     reopen();
   }, [codeThen, setParams, reopen]);
 
-  // 계속 플레이 from the lobby, whose list is a few seconds old: if the room no longer has my seat (I stood up elsewhere,
-  // an admin let me go, the table closed), say so over the table as it is now. Nothing here takes a seat. The mark is
+  // 계속 플레이 / 대기 현황 확인 from the lobby, whose list is a few seconds old: if the room no longer has my seat (I stood
+  // up elsewhere, an admin let me go, the table closed) or my place on the waitlist (its hold on a seat ran out), say so
+  // over the table as it is now; a place still held is confirmed. Nothing here takes a seat or a place. The mark is
   // dropped from the history entry at once, so a reload later does not say it again.
   const loc = useLocation();
-  const resume = useRef(isResume(loc.state));
+  const resume = useRef(resumeOf(loc.state));
   useEffect(() => {
     if (!resume.current) return;
     if (loc.state !== null) nav({ pathname: loc.pathname, search: loc.search }, { replace: true, state: null });
     if (!s) return;
-    resume.current = false;
-    if (s.you.seatIndex === null) setArrived('gone');
+    const want = resume.current;
+    resume.current = null;
+    if (s.you.seatIndex === null) setArrived(want === 'seat' ? 'gone' : s.you.inWaitlist ? 'waiting' : 'waitGone');
   }, [s, loc, nav]);
 
   // ?sit=1 from the lobby: open the buy-in dialog on the first free seat. A private table waits for the join code.
@@ -541,7 +544,9 @@ export function TablePage() {
   // Shown while it still holds: back at my seat while I have it; anything else while I have none (the waitlist ones
   // until I am on it).
   const arrival =
-    s && arrived && !nextOffer && (arrived === 'seated' ? seated : !seated && !(s.you.inWaitlist && (arrived === 'full' || arrived === 'held'))) ? arrived : null;
+    s && arrived && !nextOffer && (arrived === 'seated' ? seated : !seated && (arrived === 'waiting' ? s.you.inWaitlist : !(s.you.inWaitlist && (arrived === 'full' || arrived === 'held' || arrived === 'waitGone'))))
+      ? arrived
+      : null;
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 

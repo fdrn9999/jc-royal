@@ -470,6 +470,18 @@ export class TableRoom extends DurableObject<Env> {
     return new Set(this.sockets(exclude).map((ws) => this.att(ws).userId));
   }
 
+  /**
+   * Who is watching: members connected here, neither seated nor on the waitlist (counted apart), at a table that shows
+   * its hands to them. At a table without spectators the ones connected are there for a seat, not to watch.
+   */
+  private spectatorsOf(connected: Iterable<string>): number {
+    if (!this.table?.allowSpectators) return 0;
+    const waiting = new Set(this.room.waitlist.map((w) => w.userId));
+    let n = 0;
+    for (const u of new Set(connected)) if (this.seatIndexOf(u) === null && !waiting.has(u)) n++;
+    return n;
+  }
+
   private seatIndexOf(userId: string): number | null {
     const i = this.room.seats.findIndex((s) => s?.userId === userId);
     return i === -1 ? null : i;
@@ -550,13 +562,13 @@ export class TableRoom extends DurableObject<Env> {
     if (!this.tableId) return;
     const taken = this.room.seats.filter((s): s is SeatState => !!s && s.phase !== 'pending');
     const conns = this.sockets().map((ws) => this.att(ws).userId);
-    const spectators = new Set(conns.filter((u) => this.seatIndexOf(u) === null)).size;
     const stats = {
       seated: taken.length,
       bots: taken.filter((s) => s.bot).length,
       playing: !!this.hand,
       waitlist: this.room.waitlist.length,
-      spectators,
+      waitlistUsers: this.room.waitlist.map((w) => w.userId),
+      spectators: this.spectatorsOf(conns),
       connections: conns.length,
     };
     const key = JSON.stringify(stats);
@@ -3063,7 +3075,7 @@ export class TableRoom extends DurableObject<Env> {
       status: this.room.closed ? 'closed' : this.room.closing ? 'closing' : h && !h.isSettled ? 'playing' : 'waiting',
       seats,
       hand: hv,
-      spectatorCount: [...connected].filter((u) => this.seatIndexOf(u) === null).length,
+      spectatorCount: this.spectatorsOf(connected),
       waitlist: this.room.waitlist.map((w) => w.nickname),
       reservation: reservationLive ? { nickname: reservationLive.nickname, until: reservationLive.until } : null,
       // No countdown to a hand a pause or maintenance will not deal.

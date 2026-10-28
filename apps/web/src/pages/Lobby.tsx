@@ -1,5 +1,5 @@
 import type { LobbyTableDto, TournamentSummaryDto } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, Input, LockIcon, PlayIcon, PlusIcon, RefreshCwIcon, Spinner, SproutIcon, StarIcon, TrophyIcon, UserIcon } from '@jc/ui';
+import { Badge, Button, cx, Empty, formatChips, HourglassIcon, Input, LockIcon, PlayIcon, PlusIcon, RefreshCwIcon, Spinner, SproutIcon, StarIcon, TrophyIcon, UserIcon } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
@@ -13,7 +13,7 @@ import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { entryOf, latest, lobbyPoller, POLL_MS, RESUME, useTablePrefs, type Latest } from '../lib/lobby';
+import { entryOf, latest, lobbyPoller, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Latest } from '../lib/lobby';
 import { rememberLobby } from '../lib/lobbyReturn';
 import { setFavourite, useFavourites } from '../lib/prefs';
 import { useMaintenance } from '../lib/service';
@@ -105,37 +105,46 @@ function TournamentCard() {
 }
 
 /**
- * The tables where the player holds a seat, above everything else so no tab, search or filter hides them: going to
- * the lobby keeps the seat, and the game and its turn clock go on meanwhile.
+ * The tables where the player holds a seat or a place on the waitlist, above everything else so no tab, search or
+ * filter hides them: going to the lobby keeps both, and the game and its turn clock go on meanwhile.
  */
 function MyGames({ tables }: { tables: LobbyTableDto[] }) {
   const { t } = useI18n();
   if (tables.length === 0) return null;
+  const waits = (tb: LobbyTableDto) => tb.myParticipation?.status === 'waiting';
   return (
     <section id="lobby-my-games" className="flex scroll-mt-20 flex-col gap-2" aria-labelledby="lobby-my-games-title" data-testid="lobby-my-games">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
         <h2 id="lobby-my-games-title" className="text-sm font-bold tracking-wide text-gold-300">{t('lobby.myGames')}</h2>
-        <p className="text-xs text-ink-300">{t('lobby.myGamesHint')}</p>
+        {tables.some((tb) => !waits(tb)) && <p className="text-xs text-ink-300">{t('lobby.myGamesHint')}</p>}
+        {tables.some(waits) && <p className="text-xs text-ink-300">{t('lobby.myWaitHint')}</p>}
       </div>
-      {tables.map((tb) => (
-        <Link
-          key={tb.id}
-          to={`/table/${tb.id}`}
-          state={RESUME}
-          className="jc-panel jc-tap flex min-w-0 items-center gap-3 border-gold-500/40 p-4 transition hover:border-gold-400/70"
-          data-testid="lobby-my-game"
-          data-table={tb.id}
-        >
-          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-gold-300"><UserIcon className="size-6" /></span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-bold text-ivory">{tb.name}</span>
-            <span className="block truncate text-xs text-ink-300">
-              {t('lobby.myGameLine', { blinds: `${formatChips(tb.smallBlind)}/${formatChips(tb.bigBlind)}`, seated: tb.seated, max: tb.maxSeats })}
+      {tables.map((tb) => {
+        const p = tb.myParticipation;
+        const blinds = `${formatChips(tb.smallBlind)}/${formatChips(tb.bigBlind)}`;
+        return (
+          <Link
+            key={tb.id}
+            to={`/table/${tb.id}`}
+            state={p?.status === 'waiting' ? RESUME_WAIT : RESUME}
+            className="jc-panel jc-tap flex min-w-0 items-center gap-3 border-gold-500/40 p-4 transition hover:border-gold-400/70"
+            data-testid="lobby-my-game"
+            data-table={tb.id}
+            data-kind={p?.status === 'waiting' ? 'wait' : 'seat'}
+          >
+            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-gold-300">
+              {p?.status === 'waiting' ? <HourglassIcon className="size-6" /> : <UserIcon className="size-6" />}
             </span>
-          </span>
-          <span className="shrink-0 text-sm font-semibold text-gold-300">{t('lobby.continue')} →</span>
-        </Link>
-      ))}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-bold text-ivory">{tb.name}</span>
+              <span className="block truncate text-xs text-ink-300">
+                {p?.status === 'waiting' ? t('lobby.myWaitLine', { blinds, n: p.position }) : t('lobby.myGameLine', { blinds, seated: tb.seated, max: tb.maxSeats })}
+              </span>
+            </span>
+            <span className="shrink-0 text-sm font-semibold text-gold-300">{t(p?.status === 'waiting' ? 'lobby.viewWaitlist' : 'lobby.continue')} →</span>
+          </Link>
+        );
+      })}
     </section>
   );
 }
@@ -216,7 +225,9 @@ export function LobbyPage() {
     return [...list.filter((tb) => favs.has(tb.id)), ...list.filter((tb) => !favs.has(tb.id))];
   }, [tables, q, filter, filters.maxSeats, filters.bigBlind, favs, visited]);
 
+  // My seats (quick play asks before finding another) and, with them at the top, my places on waitlists.
   const mine = useMemo(() => (tables ?? []).filter((tb) => entryOf(tb) === 'continue'), [tables]);
+  const myGames = useMemo(() => (tables ?? []).filter((tb) => entryOf(tb) === 'continue' || entryOf(tb) === 'waiting'), [tables]);
 
   const narrowed = filter !== 'all' || q.trim() !== '' || !any;
   const resetAll = () => view({ filter: 'all', q: '', filters: ANY });
@@ -233,7 +244,7 @@ export function LobbyPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <MyGames tables={mine} />
+      <MyGames tables={myGames} />
       {!tutorialComplete(academy) && (
         <Link to="/academy" className="jc-panel jc-tap flex items-center gap-3 border-gold-500/30 p-4 transition hover:border-gold-400/60" data-testid="lobby-academy">
           <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold-500/15 text-xl text-gold-300">♠</span>
@@ -352,13 +363,14 @@ export function LobbyPage() {
           const full = tb.seated >= tb.maxSeats;
           const entry = entryOf(tb);
           const seatedHere = entry === 'continue';
+          const place = entry === 'waiting' && tb.myParticipation?.status === 'waiting' ? tb.myParticipation.position : null;
           const fav = favs.has(tb.id);
           // min-w-0: in the one-column list of a phone a long name (up to 40 characters) ends in an ellipsis, instead of
           // widening every card, and with them the page, past the screen.
           return (
             <article
               key={tb.id}
-              className={cx('jc-panel group flex min-w-0 flex-col gap-4 p-5 transition hover:border-gold-500/40', seatedHere && 'border-gold-500/40')}
+              className={cx('jc-panel group flex min-w-0 flex-col gap-4 p-5 transition hover:border-gold-500/40', (seatedHere || entry === 'waiting') && 'border-gold-500/40')}
               data-testid="lobby-table"
               data-table={tb.id}
             >
@@ -371,6 +383,7 @@ export function LobbyPage() {
                       {t(`lobby.status.${st}` as MsgKey)}
                     </Badge>
                     {seatedHere && <span data-testid="lobby-mine-badge"><Badge tone="gold"><UserIcon className="size-3" />{t('lobby.mine')}</Badge></span>}
+                    {entry === 'waiting' && <span data-testid="lobby-waiting-badge"><Badge tone="blue"><HourglassIcon className="size-3" />{t('lobby.waiting')}</Badge></span>}
                     {full &&<span data-testid="full-badge"><Badge tone="red">{t('lobby.full')}</Badge></span>}
                     {tb.host && (
                       <span data-testid="member-badge" className="min-w-0 max-w-full">
@@ -429,8 +442,10 @@ export function LobbyPage() {
                   </dd>
                 </div>
               </dl>
-              <div className="flex items-center justify-between text-xs text-ink-400">
-                <span>{t('lobby.spectators', { n: tb.spectators })}</span>
+              {/* Nobody watches a table without spectators (the ones connected there are waiting for a seat): the line
+                  keeps its height for the waitlist alone. */}
+              <div className="flex min-h-4 items-center justify-between text-xs text-ink-400">
+                <span>{tb.allowSpectators && t('lobby.spectators', { n: tb.spectators })}</span>
                 {tb.waitlist > 0 && <span>{t('lobby.waitlist', { n: tb.waitlist })}</span>}
               </div>
               <div className="mt-auto flex flex-col gap-2">
@@ -440,6 +455,16 @@ export function LobbyPage() {
                     <PlayIcon />
                     {t('lobby.continue')}
                   </Button>
+                ) : place !== null ? (
+                  // My place on its waitlist: a look at the table (the place lets me in, code or no spectators), never
+                  // a second sign-up, which would put me at the back.
+                  <>
+                    <p className="text-xs text-ink-300" data-testid="lobby-wait-place">{t('lobby.waitPlace', { n: place })}</p>
+                    <Button variant="gold" onClick={() => nav(`/table/${tb.id}`, { state: RESUME_WAIT })} data-testid="lobby-view-waitlist">
+                      <HourglassIcon />
+                      {t('lobby.viewWaitlist')}
+                    </Button>
+                  </>
                 ) : (
                   <>
                     {entry === 'wait' && (

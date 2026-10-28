@@ -922,7 +922,8 @@ const admin = new Hono<AppEnv>()
       .where(where)
       .orderBy(desc(T.createdAt), T.id);
     const rows = paged ? await base.limit(limit).offset(offset) : await base;
-    const items = rows.map(({ t: { joinCodeHash, ...t }, host }) => ({ ...t, hasJoinCode: !!joinCodeHash, hostNickname: t.roomType === 'member' ? host : null }));
+    // (The waitlist mirror is the lobby's, for each member's own place: the room's live status lists the waitlist.)
+    const items = rows.map(({ t: { joinCodeHash, liveWaitlistUsers: _w, ...t }, host }) => ({ ...t, hasJoinCode: !!joinCodeHash, hostNickname: t.roomType === 'member' ? host : null }));
     if (!paged) return c.json(items);
     const [count] = await c.var.db.select({ n: sql<number>`COUNT(*)` }).from(T).where(where);
     return c.json({ items, total: count?.n ?? 0, limit, offset });
@@ -960,7 +961,7 @@ const admin = new Hono<AppEnv>()
     const t = await c.var.db.query.tables.findFirst({ where: eq(schema.tables.id, id) });
     if (!t) fail(404, 'not_found', 'table not found');
     const live = t.status === 'closed' ? null : await roomCall(c, id, 'status');
-    const { joinCodeHash, ...rest } = t;
+    const { joinCodeHash, liveWaitlistUsers: _w, ...rest } = t;
     const tournament =
       t.roomType === 'tournament' ? await c.env.DB.prepare('SELECT id, name, status FROM tournaments WHERE table_id = ?1').bind(id).first<{ id: string; name: string; status: string }>() : null;
     // The live status never includes hole cards or deck information.
