@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, ApiError } from './api';
 import { useI18n } from './i18n';
 import { flushSettings } from './prefs';
-import { coalesced, onRealtime, startRealtime, stopRealtime } from './realtime';
+import { coalesced, onRealtime, onRealtimeResync, startRealtime, stopRealtime } from './realtime';
 
 interface AuthCtx {
   me: MeDto | null;
@@ -60,12 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   // The realtime socket lives as long as this member's sign-in here. The wallet or the account changed (an admin grant,
-  // a table's cash-out, VIP): the account is read again, once for a burst, never adjusted from the event.
+  // a table's cash-out, VIP): the account is read again, once for a burst, never adjusted from the event. So it is when
+  // the socket comes back, for what changed while it was down.
   useEffect(() => {
     if (!meId) return;
     const again = coalesced(refresh);
     startRealtime(meId, () => void again());
-    const offs = [onRealtime('wallet.changed', () => void again()), onRealtime('account.changed', () => void again())];
+    const offs = [onRealtime('wallet.changed', () => void again()), onRealtime('account.changed', () => void again()), onRealtimeResync(() => void again())];
     return () => {
       for (const off of offs) off();
       stopRealtime();
