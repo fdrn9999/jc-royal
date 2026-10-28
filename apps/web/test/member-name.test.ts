@@ -70,6 +70,16 @@ describe('MemberName', () => {
     expect(out).not.toContain('role-badge');
   });
 
+  it('puts the robot after the name, still whole and outside the cut part, where the seat’s start is cut off (botAfter)', () => {
+    const out = html(h(MemberName, { name: 'Bot-K4P2', bot: 'normal', botAfter: true }));
+    expect(out.match(/data-testid="bot-badge"/g)).toHaveLength(1);
+    expect(out.indexOf('Bot-K4P2')).toBeLessThan(out.indexOf('bot-badge'));
+    // The name's own span closes before the mark opens.
+    expect(out).toMatch(/Bot-K4P2<\/span><span class="jc-bot-icon"/);
+    // A member is not marked, after or before.
+    expect(html(h(MemberName, { name: 'PokerBot_01', botAfter: true }))).not.toContain('bot-badge');
+  });
+
   it('marks a bot of a past hand (level not recorded) without a level, and members not at all, whatever their name says', () => {
     const out = html(h(MemberName, { name: 'Bot-K4P2', bot: true }));
     expect(out).toContain('<span class="sr-only">AI 봇 플레이어</span>');
