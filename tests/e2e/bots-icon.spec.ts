@@ -182,6 +182,30 @@ const seatMarks = (page: Page, reveal: boolean | number = false) =>
           if (clips && !(ic.l >= r.l - 0.5 && ic.r <= r.r + 0.5 && ic.t >= r.t - 0.5 && ic.b <= r.b + 0.5)) cuts.push(`${label(a)} clips it`);
           if (seat.contains(a) && (cs.clipPath !== 'none' || (cs.maskImage || 'none') !== 'none')) cuts.push(`${label(a)} ${cs.clipPath !== 'none' ? 'clip-path' : 'mask'}`);
         }
+        // The robot's own strokes: each drawn, and whole inside the SVG's box, which clips what lies past it (a shifted
+        // view or a moved stroke cuts the robot with the box where it was). A shape's box leaves out half its stroke,
+        // put back in screen pixels.
+        const art: string[] = [];
+        Array.from(icon?.querySelectorAll('path, rect, circle, ellipse, line, polyline, polygon') ?? []).forEach((g, k) => {
+          const cs = getComputedStyle(g);
+          const id = `${g.tagName} ${k + 1}`;
+          const off =
+            cs.display === 'none' ? 'display'
+            : cs.visibility !== 'visible' ? 'visibility'
+            : parseFloat(cs.opacity) < 0.99 ? 'opacity'
+            : cs.stroke === 'none' || alpha(cs.stroke) === 0 ? 'stroke'
+            : parseFloat(cs.strokeOpacity) < 0.99 ? 'stroke-opacity'
+            : !(parseFloat(cs.strokeWidth) > 0) ? 'stroke-width'
+            : cs.clipPath !== 'none' ? 'clip-path'
+            : (cs.maskImage || 'none') !== 'none' ? 'mask'
+            : null;
+          if (off) return void art.push(`${id} hidden (${off})`);
+          const m = (g as SVGGraphicsElement).getScreenCTM();
+          const half = m ? (parseFloat(cs.strokeWidth) * Math.hypot(m.a, m.b)) / 2 : 0;
+          const r = g.getBoundingClientRect();
+          if (ic && (r.left - half < ic.l - 0.5 || r.right + half > ic.r + 0.5 || r.top - half < ic.t - 0.5 || r.bottom + half > ic.b + 0.5))
+            art.push(`${id} outside its box (${Math.round(r.left - half)}..${Math.round(r.right + half)}px of ${Math.round(ic.l)}..${Math.round(ic.r)}px)`);
+        });
         // How opaque the mark is drawn against its name (a folded seat dims both alike).
         const opacity = (e: Element | null | undefined) => {
           let o = 1;
@@ -221,6 +245,7 @@ const seatMarks = (page: Page, reveal: boolean | number = false) =>
           hits,
           covers,
           cuts,
+          art,
           fade,
         };
       });
@@ -272,6 +297,7 @@ function placement(marks: Mark[], where: string, opts: { hit: 'pick' | 'badge' }
     const at = `(plate ${Math.round(m.plate!.l)}..${Math.round(m.plate!.r)}px, mark ${Math.round(ic.l)}..${Math.round(ic.r)}px of ${m.vw})`;
     if (ic.l < -0.5 || ic.t < -0.5 || ic.r > m.vw + 0.5 || ic.b > m.vh + 0.5) out.push(`${id}: the mark off the screen ${at}`);
     if (m.cuts.length) out.push(`${id}: the mark cut (${m.cuts.join(', ')})`);
+    if (m.art.length) out.push(`${id}: the robot's ${m.art.join(', ')}`);
     if (m.fade < 0.99) out.push(`${id}: the mark drawn ${m.fade.toFixed(2)} as opaque as its name`);
     // After the name only where the table's left edge cuts the plate's start off (TableScene's startCut).
     if (m.after && m.onTable!.cx - m.onTable!.w / 2 >= -0.5) out.push(`${id}: the mark after the name on a whole plate ${at}`);
@@ -471,6 +497,30 @@ test('bot mark, live: only on the seats the server says are bots, named like one
     await robot.evaluate((e: SVGElement) => e.removeAttribute('style'));
     for (const k of by) expect(said.some((x) => x.includes(k)), `${style} on seat ${probe.seat}'s robot, told by '${k}': ${said.join('; ')}`).toBe(true);
   }
+  // Cut inside its own box, which stays where it was (Codex): the SVG's view shifted off the robot's left, its strokes
+  // moved, one stroke hidden. Each leaves 26–32% of its box teal, past the ink's floor: the strokes' own check tells them.
+  const missed: string[] = [];
+  for (const [how, by] of [
+    ['viewBox="6 0 24 24"', 'outside its box'],
+    ['translate(-6 0) on its strokes', 'outside its box'],
+    ['visibility: hidden on a stroke', 'hidden'],
+  ] as const) {
+    await robot.evaluate((e: SVGSVGElement, how) => {
+      if (how.startsWith('viewBox')) e.setAttribute('viewBox', '6 0 24 24');
+      else if (how.startsWith('translate')) for (const g of Array.from(e.children)) g.setAttribute('transform', 'translate(-6 0)');
+      else (e.lastElementChild as SVGElement).style.visibility = 'hidden';
+    }, how);
+    const said = [...(await inkless(a.page, 'probe')), ...placement(await seatMarks(a.page), 'probe', { hit: 'pick' })].filter((x) => x.startsWith(`probe seat ${probe.seat}:`));
+    await robot.evaluate((e: SVGSVGElement) => {
+      e.setAttribute('viewBox', '0 0 24 24');
+      for (const g of Array.from(e.children)) {
+        g.removeAttribute('transform');
+        g.removeAttribute('style');
+      }
+    });
+    if (!said.some((x) => x.includes(by))) missed.push(`${how} on seat ${probe.seat}'s robot, not told by '${by}': ${said.join('; ') || 'nothing said'}`);
+  }
+  expect(missed).toEqual([]);
   expect(await inkless(a.page, 'probe, restored')).toEqual([]);
   await a.page.screenshot({ path: test.info().outputPath('live-1440x900.png') });
   await openCardFromMark(a.page, false, '보통', 'live-1440x900');
