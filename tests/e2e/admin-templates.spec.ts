@@ -87,17 +87,65 @@ test('reason templates: a chip memo follows the amount’s sign and reaches the 
   await expect(page.getByTestId('suspend-reason')).toHaveValue('E2E 직접 쓴 사유');
   await expect(page.getByTestId('suspend-reason-final')).toHaveCount(0);
 
-  // The member switches to English before it is sent: the preview refuses it, the page shows them as they are now, and
-  // the reason is written again in English with the detail as typed. Sent again, that is what they get.
+  // A grant that reached the server but whose answer was lost (the console only sees the connection fail).
+  const balanceNow = async () => (await member.page.evaluate(async () => (await (await fetch('/api/auth/me')).json()) as { balance: number })).balance;
+  const before = await balanceNow();
+  let lost = false;
+  await page.route('**/api/admin/users/*/chips', async (route) => {
+    const res = await route.fetch();
+    if (!lost && !route.request().postDataJSON()?.preview && res.ok()) {
+      lost = true;
+      return route.abort('failed');
+    }
+    return route.fulfill({ response: res });
+  });
+  await page.getByTestId('chip-amount').fill('200');
+  await memoList.selectOption({ label: '이벤트 보상 지급' });
+  await page.getByTestId('chip-memo').fill('11월 출석');
+  await page.getByTestId('chip-submit').click();
+  await page.getByTestId('confirm-end').click();
+  await expect.poll(async () => lost || (await page.getByTestId('reauth-confirm').isVisible())).toBe(true);
+  if (!lost) await reauthIfAsked(page, page.getByTestId('chip-submit'));
+  await expect.poll(() => lost).toBe(true);
+  expect(await balanceNow()).toBe(before + 200);
+
+  // The member switches to English before the suspension is sent: the preview refuses it, the page shows them as they
+  // are now, and the reason is written again in English with the detail whole, even where that takes it over the limit.
   await why.selectOption({ label: '부정행위 확인' });
-  await page.getByTestId('suspend-reason').fill('chip dumping x3');
+  const tail = ' (case 7781)';
+  const long = 'chip dumping at table 3, '.repeat(8).slice(0, 190 - tail.length) + tail;
+  await page.getByTestId('suspend-reason').fill(long);
+  await expect(page.getByTestId('suspend-reason-too-long')).toHaveCount(0);
   expect(await member.page.evaluate(async () => (await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'en' }) })).status)).toBe(200);
   await page.getByTestId('suspend').click();
   await expect(page.getByTestId('preview-error')).toContainText('그사이 회원이 사용 언어를 바꿔 정지하지 않았습니다');
   await expect(page.getByTestId('confirm-end')).toBeDisabled();
-  await expect(page.getByTestId('suspend-reason-final')).toHaveText('기록될 내용: Cheating confirmed - chip dumping x3');
+  await expect(page.getByTestId('suspend-reason-final')).toHaveText(`기록될 내용: Cheating confirmed - ${long}`);
   await page.getByRole('dialog').getByRole('button', { name: '취소' }).click();
   await expect(page.getByText('회원에게 가는 이용 제한 안내에 영어로 그대로 보입니다')).toBeVisible();
+  await expect(page.getByTestId('suspend-reason')).toHaveValue(long);
+  await expect(page.getByTestId('suspend-reason-too-long')).toHaveText('200자까지 기록할 수 있는데 지금 211자입니다. 적은 내용은 그대로 두었으니 줄인 뒤 진행하세요.');
+  await expect(page.getByTestId('suspend')).toBeDisabled();
+  await page.screenshot({ path: 'test-results/admin-tpl-relang-too-long.png', fullPage: true });
+
+  // The chip memo is not rewritten (it is part of the retried grant's key): it says which language it is in, and trying
+  // the grant again is recognised as the one already applied, so it is not paid twice.
+  await expect(page.getByTestId('chip-memo')).toHaveValue('11월 출석');
+  await expect(page.getByTestId('chip-memo-final')).toHaveText('기록될 내용: 이벤트 보상 지급 - 11월 출석');
+  await expect(page.getByTestId('chip-memo-written-in')).toHaveText('고른 문구는 한국어로 적혀 있고, 회원에게 그대로 보입니다.');
+  await expect(memoList.locator('option:checked')).toHaveText('이벤트 보상 지급');
+  await expect(page.getByText('회원에게 가는 칩 알림에 적힌 그대로 보입니다(회원의 언어: 영어)')).toBeVisible();
+  await page.getByTestId('chip-submit').click();
+  await expect(page.getByRole('dialog').getByText('같은 요청이 이미 반영되었습니다')).toBeVisible();
+  await expect(page.getByTestId('confirm-end')).toBeDisabled();
+  await page.getByRole('dialog').getByRole('button', { name: '취소' }).click();
+  expect(await balanceNow()).toBe(before + 200);
+  await page.unroute('**/api/admin/users/*/chips');
+
+  // Shortened, it goes; that is what the member gets.
+  await page.getByTestId('suspend-reason').fill('chip dumping x3');
+  await expect(page.getByTestId('suspend-reason-too-long')).toHaveCount(0);
+  await expect(page.getByTestId('suspend-reason-final')).toHaveText('기록될 내용: Cheating confirmed - chip dumping x3');
   await page.getByTestId('suspend').click();
   await page.getByTestId('confirm-end').click();
   await reauthIfAsked(page, page.getByTestId('unsuspend'));

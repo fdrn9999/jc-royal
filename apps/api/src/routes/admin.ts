@@ -668,25 +668,33 @@ const admin = new Hono<AppEnv>()
     }
     // The reason reaches the member inside a notice in their language. Written for the other one (`reasonLocale`: they
     // switched while it was being written), it is sent back to be written again, and nothing changes.
-    if (body.reasonLocale && body.reasonLocale !== target.locale) {
-      fail(409, 'locale_changed', "the member's language changed while the reason was written", { locale: target.locale });
-    }
+    const localeChanged = (locale: string) => fail(409, 'locale_changed', "the member's language changed while the reason was written", { locale });
     if (preview) {
+      if (body.reasonLocale && body.reasonLocale !== target.locale) localeChanged(target.locale);
       return c.json({ preview: true, member: { nickname: target.nickname, role: target.role, status: target.status }, ...(await sanctionPreview(c.env.DB, id)) });
     }
     const { reason } = SuspendSchema.parse(body);
     const at = Date.now();
     // Only an active account changes, so of two administrators suspending at once one does it (one reason, one notice,
-    // one record) and the other is told it was already done.
+    // one record) and the other is told it was already done. The language is checked by the same statement, so a
+    // switch made after the member was read above still stops it; the sign-ins then stay too, as nothing changed.
     const [changed] = await c.var.db.batch([
       c.var.db
         .update(schema.users)
         .set({ status: 'suspended', suspendedReason: reason, updatedAt: at })
-        .where(and(eq(schema.users.id, id), eq(schema.users.status, 'active')))
-        .returning({ id: schema.users.id }),
-      c.var.db.delete(schema.sessions).where(eq(schema.sessions.userId, id)),
+        .where(and(eq(schema.users.id, id), eq(schema.users.status, 'active'), body.reasonLocale ? eq(schema.users.locale, body.reasonLocale) : undefined))
+        .returning({ locale: schema.users.locale }),
+      c.var.db
+        .delete(schema.sessions)
+        .where(and(eq(schema.sessions.userId, id), sql`exists (select 1 from users where users.id = ${id} and users.status <> 'active')`)),
     ]);
-    if (!changed[0]) await alreadySuspended(c, id);
+    if (!changed[0]) {
+      const now = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { status: true, locale: true } });
+      if (now?.status === 'active') localeChanged(now.locale);
+      await alreadySuspended(c, id);
+    }
+    // The language the member had when the suspension was made, which is the reason's when it was given.
+    const lang = changed[0]!.locale;
     // Deleting the sessions does not reach table connections already open: each room ends them and the member leaves
     // their seats (in a hand: folded on their turn, cashed out when it settles). The wallet itself refuses new buy-ins.
     // First of what follows the commit, so a later step that fails cannot leave the member playing.
@@ -695,7 +703,7 @@ const admin = new Hono<AppEnv>()
     if (body.reportId) {
       await c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: reason, createdAt: at });
     }
-    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).suspended(reason), senderId: c.var.user!.id });
+    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(lang).suspended(reason), senderId: c.var.user!.id });
     await audit(c, 'user.suspend', { type: 'user', id }, { ...body, from: target.status, to: 'suspended', previousReason: target.suspendedReason, kick });
     return c.json({ ok: true, kick });
   })

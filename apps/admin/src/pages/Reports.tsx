@@ -477,7 +477,7 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
         footer={
           <>
             <Button variant="ghost" onClick={() => setSuspend(null)}>{t('cancel')}</Button>
-            <Button variant="danger" loading={busy} disabled={!suspend || suspend.reason.trim().length < 2} onClick={() => void confirmSuspend()} data-testid="report-suspend-confirm">
+            <Button variant="danger" loading={busy} disabled={!suspend || suspend.reason.trim().length < 2 || suspend.reason.trim().length > 200} onClick={() => void confirmSuspend()} data-testid="report-suspend-confirm">
               {t('confirm')}
             </Button>
           </>
@@ -493,6 +493,7 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
             onChange={(v) => setSuspend((s) => s && { ...s, reason: v, error: null })}
             maxLength={200}
             lang={targetLang}
+            follow
             hint={t('suspendReasonHint', { lang: targetLang === 'en' ? t('langEn') : t('langKo') })}
             testid="report-suspend-reason"
           />

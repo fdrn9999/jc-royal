@@ -70,6 +70,7 @@ export function AdminReasonField({
   placeholder,
   emptyText,
   lang,
+  follow,
 }: {
   label: string;
   templates: AdminTemplate[] | TemplateGroup[];
@@ -84,6 +85,11 @@ export function AdminReasonField({
   emptyText?: string;
   /** The language the reason is written in, when someone other than the admin reads it (a chip memo, in the member's). */
   lang?: Lang;
+  /**
+   * Write the picked wording again when `lang` changes (a suspension, which the server refuses in the old language).
+   * Left off where the text itself must not change on its own: a chip memo is part of a retried adjustment's key.
+   */
+  follow?: boolean;
 }) {
   const { t, locale: consoleLocale } = useT();
   const locale = lang ?? consoleLocale;
@@ -113,26 +119,40 @@ export function AdminReasonField({
     if (gone) emit('', '', null);
   });
   // The reader's language changed while this was being written (the member switched theirs): the template's part is
-  // written again in it. The detail stays as the admin typed it, and text typed by hand is left alone.
-  const relang = lang !== undefined && read !== null && read.lang !== lang;
+  // written again in it. The detail stays whole, as the admin typed it, and text typed by hand is left alone.
+  const otherLang = lang !== undefined && read !== null && read.lang !== lang;
   useEffect(() => {
-    if (relang && tpl && lang) emit(composeReason(tpl, detail.slice(0, Math.max(0, maxLength - labelOf(tpl, lang).length - SEP.length)), lang), tpl.id, tpl);
+    if (follow && otherLang && tpl && lang) emit(composeReason(tpl, detail, lang), tpl.id, tpl);
   });
+  // Left in the other language, the list names what is picked as it is written, not as it would be written now.
+  const listLang = otherLang && read ? read.lang : locale;
 
   const choose = (id: string) => {
     if (id === CUSTOM) return emit(value, CUSTOM, null); // the text so far stays, to edit freely
     const next = items.find((x) => x.id === id);
     if (!next) return;
-    const room = Math.max(0, maxLength - labelOf(next, locale).length - SEP.length);
-    emit(composeReason(next, (tpl ? detail : value).slice(0, room), locale), id, next);
+    emit(composeReason(next, tpl ? detail : value, locale), id, next);
   };
   const type = (text: string) => {
     if (tpl) return emit(composeReason(tpl, text, writeIn), tpl.id, tpl);
     emit(text, text || pick === CUSTOM ? CUSTOM : '', null);
   };
 
+  // Never cut to fit: a longer wording (another template, the other language) can take it over the limit, and the
+  // admin shortens it. The page refuses to send it meanwhile, and so would the server.
+  const length = value.trim().length;
   const notes = [
     hint,
+    otherLang && !follow && read ? (
+      <span key="lang" className="text-gold-300" data-testid={`${testid}-written-in`}>
+        {t('tplWrittenIn', { lang: read.lang === 'en' ? t('langEn') : t('langKo') })}
+      </span>
+    ) : null,
+    length > maxLength ? (
+      <span key="long" className="text-danger" data-testid={`${testid}-too-long`}>
+        {t('tplReasonTooLong', { n: length, max: maxLength })}
+      </span>
+    ) : null,
     tpl?.detailRequired && !detail.trim() ? (
       <span key="need" className="text-gold-300" data-testid={`${testid}-need-detail`}>
         {t('tplNeedDetail')}
@@ -160,7 +180,7 @@ export function AdminReasonField({
             <option value="" disabled>
               {items.length ? t('tplReasonPick') : (emptyText ?? t('tplReasonPick'))}
             </option>
-            <Options list={templates} lang={locale} />
+            <Options list={templates} lang={listLang} />
             <option value={CUSTOM}>{t('tplCustom')}</option>
           </select>
           <Input

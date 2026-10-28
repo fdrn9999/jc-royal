@@ -705,7 +705,8 @@ export function UserDetailPage() {
             >
               {(fid) => <Input id={fid} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d-]/g, ''))} data-testid="chip-amount" />}
             </Field>
-            {/* The member reads this memo in the chip notice, in their own language. */}
+            {/* The member reads this memo in the chip notice, in their own language. It does not `follow` a change of it:
+                the memo is part of a retried adjustment's key, so only the admin changes it. */}
             <AdminReasonField
               label={t('memo')}
               templates={chipSign > 0 ? REASONS.chipGrant : chipSign < 0 ? REASONS.chipDeduct : []}
@@ -719,7 +720,7 @@ export function UserDetailPage() {
             />
             {chipRef && <RefillRefLine r={{ type: 'free_refill', amount: chipRef.amount, createdAt: chipRef.at, seq: chipRef.seq }} onClear={() => setChipRef(null)} />}
             <p className="text-xs text-ink-400">{t('chipPreviewHint')}</p>
-            <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2} data-testid="chip-submit">{t('confirm')}</Button>
+            <Button type="submit" disabled={!Number(amount) || memo.trim().length < 2 || memo.trim().length > 200} data-testid="chip-submit">{t('confirm')}</Button>
           </form>
           </div>
         </Panel>
@@ -737,10 +738,11 @@ export function UserDetailPage() {
                   onChange={setReason}
                   maxLength={200}
                   lang={u.locale}
+                  follow
                   hint={t('suspendReasonHint', { lang: u.locale === 'en' ? t('langEn') : t('langKo') })}
                   testid="suspend-reason"
                 />
-                <Button type="submit" variant="danger" className="self-start" disabled={reason.trim().length < 2} data-testid="suspend">{t('suspend')}</Button>
+                <Button type="submit" variant="danger" className="self-start" disabled={reason.trim().length < 2 || reason.trim().length > 200} data-testid="suspend">{t('suspend')}</Button>
               </form>
             ) : u.status === 'suspended' ? (
               <Button variant="outline" onClick={() => ask({ kind: 'unsuspend' })} data-testid="unsuspend">{t('unsuspend')} ({u.suspendedReason})</Button>

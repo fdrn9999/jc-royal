@@ -150,17 +150,25 @@ describe('two administrators at once', () => {
     const pv = await x.post(`/api/admin/users/${m.me.id}/suspend`, { preview: true, reasonLocale: 'ko' });
     expect(pv.status).toBe(409);
     expect(pv.body.error).toMatchObject({ code: 'locale_changed', details: { locale: 'en' } });
+    // The request itself is stopped by the statement that would suspend them (no check before it), so a switch made
+    // after the member was read is caught the same way: nothing changes, and their sign-in is not ended either.
     const stale = await x.post(`/api/admin/users/${m.me.id}/suspend`, { reason: '스팸 및 광고', reasonLocale: 'ko' });
     expect(stale.status).toBe(409);
     expect(stale.body.error).toMatchObject({ code: 'locale_changed', details: { locale: 'en' } });
     expect(await d1(`SELECT status, suspended_reason FROM users WHERE id = '${m.me.id}'`)).toEqual([{ status: 'active', suspended_reason: null }]);
     expect(await audits('user.suspend', m.me.id)).toHaveLength(0);
     expect((await messages(m.me.id)).filter((n) => n.category === 'sanction')).toEqual([]);
+    expect((await m.client.get('/api/auth/me')).status).toBe(200);
+    expect((await audits('user.suspend.failed', m.me.id)).map((r) => JSON.parse(r.detail))).toContainEqual(expect.objectContaining({ status: 409, code: 'locale_changed' }));
 
-    // Written again in theirs, it goes through; without `reasonLocale` (an older console) nothing is checked.
+    // Written again in theirs, it goes through, and the notice is in that language; without `reasonLocale` (an older
+    // console) nothing is checked.
     const ok = await x.post(`/api/admin/users/${m.me.id}/suspend`, { reason: 'Spam or advertising', reasonLocale: 'en' });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    expect((await messages(m.me.id)).filter((n) => n.category === 'sanction')).toHaveLength(1);
+    const notice = (await messages(m.me.id)).filter((n) => n.category === 'sanction');
+    expect(notice).toHaveLength(1);
+    expect(notice[0]!.title).toBe('Your account has been restricted');
+    expect((await m.client.get('/api/auth/me')).status).toBe(401);
     const other = await newUser(undefined, { locale: 'en' });
     expect((await x.post(`/api/admin/users/${other.me.id}/suspend`, { reason: 'no language sent' })).status).toBe(200);
   });
