@@ -30,6 +30,7 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
+import { realtimeToUsers } from '../lib/realtime';
 import { refreshVipEverywhere } from '../lib/room';
 
 interface Row {
@@ -118,6 +119,8 @@ export const adminVipRoutes = new Hono<AppEnv>()
       .first<{ vip_version: number }>();
     if (!done) fail(409, 'vip_conflict', 'the VIP state changed while saving', { vip: await load(c, id) });
     await audit(c, 'user.vip', target, { from, to, reason, change: from === null ? 'assign' : to === null ? 'remove' : 'color', version: done.vip_version });
+    // The member's own pages read their account again (the color shown on their name); nothing else in the event.
+    realtimeToUsers(c, [id], { scope: 'user', type: 'account.changed' });
     const after = await load(c, id);
     // What other players see (nothing while the member is suspended); the room never reads more than this.
     const shown = shownVip({ role: after.member.role, status: after.member.status, isBot: after.member.isBot, vipColor: after.color }) ?? null;

@@ -29,6 +29,7 @@ import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '
 import { notices } from '../lib/notices';
 import { saveSignupConsent } from '../lib/notification-settings';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { realtimeToUsers } from '../lib/realtime';
 import { checkReferralCode, findReferrer, recordReferral, settleReferral } from '../lib/referral';
 import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
@@ -329,6 +330,8 @@ export const authRoutes = new Hono<AppEnv>()
       if (isUniqueViolation(e, 'nickname')) fail(409, 'nickname_taken', 'nickname already in use');
       throw e;
     }
+    // The member's other pages and devices read the account again (the header's nickname and avatar, the language).
+    realtimeToUsers(c, [me.id], { scope: 'user', type: 'account.changed' });
     return c.json(await loadMe(c, me.id));
   })
   .get('/nickname-available', async (c) => {

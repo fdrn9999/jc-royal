@@ -803,6 +803,8 @@ const admin = new Hono<AppEnv>()
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
     if (vipEnded) await audit(c, 'user.vip', { type: 'user', id }, { from: vipEnded.color, to: null, reason: body.reason, cause: 'role', role: body.role, version: vipEnded.version + 1 });
+    // The member's own pages read their account again (the role, a VIP color it ended).
+    realtimeToUsers(c, [id], { scope: 'user', type: 'account.changed' });
     // The staff badge other players see at the tables where the member sits.
     const tables = await refreshRoleEverywhere(c.env, id, body.role);
     return c.json({ ok: true, tables });
@@ -1426,7 +1428,10 @@ const admin = new Hono<AppEnv>()
     }
     if (revert && before.status !== 'deleted' && balanceAfter !== null) {
       await sendMessages(c.var.db, { userIds: [e.subjectId], category: 'admin', ...notices(before.locale).reconcileReverted(-difference, balanceAfter), senderId: actor });
+      realtimeToUsers(c, [e.subjectId], { scope: 'user', type: 'message.changed' });
     }
+    // A recorded difference is a new row of the member's history; a revert also moves the balance.
+    realtimeToUsers(c, [e.subjectId], { scope: 'user', type: 'wallet.changed' });
     await audit(c, 'user.reconcile', { type: 'user', id: e.subjectId }, { eventId: id, action: body.action, difference, note: body.note, ledgerIds, balanceBefore: before.balance, balanceAfter });
     return c.json({ ok: true, action: body.action, ledgerIds, balanceAfter });
   })
