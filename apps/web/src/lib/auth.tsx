@@ -13,6 +13,14 @@ interface AuthCtx {
   logout: () => Promise<void>;
   /** Switches the UI language and, when signed in, saves it as the account language (mail and system messages use it). */
   chooseLocale: (locale: MeDto['locale']) => void;
+  /** The page shown at this address even signed out (`keepSignedOut`), or null. */
+  kept: string | null;
+  /**
+   * A page that says why it ended (a table connection an administrator closed, which signs the member out too) stays
+   * at `path` when the sign-in goes, rather than turning into the sign-in page; any other address asks to sign in as
+   * before. Returns the release.
+   */
+  keepSignedOut: (path: string) => () => void;
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -103,7 +111,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [setLocale, meId, meLocale],
   );
 
-  const value = useMemo(() => ({ me, loading, refresh, setMe, logout, chooseLocale }), [me, loading, refresh, logout, chooseLocale]);
+  const [kept, setKept] = useState<string | null>(null);
+  const keepSignedOut = useCallback((path: string) => {
+    setKept(path);
+    return () => setKept((k) => (k === path ? null : k));
+  }, []);
+
+  const value = useMemo(
+    () => ({ me, loading, refresh, setMe, logout, chooseLocale, kept, keepSignedOut }),
+    [me, loading, refresh, logout, chooseLocale, kept, keepSignedOut],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

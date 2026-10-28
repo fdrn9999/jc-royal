@@ -149,7 +149,7 @@ export function TablePage() {
   const quickPlay = useQuickPlay();
   const [quickMissed, setQuickMissed] = useState(false);
   const { t, err, locale } = useI18n();
-  const { me, refresh } = useAuth();
+  const { me, refresh, keepSignedOut } = useAuth();
   const nav = useNavigate();
   const prefs = usePrefs();
   const sock = useTableSocket(id);
@@ -280,6 +280,9 @@ export function TablePage() {
   // over the table as it is now; a place still held is confirmed. Nothing here takes a seat or a place. The mark is
   // dropped from the history entry at once, so a reload later does not say it again.
   const loc = useLocation();
+  // Ended by an administrator, who signs the member out with it: this page keeps saying so (and offers the lobby, which
+  // asks to sign in again) rather than becoming the sign-in page a moment later.
+  useEffect(() => (sock.status === 'kicked' ? keepSignedOut(loc.pathname) : undefined), [sock.status, loc.pathname, keepSignedOut]);
   const resume = useRef(resumeOf(loc.state));
   useEffect(() => {
     if (!resume.current) return;
