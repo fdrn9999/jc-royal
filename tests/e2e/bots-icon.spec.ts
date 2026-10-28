@@ -65,14 +65,23 @@ async function watchSocket(page: Page) {
   };
 }
 
+/** The points of a mark looked at, as fractions of its box: the middle and near each corner. */
+const POINTS: (readonly [number, number])[] = [
+  [0.5, 0.5],
+  [0.2, 0.2],
+  [0.8, 0.2],
+  [0.2, 0.8],
+  [0.8, 0.8],
+];
+
 /**
  * Each taken seat on the table: whether it shows the robot mark, and where the mark and the seat's pieces lie. `reveal`
  * first scrolls each seat's name to the middle of what shows (the replay's table window on an upright phone, then the
  * page between its header and bottom navigation), as a player looking at that seat would, by hand: scrollIntoView would
- * also scroll the table's clipped boxes.
+ * also scroll the table's clipped boxes. A seat's number reveals that seat alone.
  */
-const seatMarks = (page: Page, reveal = false) =>
-  page.evaluate((reveal) => {
+const seatMarks = (page: Page, reveal: boolean | number = false) =>
+  page.evaluate(([reveal, at]) => {
     const box = (e: Element | null | undefined) => {
       if (!e) return null;
       const b = e.getBoundingClientRect();
@@ -90,34 +99,77 @@ const seatMarks = (page: Page, reveal = false) =>
       const r = el.getBoundingClientRect();
       scrollBy(0, r.top + r.height / 2 - (header + (nav?.getBoundingClientRect().top ?? innerHeight)) / 2);
     };
+    const alpha = (c: string) => {
+      if (c === 'transparent') return 0;
+      const slash = c.match(/\/\s*([\d.]+)(%?)\s*\)$/);
+      if (slash) return parseFloat(slash[1]!) / (slash[2] ? 100 : 1);
+      const rgba = c.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/);
+      return rgba ? parseFloat(rgba[1]!) : 1;
+    };
+    const filledIn = (cs: CSSStyleDeclaration) => alpha(cs.backgroundColor) > 0 || cs.backgroundImage !== 'none' || (cs.backdropFilter || 'none') !== 'none';
+    /** Whether an element draws anything at a point of the screen: a picture, a fill, a border there, its own text there. */
+    const paints = (el: Element, x: number, y: number) => {
+      for (let a: Element | null = el; a; a = a.parentElement) if (parseFloat(getComputedStyle(a).opacity) === 0) return false;
+      // An SVG shape is hit only where its fill or its stroke is drawn.
+      if ((el instanceof SVGElement && !(el instanceof SVGSVGElement)) || /^(IMG|CANVAS|VIDEO)$/.test(el.tagName)) return true;
+      const cs = getComputedStyle(el);
+      // A ::before or ::after with a fill: its box is not known, so it counts wherever its element is.
+      if (filledIn(cs) || ['::before', '::after'].some((k) => getComputedStyle(el, k).content !== 'none' && filledIn(getComputedStyle(el, k)))) return true;
+      const b = el.getBoundingClientRect();
+      const sides = [
+        [x - b.left, cs.borderLeftWidth, cs.borderLeftColor],
+        [b.right - x, cs.borderRightWidth, cs.borderRightColor],
+        [y - b.top, cs.borderTopWidth, cs.borderTopColor],
+        [b.bottom - y, cs.borderBottomWidth, cs.borderBottomColor],
+      ] as const;
+      if (sides.some(([d, w, c]) => d < parseFloat(w) && alpha(c) > 0)) return true;
+      return Array.from(el.childNodes).some((n) => {
+        if (n.nodeType !== Node.TEXT_NODE || !n.textContent!.trim()) return false;
+        const r = document.createRange();
+        r.selectNodeContents(n);
+        return Array.from(r.getClientRects()).some((q) => x >= q.left && x < q.right && y >= q.top && y < q.bottom);
+      });
+    };
+    /**
+     * What is drawn over a mark at a point, whether a pointer reaches it or not (a chip in flight, a card, a hint): every
+     * element there above the mark, pointer events forced on for the look, that paints at the point. `clipped` if the
+     * mark itself is not there (cut by a box around it).
+     */
+    const paintedOver = (mark: Element, x: number, y: number) => {
+      const out: string[] = [];
+      for (const el of document.elementsFromPoint(x, y)) {
+        if (mark.contains(el)) return out;
+        if (paints(el, x, y)) out.push(el.closest('.jc-card') ? 'card' : (el.closest('[data-testid]')?.getAttribute('data-testid') ?? `${el.tagName.toLowerCase()}.${el.classList[0] ?? ''}`));
+      }
+      return ['clipped'];
+    };
+    const force = document.createElement('style');
+    force.textContent = '* { pointer-events: auto !important; }';
     const table = document.querySelector('[data-testid=table]')!;
     return Array.from(table.querySelectorAll('[data-testid^="seat-"][data-state]'))
       .filter((s) => /^seat-\d+$/.test(s.getAttribute('data-testid')!))
       .map((seat) => {
         const i = Number(seat.getAttribute('data-testid')!.slice(5));
         const name = seat.querySelector('[data-testid=member-name]');
-        if (reveal && name) show(name);
+        if ((reveal === true || reveal === i) && name) show(name);
         const badge = seat.querySelector('[data-testid=bot-badge]');
         const icon = badge?.querySelector('svg');
+        const text = name?.querySelector(':scope > .truncate');
         // The plate is the seat's first div above its name; the name's width cap is the span around it.
         const plate = name?.closest('div');
         const ic = box(icon);
-        // What is on top at five points of the mark: the plate's button (or the mark itself), never a card or a bet.
-        const hits = ic
-          ? [
-              [0.5, 0.5],
-              [0.2, 0.2],
-              [0.8, 0.2],
-              [0.2, 0.8],
-              [0.8, 0.8],
-            ].map(([fx, fy]) => {
-              const x = ic.l + ic.w * fx!;
-              const y = ic.t + ic.h * fy!;
-              if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return 'off-screen';
-              const hit = document.elementFromPoint(x, y);
-              return hit?.closest('.jc-card') ? 'card' : (hit?.closest('[data-testid]')?.getAttribute('data-testid') ?? null);
-            })
-          : [];
+        // At five points of the mark, what a pointer there reaches (the plate's button, or the mark itself: never a card or
+        // a bet), and what is painted over it.
+        const points = ic ? at.map(([fx, fy]) => [ic.l + ic.w * fx, ic.t + ic.h * fy] as const) : [];
+        const onScreen = ([x, y]: readonly [number, number]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight;
+        const hits = points.map((pt) => {
+          if (!onScreen(pt)) return 'off-screen';
+          const hit = document.elementFromPoint(...pt);
+          return hit?.closest('.jc-card') ? 'card' : (hit?.closest('[data-testid]')?.getAttribute('data-testid') ?? null);
+        });
+        document.head.append(force);
+        const covers = [...new Set(points.filter(onScreen).flatMap((pt) => paintedOver(badge!, ...pt)))];
+        force.remove();
         // Where the plate lies on the table (the same however the page or the window is scrolled).
         const t = table.getBoundingClientRect();
         const p = box(plate);
@@ -127,6 +179,8 @@ const seatMarks = (page: Page, reveal = false) =>
           bot: !!badge,
           level: badge?.getAttribute('data-level') ?? null,
           title: badge?.getAttribute('title') ?? null,
+          /** The mark comes after the name's text (a seat whose start the table's edge cuts off), not in front of it. */
+          after: !!(badge && text && text.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING),
           robots: seat.querySelectorAll('.lucide-bot').length,
           nickname: name?.textContent ?? '',
           icon: ic,
@@ -137,6 +191,7 @@ const seatMarks = (page: Page, reveal = false) =>
           capMax: name?.parentElement ? parseFloat(getComputedStyle(name.parentElement).maxWidth) : 0,
           plate: p,
           vw: innerWidth,
+          vh: innerHeight,
           onTable: p && { cx: (p.l + p.r) / 2 - t.left, t: p.t - t.top, b: p.b - t.top, w: p.w },
           avatar: box(plate?.firstElementChild),
           status: box(seat.querySelector(`[data-testid="seat-status-${i}"]`)),
@@ -145,9 +200,10 @@ const seatMarks = (page: Page, reveal = false) =>
           hasPick: !!pick,
           pickTitle: pick?.getAttribute('title') ?? null,
           hits,
+          covers,
         };
       });
-  }, reveal);
+  }, [reveal, POINTS] as const);
 type Mark = Awaited<ReturnType<typeof seatMarks>>[number];
 type Box = NonNullable<Mark['icon']>;
 
@@ -173,9 +229,11 @@ async function misMarked(page: Page, state: TableView | null) {
 const inside = (a: Box, b: Box) => a.l >= b.l - 0.5 && a.r <= b.r + 0.5 && a.t >= b.t - 0.5 && a.b <= b.b + 0.5;
 const meets = (a: Box, b: Box | null, pad = 0) => !!b && a.l < b.r + pad && a.r > b.l - pad && a.t < b.b + pad && a.b > b.t - pad;
 
-const EDGE = 'off the screen with its plate';
-
-/** Where a bot's mark is drawn wrong: cut, squeezed, too small, over or under another piece of its seat, off the teal. */
+/**
+ * Where a bot's mark is drawn wrong: cut, squeezed, too small, over or under another piece of its seat, off the teal,
+ * any part of it off the screen (even on a seat the layout lays across the screen's side), after the name where the
+ * seat's start is on the screen.
+ */
 function placement(marks: Mark[], where: string, opts: { hit: 'pick' | 'badge' }) {
   const out: string[] = [];
   for (const m of marks.filter((x) => x.bot)) {
@@ -190,16 +248,15 @@ function placement(marks: Mark[], where: string, opts: { hit: 'pick' | 'badge' }
     if (meets(ic, m.avatar, 3)) out.push(`${id}: the mark on the avatar's timer ring`);
     for (const [k, b] of [['status line', m.status], ['dealer button', m.dealer], ['blind', m.blind]] as const) if (meets(ic, b)) out.push(`${id}: the mark under the ${k}`);
     if (m.cap!.w > m.capMax + 0.5) out.push(`${id}: the name ${m.cap!.w}px past its cap ${m.capMax}px`);
-    // Off the screen: with its plate where the layout itself puts the seat past the screen's side (nine seats 320px
-    // wide, STATUS), told apart from a mark that leaves the screen on its own.
-    if (m.hits.includes('off-screen')) {
-      const p = m.plate!;
-      out.push(p.l < -0.5 || p.r > m.vw + 0.5 ? `${id}: ${EDGE} (${Math.round(p.l)}..${Math.round(p.r)}px of ${m.vw})` : `${id}: the mark off the screen`);
-    }
+    const at = `(plate ${Math.round(m.plate!.l)}..${Math.round(m.plate!.r)}px, mark ${Math.round(ic.l)}..${Math.round(ic.r)}px of ${m.vw})`;
+    if (m.hits.includes('off-screen')) out.push(`${id}: the mark off the screen ${at}`);
+    // After the name only where the table's left edge cuts the plate's start off (TableScene's startCut).
+    if (m.after && m.onTable!.cx - m.onTable!.w / 2 >= -0.5) out.push(`${id}: the mark after the name on a whole plate ${at}`);
     // The cards ride under the plate's top edge (their box reaches the name's line): what counts is what lies on top.
     const hit = opts.hit === 'pick' ? `seat-pick-${m.seat}` : 'bot-badge';
     const over = [...new Set(m.hits.filter((h) => h !== hit && h !== 'off-screen'))];
     if (over.length) out.push(`${id}: ${over.join(', ')} over the mark, not ${hit}`);
+    if (m.covers.length) out.push(`${id}: ${m.covers.join(', ')} painted over the mark`);
     if (m.color !== TEAL) out.push(`${id}: the mark ${m.color}, not the bot teal`);
   }
   // A bot's name line no taller than a member's: every plate the same height.
@@ -207,6 +264,18 @@ function placement(marks: Mark[], where: string, opts: { hit: 'pick' | 'badge' }
   if (heights.length > 1) out.push(`${where}: plates ${heights.join(', ')}px high`);
   return out;
 }
+
+/** Lays a layer no pointer reaches over a seat's mark: opaque, or clear. */
+const cover = (p: Page, b: Box, fill: string) =>
+  p.evaluate(
+    ([b, fill]) => {
+      const d = document.createElement('div');
+      d.dataset.testid = 'probe-cover';
+      Object.assign(d.style, { position: 'fixed', left: `${b.l - 2}px`, top: `${b.t - 2}px`, width: `${b.w + 4}px`, height: `${b.h + 4}px`, background: fill, pointerEvents: 'none', zIndex: '1000' });
+      document.body.append(d);
+    },
+    [b, fill] as const,
+  );
 
 /** Checks, else folds (table-text.spec). */
 async function act(p: Page) {
@@ -278,6 +347,17 @@ test('bot mark, live: only on the seats the server says are bots, named like one
     } else expect(m.pickTitle, `seat ${m.seat}`).toBeNull();
   }
   expect(placement(marks, 'live 1440x900', { hit: 'pick' })).toEqual([]);
+  // The checker itself: a layer over a mark that no pointer reaches is told when it paints, not when it is clear.
+  const probe = marks.find((m) => m.bot)!;
+  for (const [fill, told] of [
+    ['rgb(0, 0, 0)', true],
+    ['transparent', false],
+  ] as const) {
+    await cover(a.page, probe.icon!, fill);
+    const said = placement(await seatMarks(a.page), 'probe', { hit: 'pick' });
+    await a.page.evaluate(() => document.querySelector('[data-testid=probe-cover]')!.remove());
+    expect(said.some((x) => x.startsWith(`probe seat ${probe.seat}:`) && x.includes('probe-cover') && x.endsWith('painted over the mark')), `a ${fill} layer over seat ${probe.seat}'s mark: ${said.join('; ')}`).toBe(told);
+  }
   await a.page.screenshot({ path: test.info().outputPath('live-1440x900.png') });
   await openCardFromMark(a.page, false, '보통', 'live-1440x900');
 
@@ -339,28 +419,25 @@ test('bot mark, live: only on the seats the server says are bots, named like one
   const state = await a.page.context().storageState();
   await a.page.goto('/');
   const found: string[] = [];
-  const edge: string[] = [];
   for (const sc of SCREENS) {
     const { ctx, p, sock } = await open(browser, state, sc, '/table/e2e-boticon');
     await expect(filled(p)).toHaveCount(9, { timeout: 30_000 });
     await expect.poll(() => misMarked(p, sock.state()), { message: sc.name, timeout: 30_000 }).toEqual([]);
     // The table takes its size from the screen first.
     await p.waitForTimeout(600);
+    const seen = await seatMarks(p);
+    found.push(...placement(seen, sc.name, { hit: 'pick' }));
     // Nine seats on a 320px-wide phone: the layout's four seats along the top (layout.ts rows) need 4 × 100px, so the
-    // corner seats lie half off the screen, avatar and all (STATUS, 9인 320×568). Only there, and kept apart.
-    for (const x of placement(await seatMarks(p), sc.name, { hit: 'pick' })) (sc.name === '320x568' && x.includes(EDGE) ? edge : found).push(x);
+    // corner seats lie half across the screen's sides, avatar and all (STATUS, 9인 320×568). The left one's start is
+    // what is cut: its mark goes after its name, on the screen (placement() says where it is not). Asserted to happen,
+    // else this proves nothing.
+    if (sc.name === '320x568') expect(seen.filter((m) => m.bot && m.after && m.plate!.l < 0).map((m) => m.seat), `${sc.name}: a bot's plate cut at its start, its mark after the name`).not.toEqual([]);
     if (await widerThanDevice(p)) found.push(`${sc.name}: page wider than the screen`);
     await p.screenshot({ path: test.info().outputPath(`live-${sc.name}.png`) });
     if (sc.name === '320x568' || sc.name === '844x390' || sc.name === '1280x720') await openCardFromMark(p, sc.touch, '보통', sc.name);
     await ctx.close();
   }
   expect(found).toEqual([]);
-  // At most the two top corners, and said in the report.
-  expect(edge.length, edge.join('\n')).toBeLessThanOrEqual(2);
-  if (edge.length) {
-    test.info().annotations.push({ type: 'known limit', description: edge.join('; ') });
-    console.log(`known limit: ${edge.join('; ')}`);
-  }
 
   await a.page.goto('/table/e2e-boticon');
   await expect(filled(a.page)).toHaveCount(9, { timeout: 30_000 });
