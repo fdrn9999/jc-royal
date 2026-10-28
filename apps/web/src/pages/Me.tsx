@@ -1,6 +1,6 @@
 import { handLabelKey, NICKNAME_RE, passwordOk, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
 import { Badge, Button, Empty, Field, Figure, formatChips, formatDate, inHoleOrder, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { BadgeShelf } from '../academy/Badges';
 import { useTr } from '../academy/content';
@@ -23,6 +23,7 @@ import { useAuth } from '../lib/auth';
 import { useAmounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useMyPresence } from '../lib/presence';
+import { coalesced, onRealtimeResync, useRealtime } from '../lib/realtime';
 import { isGone, LoadFailed } from '../components/Loading';
 import { useBack } from '../lib/back';
 import { useKeptScroll } from '../lib/scroll';
@@ -74,6 +75,11 @@ export function MePage() {
   const mine = useMyPresence();
   const hands = useLoad<HandSummaryDto[]>('/api/me/hands?limit=15');
   const ledger = useLoad<LedgerEntryDto[]>('/api/me/ledger?limit=20');
+  // Chips that moved elsewhere (an administrator's grant, a table, another device): the history's first page is read
+  // again, once for a burst of events, and once more after the socket was down (events may have been missed).
+  const reloadLedger = useMemo(() => coalesced(ledger.reload), [ledger.reload]);
+  useRealtime('wallet.changed', () => void reloadLedger());
+  useEffect(() => onRealtimeResync(() => void reloadLedger()), [reloadLedger]);
   const myPosts = useLoad<PostListItemDto[]>('/api/me/posts');
   const myComments = useLoad<MyCommentDto[]>('/api/me/comments');
   const sessions = useLoad<{ id: string; createdAt: number; lastSeenAt: number; userAgent: string | null; current: boolean }[]>('/api/auth/me/sessions');
