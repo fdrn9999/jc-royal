@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
-/** The seats a table bot holds, by their BOT pill. */
+/** The seats a table bot holds, by the robot mark on its name. */
 const botSeats = (page: Page) => page.locator('[data-testid^="seat-"]').filter({ has: page.getByTestId('bot-badge') });
 
 /** The seats, taken or free, that reach past either side of the screen, with how far they run. */
@@ -27,18 +27,18 @@ async function openBotCard(page: Page) {
   return card;
 }
 
-test('mobile: a member alone at a bot table gets bots with a BOT pill and level, a bot card with no social actions, and the lobby counts members and bots, in Korean and English', async ({ browser }) => {
+test('mobile: a member alone at a bot table gets bots with the robot mark and level, a bot card with no social actions, and the lobby counts members and bots, in Korean and English', async ({ browser }) => {
   // E2E Bots Mobile: 6 seats, normal bots, at most 2, filling the table to 3 players while a member sits.
   const { page } = await signUp(browser, { mobile: true });
   await sitWith(page, 'e2e-bots-m', 100);
 
-  // The bots sit down one after another; each seat carries the BOT pill with its level.
+  // The bots sit down one after another; each seat carries the robot mark with its level.
   await expect(botSeats(page)).toHaveCount(2, { timeout: 30_000 });
   // A bot's line, while it has no action to show: its level and its style.
   await expect(page.locator('[data-testid^="bot-style-"]').first()).toHaveText(/^\s*· (균형형|TAG|LAG|타이트 패시브|루즈 패시브|캐주얼)$/, { timeout: 90_000 });
   for (const badge of await page.getByTestId('bot-badge').all()) {
     await expect(badge).toHaveAttribute('data-level', 'normal');
-    await expect(badge).toHaveAttribute('title', '테이블 봇 · 보통');
+    await expect(badge).toHaveAttribute('title', 'AI 봇 플레이어 · 보통');
   }
   expect(await widerThanDevice(page)).toBe(false);
   // Six seats, bots and a member with a long name among them, all inside the screen on phones of several widths.
@@ -50,6 +50,7 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
 
   // A bot's card says what it is; there is nothing to befriend, message, block or report.
   const card = await openBotCard(page);
+  await expect(card.getByTestId('bot-card-kind')).toHaveText('AI 봇 플레이어');
   await expect(card.getByTestId('bot-card-level')).toHaveText('난이도 보통');
   // Its style (the table leaves it to each bot): its name, what it does and four traits, a tendency and nothing more.
   const style = card.getByTestId('bot-card-style');
@@ -92,8 +93,9 @@ test('mobile: a member alone at a bot table gets bots with a BOT pill and level,
   await expect(row.getByTestId('lobby-humans-bots')).toHaveText('Members 1 · Bots 2');
   await page.goto('/table/e2e-bots-m');
   await expect(botSeats(page)).toHaveCount(2);
-  await expect(page.getByTestId('bot-badge').first()).toHaveAttribute('title', 'Table bot · Normal');
+  await expect(page.getByTestId('bot-badge').first()).toHaveAttribute('title', 'AI bot player · Normal');
   const en = await openBotCard(page);
+  await expect(en.getByTestId('bot-card-kind')).toHaveText('AI bot player');
   await expect(en.getByTestId('bot-card-level')).toHaveText('Level: Normal');
   await expect(en.getByTestId('bot-card-style-name')).toHaveText(/^Style: (Balanced|Tight Aggressive|Loose Aggressive|Tight Passive|Loose Passive|Casual)$/);
   await expect(en.getByTestId('bot-card-style')).toContainText('nothing here tells its cards or its next move');
