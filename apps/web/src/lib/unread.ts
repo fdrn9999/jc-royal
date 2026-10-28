@@ -1,6 +1,7 @@
 import type { UnreadCountsDto } from '@jc/types';
 import { useEffect, useSyncExternalStore } from 'react';
 import { api, ApiError } from './api';
+import { coalesced, onRealtime, onRealtimeResync, realtimeUp } from './realtime';
 import { refreshService } from './service';
 
 const NONE: UnreadCountsDto = { unread: 0, dmUnread: 0, friendRequests: 0 };
@@ -45,21 +46,50 @@ export function unreadOf(account: string): UnreadCountsDto {
   return owner === account ? counts : NONE;
 }
 
+/** While the realtime socket is up, events keep the counters current: the poll asks only every this many ticks. */
+const SLOW_TICKS = 4;
+
 /**
  * Keeps the counters for the signed-in `account` until the returned function stops it: polls while the tab is visible,
- * and at once when it becomes visible again (a hidden tab does not poll).
+ * and at once when it becomes visible again (a hidden tab does not poll). A message, friend or 1:1 event reads them at
+ * once in a visible tab (a hidden one reads when it is shown), one announcement to many after its random wait, and the
+ * poll slows down while those events arrive; a socket back after being down reads them once.
  */
 export function watchUnread(account: string, pollMs: number): () => void {
   own(account);
+  const read = coalesced(refreshUnread);
+  let ticks = 0;
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const shown = () => {
+    if (document.visibilityState === 'visible') void read();
+  };
   const tick = () => {
-    if (document.visibilityState === 'visible') void refreshUnread();
+    if (document.visibilityState === 'visible' && (!realtimeUp() || ++ticks % SLOW_TICKS === 0)) void read();
+  };
+  const spread = (ms: number) => {
+    if (!ms) return shown();
+    const h = setTimeout(() => {
+      timers.delete(h);
+      shown();
+    }, Math.random() * ms);
+    timers.add(h);
   };
   void refreshUnread();
   const h = setInterval(tick, pollMs);
-  document.addEventListener('visibilitychange', tick);
+  document.addEventListener('visibilitychange', shown);
+  const off = [
+    onRealtime('message.changed', (e) => spread(e.payload?.spreadMs ?? 0)),
+    onRealtime('inbox.broadcast', (e) => spread(e.payload.spreadMs)),
+    onRealtime('social.friend.changed', shown),
+    onRealtime('social.dm.created', shown),
+    onRealtime('social.dm.read', shown),
+    onRealtimeResync(shown),
+  ];
   return () => {
     clearInterval(h);
-    document.removeEventListener('visibilitychange', tick);
+    for (const t of timers) clearTimeout(t);
+    document.removeEventListener('visibilitychange', shown);
+    for (const f of off) f();
   };
 }
 
