@@ -32,6 +32,7 @@ import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
 import { adminIntegrityRoutes } from './admin-integrity';
 import { adminReportRoutes } from './reports';
+import { lobbyTableChanged } from './tables';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
@@ -973,6 +974,7 @@ const admin = new Hono<AppEnv>()
       createdBy: c.var.user!.id,
     });
     await audit(c, 'table.create', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : undefined });
+    lobbyTableChanged(c, id);
     return c.json({ id }, 201);
   })
   .get('/tables/:id', async (c) => {
@@ -1001,6 +1003,8 @@ const admin = new Hono<AppEnv>()
     const set =
       body.action === 'pause' || body.action === 'resume' ? { handsPaused: body.action === 'pause' } : { entryBlocked: body.action === 'block' };
     await c.var.db.update(schema.tables).set({ ...set, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
+    // A pause does not show on the lobby card; blocking entry does.
+    if ('entryBlocked' in set) lobbyTableChanged(c, id);
     const live = (await roomCall(c, id, 'reload')) ?? (await roomCall(c, id, 'reload'));
     await audit(c, 'table.control', { type: 'table', id }, { ...body, roomConfirmed: !!live, handInProgress: live?.handInProgress ?? null });
     // The row is saved either way: a room that did not answer takes it on when it next loads, and sending it again is safe.
@@ -1096,6 +1100,7 @@ const admin = new Hono<AppEnv>()
       }
     };
     const t = await save();
+    lobbyTableChanged(c, id);
     // Blind changes apply from the next hand; the running hand keeps its config. Bot settings apply at once without
     // touching the running hand: a bot over the new limits stands up after it, and a bot that sits down meanwhile is dealt
     // in from the next one. A room that does not confirm keeps its old settings (entry blocking included) until it
@@ -1143,6 +1148,7 @@ const admin = new Hono<AppEnv>()
     }
     // Stop new hands; the room finishes the current hand, cashes everyone out, then marks the table closed.
     await c.var.db.update(schema.tables).set({ status: 'closing', entryBlocked: true, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
+    lobbyTableChanged(c, id);
     // If the room cannot be reached the table stays 'closing' (no one can join) and the room finishes the close when it
     // next loads; the admin is told to retry, which is safe.
     const live = (await roomCall(c, id, 'close')) ?? (await roomCall(c, id, 'close'));
