@@ -62,6 +62,7 @@ import {
   loadMaintenance,
   loadTable,
   markTableClosed,
+  oneAtATime,
   publishLiveStats,
   recordHand,
   topUp,
@@ -315,6 +316,8 @@ export class TableRoom extends DurableObject<Env> {
   /** The bots' last quick reactions after a hand (bot-manners.ts). Memory only. */
   private botReacts = emptyManners();
   private lastStats = '';
+  /** Occupancy to D1 (writeStats), one write at a time so an older one never lands after a newer one. */
+  private publishStats = oneAtATime(() => this.writeStats());
   /** Operations counters (packages/db/src/ops.ts) and the latest problem, not written yet (see `publishStats`). */
   private ops = new OpsCounter();
   private pendingIssue: string | null = null;
@@ -557,8 +560,9 @@ export class TableRoom extends DurableObject<Env> {
    * those (with the occupancy) are otherwise written at most every OPS_FLUSH_MS. A failed write keeps the counters and
    * the problem, and counts itself, so the next of those writes also brings the occupancy up to date. Pending counters
    * in a room where nothing else happens are written by a timer, so they reach the dashboard within OPS_FLUSH_MS.
+   * Run through publishStats only.
    */
-  private async publishStats() {
+  private async writeStats() {
     if (!this.tableId) return;
     const taken = this.room.seats.filter((s): s is SeatState => !!s && s.phase !== 'pending');
     const conns = this.sockets().map((ws) => this.att(ws).userId);

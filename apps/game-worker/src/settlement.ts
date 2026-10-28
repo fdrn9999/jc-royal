@@ -388,6 +388,32 @@ export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveS
   return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
 }
 
+/**
+ * `write` one call at a time: asked again while one is out, it writes once more when that one is done (however often it
+ * was asked meanwhile), with the state as it is then. A room's D1 writes are separate requests that may land in any
+ * order, so two at once could leave an older occupancy over a newer one (a place on the waitlist since given up), and
+ * the room, having written the newer one already, would not write it again. `write` deals with its own failures.
+ */
+export function oneAtATime(write: () => Promise<void>): () => Promise<void> {
+  let out: Promise<void> | null = null;
+  let again = false;
+  const loop = async () => {
+    try {
+      do {
+        again = false;
+        await write();
+      } while (again);
+    } finally {
+      out = null;
+    }
+  };
+  return () => {
+    if (out) again = true;
+    else out = loop();
+    return out;
+  };
+}
+
 export async function markTableClosed(d1: D1Database, tableId: string): Promise<void> {
   await d1.prepare(`UPDATE tables SET status = 'closed', live_seated = 0, live_bots = 0, live_playing = 0, live_waitlist = 0, live_waitlist_users = NULL, updated_at = (unixepoch('subsec') * 1000) WHERE id = ?1`).bind(tableId).run();
 }
