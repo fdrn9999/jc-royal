@@ -75,6 +75,7 @@ import { botManners, emptyManners } from './bot-manners';
 import { addShown, afterHandMs } from './muck';
 import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
+import { publishToUsers } from './realtime-publish';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
@@ -1153,6 +1154,7 @@ export class TableRoom extends DurableObject<Env> {
     if (this.room.reservation?.userId === a.userId) this.room.reservation = null;
     this.remember(reqId);
     await this.save();
+    this.walletMoved(seat);
     this.broadcast([{ kind: 'seat', seatIndex, nickname: a.nickname }]);
     await this.afterChange();
   }
@@ -1186,6 +1188,7 @@ export class TableRoom extends DurableObject<Env> {
           continue;
         }
         s.phase = 'seated';
+        this.walletMoved(s);
       }
       // A player in the hand being played waits for it to end, except one who folded and left: their cash-out cut
       // short is finished here (the seat kept the stack to pay, top-up included). One not begun is `standFolded`'s,
@@ -1219,6 +1222,16 @@ export class TableRoom extends DurableObject<Env> {
       this.ops.add('cashout_fail');
       throw e;
     }
+    if (seat.stack > 0) this.walletMoved(seat);
+  }
+
+  /**
+   * Tells the member's other pages (the header's balance, the wallet history) that their wallet moved, after the ledger
+   * committed it: they read it again. Never awaited, so no game step waits on it; a table bot has no pages.
+   */
+  private walletMoved(seat: SeatState) {
+    if (seat.bot) return;
+    this.ctx.waitUntil(publishToUsers(this.env, [seat.userId], { scope: 'user', type: 'wallet.changed' }));
   }
 
   private handHasPlayer(userId: string) {
@@ -1433,6 +1446,7 @@ export class TableRoom extends DurableObject<Env> {
     seat.topUp = null;
     if (r === 'applied') this.addChips(seat, p.amount, p.auto);
     await this.save();
+    if (r === 'applied') this.walletMoved(seat);
     return r;
   }
 
@@ -1451,7 +1465,10 @@ export class TableRoom extends DurableObject<Env> {
     const p = seat.topUp;
     if (p?.state !== 'debiting') return false;
     const taken = await committedTopUp(this.env.DB, p.key);
-    if (taken !== null) this.addChips(seat, taken, p.auto);
+    if (taken !== null) {
+      this.addChips(seat, taken, p.auto);
+      this.walletMoved(seat);
+    }
     seat.topUp = null;
     return true;
   }
