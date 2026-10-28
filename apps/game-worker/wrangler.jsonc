@@ -16,13 +16,16 @@
   "durable_objects": {
     "bindings": [
       { "name": "TABLES", "class_name": "TableRoom" },
-      { "name": "PRESENCE", "class_name": "PresenceHub" }
+      { "name": "PRESENCE", "class_name": "PresenceHub" },
+      { "name": "REALTIME", "class_name": "RealtimeHub" }
     ]
   },
   // v2: the presence hub (friends' status, memory only; it never writes its storage).
+  // v3: the realtime hubs (pages' sockets outside the tables, sharded by member; docs/REALTIME.md).
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TableRoom"] },
-    { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] }
+    { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] },
+    { "tag": "v3", "new_sqlite_classes": ["RealtimeHub"] }
   ],
   "vars": { "ENVIRONMENT": "development" },
   "observability": { "enabled": true },
@@ -40,12 +43,14 @@
       "durable_objects": {
         "bindings": [
           { "name": "TABLES", "class_name": "TableRoom" },
-          { "name": "PRESENCE", "class_name": "PresenceHub" }
+          { "name": "PRESENCE", "class_name": "PresenceHub" },
+          { "name": "REALTIME", "class_name": "RealtimeHub" }
         ]
       },
       "migrations": [
         { "tag": "v1", "new_sqlite_classes": ["TableRoom"] },
-        { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] }
+        { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] },
+        { "tag": "v3", "new_sqlite_classes": ["RealtimeHub"] }
       ],
       "vars": { "ENVIRONMENT": "production" }
     }

@@ -81,6 +81,8 @@ export interface Env {
   DB: D1Database;
   INTERNAL_SECRET: string;
   ENVIRONMENT: string;
+  /** The realtime hubs (realtime.ts): a room tells lobby pages its new counts and members their wallet moved. */
+  REALTIME: DurableObjectNamespace;
 }
 
 interface Identity {
