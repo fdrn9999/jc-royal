@@ -88,6 +88,39 @@ test('reason templates: a chip memo follows the amount’s sign and reaches the 
   await expect(page.getByTestId('suspend-reason-final')).toHaveCount(0);
 });
 
+test('a suspension given from a report is written in the reported member’s language, as on the member’s page', async ({ browser }) => {
+  const bad = await signUp(browser);
+  const reporter = await signUp(browser);
+  const op = await signUp(browser);
+  sql(promoteSql(`email = '${op.email}'`));
+  expect(await bad.page.evaluate(async () => (await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'en' }) })).status)).toBe(200);
+  const title = uid('E2E ad ');
+  const postId = await bad.page.evaluate(async (t) => {
+    const r = await fetch('/api/board/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t, body: 'ad link' }) });
+    return ((await r.json()) as { id: string }).id;
+  }, title);
+  const filed = await reporter.page.evaluate(async (id) => (await fetch('/api/reports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetType: 'post', targetId: id, reason: 'spam' }) })).status, postId);
+  expect(filed).toBe(201);
+
+  // The console is in Korean; the member reads English, so the list and the reason are in English and the note says so.
+  const page = await adminLogin(browser, op.email);
+  await page.getByRole('link', { name: /^신고 관리$|^Reports$/ }).click();
+  const item = page.getByTestId('report-item').filter({ hasText: title });
+  await item.getByTestId('report-suspend').click();
+  const dialog = page.getByRole('dialog').filter({ has: page.getByTestId('report-suspend-confirm') });
+  await expect(dialog).toContainText('회원에게 가는 이용 제한 안내에 영어로 그대로 보입니다');
+  await expect(dialog).not.toContainText('{lang}');
+  const why = dialog.getByTestId('report-suspend-reason-template');
+  expect((await groups(why)).map(([, l]) => l)).toContain('Spam or advertising');
+  await why.selectOption({ label: 'Spam or advertising' });
+  await dialog.getByTestId('report-suspend-reason').fill('repeated ad links');
+  await expect(dialog.getByTestId('report-suspend-reason-final')).toHaveText('기록될 내용: Spam or advertising - repeated ad links');
+  await page.screenshot({ path: 'test-results/admin-tpl-report-suspend.png' });
+  await dialog.getByTestId('report-suspend-confirm').click();
+  await reauthIfAsked(page, page.getByRole('status').filter({ hasText: `${bad.nickname}님을 정지했습니다` }));
+  await expect(item.getByTestId('report-sanctions')).toContainText('Spam or advertising - repeated ad links');
+});
+
 test('message templates: a template writes the title and body, blanks stop the send until filled, text changed by hand is asked about first, a category change keeps the text, and the member gets what was shown', async ({ browser }) => {
   const member = await signUp(browser);
   const op = await signUp(browser);

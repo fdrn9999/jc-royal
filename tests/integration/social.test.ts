@@ -478,10 +478,14 @@ describe('reports', () => {
       detail: 'advertising',
       status: 'open',
       reporter: { id: r1.me.id },
-      target: { id: author.me.id, status: 'active' },
+      target: { id: author.me.id, status: 'active', locale: 'ko' },
       context: { kind: 'post', title: 'Spammy title', body: 'buy chips here' },
       contentStatus: 'visible',
     });
+    // The member's language comes with it, as it is now: a suspension given from the report is written in it.
+    expect((await author.client.patch('/api/auth/me', { locale: 'en' })).status).toBe(200);
+    const again = (await admin.get(`/api/admin/reports?userId=${author.me.id}`)).body.items.find((r: { id: string }) => r.id === rep.body.id);
+    expect(again.target).toMatchObject({ id: author.me.id, locale: 'en' });
 
     // Resolving with hideContent hides the post and closes both reports on it.
     const res = await admin.post(`/api/admin/reports/${rep.body.id}`, { status: 'resolved', hideContent: true, note: 'ad spam' });

@@ -193,6 +193,7 @@ type ReportRow = {
   targetUserId: string;
   targetNick: string;
   targetStatus: 'active' | 'suspended' | 'deleted';
+  targetLocale: 'ko' | 'en';
   handlerId: string | null;
   handlerNick: string | null;
   postStatus: 'visible' | 'hidden' | 'deleted' | null;
@@ -217,7 +218,7 @@ const toReport = (r: ReportRow, sanctions: ReportSanction[]): ReportDto => ({
   status: r.status,
   createdAt: r.createdAt,
   reporter: { id: r.reporterId, nickname: r.reporterNick },
-  target: { id: r.targetUserId, nickname: r.targetNick, status: r.targetStatus },
+  target: { id: r.targetUserId, nickname: r.targetNick, status: r.targetStatus, locale: r.targetLocale },
   context: r.context ? (JSON.parse(r.context) as ReportContext) : null,
   contentStatus: r.targetType === 'post' ? r.postStatus : r.targetType === 'comment' ? r.commentStatus : null,
   priorReports: { total: r.priorTotal, resolved: r.priorResolved, reporters: r.priorReporters },
@@ -235,7 +236,7 @@ const toReport = (r: ReportRow, sanctions: ReportSanction[]): ReportDto => ({
 const REPORT_SELECT = `SELECT r.id, r.target_type AS targetType, r.target_id AS targetId, r.reason, r.detail, r.context, r.status,
        r.created_at AS createdAt, r.handled_at AS handledAt, r.note,
        r.reporter_id AS reporterId, ru.nickname AS reporterNick,
-       r.target_user_id AS targetUserId, tu.nickname AS targetNick, tu.status AS targetStatus,
+       r.target_user_id AS targetUserId, tu.nickname AS targetNick, tu.status AS targetStatus, tu.locale AS targetLocale,
        r.handled_by AS handlerId, hu.nickname AS handlerNick,
        p.status AS postStatus, cm.status AS commentStatus,
        r.severity, r.assignee_id AS assigneeId, au.nickname AS assigneeNick, r.assigned_at AS assignedAt,

@@ -486,7 +486,8 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
             value={suspend?.reason ?? ''}
             onChange={(v) => suspend && setSuspend({ reason: v, error: null })}
             maxLength={200}
-            hint={t('suspendReasonHint')}
+            lang={r.target.locale}
+            hint={t('suspendReasonHint', { lang: r.target.locale === 'en' ? t('langEn') : t('langKo') })}
             testid="report-suspend-reason"
           />
           {suspend?.error && <p className="text-xs text-danger" role="alert">{suspend.error}</p>}
