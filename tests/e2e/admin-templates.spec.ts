@@ -311,6 +311,20 @@ test('message templates: a template writes the title and body, blanks stop the s
   await member.page.goto('/messages');
   await member.page.getByText('[이벤트] 이벤트 당첨 안내').first().click();
   await expect(member.page.getByText(/칩 5,000개/).first()).toBeVisible();
+
+  // A blank left in text changed by hand is filled with exactly what was typed, dollar signs and all.
+  await page.getByLabel('이메일·닉네임·ID 검색').fill(member.nickname);
+  await page.getByRole('button', { name: '검색', exact: true }).click();
+  await page.getByRole('button', { name: `${member.nickname} +` }).click();
+  await page.getByTestId('msg-category').selectOption('notice');
+  await select.selectOption({ label: '고객지원 답변' });
+  await body.fill(`${await body.inputValue()}\n추신: E2E 손으로 쓴 줄`);
+  const answer = page.getByTestId('msg-tpl-var-answer');
+  await answer.fill('환불은 US$$5, 표기는 $& 그대로입니다.');
+  await answer.blur();
+  await expect(body).toHaveValue(/환불은 US\$\$5, 표기는 \$& 그대로입니다\.[\s\S]*추신: E2E 손으로 쓴 줄/);
+  await expect(page.getByTestId('msg-missing')).toHaveCount(0);
+  await expect(send).toBeEnabled();
 });
 
 test('notice, maintenance and board templates: blanks block saving, sending at save is said plainly, the maintenance times follow the form while edits by hand stay, and no template touches the controls', async ({ browser }) => {

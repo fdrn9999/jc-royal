@@ -336,7 +336,8 @@ export function useContentTemplate({
     const patch: Slots = {};
     for (const k of keys) {
       const cur = values[k] ?? '';
-      if (!pristine(k) && cur.includes(`{${key}}`)) patch[k] = cur.replaceAll(`{${key}}`, val);
+      // Through a function, so `$&`, `$$` and the like in what was typed go in as typed.
+      if (!pristine(k) && cur.includes(`{${key}}`)) patch[k] = cur.replaceAll(`{${key}}`, () => val);
     }
     if (Object.keys(patch).length) apply(patch);
   };
@@ -362,8 +363,8 @@ export function useContentTemplate({
       let s = cur;
       for (const [key, val] of Object.entries(now)) {
         if (!val) continue;
-        if (was[key] && was[key] !== val) s = s.replaceAll(was[key]!, val);
-        s = s.replaceAll(`{${key}}`, val);
+        if (was[key] && was[key] !== val) s = s.replaceAll(was[key]!, () => val);
+        s = s.replaceAll(`{${key}}`, () => val);
       }
       if (s !== cur) patch[k] = s;
     }
