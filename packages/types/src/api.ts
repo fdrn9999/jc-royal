@@ -264,6 +264,12 @@ export interface LobbyTableDto {
   playing: boolean;
   waitlist: number;
   spectators: number;
+  /**
+   * The caller's own place at this table, never anyone else's: `seated` from their buy-in until their cash-out
+   * (table_sessions), whatever the table's entry, privacy or spectator settings. The table room has the last word when
+   * they open it. Missing from older servers: read as none.
+   */
+  myParticipation?: { status: 'seated' | 'none' };
 }
 
 /**
