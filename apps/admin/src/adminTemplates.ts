@@ -109,7 +109,7 @@ const adminGrants = [
 ];
 const vip = [
   r('vip.assign', 'VIP 등급 신규 부여', 'VIP granted'),
-  r('vip.change', 'VIP 등급 변경', 'VIP level changed'),
+  // No "VIP 등급 변경": VIP has no levels here, only on/off and a color.
   r('vip.color', 'VIP 색상 변경', 'VIP color changed'),
   r('vip.event', '이벤트 혜택 적용', 'Event benefit'),
   r('vip.remove', 'VIP 자격 해제', 'VIP ended'),
@@ -206,7 +206,10 @@ export const REASONS = {
     archived: [r('tpl.archive.unused', '더 이상 쓰지 않는 템플릿', 'No longer used'), r('tpl.archive.replaced', '새 템플릿으로 대체', 'Replaced by a new template'), r('tpl.archive.ended', '운영 일정 종료', 'Schedule over')],
     active: [r('tpl.active.resume', '운영 재개', 'Back in use'), r('tpl.active.event', '이벤트 일정 시작', 'Event schedule starting')],
   },
-  tournamentTpl: [r('tpl.structure', '대회 구조 조정', 'Structure adjusted'), r('tpl.prize', '상금 구조 변경', 'Prize structure changed'), r('tpl.blinds', '블라인드 구조 조정', 'Blind structure adjusted'), policyChange],
+  tournamentTpl: {
+    create: [r('tpl.new', '신규 대회 추가', 'New tournament'), r('tpl.event', '이벤트 대회 준비', 'Preparing an event tournament'), policyChange],
+    edit: [r('tpl.structure', '대회 구조 조정', 'Structure adjusted'), r('tpl.prize', '상금 구조 변경', 'Prize structure changed'), r('tpl.blinds', '블라인드 구조 조정', 'Blind structure adjusted'), policyChange],
+  },
   economy: {
     note: [r('rec.note.cause', '원인 확인 기록', 'Cause recorded'), r('rec.note.normal', '정상 거래 확인', 'Normal transaction confirmed')],
     record: [r('rec.record.missing', '원장 누락분 기록', 'Missing ledger entry recorded'), r('rec.record.settle', '정산 차이 기록', 'Settlement difference recorded')],

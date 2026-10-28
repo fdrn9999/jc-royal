@@ -68,6 +68,7 @@ export function AdminReasonField({
   disabled,
   placeholder,
   emptyText,
+  lang,
 }: {
   label: string;
   templates: AdminTemplate[] | TemplateGroup[];
@@ -80,8 +81,11 @@ export function AdminReasonField({
   placeholder?: string;
   /** What the list says while it has nothing to offer (a chip memo before the amount is known). */
   emptyText?: string;
+  /** The language the reason is written in, when someone other than the admin reads it (a chip memo, in the member's). */
+  lang?: Lang;
 }) {
-  const { t, locale } = useT();
+  const { t, locale: consoleLocale } = useT();
+  const locale = lang ?? consoleLocale;
   const items = flatten(templates);
   // What this field wrote last: a different value came from the page (cleared after a save, or written by another
   // action), and is read again.

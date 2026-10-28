@@ -2137,6 +2137,9 @@ const ko = {
   tplKeep: '지금 내용 유지',
   tplPreview: '미리보기',
   tplPreviewEmpty: '아직 내용이 없습니다.',
+  chipMemoVisible: '회원에게 가는 칩 알림에 {lang}로 그대로 보입니다. 내부 조사 내용이나 개인정보는 적지 마세요.',
+  chipMemoNoAmount: '금액을 먼저 입력하면 지급·차감에 맞는 메모가 나옵니다',
+  suspendReasonHint: '정지 사유로 기록됩니다. 위반이 확인되지 않았다면 단정하는 사유를 고르지 마세요.',
 } as const;
 
 type Dict = Record<keyof typeof ko, string>;
@@ -4276,6 +4279,9 @@ const en: Dict = {
   tplKeep: 'Keep my text',
   tplPreview: 'Preview',
   tplPreviewEmpty: 'Nothing written yet.',
+  chipMemoVisible: 'The member sees this memo as written in their chip notice, in {lang}. Leave out investigation notes and personal details.',
+  chipMemoNoAmount: 'Enter the amount first to see memos for a grant or a deduction',
+  suspendReasonHint: 'Recorded as the reason for the suspension. If a breach is not confirmed, do not pick a reason that states one.',
 };
 
 export type Key = keyof typeof ko;

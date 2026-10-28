@@ -4,12 +4,14 @@
  * report in the queue with the evidence, and anything that follows is decided there by an administrator who read it.
  */
 import { INTEGRITY_DAYS, type IntegrityDto, type IntegrityRisk, type IntegritySignal, type ReportContext } from '@jc/types';
-import { Badge, Button, Empty, formatChips, formatDate, Input, Panel } from '@jc/ui';
-import { useId, useState } from 'react';
+import { Badge, Button, Empty, formatChips, formatDate, Panel } from '@jc/ui';
+import { useState } from 'react';
 import { Link } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { userStatusLabel } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, LoadError, Modal, type Note } from '../ui';
 
 export const SIGNAL: Record<IntegritySignal, Key> = { flow: 'sigFlow', dumps: 'sigDumps', network: 'sigNetwork' };
@@ -40,7 +42,6 @@ export function IntegritySignals() {
   const [review, setReview] = useState<{ pair: Pair; reason: string; error: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<Note>(null);
-  const fid = useId();
   const confirm = async () => {
     if (!review) return;
     setBusy(true);
@@ -143,13 +144,13 @@ export function IntegritySignals() {
         <div className="flex flex-col gap-2 text-sm">
           <p>{review && t('integrityReviewConfirm', { from: review.pair.fromUser.nickname ?? review.pair.from, to: review.pair.toUser.nickname ?? review.pair.to })}</p>
           <p className="text-xs text-ink-300">{t('integrityReviewHint')}</p>
-          <label htmlFor={fid} className="text-xs text-ink-400">{t('reason')}</label>
-          <Input
-            id={fid}
+          <AdminReasonField
+            label={t('reason')}
+            templates={REASONS.integrity}
             value={review?.reason ?? ''}
+            onChange={(v) => review && setReview({ ...review, reason: v, error: null })}
             maxLength={300}
-            onChange={(e) => review && setReview({ ...review, reason: e.target.value, error: null })}
-            data-testid="integrity-review-reason"
+            testid="integrity-review-reason"
           />
           {review?.error && <p className="text-xs text-danger" role="alert">{review.error}</p>}
         </div>

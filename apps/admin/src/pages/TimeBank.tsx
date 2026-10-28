@@ -10,9 +10,11 @@ import { Badge, Button, Empty, Field, formatDate, Input, Panel, Stat } from '@jc
 import { timeBankProblem } from '@jc/types';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import type { Tr } from '../labels';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, LoadError, Modal, PageState, type Note } from '../ui';
 import { Table } from './Console';
 
@@ -279,7 +281,7 @@ function PolicyForm({ o, onChanged }: { o: Overview; onChanged: (n: Note) => Pro
             </ul>
             <p className="rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2 text-ink-200" data-testid="tb-applies">{t('tbApplies', { tables: pv.tables, playing: pv.playing })}</p>
             {pv.cutToMax && <p className="text-xs text-gold-200" data-testid="tb-cut">{t('tbCutToMax', { n: Math.round(pv.to.maxMs / 1000) })}</p>}
-            <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="tb-reason" />}</Field>
+            <AdminReasonField label={t('reasonRequired')} templates={REASONS.timeBank} value={reason} onChange={setReason} maxLength={200} testid="tb-reason" />
             <p className="text-xs text-ink-400">{t('pvBasis')}</p>
           </div>
         )}

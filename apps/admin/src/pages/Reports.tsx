@@ -19,11 +19,13 @@ import {
   type ReportTarget,
 } from '@jc/types';
 import { Badge, Button, ChevronDownIcon, ChevronUpIcon, Empty, formatChips, formatDate, Input, Panel, Stat, XIcon } from '@jc/ui';
-import { useId, useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { auditActionLabel, contentStatusLabel, userStatusLabel, type Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { contentTone, Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
 import { IntegritySignals, SignalEvidence } from './Integrity';
@@ -254,7 +256,6 @@ type Decision = 'resolved' | 'dismissed';
 function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone: (note: Note) => void }) {
   const { t, locale } = useT();
   const { api, me } = useAdmin();
-  const fid = useId();
   const [note, setNote] = useState('');
   const [hide, setHide] = useState(false);
   const [notifyReporter, setNotifyReporter] = useState(false);
@@ -479,13 +480,14 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
         <div className="flex flex-col gap-2 text-sm">
           <p>{t('suspendConfirm', { name: r.target.nickname })}</p>
           <p className="text-xs text-ink-300">{t('suspendFromReportHint')}</p>
-          <label htmlFor={fid} className="text-xs text-ink-400">{t('reason')}</label>
-          <Input
-            id={fid}
+          <AdminReasonField
+            label={t('reason')}
+            templates={REASONS.suspend}
             value={suspend?.reason ?? ''}
+            onChange={(v) => suspend && setSuspend({ reason: v, error: null })}
             maxLength={200}
-            onChange={(e) => suspend && setSuspend({ reason: e.target.value, error: null })}
-            data-testid="report-suspend-reason"
+            hint={t('suspendReasonHint')}
+            testid="report-suspend-reason"
           />
           {suspend?.error && <p className="text-xs text-danger" role="alert">{suspend.error}</p>}
         </div>

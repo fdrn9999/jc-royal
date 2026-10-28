@@ -3,12 +3,14 @@
  * and transactions worth a look; and the reconciliation events with the evidence an administrator decides on. Nothing
  * here changes a wallet by itself: a correction is chosen by a super admin, shown before → after, and confirmed.
  */
-import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat } from '@jc/ui';
+import { Badge, Button, Empty, formatChips, formatDate, Panel, Stat } from '@jc/ui';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { REASONS } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import { ledgerTypeLabel, memoLabel, roleLabel, scopeLabel, tableIssueLabel, userStatusLabel, type Tr } from '../labels';
 import { errText, useAdmin, useData } from '../lib';
+import { AdminReasonField } from '../templateFields';
 import { Feedback, LoadError, Modal, type Note } from '../ui';
 import { Table } from './Console';
 
@@ -665,7 +667,7 @@ function ResolveForm({ ev, choices, done }: { ev: Evidence; choices: Resolution[
           </label>
         ))}
       </fieldset>
-      <Field label={t('reasonRequired')}>{(fid) => <Input id={fid} value={note} maxLength={300} onChange={(x) => setNote(x.target.value)} data-testid="rec-note" />}</Field>
+      <AdminReasonField label={t('reasonRequired')} templates={REASONS.economy[chosen]} value={note} onChange={setNote} maxLength={300} testid="rec-note" />
       <Button variant={chosen === 'revert' ? 'danger' : 'gold'} disabled={note.trim().length < 2} loading={busy} onClick={() => setConfirm(true)} data-testid="rec-submit">{t(ACTION_LABEL[chosen])}</Button>
       <Modal
         open={confirm}
