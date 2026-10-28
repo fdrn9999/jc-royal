@@ -3,7 +3,7 @@
 // tested in tests/integration/realtime.test.ts.
 import { REALTIME_SHARDS, RealtimeClientFrameSchema, RealtimeEventSchema, realtimeShardOf, type RealtimeEvent } from '@jc/types';
 import { describe, expect, it } from 'vitest';
-import { parseIdentity, REALTIME_MAX_AGE_MS, revokes, stale, wants, type RealtimeIdentity } from './realtime-rules';
+import { liveSessionsSql, parseIdentity, REALTIME_MAX_AGE_MS, revokes, stale, SWEEP_CHUNK, SWEEP_MS, sweepMsOf, wants, type RealtimeIdentity } from './realtime-rules';
 
 const T0 = 1_800_000_000_000;
 const me = (over: Partial<RealtimeIdentity> = {}): RealtimeIdentity => ({ userId: 'u1', sessionId: 's1', authAt: T0, expiresAt: T0 + 86_400_000, ...over });
@@ -37,6 +37,27 @@ describe('stale', () => {
     expect(stale(me({ expiresAt: T0 + 10 }), T0 + 10)).toBe(true);
     expect(stale(me(), T0 + REALTIME_MAX_AGE_MS - 1)).toBe(false);
     expect(stale(me(), T0 + REALTIME_MAX_AGE_MS)).toBe(true);
+  });
+});
+
+describe('sweep', () => {
+  it('checks the sockets every few minutes; only a shorter whole period from the api changes that', () => {
+    expect(SWEEP_MS).toBeLessThan(REALTIME_MAX_AGE_MS);
+    expect(sweepMsOf(null)).toBeNull();
+    expect(sweepMsOf('')).toBeNull();
+    expect(sweepMsOf('5000')).toBe(5000);
+    expect(sweepMsOf('999')).toBeNull();
+    expect(sweepMsOf(String(SWEEP_MS + 1))).toBeNull();
+    expect(sweepMsOf('1500.5')).toBeNull();
+    expect(sweepMsOf('abc')).toBeNull();
+  });
+
+  it('asks D1 for a member sign-in of an active account, one bound value per session', () => {
+    const sql = liveSessionsSql(3);
+    expect(sql.match(/\?/g)).toHaveLength(3);
+    expect(sql).toContain("s.kind = 'user'");
+    expect(sql).toContain("u.status = 'active'");
+    expect(liveSessionsSql(SWEEP_CHUNK).match(/\?/g)).toHaveLength(100);
   });
 });
 

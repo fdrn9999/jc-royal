@@ -17,7 +17,10 @@ export async function setup() {
   await prepareState(state);
   sink = await startPushSink();
   process.env.TEST_PUSH_SINK = sink.url;
-  worker = await startWorker(Number(process.env.TEST_PORT ?? 8799), state);
+  // The realtime hubs check their sockets' sign-ins in D1 every 15 s here (every 5 min in production), so a sign-out
+  // whose revoke was lost can be seen to end its socket (integration/realtime.test.ts). Not shorter: the local runtime
+  // sends a hub's closes only once the hub has been idle for about 10 s, and a check every few seconds never lets it be.
+  worker = await startWorker(Number(process.env.TEST_PORT ?? 8799), state, { REALTIME_SWEEP_MS: '15000' });
   process.env.TEST_BASE_URL = worker.url;
   await bootstrapAdmin(worker.url);
 }

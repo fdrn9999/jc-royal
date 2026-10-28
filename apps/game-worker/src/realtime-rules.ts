@@ -15,7 +15,7 @@ export interface RealtimeAttachment extends RealtimeIdentity {
   topics: RealtimeTopic[];
 }
 
-/** A socket is checked against D1 again at least this often: the hub closes it (REALTIME_CLOSE.reauth) and the page reconnects. */
+/** A socket's handshake is checked again at least this often: the hub closes it (REALTIME_CLOSE.reauth) and the page reconnects. */
 export const REALTIME_MAX_AGE_MS = 60 * 60_000;
 /** A member's pages per hub; a newer one closes the oldest. */
 export const REALTIME_MAX_PER_USER = 10;
@@ -24,8 +24,24 @@ export const REALTIME_MAX_PER_HUB = 16_000;
 /** How long a sign-out also turns away handshakes the api checked just before it, and the clock slack allowed. */
 export const REVOKE_WINDOW_MS = 60_000;
 const REVOKE_SKEW_MS = 2_000;
-/** While sockets are open the hub wakes this often to close those past their check, even with no event to deliver. */
-export const SWEEP_MS = 15 * 60_000;
+/**
+ * While sockets are open the hub wakes this often, even with no event to deliver: it closes those past their check, and
+ * those whose sign-in D1 no longer has (a sign-out whose revoke never reached the hub), so a lost revoke leaves a socket
+ * open this long at most. A check that could not read D1 is tried again after SWEEP_RETRY_MS.
+ */
+export const SWEEP_MS = 5 * 60_000;
+export const SWEEP_RETRY_MS = 30_000;
+/** Sessions per D1 query in the sweep (a D1 statement binds at most 100 values). */
+export const SWEEP_CHUNK = 100;
+/** The sweep's period from the api (local tests only, x-jc-sweep-ms): a number of ms within these bounds, or the default. */
+export const sweepMsOf = (raw: string | null): number | null => {
+  const n = Number(raw);
+  return raw && Number.isInteger(n) && n >= 1_000 && n <= SWEEP_MS ? n : null;
+};
+
+/** The SQL the sweep asks D1 with: which of `n` session ids are still a member's sign-in, for an active account. */
+export const liveSessionsSql = (n: number) =>
+  `SELECT s.id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id IN (${Array.from({ length: n }, () => '?').join(', ')}) AND s.kind = 'user' AND u.status = 'active'`;
 /** Messages a page may send a minute (topic changes on navigation); past it its socket closes. */
 export const FRAMES_PER_MIN = 30;
 

@@ -430,6 +430,26 @@ describe('realtime socket: sign-outs', () => {
     expect(await handshake(b.client)).toBe(401);
   });
 
+  it('a sign-out the hub never heard of ends the socket at its next check of D1, and only that one', async () => {
+    const [a, b] = await Promise.all([newUser(), newUser()]);
+    const phone = new Client();
+    expect((await phone.post('/api/auth/login', { email: a.email, password: PASSWORD })).status).toBe(200);
+    const [sa, sPhone, sb] = await Promise.all([rt(a.client), rt(phone), rt(b.client)]);
+    // A revoke lost on the way: the sign-in ends in D1 alone. The first of a's two sessions goes (the phone's, on the
+    // same hub, stays); b's account stops being active.
+    await d1(`DELETE FROM sessions WHERE id = (SELECT id FROM sessions WHERE user_id = '${a.me.id}' ORDER BY created_at LIMIT 1)`);
+    await d1(`UPDATE users SET status = 'suspended' WHERE id = '${b.me.id}'`);
+    // The integration worker's hubs read their sockets' sessions every 15 s (REALTIME_SWEEP_MS; 5 min in production).
+    expect(await Promise.all([sa.waitClose(50_000), sb.waitClose(50_000)])).toEqual([4401, 4401]);
+    // the phone's socket outlived the sweep that ended the other, and still gets a's events
+    await reauth();
+    await admin.post(`/api/admin/users/${a.me.id}/chips`, { amount: 1, memo: 'sweep check', idempotencyKey: uniq('rt-sweep') });
+    await sPhone.event('wallet.changed');
+    expect(sPhone.closed).toBeNull();
+    expect(sa.events).toEqual([]);
+    expect(sb.events).toEqual([]);
+  }, 90_000);
+
   it('a socket past its sign-in is closed for a fresh check, and the expired sign-in opens nothing', async () => {
     const u = await newUser();
     // The session ends in a few seconds; the handshake tells the hub so (it reads the session without sliding it).

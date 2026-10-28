@@ -1,16 +1,34 @@
 import { DurableObject } from 'cloudflare:workers';
 import { REALTIME_CLOSE, REALTIME_PROTOCOL, RealtimeClientFrameSchema, RealtimeEventSchema } from '@jc/types';
 import type { Env } from './room';
-import { FRAMES_PER_MIN, parseIdentity, REALTIME_MAX_PER_HUB, REALTIME_MAX_PER_USER, REVOKE_WINDOW_MS, revokes, stale, SWEEP_MS, wants, type RealtimeAttachment, type Revoke } from './realtime-rules';
+import {
+  FRAMES_PER_MIN,
+  liveSessionsSql,
+  parseIdentity,
+  REALTIME_MAX_PER_HUB,
+  REALTIME_MAX_PER_USER,
+  REVOKE_WINDOW_MS,
+  revokes,
+  stale,
+  SWEEP_CHUNK,
+  SWEEP_MS,
+  SWEEP_RETRY_MS,
+  sweepMsOf,
+  wants,
+  type RealtimeAttachment,
+  type Revoke,
+} from './realtime-rules';
 
 /**
  * Platform realtime (docs/REALTIME.md): the sockets of signed-in pages outside the tables, sharded by member
- * (`rt-<realtimeShardOf(userId)>`). The hub keeps no state of its own besides recent sign-outs: it hands an event the
- * api or a table room published to the sockets it is for, and nothing a page sends changes anything but the public
- * topics that page gets. Sockets hibernate between events; the page's ping is answered without waking the hub.
+ * (`rt-<realtimeShardOf(userId)>`). The hub keeps no state of its own besides recent sign-outs (and, in local tests, a
+ * shorter sweep): it hands an event the api or a table room published to the sockets it is for, and nothing a page
+ * sends changes anything but the public topics that page gets. Sockets hibernate between events; the page's ping is
+ * answered without waking the hub.
  */
 
 const isId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 64;
+const SWEEP_KEY = 'sweep-ms';
 
 export class RealtimeHub extends DurableObject<Env> {
   /** Frames each socket sent this minute (memory only: a hub woken from hibernation starts them again). */
@@ -69,8 +87,27 @@ export class RealtimeHub extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server, [`u:${identity.userId}`]);
     server.serializeAttachment(attachment);
     server.send(JSON.stringify({ t: 'hello', v: REALTIME_PROTOCOL }));
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    // Local tests only: the api passes a shorter sweep (REALTIME_SWEEP_MS), kept for the alarms after this one.
+    const every = sweepMsOf(request.headers.get('x-jc-sweep-ms'));
+    if (every !== null && every !== (await this.ctx.storage.get<number>(SWEEP_KEY))) await this.ctx.storage.put(SWEEP_KEY, every);
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + (every ?? (await this.sweepMs())));
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private async sweepMs(): Promise<number> {
+    return (await this.ctx.storage.get<number>(SWEEP_KEY)) ?? SWEEP_MS;
+  }
+
+  /** Which of these sessions D1 still has as a member's sign-in, for an active account (one batch, SWEEP_CHUNK a query). */
+  private async liveSessions(ids: string[]): Promise<Set<string>> {
+    const statements: D1PreparedStatement[] = [];
+    for (let i = 0; i < ids.length; i += SWEEP_CHUNK) {
+      const part = ids.slice(i, i + SWEEP_CHUNK);
+      statements.push(this.env.DB.prepare(liveSessionsSql(part.length)).bind(...part));
+    }
+    const live = new Set<string>();
+    for (const r of await this.env.DB.batch<{ id: string }>(statements)) for (const row of r.results) live.add(row.id);
+    return live;
   }
 
   /**
@@ -135,12 +172,29 @@ export class RealtimeHub extends DurableObject<Env> {
     return (list ?? []).filter((r) => now - r.at < REVOKE_WINDOW_MS);
   }
 
-  /** Closes sockets past their check and forgets old sign-outs; wakes again only while there is something left. */
+  /**
+   * Closes sockets past their check, and those whose sign-in has ended in D1 though no revoke said so (it was lost on
+   * the way): one read of D1 for all the hub's sockets, never one per event. Forgets old sign-outs; wakes again only
+   * while there is something left. A failed read closes nothing and is tried again sooner; past REALTIME_MAX_AGE_MS a
+   * socket is closed for a fresh check all the same.
+   */
   override async alarm() {
     const now = Date.now();
+    const open: { ws: WebSocket; a: RealtimeAttachment }[] = [];
     for (const ws of this.ctx.getWebSockets()) {
       const a = this.att(ws);
       if (!a || stale(a, now)) this.close(ws, REALTIME_CLOSE.reauth, 'reauth');
+      else open.push({ ws, a });
+    }
+    let checked = true;
+    if (open.length > 0) {
+      try {
+        const live = await this.liveSessions([...new Set(open.map(({ a }) => a.sessionId))]);
+        for (const { ws, a } of open) if (!live.has(a.sessionId)) this.close(ws, REALTIME_CLOSE.signedOut, 'signed out');
+      } catch (e) {
+        checked = false;
+        console.warn('realtime session check failed', e instanceof Error ? e.message : String(e));
+      }
     }
     const old = await this.ctx.storage.list<Revoke[]>({ prefix: 'revoke:' });
     let left = false;
@@ -152,7 +206,8 @@ export class RealtimeHub extends DurableObject<Env> {
         if (kept.length !== list.length) await this.ctx.storage.put(key, kept);
       }
     }
-    if (this.ctx.getWebSockets().length > 0) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    const every = await this.sweepMs();
+    if (this.ctx.getWebSockets().length > 0) await this.ctx.storage.setAlarm(now + (checked ? every : Math.min(every, SWEEP_RETRY_MS)));
     else if (left) await this.ctx.storage.setAlarm(now + REVOKE_WINDOW_MS);
   }
 

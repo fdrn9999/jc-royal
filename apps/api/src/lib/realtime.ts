@@ -71,7 +71,8 @@ export const spreadFor = (n: number) => Math.min(30_000, Math.max(0, n - 20) * 1
 /**
  * Closes the realtime sockets of ended sign-ins (lib/signout.ts), and has the hub refuse handshakes checked just before.
  * Tried twice (a repeat closes nothing more): a sign-out the hub never hears of leaves those sockets open, getting events
- * that name no content and whose reads the ended sign-in is refused, until the hub's sweep past REALTIME_MAX_AGE_MS.
+ * that name no content and whose reads the ended sign-in is refused, until the hub's next sweep finds the session gone
+ * from D1 (SWEEP_MS, a few minutes).
  */
 export function realtimeSignOut(c: Context<AppEnv>, scope: SignOutScope) {
   const body = { ...scope, at: Date.now() };
