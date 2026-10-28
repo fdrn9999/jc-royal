@@ -44,6 +44,7 @@ import {
   TB_COLUMNS,
   timeBankOf,
   TOURNAMENT_ID,
+  tournamentChanged,
   tournamentNotice,
 } from '../lib/tournament';
 
@@ -341,6 +342,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
       if (!again || again.status !== 'active' || again.version !== body.templateVersion) fail(409, 'tournament_template_conflict', 'the template changed meanwhile', { template: again });
       fail(409, 'tournament_limit', 'too many tournaments are open', { openMax: TOURNAMENT_OPEN_MAX });
     }
+    tournamentChanged(c.env, id, c.executionCtx);
     await audit(c, 'tournament.create', { type: 'tournament', id }, { templateId: tpl.id, templateVersion: tpl.version, name, structure: structureOf(tpl) });
     return c.json({ ok: true, tournament: await loadRow(db, id) });
   })
@@ -430,6 +432,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
       .bind(id, to, now, from, baseVersion)
       .run();
     if (!r.meta.changes) await refused(c.env.DB, id, baseVersion);
+    tournamentChanged(c.env, id, c.executionCtx);
     // Reopened with every seat taken: a tournament that starts by itself starts now (as the last registration would have).
     let start = null;
     const t = await loadRow(c.env.DB, id);
@@ -466,6 +469,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
       tournamentNotice(db, before, 'cancelled', ['registered'], `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`, now),
     ]);
     if (!r?.meta.changes) await refused(db, id, baseVersion);
+    tournamentChanged(c.env, id, c.executionCtx);
     await queuePush(
       c.env,
       [outboxForEntries(db, { tournamentId: id, type: 'tournament_cancel', statuses: ['registered'], prefix: 'tournament_cancel', url: `/tournaments/${id}`, guard: `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`, now, night: isKstNight(now) })],
@@ -509,6 +513,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
       tournamentNotice(db, before, 'aborted', ['stopped', 'eliminated'], `tn.status = 'aborted' AND tn.aborted_at = ${now}`, now),
     ]);
     if (!r?.meta.changes) await refused(db, id, baseVersion);
+    tournamentChanged(c.env, id, c.executionCtx);
     const live = await reloadRoom(c.env, before.tableId);
     // Stopped is told as called off (the same switch as a cancel).
     await queuePush(
@@ -641,6 +646,7 @@ async function pauseOrResume(c: Context<AppEnv>, pause: boolean) {
     .bind(id, pause ? 1 : 0, now, pause ? 0 : 1, baseVersion)
     .run();
   if (!r.meta.changes) await refused(db, id, baseVersion);
+  tournamentChanged(c.env, id, c.executionCtx);
   const t = await loadRow(db, id);
   const live = await reloadRoom(c.env, t?.tableId ?? null);
   // The room says whether a hand is being played (a pause then waits for its end); unanswered: it applies at its next look.

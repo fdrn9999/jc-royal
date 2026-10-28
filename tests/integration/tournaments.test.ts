@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin, signupBody, uniq, WEB_ORIGIN } from '../support/client';
 import { d1 } from '../support/d1';
+import { RealtimeSocket } from '../support/realtime';
 import { prepareState, root, startWorker, TABLES, type RunningWorker } from '../support/worker';
 import { isMyTurn, TableSocket } from '../support/ws';
 
@@ -378,6 +379,9 @@ describe('a heads-up tournament', () => {
     const watcher = await TableSocket.open(late.client, tableId);
     sockets.push(watcher);
     expect(watcher.state!.tournament).toMatchObject({ id: t.id, you: { status: 'watching', place: null } });
+    // A tournament page, from here on: the room's writes it hears of are the bust and the finish, not each hand's stacks.
+    const pages = await RealtimeSocket.open(late.client, { topics: ['tournaments'] });
+    const told = () => pages.events.filter((e) => e.type === 'tournament.changed' && e.resourceId === t.id).length;
 
     const stop = autoplay([wa, wb], shove);
     let end: TableView;
@@ -402,6 +406,10 @@ describe('a heads-up tournament', () => {
 
     const r = (await until(() => row(t.id), (x) => x?.status === 'finished', 'D1 to have the result'))!;
     expect(r).toMatchObject({ status: 'finished', endReason: 'completed', winner: winner.me.nickname, playersLeft: 1, recovery: [] });
+    await pages.until(() => told() > 0, 15_000, 'the result to the tournament pages');
+    // (the bust and the finish, in one write or two)
+    expect(told()).toBeLessThanOrEqual(2);
+    pages.close();
     const entries = await d1<{ userId: string; status: string; place: number; stack: number }>(
       `SELECT user_id AS userId, status, place, stack FROM tournament_entries WHERE tournament_id = '${t.id}' ORDER BY place`,
     );

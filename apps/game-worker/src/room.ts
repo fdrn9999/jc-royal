@@ -2120,6 +2120,8 @@ export class TableRoom extends DurableObject<Env> {
     }
     tn.dirty = false;
     tn.confirmed = tn.places.length;
+    // A bust or the finish, now in D1, for the tournament pages; stacks and the level clock they read on their own.
+    if (r.standings) this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
     if (this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
     if (tn.status === 'running') tn.pauseRequested = r.pauseRequested;
     const aborted = r.status === 'aborted' && tn.status !== 'aborted';

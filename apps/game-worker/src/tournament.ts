@@ -301,6 +301,8 @@ export interface TourneySyncResult {
   status: TournamentStatus | null;
   pauseRequested: boolean;
   maintenance: Maintenance | null;
+  /** This write took a new elimination or the finish: what the tournament pages list changed (a stack alone is not). */
+  standings: boolean;
 }
 
 /**
@@ -323,6 +325,7 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
         .bind(t.id, p.userId, p.place, p.at, p.hand, now),
     );
   }
+  const busts = stmts.length;
   for (const s of stacks) {
     if (s.userId === t.winnerId) continue;
     stmts.push(
@@ -357,6 +360,7 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
   const res = await d1.batch(stmts);
   const back = res[res.length - 2]?.results[0] as { status?: string; pauseRequested?: number } | undefined;
   const status = back && STATUSES.includes(back.status as TournamentStatus) ? (back.status as TournamentStatus) : null;
+  const standings = res.slice(0, busts).some((x) => (x.meta?.changes ?? 0) > 0) || (finish && (res[res.length - 3]?.meta?.changes ?? 0) > 0);
   if (finish && status === 'finished') {
     // The result's push (apps/api/src/lib/notify.ts sends it, the minute cron), after the finish is saved and never with
     // it: once per member however often this is written, and only for a finish of the last hour.
@@ -375,5 +379,5 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
       console.warn('tournament result push not queued', e instanceof Error ? e.message : String(e));
     }
   }
-  return { status, pauseRequested: back?.pauseRequested === 1, maintenance: toMaintenance(res[res.length - 1]?.results[0] as Maintenance | undefined) };
+  return { status, pauseRequested: back?.pauseRequested === 1, maintenance: toMaintenance(res[res.length - 1]?.results[0] as Maintenance | undefined), standings };
 }

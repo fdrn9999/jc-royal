@@ -27,6 +27,7 @@ import {
   TB_COLUMNS,
   timeBankOf,
   TOURNAMENT_ID,
+  tournamentChanged,
   type StartResult,
 } from '../lib/tournament';
 
@@ -194,6 +195,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
       }
       fail(409, 'tournament_conflict', 'registration changed meanwhile; try again');
     }
+    tournamentChanged(c.env, id, c.executionCtx);
     let start: StartResult | null = null;
     if (t.autoStart === 1) {
       const n = await db.prepare(`SELECT COUNT(*) AS n FROM tournament_entries WHERE tournament_id = ?1 AND status = 'registered'`).bind(id).first<{ n: number }>();
@@ -242,6 +244,6 @@ export const tournamentRoutes = new Hono<AppEnv>()
         if (status === 'cancelled') fail(409, 'tournament_state', 'the tournament was cancelled', { status });
         fail(409, 'tournament_started', 'a started tournament cannot be left', { status });
       }
-    }
+    } else tournamentChanged(c.env, id, c.executionCtx);
     return c.json({ ok: true });
   });
