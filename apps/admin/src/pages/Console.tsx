@@ -726,7 +726,17 @@ export function UserDetailPage() {
           <div className="flex flex-col gap-3">
             {!on('sanctions') ? null : u.status === 'active' && me?.user.id !== u.id ? (
               <form className="flex flex-col gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); ask({ kind: 'suspend' }); }}>
-                <AdminReasonField label={t('reason')} templates={REASONS.suspend} value={reason} onChange={setReason} maxLength={200} hint={t('suspendReasonHint')} testid="suspend-reason" />
+                {/* The member reads this reason in the suspension notice, in their own language. */}
+                <AdminReasonField
+                  label={t('reason')}
+                  templates={REASONS.suspend}
+                  value={reason}
+                  onChange={setReason}
+                  maxLength={200}
+                  lang={u.locale}
+                  hint={t('suspendReasonHint', { lang: u.locale === 'en' ? t('langEn') : t('langKo') })}
+                  testid="suspend-reason"
+                />
                 <Button type="submit" variant="danger" className="self-start" disabled={reason.trim().length < 2} data-testid="suspend">{t('suspend')}</Button>
               </form>
             ) : u.status === 'suspended' ? (
