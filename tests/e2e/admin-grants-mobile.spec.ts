@@ -57,10 +57,13 @@ test('on a phone: a super admin turns features on for one administrator, who see
   const panel = b.getByTestId('admin-grants');
   await panel.getByTestId('grants-q').fill(op.nickname);
   await panel.getByTestId('grants-q').press('Enter');
+  // The list keeps the last result until the search answers: wait for the row searched for, then pick that row.
+  const opRow = panel.getByTestId('grants-admin').filter({ hasText: op.nickname });
+  await expect(opRow).toHaveCount(1);
   await expect(panel.getByTestId('grants-admin')).toHaveCount(1);
   // Of every switch there is (the list grows with new pages, e.g. VIP), one is on.
-  await expect(panel.getByTestId('grants-admin')).toContainText(`1/${ALL_GRANTS.length}`);
-  await panel.getByTestId('grants-admin').click();
+  await expect(opRow).toContainText(`1/${ALL_GRANTS.length}`);
+  await opRow.click();
   await expect(panel.getByTestId('grants-name')).toHaveText(op.nickname);
   await expect(panel.getByTestId('grant-members')).toBeChecked();
   await expect(panel.getByTestId('grant-ledger')).not.toBeChecked();
@@ -103,8 +106,12 @@ test('on a phone: a super admin turns features on for one administrator, who see
   // A super admin has no switches, their own entry included.
   await panel.getByTestId('grants-q').fill(boss.nickname);
   await panel.getByTestId('grants-q').press('Enter');
+  // Until the search answers, the one row shown is still the administrator above.
+  const bossRow = panel.getByTestId('grants-admin').filter({ hasText: boss.nickname });
+  await expect(bossRow).toHaveCount(1);
   await expect(panel.getByTestId('grants-admin')).toHaveCount(1);
-  await panel.getByTestId('grants-admin').click();
+  await bossRow.click();
+  await expect(panel.getByTestId('grants-name')).toHaveText(boss.nickname);
   await expect(panel.getByTestId('grants-super')).toBeVisible();
   await expect(panel.getByTestId('grant-members')).toHaveCount(0);
 });
