@@ -36,6 +36,7 @@ import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
+import { realtimeToUsers } from '../lib/realtime';
 import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
 import { kickEverywhere, refreshRoleEverywhere, roomCall } from '../lib/room';
@@ -859,16 +860,32 @@ const admin = new Hono<AppEnv>()
       refId: ref?.id ?? null,
     });
     if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
-    // The same request again (a retry, a double click): nothing changed, and that is on record.
-    if (r.status === 'duplicate') await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
+    const chipsDetail = { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id, refType: ref.type } : {}) };
+    // The same request again (a retry, a double click): nothing changed, and that is on record. A first try whose audit
+    // row was not written (below) gets it now, marked late, so every adjustment has its `user.chips` row.
+    if (r.status === 'duplicate') {
+      const recorded = await c.env.DB.prepare(
+        `SELECT 1 AS x FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?1 AND action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?2 LIMIT 1`,
+      )
+        .bind(id, r.ledgerId)
+        .first();
+      if (!recorded) await audit(c, 'user.chips', { type: 'user', id }, { ...chipsDetail, late: true });
+      await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
+    }
     if (r.status === 'applied') {
+      // The adjustment is committed: what follows reports it and never turns it into a failure (the admin would see an
+      // error for chips that moved, and the retry finds them moved). A step that fails is logged; a missing audit row is
+      // written by the retry above.
       await sendMessages(c.var.db, {
         userIds: [id],
         category: body.amount > 0 ? 'event' : 'admin',
         ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
-      });
-      await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id, refType: ref.type } : {}) });
+      }).catch((e) => console.error('chips notice not written', id, r.ledgerId, e));
+      await audit(c, 'user.chips', { type: 'user', id }, chipsDetail).catch((e) => console.error('chips audit not written', id, r.ledgerId, e));
+      // The member's open pages read the balance, the ledger and the inbox again (the event says only that they changed).
+      realtimeToUsers(c, [id], { scope: 'user', type: 'wallet.changed' });
+      realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });
     }
     return c.json({ ok: true, duplicate: r.status === 'duplicate', balanceAfter: r.balanceAfter });
   })
