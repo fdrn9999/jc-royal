@@ -32,11 +32,21 @@ async function rt(client: Client, opts: Parameters<typeof RealtimeSocket.open>[1
   return s;
 }
 
-async function reauth() {
-  const until = (await admin.get('/api/admin/auth/me')).body?.reauthValidUntil;
+async function reauth(c: Client = admin) {
+  const until = (await c.get('/api/admin/auth/me')).body?.reauthValidUntil;
   if (until && until - Date.now() > 60_000) return;
-  const r = await admin.post('/api/admin/auth/reauth', { password: PASSWORD });
+  const r = await c.post('/api/admin/auth/reauth', { password: PASSWORD });
   expect(r.status, JSON.stringify(r.body)).toBe(200);
+}
+
+/** Another super admin (a member promoted in D1, signed in to the console), with the password confirmed. */
+async function otherAdmin() {
+  const u = await newUser();
+  await d1(`UPDATE users SET role = 'super_admin' WHERE id = '${u.me.id}'`);
+  const c = new Client('http://localhost:5174');
+  expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
+  await reauth(c);
+  return c;
 }
 
 /** The status the api answers a handshake with, 101 when it opens (fetch() forbids the Upgrade header). */
@@ -110,19 +120,67 @@ describe('realtime socket: personal events', () => {
     expect(audits[0]!.n).toBe(1);
   });
 
-  it('a first try whose audit row was lost gets it on the retry, and still counts once', async () => {
+  it('a first try whose audit row was lost gets it on the retry, from its ledger row, and still counts once', async () => {
     const target = await newUser();
     await reauth();
+    const adminId = (await admin.get('/api/admin/auth/me')).body.user.id;
     const grant = { amount: 300, memo: 'late audit check', idempotencyKey: uniq('rt-late') };
     expect((await admin.post(`/api/admin/users/${target.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: false });
     // as if the audit insert had failed after the ledger committed
     await d1(`DELETE FROM admin_audit_log WHERE action = 'user.chips' AND target_id = '${target.me.id}'`);
-    expect((await admin.post(`/api/admin/users/${target.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: true, balanceAfter: 10_300 });
-    const audits = await d1<{ detail: string }>(`SELECT detail FROM admin_audit_log WHERE action = 'user.chips' AND target_id = '${target.me.id}'`);
+    const recorded = () => d1<{ detail: string; actor_id: string; ip: string | null }>(`SELECT detail, actor_id, ip FROM admin_audit_log WHERE action = 'user.chips' AND target_id = '${target.me.id}'`);
+    // The key with other details is not that grant again: refused, and no record of a grant made from them.
+    const altered = await admin.post(`/api/admin/users/${target.me.id}/chips`, { ...grant, memo: 'a memo it never had' });
+    expect(altered.status, JSON.stringify(altered.body)).toBe(409);
+    expect(altered.body.error.code).toBe('idempotency_conflict');
+    expect(await recorded()).toEqual([]);
+    // The same request from another administrator: the record is the grant's, by the one who made it.
+    const second = await otherAdmin();
+    expect((await second.post(`/api/admin/users/${target.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: true, balanceAfter: 10_300 });
+    const audits = await recorded();
     expect(audits).toHaveLength(1);
-    expect(JSON.parse(audits[0]!.detail)).toMatchObject({ amount: 300, late: true });
+    expect(JSON.parse(audits[0]!.detail)).toMatchObject({ amount: 300, memo: 'late audit check', late: true });
+    expect(audits[0]!.actor_id).toBe(adminId);
+    // a third repeat writes no second record
+    expect((await admin.post(`/api/admin/users/${target.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: true });
+    expect(await recorded()).toHaveLength(1);
     const rows = await d1<{ n: number }>(`SELECT count(*) AS n FROM chip_ledger WHERE user_id = '${target.me.id}' AND type = 'admin_adjust'`);
     expect(rows[0]!.n).toBe(1);
+  });
+
+  it("a key already used for one member's grant is refused for another member or another amount, and moves or records nothing for them", async () => {
+    const [a, b] = await Promise.all([newUser(), newUser()]);
+    await reauth();
+    const grant = { amount: 400, memo: 'key reuse check', idempotencyKey: uniq('rt-reuse') };
+    expect((await admin.post(`/api/admin/users/${a.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: false, balanceAfter: 10_400 });
+    for (const [who, body] of [
+      [b.me.id, grant],
+      [a.me.id, { ...grant, amount: 900 }],
+    ] as const) {
+      // the preview says so before the password is asked
+      const preview = await admin.post(`/api/admin/users/${who}/chips`, { ...body, preview: true });
+      expect(preview.status, JSON.stringify(preview.body)).toBe(409);
+      expect(preview.body.error.code).toBe('idempotency_conflict');
+      const r = await admin.post(`/api/admin/users/${who}/chips`, body);
+      expect(r.status, JSON.stringify(r.body)).toBe(409);
+      expect(r.body.error.code).toBe('idempotency_conflict');
+    }
+    // A refused preview is the failed request on record (as any refused preview is); the refusal itself, once.
+    const records = (who: string) =>
+      d1<{ action: string; outcome: string; reason: string | null; code: string | null }>(
+        `SELECT action, outcome, json_extract(detail, '$.reason') AS reason, json_extract(detail, '$.code') AS code FROM admin_audit_log WHERE target_id = '${who}' AND action LIKE 'user.chips%' ORDER BY created_at, rowid`,
+      );
+    const refused = [
+      { action: 'user.chips.failed', outcome: 'failed', code: 'idempotency_conflict' },
+      { action: 'user.chips_refused', outcome: 'failed', reason: 'idempotency_conflict' },
+    ];
+    expect(await records(b.me.id)).toMatchObject(refused);
+    expect(await records(a.me.id)).toMatchObject([{ action: 'user.chips', outcome: 'ok' }, ...refused]);
+    const ledger = (who: string) => d1<{ n: number }>(`SELECT count(*) AS n FROM chip_ledger WHERE user_id = '${who}' AND type = 'admin_adjust'`);
+    expect((await ledger(a.me.id))[0]!.n).toBe(1);
+    expect((await ledger(b.me.id))[0]!.n).toBe(0);
+    expect((await a.client.get('/api/auth/me')).body.balance).toBe(10_400);
+    expect((await b.client.get('/api/auth/me')).body.balance).toBe(10_000);
   });
 
   it('nothing a page sends is published or changes anything', async () => {

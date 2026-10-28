@@ -16,6 +16,7 @@ import { randomToken, sha256 } from '../lib/crypto';
 import { toCsv } from '../lib/csv';
 import { fail, isPreview, parseBody } from '../lib/http';
 import { can, capabilitiesOf, hasGrant, matchedRoute, parseGrants, requirePermission } from '../lib/permissions';
+import { clientIp } from '../lib/rate-limit';
 import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
@@ -194,6 +195,22 @@ function cursorOf(raw: string | undefined, timed: boolean): { at: number; seq: n
   const m = timed ? /^(\d{1,15})\.(\d{1,15})$/.exec(raw) : /^(\d{1,15})$/.exec(raw);
   if (!m) fail(400, 'bad_request', 'invalid cursor');
   return timed ? { at: Number(m[1]), seq: Number(m[2]) } : { at: 0, seq: Number(m[1]) };
+}
+
+/**
+ * The `user.chips` record of a chip adjustment, unless its ledger row has one already: one statement, so a first try and
+ * a repeat racing it write one record between them. `+action` keeps the planner on audit_target_idx (this member's rows):
+ * with no ANALYZE statistics it chose audit_action_idx, every `user.chips` row ever written (docs/LOAD_TEST.md).
+ */
+async function chipsRecord(c: Context<AppEnv>, member: string, actor: string, ip: string | null, detail: { ledgerId: string } & Record<string, unknown>) {
+  await c.env.DB.prepare(
+    `INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, detail, ip)
+     SELECT ?1, ?2, 'user.chips', 'user', ?3, ?4, ?5
+     WHERE NOT EXISTS (SELECT 1 FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?3 AND +action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?6)`,
+  )
+    .bind(crypto.randomUUID(), actor, member, JSON.stringify(detail), ip, detail.ledgerId)
+    .run();
+  c.set('audited', true);
 }
 
 /** The member a list is narrowed to, by exact id, email or nickname (nicknames are unique ignoring case). */
@@ -839,8 +856,19 @@ const admin = new Hono<AppEnv>()
           .first<{ id: string; type: string; amount: number; createdAt: number }>()
       : null;
     if (body.refLedgerId && !ref) fail(400, 'ref_not_found', 'the linked transaction is not one of this member\'s');
+    // A key already used repeats that adjustment only for the same member, amount, memo and linked transaction (from any
+    // administrator: a double click, a lost answer). Anything else under it is neither that adjustment nor a new one.
+    const key = `admin:${body.idempotencyKey}`;
+    const madeBy = () =>
+      c.env.DB.prepare(`SELECT id, user_id AS userId, type, amount, memo, ref_id AS refId, actor_id AS actorId FROM chip_ledger WHERE idempotency_key = ?1`)
+        .bind(key)
+        .first<{ id: string; userId: string; type: string; amount: number; memo: string | null; refId: string | null; actorId: string | null }>();
+    const repeats = (m: { userId: string; type: string; amount: number; memo: string | null; refId: string | null }) =>
+      m.userId === id && m.type === 'admin_adjust' && m.amount === body.amount && m.memo === body.memo && m.refId === (ref?.id ?? null);
+    const conflict = () => refuse('idempotency_conflict', 409, 'idempotency_conflict', 'this key was already used for another adjustment');
     if (preview) {
-      const done = await c.env.DB.prepare(`SELECT 1 AS x FROM chip_ledger WHERE idempotency_key = ?1`).bind(`admin:${body.idempotencyKey}`).first();
+      const done = await madeBy();
+      if (done && !repeats(done)) await conflict();
       if (!target || (!done && target.balance + body.amount < 0)) await refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
       return c.json({
         preview: true,
@@ -857,24 +885,19 @@ const admin = new Hono<AppEnv>()
       userId: id,
       type: 'admin_adjust',
       amount: body.amount,
-      idempotencyKey: `admin:${body.idempotencyKey}`,
+      idempotencyKey: key,
       actorId: c.var.user!.id,
       memo: body.memo,
       refId: ref?.id ?? null,
     });
     if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
-    const chipsDetail = { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id, refType: ref.type } : {}) };
+    const linked = ref ? { refLedgerId: ref.id, refType: ref.type } : {};
     // The same request again (a retry, a double click): nothing changed, and that is on record. A first try whose audit
-    // row was not written (below) gets it now, marked late, so every adjustment has its `user.chips` row.
+    // row was not written (below) gets it now, marked late: the adjustment as its ledger row has it, by who made it.
     if (r.status === 'duplicate') {
-      // `+action` keeps the planner on audit_target_idx (this member's rows): with no ANALYZE statistics it chose
-      // audit_action_idx, every `user.chips` row ever written (docs/LOAD_TEST.md).
-      const recorded = await c.env.DB.prepare(
-        `SELECT 1 AS x FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?1 AND +action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?2 LIMIT 1`,
-      )
-        .bind(id, r.ledgerId)
-        .first();
-      if (!recorded) await audit(c, 'user.chips', { type: 'user', id }, { ...chipsDetail, late: true });
+      const done = await madeBy();
+      if (!done || !repeats(done)) return conflict();
+      await chipsRecord(c, id, done.actorId ?? c.var.user!.id, null, { amount: done.amount, memo: done.memo, ledgerId: done.id, ...linked, late: true });
       await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
     }
     if (r.status === 'applied') {
@@ -887,7 +910,9 @@ const admin = new Hono<AppEnv>()
         ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
       }).catch((e) => console.error('chips notice not written', id, r.ledgerId, e));
-      await audit(c, 'user.chips', { type: 'user', id }, chipsDetail).catch((e) => console.error('chips audit not written', id, r.ledgerId, e));
+      await chipsRecord(c, id, c.var.user!.id, clientIp(c), { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...linked }).catch((e) =>
+        console.error('chips audit not written', id, r.ledgerId, e),
+      );
       // The member's open pages read the balance, the ledger and the inbox again (the event says only that they changed).
       realtimeToUsers(c, [id], { scope: 'user', type: 'wallet.changed' });
       realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });

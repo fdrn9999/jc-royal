@@ -481,7 +481,7 @@ export function UserDetailPage() {
   const [pv, setPv] = useState<{ data: unknown } | { error: unknown } | null>(null);
   const previewSeq = useRef(0);
   // Kept while the same amount and memo are tried again, so a retry after a lost answer cannot pay twice.
-  const [chipKey, setChipKey] = useState<{ key: string; amount: number; memo: string; ref: string | null } | null>(null);
+  const [chipKey, setChipKey] = useState<{ key: string; user: string; amount: number; memo: string; ref: string | null } | null>(null);
   // A free refill the adjustment takes back (the member's refill panel), named in the ledger row it writes.
   const [chipRef, setChipRef] = useState<RefillRef | null>(null);
   const chipForm = useRef<HTMLDivElement>(null);
@@ -544,8 +544,10 @@ export function UserDetailPage() {
   const askChips = () => {
     const n = Number(amount);
     const ref = chipRef?.id ?? null;
-    const key = chipKey && chipKey.amount === n && chipKey.memo === memo && chipKey.ref === ref ? chipKey.key : newKey();
-    setChipKey({ key, amount: n, memo, ref });
+    // One key per adjustment: the same one again only for the same member (this page stays mounted from one member to the
+    // next), amount, memo and linked transaction, which the server takes as a repeat of it.
+    const key = chipKey && chipKey.user === id && chipKey.amount === n && chipKey.memo === memo && chipKey.ref === ref ? chipKey.key : newKey();
+    setChipKey({ key, user: id, amount: n, memo, ref });
     ask({ kind: 'chips', amount: n, memo, key, ref: chipRef });
   };
   const clearChips = () => {
