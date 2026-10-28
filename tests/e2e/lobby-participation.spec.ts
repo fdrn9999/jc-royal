@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page, type Route } from '@playwright/test';
 import { balanceOf, signUp, sitWith, standUp, test } from './helpers';
 
 /**
@@ -11,6 +11,7 @@ import { balanceOf, signUp, sitWith, standUp, test } from './helpers';
 const MINE = 'e2e-mine'; // 2 seats, no spectators
 const WAIT = 'e2e-mine-wait'; // 2 seats, spectators welcome
 const VAULT = 'e2e-mine-vault'; // 2 seats, private (mine-99), no spectators
+const SWITCH = 'e2e-mine-switch'; // 2 seats, spectators welcome
 
 const cardOf = (page: Page, id: string) => page.locator(`[data-testid=lobby-table][data-table=${id}]`);
 const myGame = (page: Page, id: string) => page.locator(`[data-testid=lobby-my-game][data-table=${id}]`);
@@ -241,4 +242,42 @@ test('participation: a private table takes its seated player back without the co
     await expect(b.page.getByTestId('buyin-confirm')).toHaveCount(0);
   }
   expect((await call<{ myParticipation: unknown }>(b.page, `/api/tables/${VAULT}`)).myParticipation).toEqual({ status: 'none' });
+});
+
+test("participation: another tab switching this browser to another account never leaves the previous account's seat in the lobby, even when the list does not come or an old one arrives late", async ({ browser }) => {
+  const a = await signUp(browser);
+  await sitWith(a.page, SWITCH, 500);
+  await a.page.goto('/');
+  await expect(cardOf(a.page, SWITCH).getByTestId('lobby-mine-badge')).toBeVisible();
+  await expect(myGame(a.page, SWITCH)).toBeVisible();
+  const aList = await call(a.page, '/api/tables');
+
+  // A refresh goes out as A and its answer is held back; every list asked after it fails.
+  let held: Route | null = null;
+  await a.page.route('**/api/tables', (r) => {
+    if (!held) held = r;
+    else void r.abort();
+  });
+  await a.page.getByTestId('lobby-refresh').click();
+  await expect.poll(() => !!held).toBe(true);
+
+  // Another tab of this browser signs out and signs in as B: the cookies are B's, and this tab learns it on focus.
+  const b = await signUp(browser);
+  await a.page.context().addCookies(await b.page.context().cookies());
+  const switched = a.page.waitForResponse((r) => r.url().endsWith('/api/auth/me'));
+  await a.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await switched;
+  await expect(a.page.getByTestId('balance')).toHaveText(await b.page.getByTestId('balance').innerText());
+  // A's answer arrives only now.
+  await held!.fulfill({ json: aList }).catch(() => {});
+  await a.page.waitForTimeout(1_000);
+  for (const id of ['lobby-mine-badge', 'lobby-continue']) await expect(a.page.getByTestId(id)).toHaveCount(0);
+  await expect(a.page.getByTestId('lobby-my-game')).toHaveCount(0);
+
+  // B's own list, once it comes: the table is one B may join; A's seat is still A's.
+  await a.page.unroute('**/api/tables');
+  await a.page.getByTestId('lobby-refresh').click();
+  await expect(cardOf(a.page, SWITCH).getByTestId('lobby-enter')).toHaveAttribute('data-entry', 'join');
+  await expect(a.page.getByTestId('lobby-mine-badge')).toHaveCount(0);
+  expect((await call<{ myParticipation: unknown }>(a.page, `/api/tables/${SWITCH}`)).myParticipation).toEqual({ status: 'none' });
 });

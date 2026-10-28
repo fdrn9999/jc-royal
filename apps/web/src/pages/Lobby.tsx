@@ -149,7 +149,16 @@ function MyGames({ tables }: { tables: LobbyTableDto[] }) {
   );
 }
 
+/**
+ * The lobby is the signed-in member's (their seats, places on a waitlist, tournament): another account signing in, from
+ * another tab, starts it afresh, so nothing of the previous one shows and no answer asked for it is applied.
+ */
 export function LobbyPage() {
+  const { me } = useAuth();
+  return <Lobby key={me?.id} />;
+}
+
+function Lobby() {
   const { t, locale } = useI18n();
   const nav = useNavigate();
   const { me } = useAuth();
