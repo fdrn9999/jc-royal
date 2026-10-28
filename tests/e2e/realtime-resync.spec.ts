@@ -113,3 +113,64 @@ test('realtime: a message sent while an open conversation\'s poll is out and bef
   // With the socket up the conversation is polled every 30 s: only a poll begun after the socket came up shows it.
   await expect(page.getByTestId('dm-theirs').filter({ hasText: '소켓이 열리기 전에' })).toBeVisible({ timeout: 10_000 });
 });
+
+/** Two friends; `a` gets a second page, the one under test. */
+async function friends(browser: Parameters<typeof signUp>[0]) {
+  const a = await signUp(browser);
+  const b = await signUp(browser);
+  const [aId, bId] = [await idOf(a.page), await idOf(b.page)];
+  await call(a.page, '/api/friends/requests', { userId: bId });
+  await call(b.page, `/api/friends/${aId}/accept`, {});
+  return { b, aId, bId, page: await a.page.context().newPage() };
+}
+const firstRead = (bId: string) => (r: Route) => {
+  const u = new URL(r.request().url());
+  return r.request().method() === 'GET' && u.pathname === `/api/dm/${bId}` && !u.searchParams.has('afterSeq');
+};
+
+test('realtime: a message sent while a conversation\'s first read is out and before the socket is up shows once both are', async ({ browser }) => {
+  const { b, aId, bId, page } = await friends(browser);
+  const sock = await heldHello(page);
+  const read = await holdFirst(page, firstRead(bId));
+  await page.goto(`/friends/${bId}`);
+  await read.seen;
+
+  // B writes after that read; its event never reaches the page (the socket is not up yet).
+  await call(b.page, `/api/dm/${aId}`, { text: '첫 읽기 중에 보낸 메시지' });
+  await page.waitForTimeout(1_000);
+  // The socket comes up while the conversation is still being read; then that read, without the message, lands.
+  await sock.open();
+  await read.answer();
+  await expect(page.getByTestId('dm-title')).toHaveText(b.nickname);
+  // With the socket up the conversation is polled every 30 s: only a poll asked for while it was being read shows it.
+  await expect(page.getByTestId('dm-theirs').filter({ hasText: '첫 읽기 중에' })).toBeVisible({ timeout: 10_000 });
+});
+
+test('realtime: a message whose event comes while a conversation\'s first read is out shows once that read lands', async ({ browser }) => {
+  const { b, aId, bId, page } = await friends(browser);
+  // The socket is up on the friends list: going to the conversation keeps it (no new hello).
+  let events: (f: string) => void = () => undefined;
+  const up = new Promise<void>((resolve) =>
+    page.on('websocket', (ws) => {
+      if (!ws.url().includes('/ws/realtime')) return;
+      ws.on('framereceived', (f) => {
+        if (String(f.payload).includes('"hello"')) resolve();
+        events(String(f.payload));
+      });
+    }),
+  );
+  await page.goto('/friends');
+  await up;
+  const read = await holdFirst(page, firstRead(bId));
+  await page.getByTestId('friend-row').filter({ hasText: b.nickname }).click();
+  await read.seen;
+
+  // B writes after that read; its event reaches the page while the conversation is still being read.
+  const delivered = new Promise<void>((r) => (events = (m) => m.includes('social.dm.created') && r()));
+  await call(b.page, `/api/dm/${aId}`, { text: '첫 읽기 중에 온 알림' });
+  await delivered;
+  await page.waitForTimeout(500);
+  await read.answer();
+  await expect(page.getByTestId('dm-title')).toHaveText(b.nickname);
+  await expect(page.getByTestId('dm-theirs').filter({ hasText: '첫 읽기 중에 온' })).toBeVisible({ timeout: 10_000 });
+});

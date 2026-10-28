@@ -571,9 +571,13 @@ export function ConversationPage() {
   // The conversation on screen: a request still running for one left behind must not touch it.
   const current = useRef(userId);
   current.current = userId;
-  const polling = useRef(false);
+  // The conversation a poll is out for: one left running for a conversation left behind does not hold up this one's.
+  const polling = useRef<string | null>(null);
   // An event came while a poll was out (it may have asked before that message was saved): one more poll after it.
   const pollAgain = useRef(false);
+  // The first read of the conversation: an event, or the socket coming up, while it is out asks for the same poll after
+  // it (its read may be older than that message); once it failed there is nothing to poll.
+  const opening = useRef<'out' | 'in' | 'failed'>('out');
   const presence = useFriendsPresence(userId);
   const lastOnline = useFriendsLastOnline();
   // While this conversation is on screen the server skips a push of a message from them (lib/presence.ts).
@@ -632,18 +636,28 @@ export function ConversationPage() {
     setMissing(false);
     setFailed(false);
     synced.current = 0;
+    opening.current = 'out';
+    pollAgain.current = false;
     void api<ConversationDto>(`/api/dm/${userId}`)
       .then(({ messages, peerRead: _, ...rest }) => {
         if (!live) return;
+        opening.current = 'in';
         setConv(rest);
         scroll.current = { kind: 'bottom' };
         sync(messages);
         setMsgs(messages);
         if (messages.some((m) => !m.fromMe && !m.readAt)) void markRead(synced.current);
+        if (pollAgain.current) {
+          pollAgain.current = false;
+          void poll();
+        }
       })
       .catch((e: unknown) => {
+        if (!live) return;
+        opening.current = 'failed';
+        pollAgain.current = false;
         // No such player reads as not found; a lost connection offers a retry.
-        if (live) (isGone(e) ? setMissing : setFailed)(true);
+        (isGone(e) ? setMissing : setFailed)(true);
       });
     return () => {
       live = false;
@@ -651,10 +665,10 @@ export function ConversationPage() {
   }, [userId, markRead, attempt]);
 
   const poll: () => Promise<void> = useCallback(async () => {
-    // One at a time: a slow request is not stacked under the next tick.
-    if (polling.current) return;
-    polling.current = true;
     const id = userId;
+    // One at a time: a slow request is not stacked under the next tick.
+    if (polling.current === id) return;
+    polling.current = id;
     const cur = msgsRef.current;
     try {
       // A burst, or a while offline, can leave more than a page: keep going from the last one received.
@@ -677,7 +691,7 @@ export function ConversationPage() {
     } catch {
       /* offline: the next tick, or the connection coming back, continues from the same seq */
     } finally {
-      polling.current = false;
+      if (polling.current === id) polling.current = null;
       if (pollAgain.current && current.current === id) {
         pollAgain.current = false;
         void poll();
@@ -686,26 +700,20 @@ export function ConversationPage() {
   }, [userId, merge, markRead]);
   /** For an event or the socket (back) up: a poll now, or one more after the one out (whose read may be older). */
   const pollSoon = useCallback(() => {
-    if (polling.current) pollAgain.current = true;
+    if (opening.current === 'failed') return;
+    if (opening.current === 'out' || polling.current === userId) pollAgain.current = true;
     else void poll();
-  }, [poll]);
+  }, [poll, userId]);
   // A message in this conversation (from them, or mine sent from another device: one already shown is not asked for),
   // and their reading mine. The event says only that and where: the messages and the read mark come from the poll.
-  useRealtime(
-    'social.dm.created',
-    (e) => {
-      if (e.payload.peerId === userId && !msgsRef.current.some((m) => m.seq === e.payload.seq)) pollSoon();
-    },
-    !!conv,
-  );
-  useRealtime(
-    'social.dm.read',
-    (e) => {
-      if (e.payload.peerId === userId && e.payload.readerId === userId) pollSoon();
-    },
-    !!conv,
-  );
-  useEffect(() => (conv ? onRealtimeResync(pollSoon) : undefined), [conv, pollSoon]);
+  // Also while the conversation is first read: that read may be older than the event.
+  useRealtime('social.dm.created', (e) => {
+    if (e.payload.peerId === userId && !msgsRef.current.some((m) => m.seq === e.payload.seq)) pollSoon();
+  });
+  useRealtime('social.dm.read', (e) => {
+    if (e.payload.peerId === userId && e.payload.readerId === userId) pollSoon();
+  });
+  useEffect(() => onRealtimeResync(pollSoon), [pollSoon]);
   useVisiblePoll(() => {
     if (conv) void poll();
   }, useRealtimeStatus() === 'open' ? LIVE_POLL_MS : POLL_MS);
