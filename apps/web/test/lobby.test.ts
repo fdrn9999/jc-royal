@@ -69,6 +69,47 @@ describe('latest', () => {
     expect(f.run()).toBe(false);
   });
 
+  it('a request asked for while one is out starts once that one is answered (or fails), once however often it was asked', async () => {
+    const d = deferred<number>();
+    const got: number[] = [];
+    const f = latest(d.load, (v) => got.push(v), () => got.push(-1));
+    f.run();
+    f.again();
+    f.again();
+    expect(d.calls).toHaveLength(1);
+    d.calls[0]!.resolve(1);
+    await flush();
+    expect(d.calls).toHaveLength(2);
+    d.calls[1]!.resolve(2);
+    await flush();
+    expect(got).toEqual([1, 2]);
+    expect(d.calls).toHaveLength(2);
+    // Nothing out: at once. After a failure the one asked for still follows.
+    f.again();
+    expect(d.calls).toHaveLength(3);
+    f.again();
+    d.calls[2]!.reject(new Error('offline'));
+    await flush();
+    expect(got).toEqual([1, 2, -1]);
+    expect(d.calls).toHaveLength(4);
+  });
+
+  it('a refresh or stop takes the place of a request asked for after the one out', async () => {
+    const d = deferred<number>();
+    const f = latest(d.load, () => undefined, () => undefined);
+    f.run();
+    f.again();
+    f.run(true);
+    d.calls[1]!.resolve(1);
+    await flush();
+    expect(d.calls).toHaveLength(2);
+    f.run();
+    f.again();
+    f.stop();
+    await flush();
+    expect(d.calls).toHaveLength(3);
+  });
+
   it('records when the last request started', () => {
     let t = 1_000;
     const f = latest(() => new Promise<never>(() => undefined), () => undefined, () => undefined, () => t);
@@ -87,12 +128,14 @@ function lobbyRequests(ms: number, o: { input?: (t: number) => boolean; wake?: (
   let t = 0;
   let started = 0;
   const runs: number[] = [];
+  const run = () => {
+    runs.push(t);
+    started = t;
+    return true;
+  };
   const f = {
-    run: () => {
-      runs.push(t);
-      started = t;
-      return true;
-    },
+    run,
+    again: () => void run(),
     get startedAt() {
       return started;
     },
@@ -159,6 +202,23 @@ describe('lobby polling', () => {
     expect(runs.filter((r) => r < down)).toHaveLength(5);
     // The first tick after it went down is due already (the last read was a minute ago); every 5 s from then.
     expect(runs.filter((r) => r >= down)).toEqual([down, down + 5_000, down + 10_000, down + 15_000, down + 20_000, down + 25_000, down + 30_000]);
+  });
+
+  it('the socket coming up while the first read is out reads the list again after it, so a change made in between still shows', async () => {
+    const d = deferred<string>();
+    const shown: string[] = [];
+    const f = latest(d.load, (v) => shown.push(v), () => undefined);
+    const p = lobbyPoller(f, () => true, Date.now, () => true);
+    // The page's first read takes its snapshot; a table changes before the socket subscribes (no event for it);
+    // the socket comes up, and only then is the first read answered, with the older state.
+    f.run();
+    p.up();
+    d.calls[0]!.resolve('before the change');
+    await flush();
+    expect(d.calls).toHaveLength(2);
+    d.calls[1]!.resolve('after the change');
+    await flush();
+    expect(shown).toEqual(['before the change', 'after the change']);
   });
 });
 

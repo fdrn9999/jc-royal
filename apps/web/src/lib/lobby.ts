@@ -84,6 +84,8 @@ export function seatHeld(s: Pick<TableView, 'reservation' | 'waitlist' | 'tourna
 export interface Latest {
   /** Starts a request unless one is out; `replace` drops the one out and starts afresh. Returns whether one started. */
   run(replace?: boolean): boolean;
+  /** A request begun from now on: at once, or as soon as the one out is answered (its read may be older than this). */
+  again(): void;
   /** Drops the request out, and every answer from now on. */
   stop(): void;
   /** Epoch ms when the last request started (0 before the first). */
@@ -93,37 +95,48 @@ export interface Latest {
 /**
  * One request at a time for a polled resource, applying only the newest answer: a poll that comes due while a
  * request is out is skipped, a manual refresh replaces the request out (whose answer is dropped even if it still
- * arrives), and nothing is applied after `stop`.
+ * arrives), `again` asks for one more after the request out, and nothing is applied after `stop`.
  */
 export function latest<T>(load: (signal: AbortSignal) => Promise<T>, onData: (data: T) => void, onError: (e: unknown) => void, now = Date.now): Latest {
   let seq = 0;
   let out: AbortController | null = null;
   let stopped = false;
   let startedAt = 0;
+  // Asked for while a request was out: one more starts once that one is answered.
+  let queued = false;
+  const run = (replace = false) => {
+    if (stopped || (out && !replace)) return false;
+    out?.abort();
+    queued = false;
+    const ctl = new AbortController();
+    out = ctl;
+    const id = ++seq;
+    startedAt = now();
+    load(ctl.signal)
+      .then(
+        (data) => {
+          if (id === seq && !stopped) onData(data);
+        },
+        (e: unknown) => {
+          if (id === seq && !stopped && !ctl.signal.aborted) onError(e);
+        },
+      )
+      .finally(() => {
+        if (out !== ctl) return;
+        out = null;
+        if (queued) run();
+      });
+    return true;
+  };
   return {
-    run(replace = false) {
-      if (stopped || (out && !replace)) return false;
-      out?.abort();
-      const ctl = new AbortController();
-      out = ctl;
-      const id = ++seq;
-      startedAt = now();
-      load(ctl.signal)
-        .then(
-          (data) => {
-            if (id === seq && !stopped) onData(data);
-          },
-          (e: unknown) => {
-            if (id === seq && !stopped && !ctl.signal.aborted) onError(e);
-          },
-        )
-        .finally(() => {
-          if (out === ctl) out = null;
-        });
-      return true;
+    run,
+    again() {
+      if (out) queued = true;
+      else run();
     },
     stop() {
       stopped = true;
+      queued = false;
       out?.abort();
       out = null;
     },
@@ -145,9 +158,9 @@ export const LIVE_POLL_MS = 60_000;
  * pointer, keys or wheel; `wake` when the page becomes visible, gets focus or the connection returns. A lobby left open
  * with nobody at it slows down, and the first input afterwards brings the list up to date at once. While `live` (the
  * realtime socket is up and sends the lobby's changes) it asks only every LIVE_POLL_MS, and on coming back after
- * IDLE_POLL_MS; a socket back after being down reads it at once (the caller's resync).
+ * IDLE_POLL_MS; `up` when the socket comes (back) up reads it once more.
  */
-export function lobbyPoller(f: Pick<Latest, 'run' | 'startedAt'>, visible: () => boolean, now = Date.now, live: () => boolean = () => false) {
+export function lobbyPoller(f: Pick<Latest, 'run' | 'again' | 'startedAt'>, visible: () => boolean, now = Date.now, live: () => boolean = () => false) {
   let lastInput = now();
   return {
     tick() {
@@ -166,6 +179,13 @@ export function lobbyPoller(f: Pick<Latest, 'run' | 'startedAt'>, visible: () =>
       lastInput = t;
       // Coming back fires visibility and focus together: one request is enough.
       if (visible() && t - f.startedAt >= (live() ? IDLE_POLL_MS : 1_000)) f.run();
+    },
+    /**
+     * Changes come over the socket from now on; one made before it had no event, so the list is read again: after the
+     * request out, if any, whose read may be older than the subscription.
+     */
+    up() {
+      f.again();
     },
   };
 }

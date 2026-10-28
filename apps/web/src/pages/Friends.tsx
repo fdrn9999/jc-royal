@@ -684,11 +684,11 @@ export function ConversationPage() {
       }
     }
   }, [userId, merge, markRead]);
-  /** For an event: a poll now, or one more after the one out. */
-  const pollSoon = () => {
+  /** For an event or the socket (back) up: a poll now, or one more after the one out (whose read may be older). */
+  const pollSoon = useCallback(() => {
     if (polling.current) pollAgain.current = true;
     else void poll();
-  };
+  }, [poll]);
   // A message in this conversation (from them, or mine sent from another device: one already shown is not asked for),
   // and their reading mine. The event says only that and where: the messages and the read mark come from the poll.
   useRealtime(
@@ -705,7 +705,7 @@ export function ConversationPage() {
     },
     !!conv,
   );
-  useEffect(() => (conv ? onRealtimeResync(() => void poll()) : undefined), [conv, poll]);
+  useEffect(() => (conv ? onRealtimeResync(pollSoon) : undefined), [conv, pollSoon]);
   useVisiblePoll(() => {
     if (conv) void poll();
   }, useRealtimeStatus() === 'open' ? LIVE_POLL_MS : POLL_MS);

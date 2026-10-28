@@ -41,6 +41,7 @@ function useLobbyTables() {
   const [tables, setTables] = useState<LobbyTableDto[] | null>(null);
   const [error, setError] = useState(false);
   const feed = useRef<Latest | null>(null);
+  const poller = useRef<ReturnType<typeof lobbyPoller> | null>(null);
   const up = useRealtimeStatus() === 'open';
   useEffect(() => {
     const live = newLobbyLive();
@@ -98,6 +99,7 @@ function useLobbyTables() {
       onRealtime('lobby.mine.changed', ({ resourceId: id }) => readMine(id)),
     ];
     const p = lobbyPoller(f, () => document.visibilityState === 'visible', Date.now, realtimeUp);
+    poller.current = p;
     const h = setInterval(p.tick, POLL_MS);
     document.addEventListener('visibilitychange', p.wake);
     window.addEventListener('focus', p.wake);
@@ -118,7 +120,7 @@ function useLobbyTables() {
   // The socket (back) up: changes arrive from now on, and the list is read once more for any made before.
   const wasUp = useRef(up);
   useEffect(() => {
-    if (up && !wasUp.current) feed.current?.run();
+    if (up && !wasUp.current) poller.current?.up();
     wasUp.current = up;
   }, [up]);
   // The refresh button replaces a request already out rather than waiting for it.
