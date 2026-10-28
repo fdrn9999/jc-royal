@@ -68,8 +68,17 @@ export function realtimeToAll(c: Context<AppEnv>, e: PublicRealtimeEvent) {
  */
 export const spreadFor = (n: number) => Math.min(30_000, Math.max(0, n - 20) * 10);
 
-/** Closes the realtime sockets of ended sign-ins (lib/signout.ts), and has the hub refuse handshakes checked just before. */
+/**
+ * Closes the realtime sockets of ended sign-ins (lib/signout.ts), and has the hub refuse handshakes checked just before.
+ * Tried twice (a repeat closes nothing more): a sign-out the hub never hears of leaves those sockets open, getting events
+ * that name no content and whose reads the ended sign-in is refused, until the hub's sweep past REALTIME_MAX_AGE_MS.
+ */
 export function realtimeSignOut(c: Context<AppEnv>, scope: SignOutScope) {
-  const at = Date.now();
-  c.executionCtx.waitUntil(hubPost(c.env, realtimeShardOf(scope.user), 'revoke', { ...scope, at }).catch((err) => console.warn('realtime sign-out not delivered', String(err))));
+  const body = { ...scope, at: Date.now() };
+  const shard = realtimeShardOf(scope.user);
+  c.executionCtx.waitUntil(
+    hubPost(c.env, shard, 'revoke', body)
+      .catch(() => hubPost(c.env, shard, 'revoke', body))
+      .catch((err) => console.warn('realtime sign-out not delivered', String(err))),
+  );
 }
