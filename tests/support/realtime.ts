@@ -76,7 +76,11 @@ export class RealtimeSocket {
     return find()!;
   }
 
-  waitClose(ms = 15_000): Promise<number> {
+  /**
+   * A close the hub starts reaches this client about ten seconds later under wrangler dev (measured: 10.1 s, the same for
+   * a table room's socket; a close the client starts takes milliseconds), so the wait leaves room for that and a busy run.
+   */
+  waitClose(ms = 30_000): Promise<number> {
     return this.until(() => !!this.closed, ms, 'close').then(() => this.closed!.code);
   }
 

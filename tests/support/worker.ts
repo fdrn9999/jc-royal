@@ -129,6 +129,8 @@ export const TABLES: TestTable[] = [
   // (heads-up, so one fold ends a hand for the history).
   { id: 'it-social-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   { id: 'it-social-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Platform realtime: a buy-in and a cash-out each tell the member's other pages that the wallet moved.
+  { id: 'it-rt-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {

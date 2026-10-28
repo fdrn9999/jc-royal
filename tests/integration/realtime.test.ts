@@ -7,12 +7,24 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
 import { RealtimeSocket } from '../support/realtime';
+import { TableSocket } from '../support/ws';
 
 const admin = sharedAdmin();
 const open: RealtimeSocket[] = [];
+const tables: TableSocket[] = [];
 afterEach(() => {
   for (const s of open.splice(0)) s.close();
+  for (const s of tables.splice(0)) s.close();
 });
+
+const count = (s: RealtimeSocket, type: string) => s.events.filter((e) => e.type === type).length;
+
+/** No more events of this type reach the socket: the hub answers a ping only after what it was sent before it. */
+async function quiet(s: RealtimeSocket, type: string, expected: number) {
+  await s.ping();
+  await new Promise((r) => setTimeout(r, 500));
+  expect(count(s, type)).toBe(expected);
+}
 
 async function rt(client: Client, opts: Parameters<typeof RealtimeSocket.open>[1] = {}) {
   const s = await RealtimeSocket.open(client, opts);
@@ -138,6 +150,87 @@ describe('realtime socket: personal events', () => {
   });
 });
 
+describe('realtime socket: the account and the wallet', () => {
+  it('a VIP change tells only that member, and choosing the color it already has tells nobody', async () => {
+    const [m, other] = await Promise.all([newUser(), newUser()]);
+    const [mine, theirs] = await Promise.all([rt(m.client), rt(other.client)]);
+    await reauth();
+    const set = async (body: Record<string, unknown>) => {
+      const version = (await admin.get(`/api/admin/users/${m.me.id}/vip`)).body.version as number;
+      const r = await admin.patch(`/api/admin/users/${m.me.id}/vip`, { ...body, reason: 'realtime vip', expectedVersion: version });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body as { changed: boolean };
+    };
+    expect(await set({ enabled: true })).toMatchObject({ changed: true });
+    const e = await mine.event('account.changed');
+    // what changed is read from /api/auth/me, not carried: no color, no reason, no administrator
+    const adminId = (await admin.get('/api/admin/auth/me')).body.user.id as string;
+    expect(JSON.stringify(e)).not.toMatch(new RegExp(`gold|realtime vip|${adminId}`));
+    expect((await m.client.get('/api/auth/me')).body.vip).toBe('gold');
+    expect(await set({ enabled: true })).toMatchObject({ changed: false });
+    await quiet(mine, 'account.changed', 1);
+    await quiet(theirs, 'account.changed', 0);
+  });
+
+  it('a role change tells the member, whose own sign-in stays', async () => {
+    const m = await newUser();
+    const s = await rt(m.client);
+    await reauth();
+    expect((await admin.post(`/api/admin/users/${m.me.id}/role`, { role: 'admin', reason: 'realtime role' })).status).toBe(200);
+    await s.event('account.changed');
+    expect((await admin.post(`/api/admin/users/${m.me.id}/role`, { role: 'user', reason: 'realtime role' })).status).toBe(200);
+    await s.until(() => count(s, 'account.changed') === 2, 15_000, 'second account.changed');
+    expect(s.closed).toBeNull();
+    expect((await m.client.get('/api/auth/me')).body.role).toBe('user');
+  });
+
+  it("a profile saved on one device reaches the member's other devices", async () => {
+    const m = await newUser();
+    const phone = new Client();
+    expect((await phone.post('/api/auth/login', { email: m.email, password: PASSWORD })).status).toBe(200);
+    const [here, there] = await Promise.all([rt(m.client), rt(phone)]);
+    const nickname = uniq('rn').slice(0, 14);
+    expect((await m.client.patch('/api/auth/me', { nickname })).status).toBe(200);
+    await there.event('account.changed');
+    await here.event('account.changed');
+    expect((await phone.get('/api/auth/me')).body.nickname).toBe(nickname);
+  });
+
+  it('a free refill tells the other pages once, and a claim that pays nothing tells nobody', async () => {
+    const m = await newUser();
+    await reauth();
+    // below the seeded threshold (1,000), with a recorded adjustment
+    const down = await admin.post(`/api/admin/users/${m.me.id}/chips`, { amount: -9_500, memo: 'realtime refill', idempotencyKey: uniq('rt-rf') });
+    expect(down.status, JSON.stringify(down.body)).toBe(200);
+    const s = await rt(m.client);
+    const paid = await m.client.post('/api/me/refill', {});
+    expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+    expect(paid.body.duplicate).toBe(false);
+    await s.event('wallet.changed');
+    // the next claim is the same one seen again or one refused: nothing paid, nothing announced
+    const again = await m.client.post('/api/me/refill', {});
+    if (again.status === 200) expect(again.body.duplicate).toBe(true);
+    else expect(['refill_refused', 'refill_changed'], JSON.stringify(again.body)).toContain(again.body.error.code);
+    await quiet(s, 'wallet.changed', 1);
+    expect((await d1<{ n: number }>(`SELECT count(*) AS n FROM chip_ledger WHERE user_id = '${m.me.id}' AND type = 'free_refill'`))[0]!.n).toBe(1);
+  });
+
+  it('a buy-in and a cash-out at a table each tell the pages away from it', async () => {
+    const m = await newUser();
+    const s = await rt(m.client);
+    const ws = await TableSocket.open(m.client, 'it-rt-0');
+    tables.push(ws);
+    expect(await ws.request({ t: 'sit', seatIndex: 0, buyIn: 400 })).toMatchObject({ t: 'ack' });
+    await s.event('wallet.changed');
+    expect((await m.client.get('/api/auth/me')).body.balance).toBe(9_600);
+    expect(await ws.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
+    await s.until(() => count(s, 'wallet.changed') === 2, 15_000, 'cash-out wallet.changed');
+    // the chips came back once, by the room's own settlement
+    expect((await m.client.get('/api/auth/me')).body.balance).toBe(10_000);
+    await quiet(s, 'wallet.changed', 2);
+  });
+});
+
 describe('realtime socket: sign-outs', () => {
   it('logging out ends this device; "other devices" keeps the device that asked', async () => {
     const u = await newUser();
@@ -148,15 +241,21 @@ describe('realtime socket: sign-outs', () => {
     const [sHere, sPhone, sLaptop] = await Promise.all([rt(u.client), rt(phone), rt(laptop)]);
 
     expect((await u.client.post('/api/auth/logout')).status).toBe(200);
-    expect(await sHere.waitClose()).toBe(4401);
-    await sPhone.ping();
-    expect(sPhone.closed).toBeNull();
+    const hereClosed = sHere.waitClose();
     // the signed-out page cannot open another
     expect(await handshake(u.client)).toBe(401);
 
     // a password change on the phone signs out every other device (the laptop), not the phone
     expect((await phone.post('/api/auth/me/password', { currentPassword: PASSWORD, newPassword: `${PASSWORD}x` })).status).toBe(200);
-    expect(await sLaptop.waitClose()).toBe(4401);
+    const laptopClosed = sLaptop.waitClose();
+    // The hub stops delivering at the sign-out, whenever the closed page hears of it: an event now reaches the phone only.
+    await reauth();
+    await admin.post(`/api/admin/users/${u.me.id}/chips`, { amount: 5, memo: 'after sign-out', idempotencyKey: uniq('rt-out') });
+    await sPhone.event('wallet.changed');
+    expect(await hereClosed).toBe(4401);
+    expect(await laptopClosed).toBe(4401);
+    expect(sHere.events).toEqual([]);
+    expect(sLaptop.events).toEqual([]);
     await sPhone.ping();
     expect(sPhone.closed).toBeNull();
   });
@@ -166,9 +265,8 @@ describe('realtime socket: sign-outs', () => {
     const [sa, sb] = await Promise.all([rt(a.client), rt(b.client)]);
     await reauth();
     expect((await admin.post(`/api/admin/users/${a.me.id}/disconnect`, { reason: 'realtime check' })).status).toBe(200);
-    expect(await sa.waitClose()).toBe(4401);
     expect((await admin.post(`/api/admin/users/${b.me.id}/suspend`, { reason: 'realtime check' })).status).toBe(200);
-    expect(await sb.waitClose()).toBe(4401);
+    expect(await Promise.all([sa.waitClose(), sb.waitClose()])).toEqual([4401, 4401]);
     expect(await handshake(b.client)).toBe(401);
   });
 
