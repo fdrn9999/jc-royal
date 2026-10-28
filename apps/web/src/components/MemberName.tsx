@@ -6,7 +6,7 @@
  * members look exactly as before. The crown is drawn filled, so it never reads as a seat's outlined host crown.
  */
 import type { BotLevel, PublicRole, VipColor } from '@jc/types';
-import { cx, UserIcon } from '@jc/ui';
+import { BotIcon, cx, UserIcon } from '@jc/ui';
 import { useI18n } from '../lib/i18n';
 
 const LABEL = { super_admin: 'role.superAdmin', admin: 'role.admin' } as const;
@@ -14,17 +14,24 @@ const LABEL = { super_admin: 'role.superAdmin', admin: 'role.admin' } as const;
 export const BOT_LEVEL_LABEL = { easy: 'bot.easy', normal: 'bot.normal', hard: 'bot.hard', expert: 'bot.expert' } as const;
 
 /**
- * The BOT pill on a table bot's name (the same word in Korean and English). The level, when known, is in its title and
- * read out by screen readers; the replay of a past hand knows only that the seat was a bot. A level this build does
- * not know yet (a newer server) reads as a plain table bot.
+ * What a table bot is called ("AI bot player · Normal"): the level when known. The replay of a past hand knows only that
+ * the seat was a bot; a level this build does not know yet (a newer server) reads as a plain bot player.
+ */
+export function botLabel(t: ReturnType<typeof useI18n>['t'], level: BotLevel | true) {
+  const key = level === true ? undefined : (BOT_LEVEL_LABEL as Record<string, (typeof BOT_LEVEL_LABEL)[BotLevel] | undefined>)[level];
+  return key ? t('bot.labelLevel', { level: t(key) }) : t('bot.label');
+}
+
+/**
+ * The robot mark in front of a table bot's name (the icon set's bot, in the bot teal): what it is in its title and for
+ * screen readers. Only the server's word (`SeatView.bot`, a past hand's `bot`) puts it there, never the nickname.
  */
 export function BotBadge({ level, className }: { level: BotLevel | true; className?: string }) {
   const { t } = useI18n();
-  const key = level === true ? undefined : (BOT_LEVEL_LABEL as Record<string, (typeof BOT_LEVEL_LABEL)[BotLevel] | undefined>)[level];
-  const label = key ? t('bot.labelLevel', { level: t(key) }) : t('bot.label');
+  const label = botLabel(t, level);
   return (
-    <span className={cx('jc-bot-badge', className)} title={label} data-level={level === true ? undefined : level} data-testid="bot-badge">
-      <span aria-hidden>BOT</span>
+    <span className={cx('jc-bot-icon', className)} title={label} data-level={level === true ? undefined : level} data-testid="bot-badge">
+      <BotIcon />
       <span className="sr-only">{label}</span>
     </span>
   );
@@ -120,8 +127,8 @@ export function HostedBy({ host }: { host: { nickname: string; role?: PublicRole
  * badge with `badge`; for a VIP member, their color with the diamond in front, or the VIP pill after it with `badge`.
  * `badge="wide"` (a row that also holds a status, a time or buttons): the badges from the sm width up, and below it the
  * marks alone (the diamond; staff keep the crown or shield either way), so a phone's narrow row still shows the name.
- * A table bot (`bot`) always carries the BOT pill. Long names are cut with an ellipsis; the marks and the badges always
- * stay whole, so a seat keeps its size and a long name gives way to them.
+ * A table bot (`bot`) always carries the robot mark in front. Long names are cut with an ellipsis; the marks and the
+ * badges always stay whole, so a seat keeps its size and a long name gives way to them.
  */
 export function MemberName({ name, role, vip: given, bot, badge, className }: { name: string; role?: PublicRole; vip?: VipColor; bot?: BotLevel | true; badge?: boolean | 'wide'; className?: string }) {
   const vip = vipOf(role, given);
@@ -136,12 +143,12 @@ export function MemberName({ name, role, vip: given, bot, badge, className }: { 
     <span className={cx('inline-flex min-w-0 max-w-full items-center gap-1 align-bottom', className)} data-testid="member-name">
       <RoleIcon role={role} className="size-[1.05em]" />
       {vip && badge !== true && <VipIcon className={cx('size-[0.85em]', badge === 'wide' && 'sm:hidden')} />}
+      {bot && <BotBadge level={bot} />}
       <span className={cx('min-w-0 truncate', role && 'jc-role-name', vip && 'jc-vip-name')} data-role={role} data-vip={vip}>
         {name}
       </span>
       {/* Hidden by a wrapper: the pills' own (unlayered) display would win over a utility on them. */}
       {badge === 'wide' && pills ? <span className="contents max-sm:hidden">{pills}</span> : pills}
-      {bot && <BotBadge level={bot} />}
     </span>
   );
 }

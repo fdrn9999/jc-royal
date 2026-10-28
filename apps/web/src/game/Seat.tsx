@@ -6,7 +6,7 @@
 import type { SeatView } from '@jc/types';
 import { CrownIcon, cx, holeOrder, HourglassIcon, PlayingCard, PlusIcon } from '@jc/ui';
 import { memo, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { BOT_LEVEL_LABEL, MemberName } from '../components/MemberName';
+import { BOT_LEVEL_LABEL, botLabel, MemberName } from '../components/MemberName';
 import type { Amounts } from '../lib/amount';
 import type { Density } from './layout';
 import { cardsToShow } from './olderRooms';
@@ -248,6 +248,9 @@ function SeatPlace(p: SeatProps) {
   // A bot's level and the style it plays (the style's whole name in the title).
   const botLevel = s.bot && s.bot !== true ? t(BOT_LEVEL_LABEL[s.bot]) : '';
   const botTitle = s.botStyle ? `${botLevel} · ${t(`bot.style.${s.botStyle}` as MsgKey)}` : undefined;
+  // The plate's button covers the robot mark, so it carries the mark's title (and the style): what a pointer resting on
+  // a bot's seat reads. A tap opens the bot's card.
+  const pickTitle = s.bot ? [botLabel(t, s.bot), s.botStyle && t(`bot.style.${s.botStyle}` as MsgKey)].filter(Boolean).join(' · ') : undefined;
   const botLine = (
     <>
       {botLevel}
@@ -432,7 +435,7 @@ function SeatPlace(p: SeatProps) {
             </span>
           )}
           {p.onPick && (
-            <button type="button" className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400" onClick={p.onPick} aria-label={s.nickname} data-testid={`seat-pick-${s.seatIndex}`} />
+            <button type="button" className="absolute inset-0 rounded-full focus-visible:outline-2 focus-visible:outline-gold-400" onClick={p.onPick} aria-label={s.nickname} title={pickTitle} data-testid={`seat-pick-${s.seatIndex}`} />
           )}
         </div>
         {/* status line: no wider than the seat (layout.ts); what does not fit is cut short, whole in its title */}
