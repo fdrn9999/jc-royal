@@ -271,6 +271,12 @@ export interface LobbyTableDto {
    * has the last word when they open it. Missing from older servers: read as none.
    */
   myParticipation?: { status: 'seated' } | { status: 'waiting'; position: number } | { status: 'none' };
+  /**
+   * When the counts (seated through spectators) and the rest of the card were last written: a page that also gets them
+   * live (realtime lobby.table.changed and lobby.table.updated) keeps whichever is newer. Missing from older servers.
+   */
+  liveRev?: number;
+  rev?: number;
 }
 
 /**

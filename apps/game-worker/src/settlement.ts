@@ -368,11 +368,25 @@ export interface LiveStats {
   connections: number;
 }
 
+/** What a live occupancy write left in the row: its live_updated_at (the lobby's revision of the counts) and the table's status. */
+export interface LiveWritten {
+  rev: number;
+  status: string;
+}
+
 /**
  * Writes the room's live occupancy, its latest problem (if any) and its pending operations counters in one D1 batch,
- * which also reads the maintenance window back (so a room learns of one without a D1 call of its own).
+ * which also reads the maintenance window back (so a room learns of one without a D1 call of its own). `live` is null
+ * when the table row is gone.
  */
-export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveStats, issue: string | null = null, ops: OpsCount[] = [], now = Date.now()): Promise<Maintenance | null> {
+export async function publishLiveStats(
+  d1: D1Database,
+  tableId: string,
+  s: LiveStats,
+  issue: string | null = null,
+  ops: OpsCount[] = [],
+  now = Date.now(),
+): Promise<{ maintenance: Maintenance | null; live: LiveWritten | null }> {
   const results = await d1.batch([
     maintenanceQuery(d1, now),
     d1
@@ -380,12 +394,16 @@ export async function publishLiveStats(d1: D1Database, tableId: string, s: LiveS
         `UPDATE tables SET live_seated = ?2, live_playing = ?3, live_waitlist = ?4, live_spectators = ?5, live_connections = ?6,
                 live_updated_at = (unixepoch('subsec') * 1000), last_issue = COALESCE(?7, last_issue), live_bots = ?8,
                 live_waitlist_users = ?9
-         WHERE id = ?1`,
+         WHERE id = ?1
+         RETURNING live_updated_at AS rev, status`,
       )
       .bind(tableId, s.seated, s.playing ? 1 : 0, s.waitlist, s.spectators, s.connections, issue, s.bots, JSON.stringify(s.waitlistUsers)),
     ...opsUpserts(d1, ops),
   ]);
-  return toMaintenance(results[0]?.results[0] as Maintenance | undefined);
+  return {
+    maintenance: toMaintenance(results[0]?.results[0] as Maintenance | undefined),
+    live: (results[1]?.results[0] as LiveWritten | undefined) ?? null,
+  };
 }
 
 /**

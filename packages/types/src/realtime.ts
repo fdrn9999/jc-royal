@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { LobbyTableDto } from './api';
 
 // ------------------------------------------------------------------ platform realtime (GET /ws/realtime)
 //
@@ -63,9 +64,17 @@ export const LobbyLivePatchSchema = z.object({
   playing: z.boolean(),
   waitlist: count,
   spectators: count,
-  status: z.enum(['open', 'closing', 'closed']),
+  /** As LobbyTableDto.status: `closed` also while it is closing. */
+  status: z.enum(['open', 'closed']),
 });
 export type LobbyLivePatch = z.infer<typeof LobbyLivePatchSchema>;
+
+/** A lobby card as every member sees it: GET /api/tables' row without the caller's own place (myParticipation). */
+export type PublicLobbyTable = Omit<LobbyTableDto, 'myParticipation'>;
+/** Written by the API from the same row GET /api/tables reads; checked here only for its shape and that it has no one's own place. */
+const PublicLobbyTableSchema = z.custom<PublicLobbyTable>(
+  (v) => typeof v === 'object' && v !== null && typeof (v as { id?: unknown }).id === 'string' && typeof (v as { rev?: unknown }).rev === 'number' && !('myParticipation' in v),
+);
 
 export const RealtimeEventSchema = z.discriminatedUnion('type', [
   // ---- the member's own pages (scope user): what changed, never by how much; the page reads it again.
@@ -90,8 +99,11 @@ export const RealtimeEventSchema = z.discriminatedUnion('type', [
   // ---- public (scope lobby/service): only what every member may see.
   /** A table's live counts, as the lobby list shows them. Topic lobby. */
   z.object({ ...pub, type: z.literal('lobby.table.changed'), resourceId: id, payload: LobbyLivePatchSchema }),
-  /** A table opened or its settings changed: read /api/tables/:id (once, for that table). Topic lobby. */
-  z.object({ ...pub, type: z.literal('lobby.table.updated'), resourceId: id }),
+  /**
+   * A table opened, or its name, stakes, privacy, spectating, entry or status changed: its whole card (the page keeps
+   * its own place there, and the newer of this and what it read, by `rev`). Topic lobby.
+   */
+  z.object({ ...pub, type: z.literal('lobby.table.updated'), resourceId: id, payload: PublicLobbyTableSchema }),
   /** A table closed: drop it from the list. Topic lobby. */
   z.object({ ...pub, type: z.literal('lobby.table.removed'), resourceId: id }),
   /** A tournament was created, changed, filled, started, finished or cancelled. Topic tournaments. */
