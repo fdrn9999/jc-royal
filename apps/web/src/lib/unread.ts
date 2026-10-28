@@ -53,7 +53,8 @@ const SLOW_TICKS = 4;
  * Keeps the counters for the signed-in `account` until the returned function stops it: polls while the tab is visible,
  * and at once when it becomes visible again (a hidden tab does not poll). A message, friend or 1:1 event reads them at
  * once in a visible tab (a hidden one reads when it is shown), one announcement to many after its random wait, and the
- * poll slows down while those events arrive; a socket back after being down reads them once.
+ * poll slows down while those events arrive; a socket back after being down reads them once. A notice or maintenance
+ * change has the banners read the service status after its random wait too.
  */
 export function watchUnread(account: string, pollMs: number): () => void {
   own(account);
@@ -66,13 +67,19 @@ export function watchUnread(account: string, pollMs: number): () => void {
   const tick = () => {
     if (document.visibilityState === 'visible' && (!realtimeUp() || ++ticks % SLOW_TICKS === 0)) void read();
   };
-  const spread = (ms: number) => {
-    if (!ms) return shown();
+  const later = (ms: number, f: () => void) => {
+    if (!ms) return f();
     const h = setTimeout(() => {
       timers.delete(h);
-      shown();
+      f();
     }, Math.random() * ms);
     timers.add(h);
+  };
+  const spread = (ms: number) => later(ms, shown);
+  // A notice or maintenance change: the banners read the status again unless they hold that revision (a hidden tab
+  // reads it with the counters when it is shown).
+  const service = (rev: number) => {
+    if (document.visibilityState === 'visible') refreshService(rev);
   };
   void refreshUnread();
   const h = setInterval(tick, pollMs);
@@ -80,6 +87,7 @@ export function watchUnread(account: string, pollMs: number): () => void {
   const off = [
     onRealtime('message.changed', (e) => spread(e.payload?.spreadMs ?? 0)),
     onRealtime('inbox.broadcast', (e) => spread(e.payload.spreadMs)),
+    onRealtime('service.changed', (e) => later(e.payload.spreadMs, () => service(e.payload.rev))),
     onRealtime('social.friend.changed', shown),
     onRealtime('social.dm.created', shown),
     onRealtime('social.dm.read', shown),
