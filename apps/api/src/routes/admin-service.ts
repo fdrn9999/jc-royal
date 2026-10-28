@@ -10,6 +10,7 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { fail, parseBody } from '../lib/http';
+import { realtimeToAll, spreadFor } from '../lib/realtime';
 import { tellRoomsAboutMaintenance, type RoomFanOut } from '../lib/service';
 import { audit } from './admin-auth';
 
@@ -177,6 +178,8 @@ export const adminServiceRoutes = new Hono<AppEnv>()
         .bind(body.titleEn, body.titleKo, body.bodyEn ?? body.titleEn, body.bodyKo ?? body.titleKo, me, batchId, now)
         .run();
       sent = r.meta.changes ?? 0;
+      // Every member got one: one event for every page, each reading its count after its own wait (no row per member here).
+      if (sent) realtimeToAll(c, { scope: 'service', type: 'inbox.broadcast', payload: { spreadMs: spreadFor(sent) } });
     }
     await audit(c, 'service.notice.create', { type: 'notice', id }, { kind: body.kind, titleKo: body.titleKo, startsAt, endsAt: body.endsAt ?? null, postId, batchId, sent });
     return c.json({ id, postId, batchId, sent }, 201);

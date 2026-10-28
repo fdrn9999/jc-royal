@@ -62,6 +62,12 @@ export function realtimeToAll(c: Context<AppEnv>, e: PublicRealtimeEvent) {
   c.executionCtx.waitUntil(sendToAll(c.env, e).catch((err) => console.warn('realtime publish failed', e.type, String(err))));
 }
 
+/**
+ * How long the pages told of one send to `n` members spread their reads over: none for a few, ten milliseconds a member
+ * beyond that, at most thirty seconds (so a send to every member is read back at a steady rate, not in one second).
+ */
+export const spreadFor = (n: number) => Math.min(30_000, Math.max(0, n - 20) * 10);
+
 /** Closes the realtime sockets of ended sign-ins (lib/signout.ts), and has the hub refuse handshakes checked just before. */
 export function realtimeSignOut(c: Context<AppEnv>, scope: SignOutScope) {
   const at = Date.now();

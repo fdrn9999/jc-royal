@@ -73,8 +73,11 @@ export const RealtimeEventSchema = z.discriminatedUnion('type', [
   z.object({ ...user, type: z.literal('wallet.changed') }),
   /** Profile, VIP status or color, role or status: GET /api/auth/me again. */
   z.object({ ...user, type: z.literal('account.changed') }),
-  /** A personal message arrived, was read or deleted, here or on another device: the unread count and the list. */
-  z.object({ ...user, type: z.literal('message.changed') }),
+  /**
+   * A personal message arrived, was read or deleted, here or on another device: the unread count and the list. One
+   * administrator send to many members carries `spreadMs`: each page reads after a random wait of up to that long.
+   */
+  z.object({ ...user, type: z.literal('message.changed'), payload: z.object({ spreadMs: count }).optional() }),
   /** A friend request, an answer to one, a removed friendship or a block changed the friends list (it never says which). */
   z.object({ ...user, type: z.literal('social.friend.changed') }),
   /** A direct message with `peerId` up to `seq`: sent by the peer, or by this member on another device. */

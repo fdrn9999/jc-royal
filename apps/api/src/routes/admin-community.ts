@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { sendMessages } from '../lib/community';
 import { fail, parseBody } from '../lib/http';
+import { realtimeToUsers, spreadFor } from '../lib/realtime';
 import { audit } from './admin-auth';
 import { listItems, postDetail, recountComments } from './board';
 
@@ -83,6 +84,8 @@ export const adminCommunityRoutes = new Hono<AppEnv>()
     const batchId = crypto.randomUUID();
     const sent = await sendMessages(c.var.db, { userIds: ids, category: body.category, title: body.title, body: body.body, senderId: c.var.user!.id, batchId });
     await audit(c, 'message.send', { type: 'batch', id: batchId }, { recipients: ids.length, category: body.category, title: body.title });
+    // Only the recipients' pages, each reading its own unread count (never the message from the event).
+    realtimeToUsers(c, ids, { scope: 'user', type: 'message.changed', payload: { spreadMs: spreadFor(ids.length) } });
     return c.json({ batchId, sent }, 201);
   })
   /** Sent batches, newest first. Without `paged=1` the newest 100 as a plain array; with it `limit` (1–100, default 20) / `offset` and whether more follow. */

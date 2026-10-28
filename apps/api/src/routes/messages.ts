@@ -1,14 +1,18 @@
 import { schema } from '@jc/db';
 import type { MessageDto, UnreadCountsDto } from '@jc/types';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { alias } from 'drizzle-orm/sqlite-core';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { fail } from '../lib/http';
+import { realtimeToUsers } from '../lib/realtime';
 import { SERVICE_REV_SQL } from '../lib/service';
 
 const sender = alias(schema.users, 'sender');
+
+/** Read or deleted here: the member's other pages (another tab, another device) read the list and the count again. */
+const changed = (c: Context<AppEnv>) => realtimeToUsers(c, [c.var.user!.id], { scope: 'user', type: 'message.changed' });
 
 /** One-way inbox: users can read and delete messages, never send them. */
 export const messageRoutes = new Hono<AppEnv>()
@@ -45,7 +49,9 @@ export const messageRoutes = new Hono<AppEnv>()
     return c.json({ unread: r?.unread ?? 0, dmUnread: r?.dmUnread ?? 0, friendRequests: r?.friendRequests ?? 0, serviceRev: r?.serviceRev ?? 0 } satisfies UnreadCountsDto);
   })
   .post('/read-all', async (c) => {
-    await c.var.db.update(schema.messages).set({ readAt: Date.now() }).where(and(eq(schema.messages.userId, c.var.user!.id), isNull(schema.messages.readAt)));
+    const uid = c.var.user!.id;
+    const r = await c.var.db.update(schema.messages).set({ readAt: Date.now() }).where(and(eq(schema.messages.userId, uid), isNull(schema.messages.readAt))).run();
+    if (r.meta.changes) changed(c);
     return c.json({ ok: true });
   })
   .post('/:id/read', async (c) => {
@@ -55,6 +61,7 @@ export const messageRoutes = new Hono<AppEnv>()
       .where(and(eq(schema.messages.id, c.req.param('id')), eq(schema.messages.userId, c.var.user!.id)))
       .returning({ id: schema.messages.id });
     if (!r[0]) fail(404, 'not_found', 'message not found');
+    changed(c);
     return c.json({ ok: true });
   })
   .delete('/:id', async (c) => {
@@ -64,5 +71,6 @@ export const messageRoutes = new Hono<AppEnv>()
       .where(and(eq(schema.messages.id, c.req.param('id')), eq(schema.messages.userId, c.var.user!.id)))
       .returning({ id: schema.messages.id });
     if (!r[0]) fail(404, 'not_found', 'message not found');
+    changed(c);
     return c.json({ ok: true });
   });
