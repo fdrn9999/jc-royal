@@ -1,3 +1,4 @@
+import { inflateSync } from 'node:zlib';
 import type { HandDetailDto, TableView } from '@jc/types';
 import { expect, type Browser, type BrowserContextOptions, type Page, type WebSocketRoute } from '@playwright/test';
 import { checkOrCall, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
@@ -170,6 +171,24 @@ const seatMarks = (page: Page, reveal: boolean | number = false) =>
         document.head.append(force);
         const covers = [...new Set(points.filter(onScreen).flatMap((pt) => paintedOver(badge!, ...pt)))];
         force.remove();
+        // What cuts the mark's whole box (not only at the five points): a box around it, below the page's own, that clips
+        // what overflows it; a clip or a mask on it or around it in its seat.
+        const label = (a: Element) => a.getAttribute('data-testid') ?? `${a.tagName.toLowerCase()}.${a.classList[0] ?? ''}`;
+        const cuts: string[] = [];
+        for (let a: Element | null = icon ?? null; ic && a && a !== document.body; a = a.parentElement) {
+          const cs = getComputedStyle(a);
+          const r = box(a)!;
+          const clips = a !== icon && cs.display !== 'contents' && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible' || /paint|strict|content/.test(cs.contain));
+          if (clips && !(ic.l >= r.l - 0.5 && ic.r <= r.r + 0.5 && ic.t >= r.t - 0.5 && ic.b <= r.b + 0.5)) cuts.push(`${label(a)} clips it`);
+          if (seat.contains(a) && (cs.clipPath !== 'none' || (cs.maskImage || 'none') !== 'none')) cuts.push(`${label(a)} ${cs.clipPath !== 'none' ? 'clip-path' : 'mask'}`);
+        }
+        // How opaque the mark is drawn against its name (a folded seat dims both alike).
+        const opacity = (e: Element | null | undefined) => {
+          let o = 1;
+          for (let a: Element | null = e ?? null; a; a = a.parentElement) o *= parseFloat(getComputedStyle(a).opacity);
+          return o;
+        };
+        const fade = icon && text ? opacity(icon) / Math.max(opacity(text), 1e-6) : 1;
         // Where the plate lies on the table (the same however the page or the window is scrolled).
         const t = table.getBoundingClientRect();
         const p = box(plate);
@@ -201,6 +220,8 @@ const seatMarks = (page: Page, reveal: boolean | number = false) =>
           pickTitle: pick?.getAttribute('title') ?? null,
           hits,
           covers,
+          cuts,
+          fade,
         };
       });
   }, [reveal, POINTS] as const);
@@ -249,7 +270,9 @@ function placement(marks: Mark[], where: string, opts: { hit: 'pick' | 'badge' }
     for (const [k, b] of [['status line', m.status], ['dealer button', m.dealer], ['blind', m.blind]] as const) if (meets(ic, b)) out.push(`${id}: the mark under the ${k}`);
     if (m.cap!.w > m.capMax + 0.5) out.push(`${id}: the name ${m.cap!.w}px past its cap ${m.capMax}px`);
     const at = `(plate ${Math.round(m.plate!.l)}..${Math.round(m.plate!.r)}px, mark ${Math.round(ic.l)}..${Math.round(ic.r)}px of ${m.vw})`;
-    if (m.hits.includes('off-screen')) out.push(`${id}: the mark off the screen ${at}`);
+    if (ic.l < -0.5 || ic.t < -0.5 || ic.r > m.vw + 0.5 || ic.b > m.vh + 0.5) out.push(`${id}: the mark off the screen ${at}`);
+    if (m.cuts.length) out.push(`${id}: the mark cut (${m.cuts.join(', ')})`);
+    if (m.fade < 0.99) out.push(`${id}: the mark drawn ${m.fade.toFixed(2)} as opaque as its name`);
     // After the name only where the table's left edge cuts the plate's start off (TableScene's startCut).
     if (m.after && m.onTable!.cx - m.onTable!.w / 2 >= -0.5) out.push(`${id}: the mark after the name on a whole plate ${at}`);
     // The cards ride under the plate's top edge (their box reaches the name's line): what counts is what lies on top.
@@ -276,6 +299,82 @@ const cover = (p: Page, b: Box, fill: string) =>
     },
     [b, fill] as const,
   );
+
+/** A PNG's pixels, as Chromium writes its screenshots: 8 bits a channel, RGB or RGBA, not interlaced. */
+function pixels(png: Buffer) {
+  let w = 0;
+  let h = 0;
+  let n = 0;
+  const data: Buffer[] = [];
+  for (let at = 8; at < png.length; ) {
+    const len = png.readUInt32BE(at);
+    const kind = png.toString('ascii', at + 4, at + 8);
+    const body = png.subarray(at + 8, at + 8 + len);
+    if (kind === 'IHDR') {
+      w = body.readUInt32BE(0);
+      h = body.readUInt32BE(4);
+      n = ({ 2: 3, 6: 4 } as Record<number, number>)[body[9]!] ?? 0;
+      if (body[8] !== 8 || body[12] || !n) throw new Error(`a PNG not read here: depth ${body[8]}, color ${body[9]}, interlace ${body[12]}`);
+    } else if (kind === 'IDAT') data.push(body);
+    at += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(data));
+  const row = w * n;
+  const px = Buffer.alloc(h * row);
+  // Each row's filter undone against the bytes left of it (a), above it (b) and above-left (c).
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (row + 1)]!;
+    for (let x = 0; x < row; x++) {
+      const a = x >= n ? px[y * row + x - n]! : 0;
+      const b = y ? px[(y - 1) * row + x]! : 0;
+      const c = x >= n && y ? px[(y - 1) * row + x - n]! : 0;
+      const p = a + b - c;
+      const paeth = Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c) ? a : Math.abs(p - b) <= Math.abs(p - c) ? b : c;
+      px[y * row + x] = (raw[y * (row + 1) + 1 + x]! + [0, a, b, (a + b) >> 1, paeth][f]!) & 255;
+    }
+  }
+  return { w, h, n, px };
+}
+
+/** The least share of its box a robot's teal strokes cover: 27–44% on every screen measured, 0 made clear, 12% cut to its right 40%. */
+const INK = 0.15;
+
+/**
+ * Where a bot's robot cannot be seen, whatever its box, class and color say (made clear, faded, its strokes gone,
+ * covered, cut): its box as the screen shows it, shot with the robot and again with the robot hidden. The pixels that
+ * change are what the robot paints, and they must turn toward the teal over at least INK of the box. `reveal` brings
+ * each bot's seat into view first (seatMarks).
+ */
+async function inkless(p: Page, where: string, reveal = false) {
+  const out: string[] = [];
+  const ink: number[] = [];
+  for (const seat of (await seatMarks(p)).filter((x) => x.bot).map((x) => x.seat)) {
+    const m = (await seatMarks(p, reveal && seat)).find((x) => x.seat === seat)!;
+    const ic = m.icon!;
+    const x = Math.max(0, Math.floor(ic.l));
+    const y = Math.max(0, Math.floor(ic.t));
+    const clip = { x, y, width: Math.min(m.vw, Math.ceil(ic.r)) - x, height: Math.min(m.vh, Math.ceil(ic.b)) - y };
+    if (clip.width < 1 || clip.height < 1) {
+      out.push(`${where} seat ${seat}: the robot not on the screen to be seen`);
+      continue;
+    }
+    const svg = p.locator(`[data-testid=table] [data-testid=seat-${seat}][data-state] [data-testid=bot-badge] svg`);
+    const shown = pixels(await p.screenshot({ clip }));
+    await svg.evaluate((e: SVGElement) => e.style.setProperty('visibility', 'hidden', 'important'));
+    const hidden = pixels(await p.screenshot({ clip }));
+    await svg.evaluate((e: SVGElement) => e.style.removeProperty('visibility'));
+    let teal = 0;
+    for (let i = 0; i < shown.px.length; i += shown.n) {
+      const [dr, dg, db] = [0, 1, 2].map((k) => shown.px[i + k]! - hidden.px[i + k]!) as [number, number, number];
+      if (dg >= 24 && db >= 20 && dg > dr && db > dr) teal++;
+    }
+    const share = teal / (shown.w * shown.h);
+    ink.push(share);
+    if (share < INK) out.push(`${where} seat ${seat}: the robot's teal on ${(share * 100).toFixed(0)}% of its box, under ${INK * 100}%`);
+  }
+  if (ink.length) console.log(`robot ink ${where}: ${ink.map((s) => `${(s * 100).toFixed(0)}%`).join(' ')}`);
+  return out;
+}
 
 /** Checks, else folds (table-text.spec). */
 async function act(p: Page) {
@@ -358,6 +457,21 @@ test('bot mark, live: only on the seats the server says are bots, named like one
     await a.page.evaluate(() => document.querySelector('[data-testid=probe-cover]')!.remove());
     expect(said.some((x) => x.startsWith(`probe seat ${probe.seat}:`) && x.includes('probe-cover') && x.endsWith('painted over the mark')), `a ${fill} layer over seat ${probe.seat}'s mark: ${said.join('; ')}`).toBe(told);
   }
+  // Every robot paints its strokes; and one made to paint nothing, its box, class and color as they were, is told by
+  // its pixels (and a clear one by its opacity too), one cut by a clip by its style.
+  expect(await inkless(a.page, 'live 1440x900')).toEqual([]);
+  const robot = a.page.locator(`[data-testid=table] [data-testid=seat-${probe.seat}][data-state] [data-testid=bot-badge] svg`);
+  for (const [style, by] of [
+    ['opacity: 0', ['teal on', 'as opaque as']],
+    ['stroke: transparent', ['teal on']],
+    ['clip-path: inset(0 0 0 60%)', ['clip-path']],
+  ] as const) {
+    await robot.evaluate((e: SVGElement, s) => (e.style.cssText += s), style);
+    const said = [...(await inkless(a.page, 'probe')), ...placement(await seatMarks(a.page), 'probe', { hit: 'pick' })].filter((x) => x.startsWith(`probe seat ${probe.seat}:`));
+    await robot.evaluate((e: SVGElement) => e.removeAttribute('style'));
+    for (const k of by) expect(said.some((x) => x.includes(k)), `${style} on seat ${probe.seat}'s robot, told by '${k}': ${said.join('; ')}`).toBe(true);
+  }
+  expect(await inkless(a.page, 'probe, restored')).toEqual([]);
   await a.page.screenshot({ path: test.info().outputPath('live-1440x900.png') });
   await openCardFromMark(a.page, false, '보통', 'live-1440x900');
 
@@ -402,6 +516,7 @@ test('bot mark, live: only on the seats the server says are bots, named like one
   await expect.poll(() => sockA.states.slice(dropped + 1).some((n) => n > 0), { message: 'reconnected', timeout: 30_000 }).toBe(true);
   await expect.poll(() => misMarked(a.page, sockA.state()), { timeout: 30_000 }).toEqual([]);
   expect(placement(await seatMarks(a.page), 'reconnected', { hit: 'pick' })).toEqual([]);
+  expect(await inkless(a.page, 'reconnected')).toEqual([]);
   await a.page.reload();
   await expect(filled(a.page)).toHaveCount(9, { timeout: 30_000 });
   await expect.poll(() => misMarked(a.page, sockA.state()), { timeout: 30_000 }).toEqual([]);
@@ -413,6 +528,7 @@ test('bot mark, live: only on the seats the server says are bots, named like one
   await expect(filled(c.page)).toHaveCount(9, { timeout: 30_000 });
   await expect.poll(() => misMarked(c.page, sockC.state()), { timeout: 30_000 }).toEqual([]);
   expect(placement(await seatMarks(c.page), 'spectator', { hit: 'pick' })).toEqual([]);
+  expect(await inkless(c.page, 'spectator')).toEqual([]);
   await c.page.screenshot({ path: test.info().outputPath('spectator-1440x900.png') });
 
   // Every screen, one page of A's at the table at a time.
@@ -426,7 +542,7 @@ test('bot mark, live: only on the seats the server says are bots, named like one
     // The table takes its size from the screen first.
     await p.waitForTimeout(600);
     const seen = await seatMarks(p);
-    found.push(...placement(seen, sc.name, { hit: 'pick' }));
+    found.push(...placement(seen, sc.name, { hit: 'pick' }), ...(await inkless(p, sc.name)));
     // Nine seats on a 320px-wide phone: the layout's four seats along the top (layout.ts rows) need 4 × 100px, so the
     // corner seats lie half across the screen's sides, avatar and all (STATUS, 9인 320×568). The left one's start is
     // what is cut: its mark goes after its name, on the screen (placement() says where it is not). Asserted to happen,
@@ -461,7 +577,7 @@ test('bot mark, six seats of expert bots: only on the bots, its level in the tit
     const marks = await seatMarks(p);
     expect(marks.filter((m) => m.bot)).toHaveLength(5);
     for (const m of marks.filter((x) => x.bot)) expect(m.pickTitle).toMatch(/^AI 봇 플레이어 · 전문가 · .+$/);
-    found.push(...placement(marks, `six ${sc.name}`, { hit: 'pick' }));
+    found.push(...placement(marks, `six ${sc.name}`, { hit: 'pick' }), ...(await inkless(p, `six ${sc.name}`)));
     await p.screenshot({ path: test.info().outputPath(`six-${sc.name}.png`) });
     await openCardFromMark(p, sc.touch, '전문가', `six-${sc.name}`);
     await ctx.close();
@@ -501,6 +617,7 @@ test('bot mark, replay: 16-letter bot names cut short with the mark whole, and e
         return seatMarks(p, true);
       };
       const withMarks = await look(bots);
+      found.push(...(await inkless(p, where, true)));
       await p.screenshot({ path: test.info().outputPath(`replay-${hand.maxSeats}-${sc.name}.png`) });
       const plain = await look(none);
       const marked = withMarks.filter((m) => m.bot).map((m) => m.seat);
