@@ -1,0 +1,1 @@
+ALTER TABLE `tables` ADD `live_waitlist_users` text;

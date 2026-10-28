@@ -67,7 +67,7 @@
 - **timeBank**(최상위): 이 테이블의 시간 은행 규칙 `{initialMs, maxMs, unitMs, refillHands, refillMs}`. 핸드 중에는 그 핸드를 시작할 때의 규칙, 핸드 사이에는 다음 핸드에 쓸 규칙. 꺼진 테이블은 null, 이전 룸은 보내지 않음.
 - **you**: `seatIndex`, `legal[]`(내 차례일 때만), `sittingOut`, `leaving`, `inWaitlist`, `canSit`, `needsCode`(비공개 테이블에서 이 연결에 유효한 참가 티켓이 없고 착석하지 않음), `topUpQueued`(핸드 종료를 기다리는 충전 금액 또는 null), `autoRebuy`(자동 리바이일 때 `{amount, cap, spent}`, 아니면 null. 이전 페이지용), `autoBuy`(내 자동 칩 정책 `{mode:'rebuy', amount, cap, spent}` / `{mode:'topup', target, trigger, partial, cap, spent}` 또는 null. 착석한 본인에게만 보내고 다른 사람·관전자에게는 null. 이전 룸은 보내지 않음), `preAction`(룸이 지금 지키고 있는 내 사전 액션 또는 null), `canShow`(지금 `show`를 보낼 수 있음: 지금 앉은 자리에서 끝난 핸드에 카드를 받았고, 내 패가 쇼다운에서 공개되지 않음. 두 장을 다 보인 뒤에도 true라 화면이 '공개됨'을 계속 그림. 이전 룸은 자동 머크를 켠 사람에게만 보냄). 자동 머크는 항상 적용되므로 새 룸은 `autoMuck`을 보내지 않습니다(이전 룸은 착석한 사람에게 그 설정을 보냄), `timeBank`(착석했으면 내 시간 은행 `{ms, hands}`(`hands`는 다음 보충까지 센 핸드 수), 아직 받은 적 없거나 봇·꺼진 테이블이면 null. 다른 사람의 시간 은행은 어디에도 들어가지 않음. 이전 룸은 보내지 않음).
 - 핸드 진행 중 좌석의 `stack`은 이번 핸드에 건 칩을 뺀 남은 스택입니다. 충전 범위도 이 값으로 검사합니다.
-- **대기 관련**: `spectatorCount`, `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음), `maintenance`(서비스 점검 `{startsAt, endsAt, active}` 또는 null. 이전 룸은 보내지 않음).
+- **대기 관련**: `spectatorCount`(앉지도 대기열에 오르지도 않은 접속 회원 수. 관전을 막은 테이블은 0: 그곳에 접속한 회원은 대기 중이거나 좌석이 있는 회원뿐), `waitlist`, `reservation`, `nextHandAt`, `paused`(관리자가 새 핸드를 멈춤. 이전 룸은 보내지 않음), `maintenance`(서비스 점검 `{startsAt, endsAt, active}` 또는 null. 이전 룸은 보내지 않음).
 
 ### TableCue (연출 전용, 권한 없음)
 

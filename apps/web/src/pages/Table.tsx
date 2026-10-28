@@ -20,7 +20,7 @@ import {
   XIcon,
 } from '@jc/ui';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
@@ -44,7 +44,7 @@ import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useHiddenChat } from '../lib/safety';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { rememberVisit } from '../lib/lobby';
+import { arrivalOf, lobbyNoteSeen, markLobbyNote, rememberVisit, resumeOf, seatHeld, type Arrival } from '../lib/lobby';
 import { lobbyHref } from '../lib/lobbyReturn';
 import { siteUrl } from '../lib/share';
 import { pullSettings, usePrefs } from '../lib/prefs';
@@ -78,6 +78,17 @@ function tournamentStalled(s: TableView): boolean {
 
 /** Free to sit in now: a seat whose player folded and stood up mid-hand stays out of reach until that hand ends. */
 const isFree = (x: SeatView) => x.state === 'empty' && !x.held;
+const ARRIVAL_TEXT: Record<Arrival | 'gone' | 'waitGone', MsgKey> = {
+  seated: 'arrive.seated',
+  waiting: 'arrive.waiting',
+  full: 'invite.fullNow',
+  held: 'arrive.held',
+  closing: 'arrive.closing',
+  maintenance: 'arrive.maintenance',
+  unavailable: 'arrive.unavailable',
+  gone: 'lobby.seatGone',
+  waitGone: 'lobby.waitGone',
+};
 
 /** Whole seconds to a time the room set (its clock: a device whose clock is off counts the same seconds). */
 const secondsTo = (target: number) => Math.max(0, Math.ceil((target - serverNow()) / 1000));
@@ -178,6 +189,11 @@ export function TablePage() {
   // I asked to stand up (the room did not send me away): once I have, what next is offered as for a missed quick seat.
   const leaveAsked = useRef(false);
   const [leftHere, setLeftHere] = useState(false);
+  // Seated, the logo's way to the lobby says the first time that it keeps my seat (beside it, not a dialog).
+  const [lobbyAsk, setLobbyAsk] = useState(false);
+  const lobbyBox = useRef<HTMLSpanElement>(null);
+  // Sent here to sit or wait (or back to my seat) and the room had something else to say: what, and what next.
+  const [arrived, setArrived] = useState<Arrival | 'gone' | 'waitGone' | null>(null);
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => sound.installAutoUnlock(), []);
@@ -203,12 +219,18 @@ export function TablePage() {
     if (sock.lastError) setToast(err(sock.lastError.code));
   }, [sock.lastError, err]);
   // Every toast clears itself, on one clock: a newer one starts it again (an older timer never cuts it short), and
-  // leaving the page stops it. The full-table note stays a little longer; it says what to do next.
+  // leaving the page stops it.
   useEffect(() => {
     if (!toast) return;
-    const h = setTimeout(() => setToast(null), toast === t('invite.fullNow') ? 5_000 : 3_500);
+    const h = setTimeout(() => setToast(null), 3_500);
     return () => clearTimeout(h);
-  }, [toast, t]);
+  }, [toast]);
+  // Being back at my seat or my place on the waitlist only needs saying; what asks for a choice stays until it is made.
+  useEffect(() => {
+    if (arrived !== 'seated' && arrived !== 'waiting') return;
+    const h = setTimeout(() => setArrived(null), 6_000);
+    return () => clearTimeout(h);
+  }, [arrived]);
 
   // What happened to my top-up or automatic rebuy after a hand; the wallet changed (or a request ended), so refresh it.
   // A cancelled pre-action is only shown.
@@ -253,30 +275,43 @@ export function TablePage() {
     reopen();
   }, [codeThen, setParams, reopen]);
 
+  // 계속 플레이 / 대기 현황 확인 from the lobby, whose list is a few seconds old: if the room no longer has my seat (I stood
+  // up elsewhere, an admin let me go, the table closed) or my place on the waitlist (its hold on a seat ran out), say so
+  // over the table as it is now; a place still held is confirmed. Nothing here takes a seat or a place. The mark is
+  // dropped from the history entry at once, so a reload later does not say it again.
+  const loc = useLocation();
+  const resume = useRef(resumeOf(loc.state));
+  useEffect(() => {
+    if (!resume.current) return;
+    if (loc.state !== null) nav({ pathname: loc.pathname, search: loc.search }, { replace: true, state: null });
+    if (!s) return;
+    const want = resume.current;
+    resume.current = null;
+    if (s.you.seatIndex === null) setArrived(want === 'seat' ? 'gone' : s.you.inWaitlist ? 'waiting' : 'waitGone');
+  }, [s, loc, nav]);
+
   // ?sit=1 from the lobby: open the buy-in dialog on the first free seat. A private table waits for the join code.
+  // Already seated, or no seat to take: say so and what next (never a second seat; the room decides).
   useEffect(() => {
     if (!s || params.get('sit') !== '1' || s.you.needsCode) return;
-    if (s.you.seatIndex === null && s.you.canSit) {
-      const free = s.seats.find(isFree);
-      if (free) setBuySeat(free.seatIndex);
-      else if (quick) setQuickMissed(true);
-    } else if (s.you.seatIndex === null && quick) {
-      setQuickMissed(true);
-    } else if (s.you.seatIndex === null && !s.seats.some(isFree)) {
-      setToast(t('invite.fullNow'));
-    }
+    const free = s.seats.find(isFree);
+    if (s.you.seatIndex === null && s.you.canSit && free) setBuySeat(free.seatIndex);
+    else if (s.you.seatIndex === null && quick) setQuickMissed(true);
+    else setArrived(arrivalOf(s, !!free));
     params.delete('sit');
     setParams(params, { replace: true });
-  }, [s, params, setParams, t, quick]);
+  }, [s, params, setParams, quick]);
 
-  // ?wait=1 from a full table in the lobby: join the waitlist, or take the seat if one opened up meanwhile.
+  // ?wait=1 from a full table in the lobby: join the waitlist, or take the seat if one opened up meanwhile. Already
+  // seated or waiting: said, and nothing sent (joining again would put me at the back). A table closing or under
+  // maintenance takes nobody new.
   useEffect(() => {
     if (!s || params.get('wait') !== '1' || s.you.needsCode) return;
-    if (s.you.seatIndex === null) {
-      const free = s.you.canSit ? s.seats.find(isFree) : undefined;
-      if (free) setBuySeat(free.seatIndex);
-      else if (!s.you.inWaitlist) sock.send({ t: 'waitlist', join: true });
-    }
+    const free = s.you.canSit ? s.seats.find(isFree) : undefined;
+    const why = arrivalOf(s, s.seats.some(isFree));
+    if (free && s.you.seatIndex === null) setBuySeat(free.seatIndex);
+    else if (why === 'seated' || why === 'waiting' || why === 'closing' || why === 'maintenance') setArrived(why);
+    else sock.send({ t: 'waitlist', join: true });
     params.delete('wait');
     setParams(params, { replace: true });
   }, [s, params, setParams, sock]);
@@ -476,6 +511,26 @@ export function TablePage() {
       document.removeEventListener('keydown', key);
     };
   }, [leaveAsk]);
+  useEffect(() => {
+    if (!seated) setLobbyAsk(false);
+  }, [seated]);
+  useEffect(() => {
+    if (!lobbyAsk) return;
+    const away = (e: PointerEvent) => {
+      if (!lobbyBox.current?.contains(e.target as Node)) setLobbyAsk(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setLobbyAsk(false);
+      lobbyBox.current?.querySelector('a')?.focus();
+    };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', key);
+    };
+  }, [lobbyAsk]);
   // Standing up as I asked (at once, or when my fold came): what next is offered.
   useEffect(() => {
     if (seated) setLeftHere(false);
@@ -486,6 +541,12 @@ export function TablePage() {
   }, [seated]);
   // A quick-play seat gone on arrival, or I just stood up here: where next is offered in the status line.
   const nextOffer = !seated && ((!!quick && quickMissed) || leftHere);
+  // Shown while it still holds: back at my seat while I have it; anything else while I have none (the waitlist ones
+  // until I am on it).
+  const arrival =
+    s && arrived && !nextOffer && (arrived === 'seated' ? seated : !seated && (arrived === 'waiting' ? s.you.inWaitlist : !(s.you.inWaitlist && (arrived === 'full' || arrived === 'held' || arrived === 'waitGone'))))
+      ? arrived
+      : null;
   const canChat = !!s && (seated || s.table.allowSpectators);
   const isHost = !!s && !!me && s.table.hostId === me.id && s.status !== 'closed';
 
@@ -524,14 +585,51 @@ export function TablePage() {
           'jc-game-surface flex shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 backdrop-blur-md',
           // The stand-up question hangs below the header, over the lines that follow it (each at z-40) and over the chat
           // beside the table (z-50, the phone's drawer it also is, and later on the page).
-          leaveAsk ? 'z-[60]' : 'z-40',
+          leaveAsk || lobbyAsk ? 'z-[60]' : 'z-40',
           // Short, every pixel of height goes to the seats; the notch's side (a phone on its side) stays clear.
           short ? 'h-11 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]' : 'h-14 px-3',
         )}
       >
-        <Link to={lobbyHref()} aria-label={t('nav.lobby')} className="shrink-0">
-          <Logo size={32} />
-        </Link>
+        <span ref={lobbyBox} className="relative shrink-0">
+          <Link
+            to={lobbyHref()}
+            aria-label={t('nav.lobby')}
+            className="block"
+            onClick={(e) => {
+              // Nothing changes at the table on the way out: no fold, no sitting out, no cash-out, the clock as it was.
+              if (!seated || tn || lobbyNoteSeen()) return;
+              e.preventDefault();
+              markLobbyNote();
+              setLobbyAsk(true);
+            }}
+            aria-expanded={lobbyAsk || undefined}
+          >
+            <Logo size={32} />
+          </Link>
+          {lobbyAsk && (
+            <div role="group" aria-label={t('nav.lobby')} className="absolute left-0 top-full mt-2 w-[min(19rem,calc(100vw-1.5rem))] rounded-xl border border-white/10 bg-ink-900 p-3 text-sm shadow-panel" data-testid="lobby-ask">
+              <p className="text-ivory">{t('table.toLobbyNote')}</p>
+              <p className="mt-1 text-xs text-ink-300">{t('table.toLobbyStandUp')}</p>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="min-h-10"
+                  onClick={() => {
+                    setLobbyAsk(false);
+                    lobbyBox.current?.querySelector('a')?.focus();
+                  }}
+                  data-testid="lobby-ask-cancel"
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button size="sm" className="min-h-10" onClick={() => nav(lobbyHref())} data-testid="lobby-ask-go">
+                  {t('table.toLobby')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </span>
         {(() => {
           const title = (
             <>
@@ -818,6 +916,31 @@ export function TablePage() {
             {s && reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={short} />}
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
+                {arrival && (
+                  // Why the seat or the waitlist I came for is not there, and what next, as the status line's first so the
+                  // table above keeps its size; the waitlist button, when that is next, is the line's own (below).
+                  <div className="flex basis-full flex-col gap-2 text-gold-300 sm:items-center" role="status" data-testid="arrival-note" data-kind={arrival}>
+                    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
+                      <span>{t(ARRIVAL_TEXT[arrival])}</span>
+                      <span className="flex flex-wrap items-center justify-center gap-2">
+                        {arrival === 'full' && !tn && (
+                          <Button size="sm" className="min-h-10" loading={quickPlay.busy} disabled={!!s.maintenance?.active} onClick={() => quickPlay.run(ANY, [id])} data-testid="arrival-another">
+                            {t('quick.another')}
+                          </Button>
+                        )}
+                        {arrival !== 'seated' && arrival !== 'waiting' && (
+                          <Link to={lobbyHref()} className="jc-tap inline-flex min-h-10 items-center rounded-lg px-2 text-xs font-semibold text-gold-300 underline underline-offset-2" data-testid="arrival-lobby">
+                            {t('nav.lobby')}
+                          </Link>
+                        )}
+                        <Button size="sm" variant="outline" className="min-h-10" onClick={() => setArrived(null)} data-testid="arrival-ok">
+                          {t('common.confirm')}
+                        </Button>
+                      </span>
+                    </div>
+                    {arrival === 'full' && quickPlay.miss && <QuickMissNote miss={quickPlay.miss} filtered={false} />}
+                  </div>
+                )}
                 {nextOffer && (
                   // A quick-play seat gone on arrival, or I just stood up here: where next (another table, this one, the
                   // lobby), the status line's first, so the table above keeps its size.
@@ -903,7 +1026,7 @@ export function TablePage() {
                   </span>
                 )}
                 {!seated && s.reservation && <span className="text-gold-300">{t('table.reserved', { name: s.reservation.nickname })}</span>}
-                {!tn && !seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && !s.seats.some(isFree) && (
+                {!tn && !seated && !s.you.canSit && !s.you.needsCode && !s.maintenance?.active && (!s.seats.some(isFree) || seatHeld(s, true)) && (
                   <Button size="sm" variant="outline" onClick={() => sock.send({ t: 'waitlist', join: !s.you.inWaitlist })}>
                     {s.you.inWaitlist ? t('table.leaveWaitlist') : t('table.joinWaitlist')} ({s.waitlist.length})
                   </Button>

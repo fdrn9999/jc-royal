@@ -62,6 +62,7 @@ import {
   loadMaintenance,
   loadTable,
   markTableClosed,
+  oneAtATime,
   publishLiveStats,
   recordHand,
   topUp,
@@ -315,6 +316,8 @@ export class TableRoom extends DurableObject<Env> {
   /** The bots' last quick reactions after a hand (bot-manners.ts). Memory only. */
   private botReacts = emptyManners();
   private lastStats = '';
+  /** Occupancy to D1 (writeStats), one write at a time so an older one never lands after a newer one. */
+  private publishStats = oneAtATime(() => this.writeStats());
   /** Operations counters (packages/db/src/ops.ts) and the latest problem, not written yet (see `publishStats`). */
   private ops = new OpsCounter();
   private pendingIssue: string | null = null;
@@ -470,6 +473,18 @@ export class TableRoom extends DurableObject<Env> {
     return new Set(this.sockets(exclude).map((ws) => this.att(ws).userId));
   }
 
+  /**
+   * Who is watching: members connected here, neither seated nor on the waitlist (counted apart), at a table that shows
+   * its hands to them. At a table without spectators the ones connected are there for a seat, not to watch.
+   */
+  private spectatorsOf(connected: Iterable<string>): number {
+    if (!this.table?.allowSpectators) return 0;
+    const waiting = new Set(this.room.waitlist.map((w) => w.userId));
+    let n = 0;
+    for (const u of new Set(connected)) if (this.seatIndexOf(u) === null && !waiting.has(u)) n++;
+    return n;
+  }
+
   private seatIndexOf(userId: string): number | null {
     const i = this.room.seats.findIndex((s) => s?.userId === userId);
     return i === -1 ? null : i;
@@ -545,18 +560,19 @@ export class TableRoom extends DurableObject<Env> {
    * those (with the occupancy) are otherwise written at most every OPS_FLUSH_MS. A failed write keeps the counters and
    * the problem, and counts itself, so the next of those writes also brings the occupancy up to date. Pending counters
    * in a room where nothing else happens are written by a timer, so they reach the dashboard within OPS_FLUSH_MS.
+   * Run through publishStats only.
    */
-  private async publishStats() {
+  private async writeStats() {
     if (!this.tableId) return;
     const taken = this.room.seats.filter((s): s is SeatState => !!s && s.phase !== 'pending');
     const conns = this.sockets().map((ws) => this.att(ws).userId);
-    const spectators = new Set(conns.filter((u) => this.seatIndexOf(u) === null)).size;
     const stats = {
       seated: taken.length,
       bots: taken.filter((s) => s.bot).length,
       playing: !!this.hand,
       waitlist: this.room.waitlist.length,
-      spectators,
+      waitlistUsers: this.room.waitlist.map((w) => w.userId),
+      spectators: this.spectatorsOf(conns),
       connections: conns.length,
     };
     const key = JSON.stringify(stats);
@@ -3063,7 +3079,7 @@ export class TableRoom extends DurableObject<Env> {
       status: this.room.closed ? 'closed' : this.room.closing ? 'closing' : h && !h.isSettled ? 'playing' : 'waiting',
       seats,
       hand: hv,
-      spectatorCount: [...connected].filter((u) => this.seatIndexOf(u) === null).length,
+      spectatorCount: this.spectatorsOf(connected),
       waitlist: this.room.waitlist.map((w) => w.nickname),
       reservation: reservationLive ? { nickname: reservationLive.nickname, until: reservationLive.until } : null,
       // No countdown to a hand a pause or maintenance will not deal.

@@ -3,19 +3,82 @@
  * tables (kept on this device per account; nothing about them is sent to the server). The favourite tables are the
  * account's now (prefs.ts); the ones kept here before are handed over once (takeLegacyFavourites).
  */
-import type { LobbyTableDto } from '@jc/types';
+import type { LobbyTableDto, TableView } from '@jc/types';
 import { useEffect, useSyncExternalStore } from 'react';
 
 /**
- * The main action a table card offers. A full table offers the waitlist (never a seat, and never a plain visit that
- * would only look like watching); a table that takes no entries or is closing offers nothing.
+ * The main action a table card offers. The player's own seat comes first: whatever the table takes from newcomers
+ * (full, closing, blocked, private, no spectators), they go back to it. Their place on its waitlist next: a look at it
+ * (`waiting`), never a second sign-up, which would put them at the back. A full table offers the waitlist (never a
+ * seat, and never a plain visit that would only look like watching); a table that takes no entries or is closing
+ * offers nothing. Only a guide: the table room decides once the player is there.
  */
-export type Entry = 'join' | 'wait' | 'blocked' | 'closing';
+export type Entry = 'continue' | 'waiting' | 'join' | 'wait' | 'blocked' | 'closing';
 
-export function entryOf(tb: Pick<LobbyTableDto, 'status' | 'entryBlocked' | 'seated' | 'maxSeats'>): Entry {
+export function entryOf(tb: Pick<LobbyTableDto, 'status' | 'entryBlocked' | 'seated' | 'maxSeats' | 'myParticipation'>): Entry {
+  if (tb.myParticipation?.status === 'seated') return 'continue';
   if (tb.status !== 'open') return 'closing';
+  if (tb.myParticipation?.status === 'waiting') return 'waiting';
   if (tb.entryBlocked) return 'blocked';
   return tb.seated >= tb.maxSeats ? 'wait' : 'join';
+}
+
+/**
+ * Navigation state of a way back to the player's own seat (계속 플레이) or place on the waitlist (대기 현황 확인). The
+ * table page says so when it turns out to be gone already (the lobby list is a few seconds old); it never makes a new
+ * one from it.
+ */
+export const RESUME = { resume: 'seat' } as const;
+export const RESUME_WAIT = { resume: 'wait' } as const;
+export function resumeOf(state: unknown): 'seat' | 'wait' | null {
+  const r = state && typeof state === 'object' ? (state as { resume?: unknown }).resume : null;
+  return r === 'seat' || r === 'wait' ? r : null;
+}
+
+/**
+ * What a player sent to a table to sit (?sit) or wait (?wait) finds there, when it is not a seat to take: read off the
+ * room's view of them only, to say what next. The room still decides every command. null: nothing to say (a seat to
+ * take, or the join code first). `free`: the table shows a free seat.
+ */
+export type Arrival = 'seated' | 'waiting' | 'closing' | 'maintenance' | 'full' | 'held' | 'unavailable';
+
+export function arrivalOf(s: Pick<TableView, 'status' | 'maintenance' | 'reservation' | 'waitlist' | 'tournament' | 'you'>, free: boolean): Arrival | null {
+  if (s.you.seatIndex !== null) return 'seated';
+  if (s.you.inWaitlist) return 'waiting';
+  if (s.you.needsCode) return null;
+  if (s.status === 'closing' || s.status === 'closed') return 'closing';
+  if (s.maintenance?.active) return 'maintenance';
+  if (s.you.canSit && free) return null;
+  if (!free) return 'full';
+  return seatHeld(s, free) ? 'held' : 'unavailable';
+}
+
+/**
+ * Going to the lobby from a table I sit at is not standing up: my seat, the hand and my turn's clock go on. The table
+ * says so the first time on this device (or this visit, storage blocked), never again.
+ */
+const LOBBY_NOTE = 'jc.lobbyNote';
+let lobbyNoteShown = false;
+export function lobbyNoteSeen(): boolean {
+  if (lobbyNoteShown) return true;
+  try {
+    return localStorage.getItem(LOBBY_NOTE) === '1';
+  } catch {
+    return false;
+  }
+}
+export function markLobbyNote() {
+  lobbyNoteShown = true;
+  try {
+    localStorage.setItem(LOBBY_NOTE, '1');
+  } catch {
+    /* this visit only */
+  }
+}
+
+/** A free seat the room keeps for someone else: for the head of the waitlist, or for the players waiting. */
+export function seatHeld(s: Pick<TableView, 'reservation' | 'waitlist' | 'tournament' | 'you'>, free: boolean): boolean {
+  return free && !s.you.canSit && s.you.seatIndex === null && !s.tournament && (!!s.reservation || s.waitlist.length > 0);
 }
 
 export interface Latest {

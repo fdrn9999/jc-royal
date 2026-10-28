@@ -5,11 +5,12 @@
  * the tables already tried, so "find another table" on the table page skips them.
  */
 import type { LobbyTableDto, QuickPlayDto } from '@jc/types';
-import { Button, formatChips, PlusIcon, ZapIcon } from '@jc/ui';
+import { Button, formatChips, PlayIcon, PlusIcon, ZapIcon } from '@jc/ui';
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError } from '../lib/api';
 import { useI18n } from '../lib/i18n';
+import { RESUME } from '../lib/lobby';
 import { RefillHintLazy } from './RefillHintLazy';
 import { Choice } from './Rooms';
 
@@ -137,6 +138,7 @@ export function QuickPlayPanel({
   onFilters,
   onCreateRoom,
   paused = false,
+  mine = [],
 }: {
   filters: QuickFilters;
   blinds: [number, number][];
@@ -144,13 +146,36 @@ export function QuickPlayPanel({
   onCreateRoom: () => void;
   /** Maintenance under way: quick play and new rooms wait (the server refuses both). */
   paused?: boolean;
+  /** Tables the player is seated at (lobby list): quick play first asks whether they meant to go back to one. */
+  mine?: Pick<LobbyTableDto, 'id'>[];
 }) {
   const { t } = useI18n();
+  const nav = useNavigate();
   const { run, busy, miss, clear } = useQuickPlay();
+  const [asking, setAsking] = useState(false);
   const f = filters;
   const set = (next: Partial<QuickFilters>) => {
     clear();
+    setAsking(false);
     onFilters({ ...f, ...next });
+  };
+  // Seated somewhere already: ask, never send them back on their own. Another table stays a choice (one may sit at
+  // several), and quick play never picks a table they are seated at.
+  const go = () => {
+    clear();
+    if (mine.length && !asking) setAsking(true);
+    else {
+      setAsking(false);
+      void run(filters);
+    }
+  };
+  const back = () => {
+    setAsking(false);
+    if (mine.length === 1) return nav(`/table/${encodeURIComponent(mine[0]!.id)}`, { state: RESUME });
+    // Several: the list of them at the top of the lobby.
+    const list = document.getElementById('lobby-my-games');
+    list?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    list?.querySelector<HTMLElement>('a')?.focus({ preventScroll: true });
   };
   const bigBlind = f.bigBlind;
 
@@ -185,11 +210,25 @@ export function QuickPlayPanel({
               ))}
             </select>
           </label>
-          <Button className="h-11 sm:ml-auto sm:min-w-36" loading={busy} disabled={paused} onClick={() => run(filters)} data-testid="quick-go">
+          <Button className="h-11 sm:ml-auto sm:min-w-36" loading={busy} disabled={paused} onClick={go} data-testid="quick-go">
             {t('quick.go')}
           </Button>
         </div>
       </div>
+      {asking && !paused && (
+        <div className="flex flex-col gap-2 rounded-lg border border-gold-500/25 bg-gold-500/10 px-3 py-2.5 text-sm text-ivory" role="status" data-testid="quick-seated">
+          <p>{t('quick.seatedAsk')}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="gold" onClick={back} data-testid="quick-back">
+              <PlayIcon />
+              {t('quick.backToGame')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={go} data-testid="quick-other">
+              {t('quick.findOther')}
+            </Button>
+          </div>
+        </div>
+      )}
       {miss && !paused && (
         <QuickMissNote
           miss={miss}

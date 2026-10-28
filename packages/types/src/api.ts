@@ -264,6 +264,13 @@ export interface LobbyTableDto {
   playing: boolean;
   waitlist: number;
   spectators: number;
+  /**
+   * The caller's own place at this table, never anyone else's: `seated` from their buy-in until their cash-out
+   * (table_sessions), whatever the table's entry, privacy or spectator settings; `waiting` while it is open and they are
+   * on its waitlist, `position` 1 being next, as the table room last mirrored it (seconds old at most). The table room
+   * has the last word when they open it. Missing from older servers: read as none.
+   */
+  myParticipation?: { status: 'seated' } | { status: 'waiting'; position: number } | { status: 'none' };
 }
 
 /**

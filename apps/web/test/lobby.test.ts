@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entryOf, FAV_MAX, IDLE_AFTER_MS, IDLE_POLL_MS, latest, lobbyPoller, parsePrefs, POLL_MS, RECENT_MAX, withFav, withVisit } from '../src/lib/lobby';
+import { arrivalOf, entryOf, FAV_MAX, IDLE_AFTER_MS, IDLE_POLL_MS, latest, lobbyPoller, parsePrefs, POLL_MS, RECENT_MAX, RESUME, RESUME_WAIT, resumeOf, seatHeld, withFav, withVisit } from '../src/lib/lobby';
 
 /** A request whose answer the test decides; it rejects like fetch when aborted. */
 function deferred<T>() {
@@ -151,6 +151,70 @@ describe('entryOf', () => {
     expect(entryOf({ ...tb, seated: 2 })).toBe('wait');
     expect(entryOf({ ...tb, seated: 2, entryBlocked: true })).toBe('blocked');
     expect(entryOf({ ...tb, status: 'closed' })).toBe('closing');
+  });
+
+  it("sends a player back to their own seat before anything the table offers newcomers", () => {
+    const mine = { ...tb, myParticipation: { status: 'seated' as const } };
+    expect(entryOf(mine)).toBe('continue');
+    expect(entryOf({ ...mine, seated: 2 })).toBe('continue');
+    expect(entryOf({ ...mine, entryBlocked: true })).toBe('continue');
+    expect(entryOf({ ...mine, status: 'closed' })).toBe('continue');
+    // No seat, or an older server that says nothing: the usual choices.
+    expect(entryOf({ ...tb, seated: 2, myParticipation: { status: 'none' } })).toBe('wait');
+    expect(entryOf({ ...tb, myParticipation: undefined })).toBe('join');
+  });
+
+  it('a place on the waitlist is a look at it, never a second sign-up, while the table is open', () => {
+    const waiting = { ...tb, seated: 2, myParticipation: { status: 'waiting' as const, position: 2 } };
+    expect(entryOf(waiting)).toBe('waiting');
+    // A free seat or stopped entries do not hide the place I already have.
+    expect(entryOf({ ...waiting, seated: 1 })).toBe('waiting');
+    expect(entryOf({ ...waiting, entryBlocked: true })).toBe('waiting');
+    // A closing table drops its waitlist.
+    expect(entryOf({ ...waiting, status: 'closed' })).toBe('closing');
+  });
+});
+
+describe('resumeOf', () => {
+  it('reads only the marks the lobby sets', () => {
+    expect(resumeOf(RESUME)).toBe('seat');
+    expect(resumeOf(RESUME_WAIT)).toBe('wait');
+    expect(resumeOf(null)).toBeNull();
+    expect(resumeOf({ resume: true })).toBeNull();
+    expect(resumeOf('seat')).toBeNull();
+  });
+});
+
+describe('arrivalOf', () => {
+  const you = { seatIndex: null, inWaitlist: false, canSit: true, needsCode: false };
+  const view = (over: Record<string, unknown> = {}, me: Partial<typeof you> = {}) =>
+    ({ status: 'waiting', maintenance: null, reservation: null, waitlist: [], tournament: null, ...over, you: { ...you, ...me } }) as unknown as Parameters<typeof arrivalOf>[0];
+
+  it('says nothing when there is a seat to take, or the join code comes first', () => {
+    expect(arrivalOf(view(), true)).toBeNull();
+    expect(arrivalOf(view({}, { canSit: false, needsCode: true }), false)).toBeNull();
+  });
+
+  it('a seat or a place on the waitlist I already have comes before anything else', () => {
+    expect(arrivalOf(view({ status: 'closing' }, { seatIndex: 3, canSit: false }), false)).toBe('seated');
+    expect(arrivalOf(view({ waitlist: ['a', 'me'] }, { inWaitlist: true, canSit: false }), true)).toBe('waiting');
+  });
+
+  it('tells a closing table, maintenance, a full table and a seat kept for others apart', () => {
+    expect(arrivalOf(view({ status: 'closing' }, { canSit: false }), true)).toBe('closing');
+    expect(arrivalOf(view({ maintenance: { startsAt: 0, endsAt: 1, active: true } }, { canSit: false }), true)).toBe('maintenance');
+    expect(arrivalOf(view({}, { canSit: false }), false)).toBe('full');
+    expect(arrivalOf(view({ reservation: { nickname: 'a', until: 1 } }, { canSit: false }), true)).toBe('held');
+    expect(arrivalOf(view({ waitlist: ['a'] }, { canSit: false }), true)).toBe('held');
+    // A free seat the room still refuses for another reason (entries stopped): no guess at which.
+    expect(arrivalOf(view({}, { canSit: false }), true)).toBe('unavailable');
+  });
+
+  it('a seat is kept for others only while it is free and I may not take it', () => {
+    expect(seatHeld(view({ waitlist: ['a'] }, { canSit: false }), true)).toBe(true);
+    expect(seatHeld(view({ waitlist: ['a'] }, { canSit: false }), false)).toBe(false);
+    expect(seatHeld(view({ reservation: { nickname: 'me', until: 1 } }), true)).toBe(false);
+    expect(seatHeld(view({ waitlist: ['a'] }, { canSit: false, seatIndex: 1 }), true)).toBe(false);
   });
 });
 
