@@ -74,8 +74,8 @@
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/tables` | 로비(종료된 테이블 제외, 실시간 착석·진행·대기·관전 수, `beginner` 입문 테이블 여부) |
-| GET | `/api/tables/:id` | 단일 테이블 |
+| GET | `/api/tables` | 로비(종료된 테이블 제외, 실시간 착석·진행·대기·관전 수, `beginner` 입문 테이블 여부). 관전 수(`spectators`)는 앉지도 대기하지도 않은 접속 회원만 세고, 관전을 막은 테이블은 0. `myParticipation`은 호출자 본인의 참여 상태만: `{status:'seated'}` · `{status:'waiting', position}`(열린 테이블의 대기 순번, 1부터) · `{status:'none'}`. 착석은 `table_sessions`를 요청당 한 번 조회하고, 대기 순번은 룸이 통계와 함께 D1에 비추는 대기열(`tables.live_waitlist_users`, 관리자 응답에서도 빠짐)에서 본인 자리만 읽음. 다른 회원의 착석·대기는 내보내지 않음. 응답은 `no-store` |
+| GET | `/api/tables/:id` | 단일 테이블(목록과 같은 모양, 같은 `myParticipation`) |
 | POST | `/api/tables/quick` | 빠른 참가 `{maxSeats?: 2\|6\|9, bigBlind?, exclude?: string[]}` → `{table, seatIndex}`. 칩은 쓰지 않음(바이인은 테이블에서 착석 요청으로) |
 | POST | `/api/tables/:id/access` | 비공개 테이블 참가 코드 확인 `{code(1–64자)}` → `{ok:true}`와 참가 티켓 쿠키 `jc_room_<id>`(HttpOnly, SameSite=Strict, Path=`/ws/tables/<id>`, 12시간). 공개 테이블과 회원 방의 방장은 쿠키 없이 `{ok:true}`. 틀린 코드 403 `bad_join_code`, 없거나 종료된 테이블 404. 맞든 틀리든 시도마다 회원당 10분에 10회, IP당 10분에 30회(429 `rate_limited`) |
 | GET(upgrade) | `/ws/tables/:id` | WebSocket. 세션 쿠키와 Origin 필수. 비공개 테이블은 참가 티켓이 있어야 착석·대기 등록 가능(관전이 꺼진 방은 티켓 없으면 4003) → `docs/WEBSOCKET_PROTOCOL.md` |

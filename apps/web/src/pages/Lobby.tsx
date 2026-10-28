@@ -384,7 +384,7 @@ export function LobbyPage() {
                     </Badge>
                     {seatedHere && <span data-testid="lobby-mine-badge"><Badge tone="gold"><UserIcon className="size-3" />{t('lobby.mine')}</Badge></span>}
                     {entry === 'waiting' && <span data-testid="lobby-waiting-badge"><Badge tone="blue"><HourglassIcon className="size-3" />{t('lobby.waiting')}</Badge></span>}
-                    {full &&<span data-testid="full-badge"><Badge tone="red">{t('lobby.full')}</Badge></span>}
+                    {full && <span data-testid="full-badge"><Badge tone="red">{t('lobby.full')}</Badge></span>}
                     {tb.host && (
                       <span data-testid="member-badge" className="min-w-0 max-w-full">
                         <Badge className="max-w-full">
