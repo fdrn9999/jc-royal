@@ -139,6 +139,18 @@ describe('template data', () => {
     }
   });
 
+  it('writes every time a maintenance message asks for from the form, and lets a notice ask for it instead', () => {
+    const written = Object.keys(maintenanceVars(0, 3_600_000));
+    for (const t of MAINTENANCE_TEMPLATES)
+      for (const key of unfilled(texts(t))) if (varOf(key)!.auto) expect(written, `${t.id}: {${key}}`).toContain(key);
+    // A notice or board post has no times of its own: the admin types them, with an example to follow.
+    for (const x of VARS.filter((y) => y.auto)) {
+      expect(written, x.key).toContain(x.key);
+      expect(x.hintKo && x.hintEn, x.key).toBeTruthy();
+    }
+    expect(NOTICE_TEMPLATES.some((t) => unfilled(texts(t)).includes('period'))).toBe(true);
+  });
+
   it('offers no maintenance message for after the window, since none is shown then', () => {
     expect(MAINTENANCE_TEMPLATES.map((t) => t.id)).not.toContain('maint.done');
     expect(NOTICE_TEMPLATES.map((t) => t.id)).toContain('notice.maintDone');

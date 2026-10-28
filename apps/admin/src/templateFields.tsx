@@ -238,6 +238,13 @@ export function useContentTemplate({
   // The text each field got from the template last: a field that still holds it was not changed by hand.
   const gen = useRef<Slots>({});
   const tpl = items.find((x) => x.id === choice) ?? null;
+  // A template no longer offered (the message category changed): the choice goes, the text stays as it is, now the admin's.
+  const gone = choice !== '' && choice !== CUSTOM && !tpl;
+  useEffect(() => {
+    if (!gone) return;
+    gen.current = {};
+    setChoice('');
+  }, [gone]);
 
   const render = (x: AdminTemplate, k: SlotKey, l: Lang, vs: Record<string, string>) => {
     const s = slotOf(k, l);
@@ -334,9 +341,10 @@ export function useContentTemplate({
   const sent = keys.map((k) => values[k] ?? '');
   const missing = unfilled(sent);
   const asked = tpl ? unfilled(keys.map((k) => part(tpl, slotOf(k, lang).which, slotOf(k, lang).lang))) : [];
+  // A time the form writes is not asked for; a form without times (a notice) asks for it like any other value.
   const needed = [...asked, ...missing.filter((k) => !asked.includes(k))]
     .map((k) => varOf(k))
-    .filter((x): x is TemplateVar => !!x && !x.auto);
+    .filter((x): x is TemplateVar => !!x && !(x.auto && auto && x.key in auto));
 
   return {
     templates,
@@ -357,6 +365,15 @@ export function useContentTemplate({
       if (x) use(x, pending.lang);
     },
     cancel: () => setPending(null),
+    /** For a form opened afresh: no template, no values. */
+    reset: () => {
+      gen.current = {};
+      lastAuto.current = {};
+      setChoice('');
+      setVars({});
+      setPending(null);
+      setLangState(initialLang);
+    },
   };
 }
 export type ContentTemplate = ReturnType<typeof useContentTemplate>;

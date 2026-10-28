@@ -270,7 +270,7 @@ export interface TemplateVar {
   multiline?: boolean;
   hintKo?: string;
   hintEn?: string;
-  /** Written from the form (the maintenance times), not typed. */
+  /** Written from the maintenance form's times there; typed like any other value in a form without them (a notice). */
   auto?: boolean;
 }
 
@@ -291,8 +291,8 @@ export const VARS: TemplateVar[] = [
   ...both('affectedServices', '영향 범위', 'Affected services'),
   ...both('status', '현재 조치 상황', 'Current status', { multiline: true }),
   v('resolvedAt', '정상화 시각', 'Restored at', WHEN),
-  ...both('period', '점검 일정', 'Maintenance period', { auto: true }),
-  ...both('endAt', '종료 예정 시각', 'End time', { auto: true }),
+  ...both('period', '점검 일정', 'Maintenance period', { auto: true, hintKo: '예: 2026년 10월 29일 02:00 ~ 04:00 (KST)', hintEn: 'e.g. Oct 29, 2026 02:00 – 04:00 (KST)' }),
+  ...both('endAt', '종료 예정 시각', 'End time', { auto: true, hintKo: '예: 2026년 10월 29일 04:00 (KST)', hintEn: 'e.g. Oct 29, 2026 04:00 (KST)' }),
   ...both('maintenanceDetails', '점검 내용', 'Maintenance details', { multiline: true }),
   ...both('noticeDetails', '공지 내용', 'Announcement', { multiline: true }),
   ...both('guideDetails', '안내 내용', 'Details', { multiline: true }),
