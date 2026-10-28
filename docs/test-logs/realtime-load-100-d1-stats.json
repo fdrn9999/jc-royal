@@ -1,0 +1,230 @@
+{
+  "at": "2026-10-28T12:53:08.798Z",
+  "config": {
+    "viewers": 100,
+    "changes": 6,
+    "burst": 30,
+    "grantees": 20,
+    "devices": 3,
+    "tablesListed": 10,
+    "d1Stats": true
+  },
+  "note": "local wrangler dev (workerd) on one machine; every hub shares one process. Not edge latency, not billing.",
+  "durationMs": 36971,
+  "accounts": {
+    "n": 100,
+    "signupMs": {
+      "n": 100,
+      "p50": 1391,
+      "p95": 1451,
+      "p99": 1454,
+      "max": 1454
+    }
+  },
+  "connect": {
+    "inMs": 1306,
+    "perSocketMs": {
+      "n": 100,
+      "p50": 290,
+      "p95": 455,
+      "p99": 456,
+      "max": 456
+    },
+    "failures": 0,
+    "extraDeviceSockets": 40
+  },
+  "d1RowsPerRequest": [
+    {
+      "path": "/api/tables",
+      "status": 200,
+      "queries": 3,
+      "rowsRead": 24,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/tables/load-0",
+      "status": 200,
+      "queries": 3,
+      "rowsRead": 3,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/messages/unread-count",
+      "status": 200,
+      "queries": 2,
+      "rowsRead": 10,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/auth/me",
+      "status": 200,
+      "queries": 1,
+      "rowsRead": 2,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/service/status",
+      "status": 200,
+      "queries": 3,
+      "rowsRead": 6,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/friends",
+      "status": 200,
+      "queries": 2,
+      "rowsRead": 6,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/friends/presence",
+      "status": 200,
+      "queries": 2,
+      "rowsRead": 4,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/dm/c0261a3f-1e8d-4e70-b85e-191233423c01?afterSeq=0",
+      "status": 200,
+      "queries": 6,
+      "rowsRead": 6,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    },
+    {
+      "path": "/api/tournaments?status=active&limit=20",
+      "status": 200,
+      "queries": 3,
+      "rowsRead": 7,
+      "rowsWritten": 0,
+      "unmeasured": 0
+    }
+  ],
+  "seats": {
+    "changes": 12,
+    "ackMs": {
+      "n": 12,
+      "p50": 11,
+      "p95": 17,
+      "p99": 17,
+      "max": 17
+    },
+    "deliveryMs": {
+      "n": 1200,
+      "p50": 19,
+      "p95": 24,
+      "p99": 27,
+      "max": 27
+    },
+    "missed": 0
+  },
+  "room": {
+    "createMs": 66,
+    "createdMs": {
+      "n": 100,
+      "p50": 83,
+      "p95": 87,
+      "p99": 87,
+      "max": 87
+    },
+    "closedMs": {
+      "n": 100,
+      "p50": 54,
+      "p95": 56,
+      "p99": 56,
+      "max": 56
+    },
+    "missed": 0,
+    "removedEventsPerViewer": {
+      "n": 100,
+      "p50": 1,
+      "p95": 1,
+      "p99": 1,
+      "max": 1
+    }
+  },
+  "burst": {
+    "spectators": 30,
+    "openedAllMs": 610,
+    "lastCountMs": {
+      "n": 100,
+      "p50": 1068,
+      "p95": 1069,
+      "p99": 1069,
+      "max": 1069
+    },
+    "emptiedMs": {
+      "n": 100,
+      "p50": 1036,
+      "p95": 1038,
+      "p99": 1038,
+      "max": 1038
+    },
+    "missed": 0,
+    "eventsPerViewer": {
+      "n": 100,
+      "p50": 4,
+      "p95": 4,
+      "p99": 4,
+      "max": 4
+    },
+    "tableSaysSpectators": {
+      "up": 30,
+      "down": 0
+    }
+  },
+  "grants": {
+    "members": 20,
+    "pagesEach": 3,
+    "grantMs": {
+      "n": 20,
+      "p50": 110,
+      "p95": 122,
+      "p99": 122,
+      "max": 122
+    },
+    "deliveryMs": {
+      "n": 60,
+      "p50": 107,
+      "p95": 118,
+      "p99": 118,
+      "max": 118
+    },
+    "missed": 0,
+    "walletEventsPerPage": {
+      "n": 60,
+      "p50": 1,
+      "p95": 1,
+      "p99": 1,
+      "max": 1
+    },
+    "eventsAfterRetry": 0,
+    "ledgerRowsPerMember": {
+      "n": 20,
+      "p50": 1,
+      "p95": 1,
+      "p99": 1,
+      "max": 1
+    },
+    "balances": {
+      "n": 20,
+      "p50": 10500,
+      "p95": 10500,
+      "p99": 10500,
+      "max": 10500
+    }
+  },
+  "events": {
+    "received": 2744,
+    "duplicates": 0
+  },
+  "lostSockets": [],
+  "errors": []
+}

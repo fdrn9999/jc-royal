@@ -42,6 +42,23 @@ LOAD_TABLES=30 LOAD_PLAYERS=6 LOAD_SPECTATORS=4 pnpm test:load  # PowerShell: $e
 | `LOAD_HANDS` | 5 | 1–200 | 테이블마다 진행할 핸드 수 |
 | `LOAD_PORT` | 8796 | | 로컬 Worker 포트(통합 8799, E2E 8798과 겹치지 않음) |
 
+`pnpm test:load`는 6절의 실시간 시나리오(`tests/load/realtime.load.ts`)도 같은 Worker에서 차례로 돌린다(파일을 동시에 돌리지 않음). 두 시나리오는 같은 테이블에 앉으므로, 테이블 시나리오의 착석 세션 검사는 자기 플레이어의 세션만 센다. 실시간 시나리오만 돌리려면 다음과 같이 한다.
+
+```bash
+pnpm exec vitest run --config tests/load/vitest.config.ts tests/load/realtime.load.ts
+RT_VIEWERS=1000 pnpm exec vitest run --config tests/load/vitest.config.ts tests/load/realtime.load.ts
+TEST_D1_STATS=1 pnpm exec vitest run --config tests/load/vitest.config.ts tests/load/realtime.load.ts   # D1 행 수(6절)
+```
+
+| 변수 | 기본값 | 범위 | 뜻 |
+|---|---|---|---|
+| `RT_VIEWERS` | 100 | 10–2,000 | 실시간 소켓을 연 로비 화면(회원 1명당 1개) |
+| `RT_CHANGES` | min(6, `LOAD_TABLES`−1) | 1–59 | 한 명씩 앉았다 일어서는 테이블 수 |
+| `RT_BURST` | min(30, `RT_VIEWERS`) | 1–`RT_VIEWERS` | 한 테이블을 동시에 여는 관전자 |
+| `RT_GRANTEES` | min(20, `RT_VIEWERS`−`RT_CHANGES`−1) | 1–`RT_VIEWERS` | 관리자가 칩을 지급하는 회원 |
+| `RT_DEVICES` | 3 | 1–10 | 지급받는 회원마다 연 페이지 수(허브 하나에 회원당 소켓 10개까지) |
+| `TEST_D1_STATS` | 끔 | `1` | 응답마다 D1이 센 읽은 행·쓴 행을 `x-d1-*` 헤더와 Worker 로그에 남긴다(`apps/api/src/lib/d1-stats.ts`). 배포 설정에는 넣지 않는다 |
+
 통합 테스트(`pnpm test:integration`)와 CI에는 포함하지 않는다. 느리고, 합격·불합격보다 측정이 목적이다.
 
 ## 3. 결과 (2026-10-15)
@@ -150,3 +167,115 @@ PART A를 모두 마친 코드로 기본 구성을 다시 돌린 값(트레이�
 - 운영에는 이 로컬 트레이스 저장소가 없다. 운영에서는 테이블마다 Durable Object가 따로 돈다.
 - 그래서 위 멈춤은 운영 지연의 근거가 아니다. 운영의 꼬리 지연은 재지 않았다.
 - 바꾼 것: 부하 하네스는 트레이스를 기본으로 끈다. 통합·E2E 하네스는 그대로 둔다.
+
+## 6. 플랫폼 실시간 허브와 D1 행 (2026-10-28)
+
+> 이 절의 숫자도 개발 PC 한 대의 로컬 `wrangler dev`(workerd) 결과다. 실시간 허브 4개(`rt-0 … rt-3`), 테이블 방, API가 모두 한 프로세스에서 돌고, 테스트 클라이언트도 같은 PC에서 돈다. 엣지 지연, 실제 네트워크, 과금이 아니다. 구조는 `docs/REALTIME.md`.
+
+### 6.1 무엇을 하는가
+
+`tests/load/realtime.load.ts`:
+
+1. 회원 `RT_VIEWERS`명이 로비 화면처럼 실시간 소켓(`/ws/realtime`, 토픽 `lobby`)을 연다(동시 25개씩).
+2. **좌석**: 테이블 `load-0 … load-(RT_CHANGES−1)`에 한 명씩 앉았다가 일어선다. 테이블 방이 보내는 `lobby.table.changed`를 모든 화면이 받는지 본다(변경 사이 1.1초).
+3. **방**: 회원이 방을 만들고 닫는다. API가 보내는 `lobby.table.updated`와 `lobby.table.removed`를 본다.
+4. **관전 몰림**: 관전자 `RT_BURST`명이 테이블 하나를 동시에 열고 동시에 닫는다. 방은 관전자 수를 1초에 한 번까지만 보낸다(첫 변경은 바로, 나머지는 1초 뒤 한 번).
+5. **칩 지급**: 관리자가 회원 `RT_GRANTEES`명에게 500칩씩 지급한다. 회원마다 페이지가 `RT_DEVICES`개 열려 있다. 같은 멱등 키로 한 번씩 더 보낸다.
+6. 끝나면 받은 이벤트 전체에서 중복(같은 `eventId`), 누락, 끊긴 소켓을 세고, D1의 최종 상태(원장 행, 잔액)를 읽는다. 보고서는 `tests/.state/realtime-load-report-<RT_VIEWERS>.json`이다.
+
+지연은 요청을 보내기 직전부터 각 화면이 이벤트를 받은 때까지다. 백분위는 1절과 같이 계산한다.
+
+**통과 조건**(하나라도 어기면 실패)
+- 연결 실패, 클라이언트 오류, 누락, 중복, 끊긴 소켓이 모두 0.
+- 관전 몰림 뒤 `GET /api/tables/:id`의 관전자 수가 `RT_BURST`, 모두 나간 뒤 0.
+- 지급받은 회원의 페이지마다 `wallet.changed`를 정확히 1번 받는다. 재시도(`duplicate: true`) 뒤에는 이벤트가 0개다.
+- 회원마다 `admin_adjust` 원장 행이 1개이고 잔액이 10,500이다.
+
+### 6.2 지연 (D1 행 측정을 끈 실행)
+
+원본 보고서는 `docs/test-logs/realtime-load-100.json`과 `realtime-load-1000.json`이다. 10테이블, `RT_CHANGES` 6, `RT_BURST` 30, `RT_GRANTEES` 20 × 3페이지.
+
+| 항목 | 100명 | 1,000명 |
+|---|---|---|
+| 실시간 소켓 연결(소켓마다) p50 / p95 / p99 / 최대(ms) | 219 / 305 / 308 / 308 | 209 / 275 / 318 / 328 |
+| 전부 연 시간 / 연결 실패 | 962 ms / 0 | 8,595 ms / 0 |
+| 착석·일어서기 응답 p50 / p95(ms), 12회 | 12 / 17 | 12 / 16 |
+| 좌석 변경 → 모든 로비 화면 p50 / p95 / p99 / 최대(ms) | 19 / 24 / 25 / 26 (1,200건) | 42 / 64 / 68 / 71 (12,000건) |
+| 방 만들기 응답 / → `lobby.table.updated` p50 / p95 / 최대(ms) | 63 / 75 / 77 / 78 | 72 / 170 / 202 / 203 |
+| 방 닫기 → `lobby.table.removed` p50 / p95 / 최대(ms) | 43 / 45 / 45 | 122 / 145 / 147 |
+| 관전 30명 동시 입장 → 마지막 관전자 수 p50 / p95 / 최대(ms) | 1,064 / 1,067 / 1,067 | 1,091 / 1,113 / 1,115 |
+| 관전 30명 동시 퇴장 → 0명 p50 / p95 / 최대(ms) | 1,068 / 1,071 / 1,071 | 1,088 / 1,112 / 1,113 |
+| 관전 몰림 동안 화면마다 받은 이벤트 | 4 | 4 |
+| 칩 지급 응답 p50 / p95(ms), 20명 | 77 / 84 | 78 / 92 |
+| 지급 → 그 회원의 모든 페이지 `wallet.changed` p50 / p95 / 최대(ms), 60페이지 | 76 / 82 / 83 | 76 / 88 / 88 |
+| 페이지마다 `wallet.changed` / 재시도 뒤 이벤트 | 1 / 0 | 1 / 0 |
+| 회원마다 원장 행 / 잔액 | 1 / 10,500 | 1 / 10,500 |
+| 받은 이벤트 / 중복 / 누락 / 끊긴 소켓 | 2,744 / 0 / 0 / 0 | 26,144 / 0 / 0 / 0 |
+| Worker 로그 오류 줄 | 0 | 0 |
+
+- **관전 몰림의 약 1.1초는 의도한 값이다.** 방은 첫 변경을 바로 보내고, 1초 안에 이어진 변경은 1초 뒤 한 번에 보낸다(같은 수는 두 번 보내지 않는다). 그래서 화면은 30명이 들어오고 나가는 동안 이벤트를 4개(들어올 때 2, 나갈 때 2)만 받고, 마지막 수는 1초 남짓 뒤에 받는다.
+- **칩 지급**은 지급 응답과 거의 같은 때 모든 페이지에 닿았다. 이벤트에는 금액이 없다. 페이지는 이벤트를 받으면 `/api/auth/me`를 한 번 다시 읽는다(같은 때 온 이벤트는 한 번으로 묶음).
+- **100명 → 1,000명**에서 좌석 변경 p95가 24 → 64 ms, 방 이벤트 p95가 77 → 202 ms로 늘었다. 허브 4개와 1,000개 소켓, 26,144개 이벤트를 파싱하는 테스트 클라이언트가 모두 한 PC에서 돈 결과다. 엣지에서 허브는 각각 Durable Object로 따로 돈다. 이 값은 운영 확장성을 보여 주지 않는다.
+- 가입은 1,000명 실행에서 p50 1,014 ms, p99 4,619 ms, 최대 5,610 ms였다(PBKDF2 1,000회, 동시 16개). 운영 비용이 아니다.
+- 이 PC에서 본 일시 오류: 실행 중 가입 요청 하나가 wrangler 프록시의 `Network connection lost`(500)로 실패한 적이 1번 있다. 전역 준비에서 `Migration 0029_presence_push.sql failed … bad port`가 1번 있었다. 둘 다 다시 돌리니 나오지 않았다(같은 코드).
+
+**샤드 수(`REALTIME_SHARDS` = 4)를 이 측정으로 정하지 않았다.** 로컬에서는 허브가 모두 한 프로세스라 허브 하나의 한계를 잴 수 없다. 개인 이벤트는 그 회원의 허브 하나에만 가고, 공개 이벤트(로비·공지·토너먼트) 1건은 허브 4개에 1번씩 간다. 보는 사람이 몇 명이든 발행자의 허브 요청 수는 4다. 4는 시작값이다. 엣지에서 허브 하나의 CPU 시간과 팬아웃 지연을 재고 정해야 한다(배포 뒤 확인 항목, `docs/REALTIME.md`).
+
+### 6.3 요청 하나가 읽는 D1 행
+
+`TEST_D1_STATS=1`로 같은 시나리오를 돌렸다(원본 `docs/test-logs/realtime-load-100-d1-stats.json`, 100명). 각 경로를 두 번 부르고 두 번째 응답의 `x-d1-*` 헤더를 기록했다. D1이 센 `rows_read`, `rows_written` 그대로다.
+
+| 요청 | 쿼리 | 읽은 행 | 쓴 행 |
+|---|---|---|---|
+| `GET /api/tables` (10테이블) | 3 | 24 | 0 |
+| `GET /api/tables/load-0` | 3 | 3 | 0 |
+| `GET /api/messages/unread-count` | 2 | 10 | 0 |
+| `GET /api/auth/me` | 1 | 2 | 0 |
+| `GET /api/service/status` | 3 | 6 | 0 |
+| `GET /api/friends` | 2 | 6 | 0 |
+| `GET /api/friends/presence` | 2 | 4 | 0 |
+| `GET /api/dm/:id?afterSeq=0` | 6 | 6 | 0 |
+| `GET /api/tournaments?status=active&limit=20` | 3 | 7 | 0 |
+
+- 측정 못 한 쿼리(쓰기인데 `first`·`raw`로 부른 것)는 모두 0이었다.
+- 데이터가 작다(가입 100명, 테이블 10개). 절대값보다 무엇에 비례하는지가 중요하다. `/api/tables`의 읽은 행은 목록의 테이블 수에 따라 늘어난다. 나머지는 그 회원의 행만 인덱스로 읽는다(6.4).
+- 공개 로비 이벤트는 받는 화면에서 D1을 읽지 않는다. 바뀐 테이블의 공개 DTO가 이벤트에 들어 있다. 방을 만들거나 닫을 때 API가 공개 카드를 만들려고 D1을 한 번 읽는다(만들기 2행, 닫기 2행, 100명이 보고 있을 때). 보는 사람 수와 상관없다.
+- 테이블 방의 좌석·관전자 수 공개는 원래 있던 D1 기록(로비 실시간 현황) 뒤에 메모리의 수로 보낸다. 게임 Worker의 D1은 이 계측에 들어가지 않는다. 게임 Worker의 D1 문장은 모두 기본 키·유일 키 조회임을 코드로 확인했고, 행 수는 재지 않았다.
+
+**폴링 요청 수(계산, 측정 아님).** 보이는 화면 1개가 1분에 보내는 요청이다. 실시간 소켓이 연결되어 있으면 이벤트가 화면을 갱신하고, 폴링은 놓친 이벤트를 메우는 안전망으로 남는다. 숫자는 `apps/web/src` 안의 간격 상수에서 계산했다.
+
+| 화면 | 소켓 없음 | 소켓 연결 | 1,000명이 볼 때 `/api/tables` 읽은 행/분(위 24행 기준) |
+|---|---|---|---|
+| 로비 목록 `GET /api/tables` | 12회(5초), 1분 동안 입력이 없으면 2회(30초) | 1회(60초) | 288,000 → 24,000 (활성 기준) |
+| 안 읽은 수 `GET /api/messages/unread-count` | 2회(30초) | 0.5회(120초) + 개인 이벤트마다 1회 | |
+| 친구 목록 `GET /api/friends` | 4회(15초) | 1회(60초) | |
+| 열린 1:1 대화 `GET /api/dm/:id` | 15회(4초) | 2회(30초) + 새 메시지 이벤트마다 1회 | |
+| 토너먼트 목록 | 4회(15초) | 1회(60초) | |
+| 토너먼트 상세 | 12회(5초) | 진행 중 4회(15초), 그 밖 1회(60초) | |
+
+- 이벤트 때문에 다시 읽는 요청은 위 표에 없다. 개인 이벤트(쪽지, 친구, 1:1, 지갑)는 그 회원의 화면만 읽는다. `tournament.changed`와 `service.changed`는 공개 이벤트다. 보고 있는 화면이 0–3초(토너먼트) 또는 서버가 정한 분산 시간 안에 흩어서 다시 읽고, 공지·점검은 이미 보고 있는 리비전이면 읽지 않는다.
+- 접속 표시(`/api/friends/presence`, 30초)는 바꾸지 않았다.
+
+### 6.4 쿼리 계획(EXPLAIN QUERY PLAN)
+
+통계를 켠 실행의 Worker 로그에서 서로 다른 SQL 53개를 모아, 같은 실행의 로컬 D1 파일에 `EXPLAIN QUERY PLAN`을 돌렸다(`node:sqlite`, 읽기 전용).
+
+- 폴링되는 경로는 모두 인덱스를 탄다. 예: `sessions_token_uq`, `users` 기본 키, `tables_status_idx`, `tsess_user_idx`, `messages_user_idx`, `dm_unread_idx`, `dm_pair_seq_uq`, `friendships_b_idx`, `tournaments_status_idx`, `maintenance_windows_ends_idx`, `service_notices_live_idx`.
+- 전체 스캔으로 나온 4개:
+  - `delete from email_verifications where expires_at < ?`: 인증 메일 요청마다 지난 행을 지운다. 수명이 짧은 행만 남는 표라 최대 15행을 읽었다. 그대로 둔다.
+  - 관리자 첫 생성의 `select id from users where role = ? limit ?`: 한 번만 돈다.
+  - `/api/service/status`의 `SCAN (subquery-2)`: 표가 아니라 쿼리 안의 하위 결과다.
+  - 방 만들기 `INSERT INTO tables`의 `SCAN direct_messages`, `SCAN table_sessions`: 외래 키 검사 계획이다. 실제로는 기다리는 위반이 없으면 건너뛰고, 잰 읽은 행은 1이었다.
+
+**고친 것: 관리자 칩 재시도의 감사 기록 조회**(`apps/api/src/routes/admin.ts`). 같은 멱등 키로 다시 온 지급은 첫 시도의 `user.chips` 감사 행이 있는지 찾는다. D1에 `ANALYZE` 통계(`sqlite_stat1`)가 없어서 쿼리 계획이 `audit_action_idx`(지금까지 쓰인 모든 `user.chips` 행)를 골랐다. 지급이 쌓일수록 읽는 행이 늘어난다. 인덱스를 새로 만들지 않고 `+action`으로 `action` 조건만 인덱스 선택에서 빼서 `audit_target_idx`(그 회원의 행)를 타게 했다. 결과는 같다.
+
+| 재시도 20회(지급 20회 뒤) | 읽은 행 최소 / 최대 / 평균 |
+|---|---|
+| 고치기 전 | 1 / 20 / 10.5 (그때까지의 지급 수만큼 늘어남) |
+| 고친 뒤 | 1 / 1 / 1 |
+
+이 변경 뒤 관리자 칩·멱등·감사 통합 테스트(`admin`, `admin-concurrency`, `economy`, `realtime`)를 다시 돌려 62개 모두 통과했다. 늦게 쓰는 감사 행(`late: true`) 경로도 들어 있다.
+
+**새 인덱스는 만들지 않았다.** 측정한 경로에서 근거가 나온 것은 위 하나였다.
+
+**남은 후보(바꾸지 않음)**: 반복 신고 대상 목록(`apps/api/src/routes/reports.ts`의 정지 횟수 하위 쿼리, `a.action = 'user.suspend'`)도 같은 계획을 고른다. 대상마다 `audit_action_idx`로 모든 `user.suspend` 행을 읽는다. `+a.action`이면 `audit_target_idx`를 탄다(같은 D1 파일의 `EXPLAIN QUERY PLAN`). 관리자 화면 하나만 쓰고 부하 시나리오에 없어서 읽은 행을 재지 않았다. 재고 나서 고친다.
