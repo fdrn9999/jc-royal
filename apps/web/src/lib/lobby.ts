@@ -3,7 +3,7 @@
  * tables (kept on this device per account; nothing about them is sent to the server). The favourite tables are the
  * account's now (prefs.ts); the ones kept here before are handed over once (takeLegacyFavourites).
  */
-import type { LobbyTableDto, TableView } from '@jc/types';
+import type { LobbyLivePatch, LobbyTableDto, PublicLobbyTable, TableView } from '@jc/types';
 import { useEffect, useSyncExternalStore } from 'react';
 
 /**
@@ -137,33 +137,118 @@ export function latest<T>(load: (signal: AbortSignal) => Promise<T>, onData: (da
 export const POLL_MS = 5_000;
 export const IDLE_POLL_MS = 30_000;
 export const IDLE_AFTER_MS = 60_000;
+/** While the realtime socket brings each table's changes, the list is read again only this often, as a safety net. */
+export const LIVE_POLL_MS = 60_000;
 
 /**
  * When the lobby asks for the list again. A hidden page never does. `tick` runs every POLL_MS; `input` on the user's
  * pointer, keys or wheel; `wake` when the page becomes visible, gets focus or the connection returns. A lobby left open
- * with nobody at it slows down, and the first input afterwards brings the list up to date at once.
+ * with nobody at it slows down, and the first input afterwards brings the list up to date at once. While `live` (the
+ * realtime socket is up and sends the lobby's changes) it asks only every LIVE_POLL_MS, and on coming back after
+ * IDLE_POLL_MS; a socket back after being down reads it at once (the caller's resync).
  */
-export function lobbyPoller(f: Pick<Latest, 'run' | 'startedAt'>, visible: () => boolean, now = Date.now) {
+export function lobbyPoller(f: Pick<Latest, 'run' | 'startedAt'>, visible: () => boolean, now = Date.now, live: () => boolean = () => false) {
   let lastInput = now();
   return {
     tick() {
       const t = now();
-      const every = t - lastInput >= IDLE_AFTER_MS ? IDLE_POLL_MS : POLL_MS;
+      const every = live() ? LIVE_POLL_MS : t - lastInput >= IDLE_AFTER_MS ? IDLE_POLL_MS : POLL_MS;
       // Timers fire a little early or late; a second's slack keeps the tick from skipping every other turn.
       if (visible() && t - f.startedAt >= every - 1_000) f.run();
     },
     input() {
       const t = now();
       lastInput = t;
-      if (visible() && t - f.startedAt >= POLL_MS) f.run();
+      if (visible() && t - f.startedAt >= (live() ? LIVE_POLL_MS : POLL_MS)) f.run();
     },
     wake() {
       const t = now();
       lastInput = t;
       // Coming back fires visibility and focus together: one request is enough.
-      if (visible() && t - f.startedAt >= 1_000) f.run();
+      if (visible() && t - f.startedAt >= (live() ? IDLE_POLL_MS : 1_000)) f.run();
     },
   };
+}
+
+type Mine = NonNullable<LobbyTableDto['myParticipation']>;
+const NO_PLACE: Mine = { status: 'none' };
+/** As the API: a place on the waitlist only counts while the table is open. */
+const placeAt = (status: LobbyTableDto['status'], mine: Mine | undefined): Mine | undefined => (status !== 'open' && mine?.status === 'waiting' ? NO_PLACE : mine);
+
+/** A table's live counts from the realtime socket onto its card, when they are newer than the ones it shows. */
+export function withCounts(t: LobbyTableDto, p: LobbyLivePatch): LobbyTableDto {
+  if ((t.liveRev ?? 0) >= p.rev) return t;
+  const { id: _, rev, ...counts } = p;
+  return { ...t, ...counts, liveRev: rev, myParticipation: placeAt(p.status, t.myParticipation) };
+}
+
+/**
+ * A table's card from the realtime socket (or a fresh read of it) onto the one shown: the newer settings, the newer
+ * counts, and the player's own place as the card had it (an event never carries anyone's). A table not shown yet is added.
+ */
+export function withCard(t: LobbyTableDto | undefined, card: PublicLobbyTable): LobbyTableDto {
+  if (!t) return { ...card, myParticipation: NO_PLACE };
+  const settings = (card.rev ?? 0) > (t.rev ?? 0) ? card : t;
+  const counts = (card.liveRev ?? 0) > (t.liveRev ?? 0) ? card : t;
+  const { seated, bots, playing, waitlist, spectators, liveRev } = counts;
+  return { ...settings, seated, bots, playing, waitlist, spectators, liveRev, myParticipation: placeAt(settings.status, t.myParticipation) };
+}
+
+/** The lobby's order, as GET /api/tables sorts: official tables first, then by big blind, then by name. */
+export function lobbyOrder(a: LobbyTableDto, b: LobbyTableDto): number {
+  if (a.roomType !== b.roomType) return a.roomType > b.roomType ? -1 : 1;
+  if (a.bigBlind !== b.bigBlind) return a.bigBlind - b.bigBlind;
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+/**
+ * What the realtime socket told the lobby since its last list read: kept so that a list read that started before an
+ * event, and arrives after it, never shows the older state (mergeList). Entries the list has caught up with go.
+ */
+export interface LobbyLive {
+  patches: Map<string, LobbyLivePatch>;
+  /** Cards from events (or a fresh read of one table) and when they came, on this page's clock. */
+  cards: Map<string, { card: PublicLobbyTable; at: number }>;
+  /** The player's own place from a fresh read of one table, and when that read started. */
+  mine: Map<string, { p: Mine; at: number }>;
+  /** Tables that closed: never shown again (a closed table does not reopen). */
+  gone: Set<string>;
+}
+export const newLobbyLive = (): LobbyLive => ({ patches: new Map(), cards: new Map(), mine: new Map(), gone: new Set() });
+
+/**
+ * A list read that started at `at` (this page's clock), with whatever newer the socket brought meanwhile. What the
+ * read already has is forgotten. `fresh` (the read just arrived): so are counts for tables it does not list.
+ */
+export function mergeList(list: LobbyTableDto[], at: number, live: LobbyLive, fresh = false): LobbyTableDto[] {
+  const rows = new Map(list.map((t) => [t.id, t]));
+  // A table that opened after the read started is added; one the read should have had and did not has closed.
+  for (const [id, c] of live.cards) if (!rows.has(id) && c.at <= at) live.cards.delete(id);
+  const out: LobbyTableDto[] = [];
+  for (const id of new Set([...rows.keys(), ...live.cards.keys()])) {
+    if (live.gone.has(id)) continue;
+    const row = rows.get(id);
+    let t = row;
+    const c = live.cards.get(id);
+    if (c) {
+      if (row && (row.rev ?? 0) >= (c.card.rev ?? 0)) live.cards.delete(id);
+      else t = withCard(t, c.card);
+    }
+    if (!t) continue;
+    const p = live.patches.get(id);
+    if (p) {
+      if (row && (row.liveRev ?? 0) >= p.rev) live.patches.delete(id);
+      else t = withCounts(t, p);
+    }
+    const m = live.mine.get(id);
+    if (m) {
+      if (m.at <= at) live.mine.delete(id);
+      else t = { ...t, myParticipation: placeAt(t.status, m.p) };
+    }
+    out.push(t);
+  }
+  if (fresh) for (const id of live.patches.keys()) if (!rows.has(id) && !live.cards.has(id)) live.patches.delete(id);
+  return out.sort(lobbyOrder);
 }
 
 export interface TablePrefs {
