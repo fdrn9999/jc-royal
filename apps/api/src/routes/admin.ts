@@ -4,7 +4,7 @@
  * to admin_audit_log, refused and failed attempts too (lib/audit.ts). Actions marked so take preview: true and answer
  * what they would change without changing it.
  */
-import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
+import { applyLedger, findLedgerMismatches, LEDGER_GUARD, schema } from '@jc/db';
 import { botSettingsIssues, ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, ne, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
@@ -198,19 +198,21 @@ function cursorOf(raw: string | undefined, timed: boolean): { at: number; seq: n
 }
 
 /**
- * The `user.chips` record of a chip adjustment, unless its ledger row has one already: one statement, so a first try and
- * a repeat racing it write one record between them. `+action` keeps the planner on audit_target_idx (this member's rows):
- * with no ANALYZE statistics it chose audit_action_idx, every `user.chips` row ever written (docs/LOAD_TEST.md).
+ * The `user.chips` record of a chip adjustment: written only if its ledger row is there and has no record yet, in one
+ * statement, so a first try and a repeat racing it write one record between them. The adjustment runs it in the ledger's
+ * own batch (the chips and their record commit together or neither does); a repeat runs it alone for a row recorded
+ * before that. `+action` keeps the planner on audit_target_idx (this member's rows): with no ANALYZE statistics it chose
+ * audit_action_idx, every `user.chips` row ever written (docs/LOAD_TEST.md).
  */
-async function chipsRecord(c: Context<AppEnv>, member: string, actor: string, ip: string | null, detail: { ledgerId: string } & Record<string, unknown>) {
-  await c.env.DB.prepare(
-    `INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, detail, ip)
-     SELECT ?1, ?2, 'user.chips', 'user', ?3, ?4, ?5
-     WHERE NOT EXISTS (SELECT 1 FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?3 AND +action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?6)`,
-  )
-    .bind(crypto.randomUUID(), actor, member, JSON.stringify(detail), ip, detail.ledgerId)
-    .run();
-  c.set('audited', true);
+function chipsRecord(db: D1Database, member: string, actor: string, ip: string | null, detail: { ledgerId: string } & Record<string, unknown>) {
+  return db
+    .prepare(
+      `INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, detail, ip)
+       SELECT ?1, ?2, 'user.chips', 'user', ?3, ?4, ?5
+       WHERE NOT EXISTS (SELECT 1 FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?3 AND +action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?6)
+         AND ${LEDGER_GUARD}`,
+    )
+    .bind(crypto.randomUUID(), actor, member, JSON.stringify(detail), ip, detail.ledgerId, detail.ledgerId);
 }
 
 /** The member a list is narrowed to, by exact id, email or nickname (nicknames are unique ignoring case). */
@@ -881,38 +883,42 @@ const admin = new Hono<AppEnv>()
         ref,
       });
     }
-    const r = await applyLedger(c.env.DB, {
-      userId: id,
-      type: 'admin_adjust',
-      amount: body.amount,
-      idempotencyKey: key,
-      actorId: c.var.user!.id,
-      memo: body.memo,
-      refId: ref?.id ?? null,
-    });
-    if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
     const linked = ref ? { refLedgerId: ref.id, refType: ref.type } : {};
-    // The same request again (a retry, a double click): nothing changed, and that is on record. A first try whose audit
-    // row was not written (below) gets it now, marked late: the adjustment as its ledger row has it, by who made it.
+    // The record goes in the ledger's batch: if it cannot be written, no chips move and the request fails (the console
+    // keeps its key, so sending it again is this adjustment, once).
+    const r = await applyLedger(
+      c.env.DB,
+      {
+        userId: id,
+        type: 'admin_adjust',
+        amount: body.amount,
+        idempotencyKey: key,
+        actorId: c.var.user!.id,
+        memo: body.memo,
+        refId: ref?.id ?? null,
+      },
+      (ledgerId) => [chipsRecord(c.env.DB, id, c.var.user!.id, clientIp(c), { amount: body.amount, memo: body.memo, ledgerId, ...linked })],
+    );
+    if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
+    // The same request again (a retry, a double click): nothing changed, and that is on record. An adjustment made before
+    // its record shared its batch, whose record was not written, gets it now, marked late: as its ledger row has it, by
+    // who made it.
     if (r.status === 'duplicate') {
       const done = await madeBy();
       if (!done || !repeats(done)) return conflict();
-      await chipsRecord(c, id, done.actorId ?? c.var.user!.id, null, { amount: done.amount, memo: done.memo, ledgerId: done.id, ...linked, late: true });
+      await chipsRecord(c.env.DB, id, done.actorId ?? c.var.user!.id, null, { amount: done.amount, memo: done.memo, ledgerId: done.id, ...linked, late: true }).run();
       await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
     }
     if (r.status === 'applied') {
-      // The adjustment is committed: what follows reports it and never turns it into a failure (the admin would see an
-      // error for chips that moved, and the retry finds them moved). A step that fails is logged; a missing audit row is
-      // written by the retry above.
+      c.set('audited', true);
+      // The adjustment and its record are committed: what follows reports it and never turns it into a failure (the
+      // admin would see an error for chips that moved, and the retry finds them moved). The notice is logged if it fails.
       await sendMessages(c.var.db, {
         userIds: [id],
         category: body.amount > 0 ? 'event' : 'admin',
         ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
       }).catch((e) => console.error('chips notice not written', id, r.ledgerId, e));
-      await chipsRecord(c, id, c.var.user!.id, clientIp(c), { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...linked }).catch((e) =>
-        console.error('chips audit not written', id, r.ledgerId, e),
-      );
       // The member's open pages read the balance, the ledger and the inbox again (the event says only that they changed).
       realtimeToUsers(c, [id], { scope: 'user', type: 'wallet.changed' });
       realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });

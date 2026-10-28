@@ -148,6 +148,35 @@ describe('realtime socket: personal events', () => {
     expect(rows[0]!.n).toBe(1);
   });
 
+  it('a grant whose record cannot be written is not made: the chips and their record commit together, and the retry makes both once', async () => {
+    const target = await newUser();
+    const s = await rt(target.client);
+    await reauth();
+    const grant = { amount: 500, memo: 'atomic audit check', idempotencyKey: uniq('rt-atomic') };
+    const ledger = async () => (await d1<{ n: number }>(`SELECT count(*) AS n FROM chip_ledger WHERE user_id = '${target.me.id}' AND type = 'admin_adjust'`))[0]!.n;
+    const recorded = async () => (await d1<{ n: number }>(`SELECT count(*) AS n FROM admin_audit_log WHERE action = 'user.chips' AND target_id = '${target.me.id}'`))[0]!.n;
+    // The audit log refuses this member's grant record (as a failing write would), for this test only.
+    const trigger = `audit_down_${target.me.id.replace(/[^A-Za-z0-9]/g, '')}`;
+    await d1(`CREATE TRIGGER ${trigger} BEFORE INSERT ON admin_audit_log WHEN NEW.action = 'user.chips' AND NEW.target_id = '${target.me.id}' BEGIN SELECT RAISE(ABORT, 'audit down'); END`);
+    try {
+      const failed = await admin.post(`/api/admin/users/${target.me.id}/chips`, grant);
+      expect(failed.status, JSON.stringify(failed.body)).toBeGreaterThanOrEqual(500);
+      // no chips moved without their record, nor is a change announced
+      expect(await ledger()).toBe(0);
+      expect(await recorded()).toBe(0);
+      expect((await target.client.get('/api/auth/me')).body.balance).toBe(10_000);
+      await quiet(s, 'wallet.changed', 0);
+    } finally {
+      await d1(`DROP TRIGGER IF EXISTS ${trigger}`);
+    }
+    // The console keeps the key after a failure: the same request is then the grant, once, with its record.
+    const ok = await admin.post(`/api/admin/users/${target.me.id}/chips`, grant);
+    expect(ok.body).toMatchObject({ ok: true, duplicate: false, balanceAfter: 10_500 });
+    await s.event('wallet.changed');
+    expect(await ledger()).toBe(1);
+    expect(await recorded()).toBe(1);
+  });
+
   it("a key already used for one member's grant is refused for another member or another amount, and moves or records nothing for them", async () => {
     const [a, b] = await Promise.all([newUser(), newUser()]);
     await reauth();
