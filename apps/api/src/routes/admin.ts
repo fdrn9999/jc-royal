@@ -45,7 +45,7 @@ import { signedOut } from '../lib/signout';
 const ONLINE_MS = 5 * 60_000;
 
 const ReasonSchema = z.string().trim().min(2).max(200);
-const SuspendSchema = z.object({ reason: ReasonSchema, reportId: z.string().min(1).max(64).optional() });
+const SuspendSchema = z.object({ reason: ReasonSchema, reportId: z.string().min(1).max(64).optional(), reasonLocale: z.enum(['ko', 'en']).optional() });
 const DisconnectSchema = z.object({ reason: ReasonSchema, removeFromTable: z.boolean().default(false) });
 const RoleSchema = z.object({ role: z.enum(['user', 'admin', 'super_admin']), reason: ReasonSchema });
 
@@ -665,6 +665,11 @@ const admin = new Hono<AppEnv>()
       // rest (status, notice, record) is not repeated.
       if (preview) fail(409, 'already_suspended', 'this member is already suspended');
       await alreadySuspended(c, id);
+    }
+    // The reason reaches the member inside a notice in their language. Written for the other one (`reasonLocale`: they
+    // switched while it was being written), it is sent back to be written again, and nothing changes.
+    if (body.reasonLocale && body.reasonLocale !== target.locale) {
+      fail(409, 'locale_changed', "the member's language changed while the reason was written", { locale: target.locale });
     }
     if (preview) {
       return c.json({ preview: true, member: { nickname: target.nickname, role: target.role, status: target.status }, ...(await sanctionPreview(c.env.DB, id)) });

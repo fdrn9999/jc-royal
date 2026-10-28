@@ -142,6 +142,29 @@ describe('two administrators at once', () => {
     expect(await messages(gone.me.id)).toEqual([]);
   });
 
+  it('a reason written in the language the member has just switched away from is sent back, the preview too, and nothing changes', async () => {
+    const [x] = await both();
+    const m = await newUser();
+    // The console wrote the reason in Korean; the member switched to English before it was sent.
+    expect((await m.client.patch('/api/auth/me', { locale: 'en' })).status).toBe(200);
+    const pv = await x.post(`/api/admin/users/${m.me.id}/suspend`, { preview: true, reasonLocale: 'ko' });
+    expect(pv.status).toBe(409);
+    expect(pv.body.error).toMatchObject({ code: 'locale_changed', details: { locale: 'en' } });
+    const stale = await x.post(`/api/admin/users/${m.me.id}/suspend`, { reason: '스팸 및 광고', reasonLocale: 'ko' });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toMatchObject({ code: 'locale_changed', details: { locale: 'en' } });
+    expect(await d1(`SELECT status, suspended_reason FROM users WHERE id = '${m.me.id}'`)).toEqual([{ status: 'active', suspended_reason: null }]);
+    expect(await audits('user.suspend', m.me.id)).toHaveLength(0);
+    expect((await messages(m.me.id)).filter((n) => n.category === 'sanction')).toEqual([]);
+
+    // Written again in theirs, it goes through; without `reasonLocale` (an older console) nothing is checked.
+    const ok = await x.post(`/api/admin/users/${m.me.id}/suspend`, { reason: 'Spam or advertising', reasonLocale: 'en' });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await messages(m.me.id)).filter((n) => n.category === 'sanction')).toHaveLength(1);
+    const other = await newUser(undefined, { locale: 'en' });
+    expect((await x.post(`/api/admin/users/${other.me.id}/suspend`, { reason: 'no language sent' })).status).toBe(200);
+  });
+
   it('a suspension that committed but never reached the tables is finished by asking again: the seat is left, the socket ends', async () => {
     const [x] = await both();
     const m = await newUser();

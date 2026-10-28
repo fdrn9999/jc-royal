@@ -487,8 +487,11 @@ export function UserDetailPage() {
   const chipForm = useRef<HTMLDivElement>(null);
   // Bumped after every change so the history panel reloads with the new entry.
   const [rev, setRev] = useState(0);
-  // Another administrator suspended the member after this page loaded: show the member as they are now.
-  const outdated = (e: unknown): e is ApiError => e instanceof ApiError && e.code === 'already_suspended';
+  // The member changed after this page loaded (another administrator suspended them, or they switched language and the
+  // reason has to be written in the new one): show the member as they are now.
+  const outdated = (e: unknown): e is ApiError => e instanceof ApiError && (e.code === 'already_suspended' || e.code === 'locale_changed');
+  // The language the suspension reason was written in, for the server to check it is still the member's.
+  const reasonLocale = data?.user.locale;
   const run = async (fn: () => Promise<unknown>) => {
     setNote(null);
     setReset(null);
@@ -516,7 +519,7 @@ export function UserDetailPage() {
     const seq = ++previewSeq.current;
     const body =
       p.kind === 'suspend'
-        ? { preview: true, reason }
+        ? { preview: true, reason, reasonLocale }
         : p.kind === 'disconnect'
           ? { preview: true, reason: dReason, removeFromTable: removeSeat }
           : p.kind === 'role'
@@ -575,7 +578,7 @@ export function UserDetailPage() {
     void run(async () => {
       setKick(
         kind === 'suspend'
-          ? await api<{ kick: KickReport }>(`/api/admin/users/${id}/suspend`, { body: { reason } })
+          ? await api<{ kick: KickReport }>(`/api/admin/users/${id}/suspend`, { body: { reason, reasonLocale } })
           : await api<{ kick: KickReport; sessions: number }>(`/api/admin/users/${id}/disconnect`, { body: { reason: dReason, removeFromTable: removeSeat } }),
       );
       // A used reason is not offered again for the next action.

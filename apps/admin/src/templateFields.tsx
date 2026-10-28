@@ -112,6 +112,12 @@ export function AdminReasonField({
   useEffect(() => {
     if (gone) emit('', '', null);
   });
+  // The reader's language changed while this was being written (the member switched theirs): the template's part is
+  // written again in it. The detail stays as the admin typed it, and text typed by hand is left alone.
+  const relang = lang !== undefined && read !== null && read.lang !== lang;
+  useEffect(() => {
+    if (relang && tpl && lang) emit(composeReason(tpl, detail.slice(0, Math.max(0, maxLength - labelOf(tpl, lang).length - SEP.length)), lang), tpl.id, tpl);
+  });
 
   const choose = (id: string) => {
     if (id === CUSTOM) return emit(value, CUSTOM, null); // the text so far stays, to edit freely

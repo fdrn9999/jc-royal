@@ -262,7 +262,9 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
   const [notifyTarget, setNotifyTarget] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const [suspend, setSuspend] = useState<{ reason: string; error: string | null } | null>(null);
+  // `lang`: the member's language as the server last said it, when they switched it after this list loaded.
+  const [suspend, setSuspend] = useState<{ reason: string; error: string | null; lang?: 'ko' | 'en' } | null>(null);
+  const targetLang = suspend?.lang ?? r.target.locale;
   // A decision waits in a confirmation that shows the server's preview of it (reports closed with it, content hidden, messages sent).
   const [decide, setDecide] = useState<{ status: Decision; pv: { data: DecisionPreview } | { error: unknown } | null } | null>(null);
   const pvSeq = useRef(0);
@@ -320,11 +322,15 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
     if (!suspend) return;
     setBusy(true);
     try {
-      await api(`/api/admin/users/${r.target.id}/suspend`, { body: { reason: suspend.reason.trim(), reportId: r.id } });
+      await api(`/api/admin/users/${r.target.id}/suspend`, { body: { reason: suspend.reason.trim(), reportId: r.id, reasonLocale: targetLang } });
       setSuspend(null);
       onDone({ ok: true, text: t('reportSuspended', { name: r.target.nickname }) });
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setSuspend({ ...suspend, error: errText(e, t) });
+      if (e instanceof ApiError && e.code === 'locale_changed') {
+        // Written again in the member's language now (the field does it); the note stays until the dialog closes.
+        const lang = (e.details as { locale?: 'ko' | 'en' } | undefined)?.locale;
+        setSuspend({ ...suspend, lang: lang ?? (targetLang === 'en' ? 'ko' : 'en'), error: null });
+      } else if (!(e instanceof ApiError && e.code === 'reauth_cancelled')) setSuspend({ ...suspend, error: errText(e, t) });
     } finally {
       setBusy(false);
     }
@@ -484,12 +490,15 @@ function ReportItem({ r, staff, onDone }: { r: ReportDto; staff: Staff[]; onDone
             label={t('reason')}
             templates={REASONS.suspend}
             value={suspend?.reason ?? ''}
-            onChange={(v) => suspend && setSuspend({ reason: v, error: null })}
+            onChange={(v) => setSuspend((s) => s && { ...s, reason: v, error: null })}
             maxLength={200}
-            lang={r.target.locale}
-            hint={t('suspendReasonHint', { lang: r.target.locale === 'en' ? t('langEn') : t('langKo') })}
+            lang={targetLang}
+            hint={t('suspendReasonHint', { lang: targetLang === 'en' ? t('langEn') : t('langKo') })}
             testid="report-suspend-reason"
           />
+          {suspend?.lang && (
+            <p className="text-xs text-gold-300" role="status" data-testid="report-suspend-relang">{t('errLocaleChanged')}</p>
+          )}
           {suspend?.error && <p className="text-xs text-danger" role="alert">{suspend.error}</p>}
         </div>
       </Modal>

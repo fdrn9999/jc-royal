@@ -27,7 +27,7 @@ async function reauthIfAsked(page: Page, done: Locator) {
 const groups = (select: Locator) =>
   select.evaluate((el) => Array.from((el as HTMLSelectElement).querySelectorAll('option')).filter((o) => !o.disabled).map((o) => [(o.parentElement as HTMLOptGroupElement).label ?? '', o.textContent ?? ''] as const));
 
-test('reason templates: a chip memo follows the amount’s sign and reaches the member as recorded; a suspension reason that states a breach asks for what happened', async ({ browser }) => {
+test('reason templates: a chip memo follows the amount’s sign and reaches the member as recorded; a suspension reason that states a breach asks for what happened, and follows the member’s language if they switch it before it is sent', async ({ browser }) => {
   const member = await signUp(browser);
   const op = await signUp(browser);
   sql(promoteSql(`email = '${op.email}'`));
@@ -86,9 +86,25 @@ test('reason templates: a chip memo follows the amount’s sign and reaches the 
   await page.getByTestId('suspend-reason').fill('E2E 직접 쓴 사유');
   await expect(page.getByTestId('suspend-reason')).toHaveValue('E2E 직접 쓴 사유');
   await expect(page.getByTestId('suspend-reason-final')).toHaveCount(0);
+
+  // The member switches to English before it is sent: the preview refuses it, the page shows them as they are now, and
+  // the reason is written again in English with the detail as typed. Sent again, that is what they get.
+  await why.selectOption({ label: '부정행위 확인' });
+  await page.getByTestId('suspend-reason').fill('chip dumping x3');
+  expect(await member.page.evaluate(async () => (await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'en' }) })).status)).toBe(200);
+  await page.getByTestId('suspend').click();
+  await expect(page.getByTestId('preview-error')).toContainText('그사이 회원이 사용 언어를 바꿔 정지하지 않았습니다');
+  await expect(page.getByTestId('confirm-end')).toBeDisabled();
+  await expect(page.getByTestId('suspend-reason-final')).toHaveText('기록될 내용: Cheating confirmed - chip dumping x3');
+  await page.getByRole('dialog').getByRole('button', { name: '취소' }).click();
+  await expect(page.getByText('회원에게 가는 이용 제한 안내에 영어로 그대로 보입니다')).toBeVisible();
+  await page.getByTestId('suspend').click();
+  await page.getByTestId('confirm-end').click();
+  await reauthIfAsked(page, page.getByTestId('unsuspend'));
+  await expect(page.getByTestId('unsuspend')).toContainText('Cheating confirmed - chip dumping x3');
 });
 
-test('a suspension given from a report is written in the reported member’s language, as on the member’s page', async ({ browser }) => {
+test('a suspension given from a report is written in the reported member’s language, as on the member’s page, and a switch while it is open is caught before it goes out', async ({ browser }) => {
   const bad = await signUp(browser);
   const reporter = await signUp(browser);
   const op = await signUp(browser);
@@ -116,9 +132,19 @@ test('a suspension given from a report is written in the reported member’s lan
   await dialog.getByTestId('report-suspend-reason').fill('repeated ad links');
   await expect(dialog.getByTestId('report-suspend-reason-final')).toHaveText('기록될 내용: Spam or advertising - repeated ad links');
   await page.screenshot({ path: 'test-results/admin-tpl-report-suspend.png' });
+
+  // The member switches back to Korean while the dialog is open: nothing is suspended, the reason is written again in
+  // Korean with the detail as typed, and the dialog says why.
+  expect(await bad.page.evaluate(async () => (await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'ko' }) })).status)).toBe(200);
+  await dialog.getByTestId('report-suspend-confirm').click();
+  await reauthIfAsked(page, dialog.getByTestId('report-suspend-relang'));
+  await expect(dialog.getByTestId('report-suspend-reason-final')).toHaveText('기록될 내용: 스팸 및 광고 - repeated ad links');
+  await expect(dialog).toContainText('회원에게 가는 이용 제한 안내에 한국어로 그대로 보입니다');
+  await expect(item.getByTestId('report-sanctions')).toContainText('정지·강제 연결 종료 이력이 없습니다.');
+  await page.screenshot({ path: 'test-results/admin-tpl-report-relang.png' });
   await dialog.getByTestId('report-suspend-confirm').click();
   await reauthIfAsked(page, page.getByRole('status').filter({ hasText: `${bad.nickname}님을 정지했습니다` }));
-  await expect(item.getByTestId('report-sanctions')).toContainText('Spam or advertising - repeated ad links');
+  await expect(item.getByTestId('report-sanctions')).toContainText('스팸 및 광고 - repeated ad links');
 });
 
 test('message templates: a template writes the title and body, blanks stop the send until filled, text changed by hand is asked about first, a category change keeps the text, and the member gets what was shown', async ({ browser }) => {
