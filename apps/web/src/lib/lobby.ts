@@ -182,16 +182,21 @@ export function withCounts(t: LobbyTableDto, p: LobbyLivePatch): LobbyTableDto {
   return { ...t, ...counts, liveRev: rev, myParticipation: placeAt(p.status, t.myParticipation) };
 }
 
+/** Of two cards of one table, the newer settings (rev) and the newer counts (liveRev), each on its own. */
+export function newerCard<T extends PublicLobbyTable>(t: T, card: PublicLobbyTable): T {
+  const settings = (card.rev ?? 0) > (t.rev ?? 0) ? { ...t, ...card } : t;
+  const { seated, bots, playing, waitlist, spectators, liveRev } = (card.liveRev ?? 0) > (t.liveRev ?? 0) ? card : t;
+  return { ...settings, seated, bots, playing, waitlist, spectators, liveRev };
+}
+
 /**
  * A table's card from the realtime socket (or a fresh read of it) onto the one shown: the newer settings, the newer
  * counts, and the player's own place as the card had it (an event never carries anyone's). A table not shown yet is added.
  */
 export function withCard(t: LobbyTableDto | undefined, card: PublicLobbyTable): LobbyTableDto {
   if (!t) return { ...card, myParticipation: NO_PLACE };
-  const settings = (card.rev ?? 0) > (t.rev ?? 0) ? card : t;
-  const counts = (card.liveRev ?? 0) > (t.liveRev ?? 0) ? card : t;
-  const { seated, bots, playing, waitlist, spectators, liveRev } = counts;
-  return { ...settings, seated, bots, playing, waitlist, spectators, liveRev, myParticipation: placeAt(settings.status, t.myParticipation) };
+  const c = newerCard(t, card);
+  return { ...c, myParticipation: placeAt(c.status, t.myParticipation) };
 }
 
 /** The lobby's order, as GET /api/tables sorts: official tables first, then by big blind, then by name. */
@@ -217,6 +222,15 @@ export interface LobbyLive {
 export const newLobbyLive = (): LobbyLive => ({ patches: new Map(), cards: new Map(), mine: new Map(), gone: new Set() });
 
 /**
+ * Keeps a table's card from an event or a fresh read: laid over the one already kept, so a read that started before an
+ * event and answers after it never takes back the newer settings or counts the event brought.
+ */
+export function keepCard(live: LobbyLive, id: string, card: PublicLobbyTable, at: number) {
+  const kept = live.cards.get(id);
+  live.cards.set(id, kept ? { card: newerCard(kept.card, card), at: Math.max(kept.at, at) } : { card, at });
+}
+
+/**
  * A list read that started at `at` (this page's clock), with whatever newer the socket brought meanwhile. What the
  * read already has is forgotten. `fresh` (the read just arrived): so are counts for tables it does not list.
  */
@@ -231,7 +245,7 @@ export function mergeList(list: LobbyTableDto[], at: number, live: LobbyLive, fr
     let t = row;
     const c = live.cards.get(id);
     if (c) {
-      if (row && (row.rev ?? 0) >= (c.card.rev ?? 0)) live.cards.delete(id);
+      if (row && (row.rev ?? 0) >= (c.card.rev ?? 0) && (row.liveRev ?? 0) >= (c.card.liveRev ?? 0)) live.cards.delete(id);
       else t = withCard(t, c.card);
     }
     if (!t) continue;

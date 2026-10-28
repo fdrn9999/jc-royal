@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LobbyLivePatch, LobbyTableDto, PublicLobbyTable } from '@jc/types';
-import { arrivalOf, entryOf, FAV_MAX, IDLE_AFTER_MS, IDLE_POLL_MS, latest, LIVE_POLL_MS, lobbyPoller, mergeList, newLobbyLive, parsePrefs, POLL_MS, RECENT_MAX, RESUME, RESUME_WAIT, resumeOf, seatHeld, withCard, withCounts, withFav, withVisit } from '../src/lib/lobby';
+import { arrivalOf, entryOf, FAV_MAX, IDLE_AFTER_MS, IDLE_POLL_MS, keepCard, latest, LIVE_POLL_MS, lobbyPoller, mergeList, newLobbyLive, parsePrefs, POLL_MS, RECENT_MAX, RESUME, RESUME_WAIT, resumeOf, seatHeld, withCard, withCounts, withFav, withVisit } from '../src/lib/lobby';
 
 /** A request whose answer the test decides; it rejects like fetch when aborted. */
 function deferred<T>() {
@@ -233,6 +233,28 @@ describe('lobby realtime merge', () => {
     const [b] = mergeList([row('a', { liveRev: 160, rev: 70, seated: 2, name: 'renamed' })], 3_000, live, true);
     expect(b).toMatchObject({ seated: 2, name: 'renamed' });
     expect(live.patches.size + live.cards.size).toBe(0);
+  });
+
+  it('a read of one table that answers after a newer card never takes that card back', () => {
+    const live = newLobbyLive();
+    // The settings changed (an event), while a read of the table for my own place, begun before, was still out.
+    keepCard(live, 'a', card('a', { rev: 70, liveRev: 100, name: 'renamed' }), 2_000);
+    keepCard(live, 'a', card('a', { rev: 60, liveRev: 180, seated: 3, name: 'old' }), 1_500);
+    expect(live.cards.get('a')).toMatchObject({ at: 2_000, card: { rev: 70, name: 'renamed', liveRev: 180, seated: 3 } });
+    expect(mergeList([row('a')], 1_000, live)[0]).toMatchObject({ name: 'renamed', seated: 3 });
+    // and the same again the other way round
+    keepCard(live, 'a', card('a', { rev: 80, liveRev: 90, seated: 1, name: 'again' }), 2_500);
+    expect(live.cards.get('a')).toMatchObject({ at: 2_500, card: { rev: 80, name: 'again', liveRev: 180, seated: 3 } });
+  });
+
+  it('a list read with the same settings but older counts keeps the newer counts a card brought', () => {
+    const live = newLobbyLive();
+    live.cards.set('a', { card: card('a', { rev: 70, liveRev: 200, seated: 5 }), at: 2_000 });
+    expect(mergeList([row('a', { rev: 70, liveRev: 100, seated: 1 })], 1_000, live, true)[0]).toMatchObject({ seated: 5, liveRev: 200 });
+    expect(live.cards.size).toBe(1);
+    // the list has caught up with both
+    expect(mergeList([row('a', { rev: 70, liveRev: 200, seated: 5 })], 3_000, live, true)[0]).toMatchObject({ seated: 5 });
+    expect(live.cards.size).toBe(0);
   });
 
   it('adds a table that opened after the read began, drops one that closed, and orders them as the API', () => {

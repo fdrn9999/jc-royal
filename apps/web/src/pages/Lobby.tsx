@@ -13,7 +13,7 @@ import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { entryOf, latest, lobbyPoller, mergeList, newLobbyLive, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Latest } from '../lib/lobby';
+import { entryOf, keepCard, latest, lobbyPoller, mergeList, newLobbyLive, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Latest } from '../lib/lobby';
 import { rememberLobby } from '../lib/lobbyReturn';
 import { setFavourite, useFavourites } from '../lib/prefs';
 import { coalesced, onRealtime, realtimeUp, useRealtimeStatus, wantTopic } from '../lib/realtime';
@@ -74,7 +74,7 @@ function useLobbyTables() {
           const t = await api<LobbyTableDto>(`/api/tables/${encodeURIComponent(id)}`).catch(() => null);
           if (!t || t.roomType === 'tournament') return;
           const { myParticipation, ...card } = t;
-          live.cards.set(id, { card, at });
+          keepCard(live, id, card, at);
           live.mine.set(id, { p: myParticipation ?? { status: 'none' }, at });
           show();
         });
@@ -88,7 +88,7 @@ function useLobbyTables() {
         show();
       }),
       onRealtime('lobby.table.updated', ({ resourceId: id, payload: card }) => {
-        if ((live.cards.get(id)?.card.rev ?? -1) < (card.rev ?? 0)) live.cards.set(id, { card, at: Date.now() });
+        keepCard(live, id, card, Date.now());
         show();
       }),
       onRealtime('lobby.table.removed', ({ resourceId: id }) => {
