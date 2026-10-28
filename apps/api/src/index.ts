@@ -20,6 +20,7 @@ import { roomRoutes } from './routes/rooms';
 import { serviceRoutes } from './routes/service';
 import { notificationRoutes } from './routes/notifications';
 import { presenceRoutes } from './routes/presence';
+import { realtimeSocket } from './routes/realtime';
 import { blockRoutes, dmRoutes, friendPresenceRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 import { tournamentRoutes } from './routes/tournaments';
@@ -58,6 +59,7 @@ app.route('/api/academy', academyRoutes);
 app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
+app.get('/ws/realtime', realtimeSocket);
 
 /**
  * Shareable pages (wrangler.jsonc run_worker_first): the app's index.html with the page's own link preview, so a

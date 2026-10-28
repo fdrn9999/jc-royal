@@ -7,6 +7,8 @@ export interface Env {
   TABLES: DurableObjectNamespace;
   /** PresenceHub Durable Object namespace hosted by the game worker (friends' status, in memory only). */
   PRESENCE: DurableObjectNamespace;
+  /** RealtimeHub Durable Object namespace hosted by the game worker (pages' sockets outside the tables, lib/realtime.ts). */
+  REALTIME: DurableObjectNamespace;
   ASSETS?: Fetcher;
   ENVIRONMENT: 'development' | 'test' | 'production';
   /** Comma separated list of browser origins allowed to send state-changing requests. */
