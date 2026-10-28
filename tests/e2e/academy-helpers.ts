@@ -7,6 +7,20 @@ const press = async (page: Page, sel: string, how: Press) => {
   await (how === 'tap' ? el.tap() : el.click());
 };
 
+/**
+ * Practice is offline: `sockets` collects every socket the page opens but the platform one (/ws/realtime, which every
+ * signed-in page keeps for its header and messages), and `platformSent` what the page sent on that one (`t` of each frame).
+ */
+export function offlineWatch(page: Page) {
+  const sockets: string[] = [];
+  const platformSent: string[] = [];
+  page.on('websocket', (ws) => {
+    if (new URL(ws.url()).pathname !== '/ws/realtime') return void sockets.push(ws.url());
+    ws.on('framesent', ({ payload }) => platformSent.push(String((JSON.parse(String(payload)) as { t?: unknown }).t)));
+  });
+  return { sockets, platformSent };
+}
+
 /** Brings the sort row into `target` (item indexes, strongest first) using tap-to-swap. */
 export async function sortBySwaps(page: Page, target: number[], how: Press = 'click') {
   for (let i = 0; i < target.length; i++) {
