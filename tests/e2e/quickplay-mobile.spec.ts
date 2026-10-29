@@ -1,11 +1,16 @@
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { balanceOf, signUp, test, widerThanDevice } from './helpers';
+
+// On a phone the lobby's install offer loads after the page (its own chunk) and lands above quick play, pushing it down
+// (184px at 390×844): a tap sent before it is in place can land on the offer instead of the size it aimed at.
+const settled = (page: Page) => expect(page.getByTestId('install-offer')).toBeVisible();
 
 test('mobile: quick play seats players at the table, then explains a full table and what to do instead', async ({ browser }) => {
   // E2E Quick Mobile is the only 2-seat table at 9/18.
   const first = await signUp(browser, { mobile: true });
   const panel = first.page.getByTestId('quick-play');
   await expect(panel).toBeVisible();
+  await settled(first.page);
   expect(await widerThanDevice(first.page)).toBe(false);
   await panel.getByTestId('quick-seats-2').tap();
   await panel.getByTestId('quick-blind').selectOption('18');
@@ -16,6 +21,7 @@ test('mobile: quick play seats players at the table, then explains a full table 
   await expect.poll(() => balanceOf(first.page)).toBe(8200);
 
   const second = await signUp(browser, { mobile: true });
+  await settled(second.page);
   await second.page.getByTestId('quick-seats-2').tap();
   await second.page.getByTestId('quick-blind').selectOption('18');
   await second.page.getByTestId('quick-go').tap();
@@ -25,6 +31,7 @@ test('mobile: quick play seats players at the table, then explains a full table 
 
   // The only matching table is now full: the room says so even if the lobby counts lag, and the panel offers a way on.
   const third = await signUp(browser, { mobile: true });
+  await settled(third.page);
   const quick = third.page.getByTestId('quick-play');
   await quick.getByTestId('quick-seats-2').tap();
   await quick.getByTestId('quick-blind').selectOption('18');
