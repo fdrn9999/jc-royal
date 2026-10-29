@@ -698,11 +698,14 @@ export function ConversationPage() {
       }
     }
   }, [userId, merge, markRead]);
-  /** For an event or the socket (back) up: a poll now, or one more after the one out (whose read may be older). */
+  /**
+   * For an event or the socket (back) up: a poll now, or one more after the one out (whose read may be older). A hidden
+   * tab with none out asks nothing: it polls once it is shown.
+   */
   const pollSoon = useCallback(() => {
     if (opening.current === 'failed') return;
     if (opening.current === 'out' || polling.current === userId) pollAgain.current = true;
-    else void poll();
+    else if (document.visibilityState === 'visible') void poll();
   }, [poll, userId]);
   // A message in this conversation (from them, or mine sent from another device: one already shown is not asked for),
   // and their reading mine. The event says only that and where: the messages and the read mark come from the poll.
@@ -713,6 +716,8 @@ export function ConversationPage() {
   useRealtime('social.dm.read', (e) => {
     if (e.payload.peerId === userId && e.payload.readerId === userId) pollSoon();
   });
+  // A friendship or a block changed, never saying which: whether I can still write here comes with the poll.
+  useRealtime('social.friend.changed', pollSoon);
   useEffect(() => onRealtimeResync(pollSoon), [pollSoon]);
   useVisiblePoll(() => {
     if (conv) void poll();

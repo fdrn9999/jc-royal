@@ -149,7 +149,7 @@ test('reports: a post, a comment and a player at the table; the author card offe
   await expect(b.page.locator('[data-testid^=seat-]').filter({ hasText: b.nickname })).toHaveCount(0);
 });
 
-test('1:1 chat sync: no polling while the tab is hidden; coming back or reconnecting catches up at once', async ({ browser }) => {
+test('1:1 chat sync with the realtime socket down: no polling while the tab is hidden; coming back or reconnecting catches up at once', async ({ browser }) => {
   const a = await signUp(browser);
   const b = await signUp(browser);
   const idOf = async (p: Page) => (await call<{ id: string }>(p, '/api/auth/me')).id;
@@ -157,6 +157,9 @@ test('1:1 chat sync: no polling while the tab is hidden; coming back or reconnec
   await call(a.page, '/api/friends/requests', { userId: bId });
   await call(b.page, `/api/friends/${aId}/accept`, {});
 
+  // B's realtime socket is refused: the conversation keeps itself current by polling alone (every 4 s). With the socket
+  // up it polls only every 30 s and events do the rest (the test below).
+  await b.page.routeWebSocket(/\/ws\/realtime/, (ws) => ws.close());
   // B's clock moves only when the test moves it, so every request below is one the page chose to make.
   await b.page.clock.install();
   await b.page.goto(`/friends/${aId}`);
@@ -204,4 +207,66 @@ test('1:1 chat sync: no polling while the tab is hidden; coming back or reconnec
   await expect(b.page.getByTestId('dm-theirs').filter({ hasText: '끊긴 동안' })).toBeVisible();
   await expect(b.page.getByTestId('dm-theirs')).toHaveCount(2);
   expect(dmPolls.at(-1)).toBe('?afterSeq=1');
+});
+
+test('1:1 chat sync with the realtime socket up: a message announced while the tab is hidden is read once it is shown; an unfriending shows without a poll', async ({ browser }) => {
+  const a = await signUp(browser);
+  const b = await signUp(browser);
+  const idOf = async (p: Page) => (await call<{ id: string }>(p, '/api/auth/me')).id;
+  const [aId, bId] = [await idOf(a.page), await idOf(b.page)];
+  await call(a.page, '/api/friends/requests', { userId: bId });
+  await call(b.page, `/api/friends/${aId}/accept`, {});
+
+  // What B's realtime socket receives.
+  const frames: string[] = [];
+  const up = new Promise<void>((resolve) =>
+    b.page.on('websocket', (ws) => {
+      if (!ws.url().includes('/ws/realtime')) return;
+      ws.on('framereceived', (f) => {
+        frames.push(String(f.payload));
+        if (String(f.payload).includes('"hello"')) resolve();
+      });
+    }),
+  );
+  await b.page.clock.install();
+  await b.page.goto(`/friends/${aId}`);
+  await expect(b.page.getByTestId('dm-title')).toHaveText(a.nickname);
+  await up;
+  // B's clock stops: the 30-s fallback poll never comes, so a request below is one an event (or the tab) asked for.
+  await b.page.clock.pauseAt(Date.now() + 1_000);
+  await b.page.waitForTimeout(1_000);
+  const dmPolls: string[] = [];
+  b.page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (/^\/api\/dm\/[^/]+$/.test(u.pathname) && u.searchParams.has('afterSeq')) dmPolls.push(u.search);
+  });
+  const setVisible = (on: boolean) =>
+    b.page.evaluate((v) => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (v ? 'visible' : 'hidden') });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, on);
+  const announced = async (type: string, from: number) => {
+    await expect.poll(() => frames.slice(from).some((f) => f.includes(`"${type}"`))).toBe(true);
+    await b.page.waitForTimeout(500);
+  };
+
+  // Hidden: the message is announced, and nothing is read until the tab is shown.
+  await setVisible(false);
+  let from = frames.length;
+  await call(a.page, `/api/dm/${bId}`, { text: '숨긴 동안 알린 메시지' });
+  await announced('social.dm.created', from);
+  expect(dmPolls).toEqual([]);
+  await expect(b.page.getByTestId('dm-theirs')).toHaveCount(0);
+
+  // Shown: one request at once.
+  await setVisible(true);
+  await expect(b.page.getByTestId('dm-theirs')).toHaveText(/숨긴 동안 알린/);
+  expect(dmPolls).toEqual(['?afterSeq=0']);
+
+  // A unfriends: B's open conversation stops offering to send once the change is announced, with no poll due.
+  from = frames.length;
+  expect(await a.page.evaluate(async (id) => (await fetch(`/api/friends/${id}`, { method: 'DELETE' })).status, bId)).toBe(200);
+  await announced('social.friend.changed', from);
+  await expect(b.page.getByTestId('dm-not-friends')).toBeVisible({ timeout: 5_000 });
+  await expect(b.page.getByTestId('dm-input')).toHaveCount(0);
 });
