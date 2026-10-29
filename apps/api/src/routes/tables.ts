@@ -87,8 +87,8 @@ export function lobbyTableChanged(c: Context<AppEnv>, id: string) {
 }
 
 /**
- * The tables where `userId` holds a seat: bought in and not cashed out yet. One query on tsess_user_idx however many
- * tables are listed (or just `tableId`'s row).
+ * The tables where `userId` holds a seat: bought in and not cashed out yet. One query on tsess_seated_user_idx (only
+ * the open seats, not every seat the member ever closed) however many tables are listed (or just `tableId`'s row).
  */
 async function seatedTables(c: Context<AppEnv>, userId: string, tableId?: string): Promise<Set<string>> {
   const S = schema.tableSessions;

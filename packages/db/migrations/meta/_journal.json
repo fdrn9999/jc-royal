@@ -260,6 +260,13 @@
       "when": 1793170878795,
       "tag": "0036_live_waitlist_users",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1793309074488,
+      "tag": "0037_seated_user_index",
+      "breakpoints": true
     }
   ]
 }

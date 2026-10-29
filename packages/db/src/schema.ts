@@ -217,6 +217,9 @@ export const tableSessions = sqliteTable(
     // A user can only hold one open seat per table at a time.
     uniqueIndex('tsess_open_user_uq').on(t.tableId, t.userId).where(sql`status = 'seated'`),
     index('tsess_user_idx').on(t.userId),
+    // A user's open seats (the lobby, refills, bot recruiting): only open seats, so the lookup does not read every seat
+    // the user ever closed, which only grows (docs/LOAD_TEST.md §7).
+    index('tsess_seated_user_idx').on(t.userId).where(sql`status = 'seated'`),
     // Seats closed in a period, for the daily statistics (only closed seats, which have a closing time).
     index('tsess_closed_idx').on(t.closedAt).where(sql`closed_at IS NOT NULL`),
   ],

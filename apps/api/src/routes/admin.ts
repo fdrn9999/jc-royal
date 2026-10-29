@@ -6,7 +6,7 @@
  */
 import { applyLedger, findLedgerMismatches, LEDGER_GUARD, schema } from '@jc/db';
 import { botSettingsIssues, ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -967,7 +967,8 @@ const admin = new Hono<AppEnv>()
     const where = paged
       ? and(
           q ? or(like(T.name, `%${q}%`), eq(T.id, q)) : undefined,
-          status === 'open' || status === 'closing' || status === 'closed' ? eq(T.status, status) : status === 'active' ? ne(T.status, 'closed') : undefined,
+          // `IN` (not `<> 'closed'`) so SQLite searches tables_status_idx instead of scanning every closed room ever made.
+          status === 'open' || status === 'closing' || status === 'closed' ? eq(T.status, status) : status === 'active' ? inArray(T.status, ['open', 'closing']) : undefined,
           roomType === 'official' || roomType === 'member' || roomType === 'tournament' ? eq(T.roomType, roomType) : undefined,
           c.req.query('issue') === '1' ? isNotNull(T.lastIssue) : undefined,
         )

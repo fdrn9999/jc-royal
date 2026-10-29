@@ -54,8 +54,10 @@ export const adminMonitorRoutes = new Hono<AppEnv>()
        ORDER BY (t.status = 'closing') DESC, t.created_at DESC, t.id LIMIT ${MONITOR_TABLES_MAX + 1}`,
     ).bind(...binds);
     // Closed tables that still have seated rows (the dashboard's seatedOnClosed): a seat no room will ever cash out.
+    // CROSS JOIN keeps SQLite starting from the open seats, as liveOps does, rather than from every closed table, which
+    // only grows (a plain JOIN read 5,001 rows with 5,000 closed tables; docs/LOAD_TEST.md §7).
     const stuck = c.env.DB.prepare(
-      `SELECT DISTINCT s.table_id AS id FROM table_sessions s JOIN tables t ON t.id = s.table_id WHERE s.status = 'seated' AND t.status = 'closed' LIMIT 50`,
+      `SELECT DISTINCT s.table_id AS id FROM table_sessions s CROSS JOIN tables t ON t.id = s.table_id WHERE s.status = 'seated' AND t.status = 'closed' LIMIT 50`,
     );
     const [rows, seated] = await c.env.DB.batch<MonitorRow | { id: string }>([list, stuck]);
     const d1Ms = Date.now() - at;

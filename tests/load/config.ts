@@ -1,3 +1,5 @@
+import { ADMIN_MONITOR_WATCH_MAX } from '@jc/types';
+
 /** Scenario size, overridable through the environment (see docs/LOAD_TEST.md). */
 export interface LoadConfig {
   /** Six-max tables played at the same time. */
@@ -51,6 +53,33 @@ export function realtimeConfig(): RealtimeLoadConfig {
   if (changes + 1 > tables) throw new Error(`RT_CHANGES needs LOAD_TABLES of at least ${changes + 1}`);
   if (changes + 1 + c.grantees > viewers) throw new Error(`RT_GRANTEES is at most RT_VIEWERS - RT_CHANGES - 1`);
   return c;
+}
+
+/** The control center scenario (monitor.load.ts); its members sit at the first tables LOAD_TABLES seeds. */
+export interface MonitorLoadConfig {
+  /** Open tables the grid lists: the setup's LOAD_TABLES, then idle ones seeded until there are this many. */
+  tables: number;
+  /** Administrators, each signed in to the console with one control center socket. */
+  admins: number;
+  /** Closed tables seeded as history before the second set of reads (what the active list must not read). */
+  closed: number;
+  /** Tables where a member sits and stands, once with no administrator following them and once with all following. */
+  sits: number;
+  /** Hands played on one table, once unfollowed and once followed, to compare action round trips. */
+  hands: number;
+}
+
+export function monitorConfig(): MonitorLoadConfig {
+  const seeded = loadConfig().tables;
+  return {
+    tables: int('MON_TABLES', Math.max(20, seeded), seeded, 500),
+    // Console sign-ins from one address stop at 20 in 15 minutes (apps/api/src/routes/admin-auth.ts).
+    admins: int('MON_ADMINS', 1, 1, 10),
+    closed: int('MON_CLOSED', 5_000, 0, 50_000),
+    // A page follows at most ADMIN_MONITOR_WATCH_MAX rooms; the sit tables are the ones every admin follows.
+    sits: int('MON_SITS', Math.min(ADMIN_MONITOR_WATCH_MAX, seeded), 1, Math.min(ADMIN_MONITOR_WATCH_MAX, seeded)),
+    hands: int('MON_HANDS', 6, 0, 100),
+  };
 }
 
 export function loadConfig(): LoadConfig {
