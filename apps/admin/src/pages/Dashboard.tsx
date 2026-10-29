@@ -54,7 +54,7 @@ interface Totals {
 
 /** Live figures are polled this often, and only while the page is in view and the admin was active recently. */
 export const LIVE_REFRESH_MS = 30_000;
-const IDLE_AFTER_MS = 5 * 60_000;
+export const IDLE_AFTER_MS = 5 * 60_000;
 const REASON_KEY: Record<string, Key> = { spam: 'reasonSpam', abuse: 'reasonAbuse', inappropriate: 'reasonInappropriate', cheating: 'reasonCheating', other: 'reasonOther' };
 
 /** Calls `reload` every LIVE_REFRESH_MS while the tab is visible and the admin used it within IDLE_AFTER_MS. */

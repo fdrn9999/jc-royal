@@ -1,7 +1,7 @@
 import { Button, Logo, PasswordInput, Spinner } from '@jc/ui';
 import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, NavLink, Outlet, RouterProvider } from 'react-router';
+import { createBrowserRouter, NavLink, Outlet, RouterProvider, useLocation } from 'react-router';
 import { setLocale, useT, type Key } from './i18n';
 import './index.css';
 import { roleLabel } from './labels';
@@ -15,6 +15,7 @@ import { BrandPage } from './pages/Brand';
 import { ServicePage } from './pages/Service';
 import { SocialPage } from './pages/Social';
 import { StatsPage } from './pages/Stats';
+import { ControlCenterPage } from './pages/ControlCenter';
 import { DashboardPage } from './pages/Dashboard';
 import { EconomyPage, ReconcilePage } from './pages/Economy';
 import { RefillPage } from './pages/Refill';
@@ -28,6 +29,7 @@ import { AcademyStatsPage, HandDetailPage, HandsPage, LedgerPage, TableDetailPag
 /** Menu entries with the feature switches whose pages they open (any one; none: every administrator). */
 const NAV: [string, Key, string[]][] = [
   ['/', 'dashboard', ['dashboard']],
+  ['/control-center', 'controlCenter', ['tables']],
   ['/stats', 'opsStats', ['stats']],
   ['/users', 'users', ['members']],
   ['/tables', 'tables', ['tables']],
@@ -110,6 +112,8 @@ function ConnectionBanner() {
 function Shell({ children }: { children: ReactNode }) {
   const { t, locale } = useT();
   const { me, logout } = useAdmin();
+  // The control center fills a wide screen (its grid and the table opened beside it); every other page keeps the column.
+  const wide = useLocation().pathname === '/control-center' ? 'max-w-[1920px]' : 'max-w-7xl';
   // The header's height (its menu wraps, the connection banner comes and goes) as --shell-h: a pinned result and a
   // jump link's panel stop under it.
   const header = useRef<HTMLElement>(null);
@@ -127,7 +131,7 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh" style={{ background: 'var(--t-bg)' }}>
       <header ref={header} className="sticky top-0 z-30 border-b border-gold-500/10 bg-ink-950/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4">
+        <div className={`mx-auto flex h-14 ${wide} items-center gap-3 px-4`}>
           <Logo size={30} />
           <span className="hidden whitespace-nowrap font-display text-sm font-bold tracking-[0.2em] jc-gold-text sm:inline">JC ROYAL</span>
           <span className="rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-bold text-[#f0a0a2]">ADMIN</span>
@@ -135,7 +139,7 @@ function Shell({ children }: { children: ReactNode }) {
           <button className="shrink-0 whitespace-nowrap text-xs text-ink-300" onClick={() => setLocale(locale === 'ko' ? 'en' : 'ko')}>{locale === 'ko' ? 'EN' : '한국어'}</button>
           <Button size="sm" variant="ghost" onClick={logout}>{t('logout')}</Button>
         </div>
-        <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 md:flex-wrap">
+        <nav className={`mx-auto flex ${wide} gap-1 overflow-x-auto px-4 pb-2 md:flex-wrap`}>
           {NAV.filter(([, , g]) => g.length === 0 || g.some((x) => hasGrant(me, x))).map(([to, k]) => (
             <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${isActive ? 'bg-gold-500/15 text-gold-300' : 'text-ink-300 hover:text-ivory'}`}>
               {t(k)}
@@ -144,7 +148,7 @@ function Shell({ children }: { children: ReactNode }) {
         </nav>
         <ConnectionBanner />
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+      <main className={`mx-auto ${wide} px-4 py-6`}>{children}</main>
       <ReauthModal />
     </div>
   );
@@ -176,6 +180,7 @@ const router = createBrowserRouter([
     element: <Gate />,
     children: [
       { path: '/', element: <Home /> },
+      { path: '/control-center', element: <ControlCenterPage /> },
       { path: '/stats', element: <StatsPage /> },
       { path: '/users', element: <UsersPage /> },
       { path: '/users/:id', element: <UserDetailPage /> },
