@@ -71,6 +71,7 @@ import {
   CC_TABS,
   CC_TYPES,
   addDelay,
+  closeOverdue,
   compare,
   delayOf,
   FOCUS_MAX,
@@ -261,7 +262,7 @@ function KstClock({ skew }: { skew: number }) {
 }
 
 type Meta = Pick<MonitorTablesResponse, 'truncated' | 'seatedOnClosed' | 'memberTables' | 'at' | 'd1Ms'>;
-type Cached = Judged & { entry: RoomEntry | undefined; link: LinkState };
+type Cached = Judged & { entry: RoomEntry | undefined; link: LinkState; overdue: boolean };
 
 // ------------------------------------------------------------------ the page
 
@@ -576,11 +577,13 @@ export function ControlCenterPage() {
       if (!lingers(x, scope, serverNow)) continue;
       const entry = rooms.get(x.id);
       const old = cache.current.get(x.id);
+      // A close running past its limit becomes overdue with the clock, not with a new reading.
+      const overdue = closeOverdue(x, serverNow);
       let j: Cached;
-      if (old && old.table === x && old.entry === entry && old.link === link) j = old;
+      if (old && old.table === x && old.entry === entry && old.link === link && old.overdue === overdue) j = old;
       else {
-        const problems = problemsOf(x, entry);
-        j = { table: x, problems, level: levelOf(problems), fresh: freshnessOf(x, link, entry), entry, link };
+        const problems = problemsOf(x, entry, serverNow);
+        j = { table: x, problems, level: levelOf(problems), fresh: freshnessOf(x, link, entry), entry, link, overdue };
       }
       next.set(x.id, j);
       out.push(j);

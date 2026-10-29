@@ -1,3 +1,4 @@
+import { CLOSE_OVERDUE_AFTER_MS } from '@jc/types';
 import type { Context } from 'hono';
 import type { AppEnv, Env } from '../env';
 import { INTERNAL_HEADER } from '../routes/tables';
@@ -25,8 +26,8 @@ export function roomCall(c: Context<AppEnv>, tableId: string, action: RoomAction
   return roomCallEnv(c.env, tableId, action, query);
 }
 
-/** How long a close may stay unfinished before the daily sweep nudges the room. */
-export const SWEEP_CLOSING_AFTER_MS = 15 * 60_000;
+/** How long a close may stay unfinished before the daily sweep nudges the room (the control center's close_overdue). */
+export const SWEEP_CLOSING_AFTER_MS = CLOSE_OVERDUE_AFTER_MS;
 /** An empty member room older than this whose room never armed its idle close (its opening call failed). */
 export const SWEEP_EMPTY_ROOM_AFTER_MS = 60 * 60_000;
 

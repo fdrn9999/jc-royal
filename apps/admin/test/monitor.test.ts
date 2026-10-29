@@ -1,6 +1,6 @@
 // The control center's model (src/monitor.ts): the address, filters and order, problems, how current the data is, and
 // how a snapshot and the socket's events combine without ever taking a table back, the alerts and the timeline.
-import type { AdminMonitorEvent, MonitorRoom, MonitorTable } from '@jc/types';
+import { CLOSE_OVERDUE_AFTER_MS, type AdminMonitorEvent, type MonitorRoom, type MonitorTable } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import {
   addDelay,
@@ -10,6 +10,7 @@ import {
   applyRooms,
   applySnapshot,
   CLOSED_LINGER_MS,
+  closeOverdue,
   compare,
   DEFAULT_VIEW,
   delayOf,
@@ -139,6 +140,17 @@ describe('problems', () => {
     expect(problemsOf(table({ status: 'closed', flags: ['seated_on_closed'] }))).toEqual([{ code: 'seated_on_closed', level: 4, source: 'd1' }]);
     expect(levelOf(problemsOf(table({ status: 'closing', flags: ['close_overdue'] })))).toBe(3);
     expect(problemsOf(table({ lastIssue: '2026-10-29T00:00:00Z settle: x' }))).toEqual([{ code: 'last_issue', level: 1, source: 'd1' }]);
+  });
+
+  it('a close that runs past its limit becomes overdue as the clock passes it, with no other read of the list', () => {
+    const t = table({ status: 'closing', updatedAt: 1_000 });
+    expect(problemsOf(t, undefined, 1_000 + CLOSE_OVERDUE_AFTER_MS)).toEqual([]);
+    expect(problemsOf(t, undefined, 1_001 + CLOSE_OVERDUE_AFTER_MS)).toEqual([{ code: 'close_overdue', level: 3, source: 'd1' }]);
+    // as the api flags it (updated_at < now - limit), so a later read agrees with the clock
+    expect(closeOverdue(t, 1_001 + CLOSE_OVERDUE_AFTER_MS)).toBe(closeOverdue(table({ status: 'closing', flags: ['close_overdue'] })));
+    // only a closing table: an open one idle that long, or one closed since, is not
+    expect(closeOverdue(table({ updatedAt: 1_000 }), 1_000 + 2 * CLOSE_OVERDUE_AFTER_MS)).toBe(false);
+    expect(closeOverdue(table({ status: 'closed', updatedAt: 1_000, flags: ['close_overdue'] }), 1_000 + 2 * CLOSE_OVERDUE_AFTER_MS)).toBe(false);
   });
 
   it('a switch an administrator set is a state, not a problem', () => {

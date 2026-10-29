@@ -7,7 +7,7 @@
  * Nothing here decides anything for the game: a problem is a reading of what D1 and the rooms reported, an alert noted
  * as seen is still the same problem, and acting on one goes through the console's existing controls.
  */
-import type { AdminMonitorEvent, MonitorCounts, MonitorRoom, MonitorRoomsResponse, MonitorTable } from '@jc/types';
+import { CLOSE_OVERDUE_AFTER_MS, type AdminMonitorEvent, type MonitorCounts, type MonitorRoom, type MonitorRoomsResponse, type MonitorTable } from '@jc/types';
 
 // ------------------------------------------------------------------ the page's address
 
@@ -120,12 +120,12 @@ export type RoomEntry = { room: MonitorRoom; at: number; ms?: number } | { error
  * minus every socket the room has, spectators' included), and the last problem the room wrote (info: when it happened
  * is in its text, it may be over). From the room's answer, when there is one: its issues, the exact players without a
  * connection (bots are always connected), and an open table whose room did not answer (warning). An entry blocked or
- * a table paused is an administrator's switch, shown as a state, not a problem.
+ * a table paused is an administrator's switch, shown as a state, not a problem. `now` (the server's clock): see closeOverdue.
  */
-export function problemsOf(t: MonitorTable, entry?: RoomEntry): Problem[] {
+export function problemsOf(t: MonitorTable, entry?: RoomEntry, now?: number): Problem[] {
   const out: Problem[] = [];
   if (t.flags.includes('seated_on_closed')) out.push({ code: 'seated_on_closed', level: 4, source: 'd1' });
-  if (t.flags.includes('close_overdue')) out.push({ code: 'close_overdue', level: 3, source: 'd1' });
+  if (closeOverdue(t, now)) out.push({ code: 'close_overdue', level: 3, source: 'd1' });
   const room = entry && 'room' in entry ? entry.room : null;
   if (room && t.status !== 'closed') {
     for (const code of room.issues) out.push({ code, level: ROOM_ISSUE_LEVEL[code] ?? 3, source: 'room' });
@@ -138,6 +138,16 @@ export function problemsOf(t: MonitorTable, entry?: RoomEntry): Problem[] {
   }
   if (t.lastIssue) out.push({ code: 'last_issue', level: 1, source: 'd1' });
   return out.sort((a, b) => b.level - a.level);
+}
+
+/**
+ * Whether a closing table is past its limit: flagged so by the read that listed it, or, by `now` (the server's clock),
+ * closing for longer than the api's limit since D1 last wrote its row. A close that runs over while the socket is open
+ * (and the list is not read again) becomes overdue as the clock passes the limit.
+ */
+export function closeOverdue(t: MonitorTable, now?: number): boolean {
+  if (t.status !== 'closing') return false;
+  return t.flags.includes('close_overdue') || (now !== undefined && now - t.updatedAt > CLOSE_OVERDUE_AFTER_MS);
 }
 
 export const levelOf = (ps: Problem[]): Level => ps.reduce<Level>((m, p) => (p.level > m ? p.level : m), 0);

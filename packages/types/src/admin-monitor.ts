@@ -19,6 +19,8 @@ export type MonitorRoomType = 'official' | 'member' | 'tournament';
  */
 export const MONITOR_TABLE_FLAGS = ['close_overdue', 'seated_on_closed', 'blocked', 'paused'] as const;
 export type MonitorTableFlag = (typeof MONITOR_TABLE_FLAGS)[number];
+/** How long a close may stay unfinished before it is overdue (close_overdue; the api's sweep then nudges the room). */
+export const CLOSE_OVERDUE_AFTER_MS = 15 * 60_000;
 
 /** One table as the grid draws it from D1 (GET /api/admin/monitor/tables): the counts its room last wrote. */
 export interface MonitorTable {
