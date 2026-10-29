@@ -1,10 +1,11 @@
 /**
  * The control center's model (docs/CONTROL_CENTER.md): what the page's address holds, which tables a filter keeps and
  * in what order, what counts as a problem and how bad, how current the data is, where a seat sits on the oval, and how
- * a snapshot and the socket's events combine. Pure, so it is tested without a browser (test/monitor.test.ts).
+ * a snapshot and the socket's events combine, which alerts the readings raise and resolve, and the timeline's lines.
+ * Pure, so it is tested without a browser (test/monitor.test.ts).
  *
- * Nothing here decides anything for the game: a problem is a reading of what D1 and the rooms reported, and acting on
- * one goes through the console's existing controls.
+ * Nothing here decides anything for the game: a problem is a reading of what D1 and the rooms reported, an alert noted
+ * as seen is still the same problem, and acting on one goes through the console's existing controls.
  */
 import type { AdminMonitorEvent, MonitorCounts, MonitorRoom, MonitorRoomsResponse, MonitorTable } from '@jc/types';
 
@@ -495,4 +496,238 @@ export function togglePin(pins: string[], id: string): string[] {
 /** The server's clock minus this one's, from an answer stamped `serverAt` that took from `sentAt` to `gotAt`. */
 export function skewOf(serverAt: number, sentAt: number, gotAt: number): number {
   return Math.round(serverAt - (sentAt + gotAt) / 2);
+}
+
+// ------------------------------------------------------------------ alerts
+
+/**
+ * What an administrator noted about an alert on this page: nothing yet, seen, being looked into, or set aside as a false
+ * alarm. It is a note of this page only (not shared with other administrators, gone with the page) and it changes
+ * nothing about the table: the problem behind an alert stays shown as it is read, and the alert resolves only when the
+ * readings no longer show it, whatever was noted.
+ */
+export type AlertHandling = 'new' | 'ack' | 'investigating' | 'dismissed';
+
+/** One problem of one table, from when the page first read it until the readings stopped showing it. */
+export interface Alert {
+  /** This run of the problem: its key and when it was first seen (a problem that comes back is a new alert). */
+  id: string;
+  /** The table and the problem: at most one active alert each. */
+  key: string;
+  tableId: string;
+  name: string;
+  code: string;
+  level: Exclude<Level, 0>;
+  source: Problem['source'];
+  n?: number;
+  firstSeen: number;
+  /** When a reading last showed it (a room's problem: when that room's answer came). */
+  lastSeen: number;
+  /** Since when the readings no longer show it, while it waits out RESOLVE_AFTER_MS (null: it is shown). */
+  clearSince: number | null;
+  /** When it went (null: active). */
+  resolvedAt: number | null;
+  /** Why: the readings stopped showing it, or its table left the list. */
+  resolvedBy: 'cleared' | 'gone' | null;
+  handling: AlertHandling;
+}
+
+/** One table as the page reads it now: its problems and when its room last answered (null: no answer to read). */
+export interface Reading {
+  table: MonitorTable;
+  problems: Problem[];
+  roomAt: number | null;
+}
+
+/** A problem missing from the readings this long has resolved; one back sooner is the same alert (no flapping). */
+export const RESOLVE_AFTER_MS = 10_000;
+/** A resolved alert stays listed this long, at most RESOLVED_MAX of them. */
+export const RESOLVED_KEEP_MS = 5 * 60_000;
+export const RESOLVED_MAX = 50;
+
+/**
+ * The alerts after a reading of the tables the page holds (on every change and every few seconds): one active alert per
+ * table and problem, its last-seen time and count kept current, a worse level shown as new again. A problem the readings
+ * stop showing resolves after RESOLVE_AFTER_MS; a room's problem only counts as gone when a newer answer of the room
+ * lacks it (a room that stopped answering hides its issues, it does not fix them). A table no longer listed resolves its
+ * alerts as gone. Returns `prev` itself when nothing changed.
+ */
+export function trackAlerts(prev: readonly Alert[], readings: Iterable<Reading>, now: number): Alert[] {
+  const byTable = new Map<string, Reading>();
+  for (const r of readings) byTable.set(r.table.id, r);
+  const out: Alert[] = [];
+  const active = new Set<string>();
+  let changed = false;
+  for (const a of prev) {
+    if (a.resolvedAt !== null) {
+      out.push(a);
+      continue;
+    }
+    const r = byTable.get(a.tableId);
+    if (!r) {
+      out.push({ ...a, clearSince: null, resolvedAt: now, resolvedBy: 'gone' });
+      changed = true;
+      continue;
+    }
+    const p = r.problems.find((x) => x.code === a.code && x.level > 0);
+    if (p) {
+      const seen = p.source === 'room' && r.roomAt !== null ? r.roomAt : now;
+      const level = p.level as Alert['level'];
+      const next: Alert = {
+        ...a,
+        name: r.table.name,
+        level,
+        source: p.source,
+        ...(p.n !== undefined ? { n: p.n } : {}),
+        lastSeen: Math.max(a.lastSeen, seen),
+        clearSince: null,
+        handling: level > a.level ? 'new' : a.handling,
+      };
+      if (p.n === undefined) delete next.n;
+      if (next.lastSeen !== a.lastSeen || next.clearSince !== a.clearSince || next.level !== a.level || next.n !== a.n || next.name !== a.name || next.source !== a.source || next.handling !== a.handling) changed = true;
+      out.push(next);
+      active.add(a.key);
+      continue;
+    }
+    // Not shown now. A room's problem is gone only when the room answered since it was last seen.
+    const roomRead = a.source === 'room' ? (r.roomAt !== null && r.roomAt > a.lastSeen ? r.roomAt : null) : now;
+    if (roomRead === null) {
+      out.push(a);
+      active.add(a.key);
+      continue;
+    }
+    const since = a.clearSince ?? roomRead;
+    if (now - since >= RESOLVE_AFTER_MS) {
+      out.push({ ...a, clearSince: null, resolvedAt: since, resolvedBy: 'cleared' });
+      changed = true;
+      continue;
+    }
+    if (a.clearSince === null) changed = true;
+    out.push({ ...a, clearSince: since });
+    active.add(a.key);
+  }
+  for (const r of byTable.values()) {
+    for (const p of r.problems) {
+      if (p.level === 0) continue;
+      const key = `${r.table.id}:${p.code}`;
+      if (active.has(key)) continue;
+      active.add(key);
+      const seen = p.source === 'room' && r.roomAt !== null ? r.roomAt : now;
+      out.push({
+        id: `${key}@${seen}`,
+        key,
+        tableId: r.table.id,
+        name: r.table.name,
+        code: p.code,
+        level: p.level as Alert['level'],
+        source: p.source,
+        ...(p.n !== undefined ? { n: p.n } : {}),
+        firstSeen: seen,
+        lastSeen: seen,
+        clearSince: null,
+        resolvedAt: null,
+        resolvedBy: null,
+        handling: 'new',
+      });
+      changed = true;
+    }
+  }
+  // Resolved ones are kept a while, the latest first, at most RESOLVED_MAX.
+  const resolved = out.filter((a) => a.resolvedAt !== null).sort((a, b) => b.resolvedAt! - a.resolvedAt!);
+  const keep = new Set(resolved.filter((a) => now - a.resolvedAt! < RESOLVED_KEEP_MS).slice(0, RESOLVED_MAX));
+  const kept = out.filter((a) => a.resolvedAt === null || keep.has(a));
+  if (kept.length !== out.length) changed = true;
+  return changed ? kept : (prev as Alert[]);
+}
+
+/** An administrator's note on an active alert (a resolved one keeps what it had). */
+export function handleAlert(alerts: readonly Alert[], id: string, handling: AlertHandling): Alert[] {
+  return alerts.map((a) => (a.id === id && a.resolvedAt === null ? { ...a, handling } : a));
+}
+
+/** The alerts as listed: active ones first, worst first, then the newest; then the resolved ones, latest first. */
+export function alertOrder(a: Alert, b: Alert): number {
+  if ((a.resolvedAt === null) !== (b.resolvedAt === null)) return a.resolvedAt === null ? -1 : 1;
+  if (a.resolvedAt !== null && b.resolvedAt !== null) return b.resolvedAt - a.resolvedAt;
+  return b.level - a.level || b.firstSeen - a.firstSeen;
+}
+
+/** Alerts raised and resolved between two trackings, worth a line on the timeline (caution and worse). */
+export function alertChanges(prev: readonly Alert[], next: readonly Alert[]): { raised: Alert[]; resolved: Alert[] } {
+  const before = new Map(prev.map((a) => [a.id, a]));
+  const raised: Alert[] = [];
+  const resolved: Alert[] = [];
+  for (const a of next) {
+    if (a.level < PROBLEM_LEVEL) continue;
+    const old = before.get(a.id);
+    if (!old) {
+      if (a.resolvedAt === null) raised.push(a);
+    } else if (old.resolvedAt === null && a.resolvedAt !== null) resolved.push(a);
+  }
+  return { raised, resolved };
+}
+
+// ------------------------------------------------------------------ the timeline
+
+/**
+ * A line of the page's timeline: what the server told this page as it happened (a table's events and its open rooms'
+ * summaries), the alerts the page raised and resolved, and the controls this administrator used here. Kept in this
+ * page's memory only, at most TIMELINE_MAX lines; what lasts is in the audit log and the tables' own history.
+ */
+export interface TimelineEntry {
+  id: string;
+  at: number;
+  kind: 'table' | 'seat' | 'game' | 'alert' | 'admin';
+  code: string;
+  tableId: string;
+  name: string;
+  params?: Record<string, string | number>;
+}
+
+export const TIMELINE_MAX = 200;
+
+let lineSeq = 0;
+const line = (at: number, kind: TimelineEntry['kind'], code: string, t: { id: string; name: string }, params?: TimelineEntry['params']): TimelineEntry => ({
+  id: `tl${++lineSeq}`,
+  at,
+  kind,
+  code,
+  tableId: t.id,
+  name: t.name,
+  ...(params ? { params } : {}),
+});
+
+/**
+ * What an event changed about a table, in lines: opened, closing, closed, seats taken and the waitlist (from and to),
+ * entry blocked and allowed, new hands paused and resumed. Whether a hand is being played is not one: it changes
+ * between every two hands (the open rooms' hand numbers are, handStarted).
+ */
+export function tableChanges(old: MonitorTable | undefined, next: MonitorTable | undefined, at: number): TimelineEntry[] {
+  if (!next) return [];
+  if (!old) return next.status === 'open' ? [line(at, 'table', 'opened', next)] : [];
+  const out: TimelineEntry[] = [];
+  if (old.status !== next.status && next.status !== 'open') out.push(line(at, 'table', next.status, next));
+  if (old.seated !== next.seated) out.push(line(at, 'seat', 'seated', next, { from: old.seated, to: next.seated, max: next.maxSeats }));
+  if (old.waitlist !== next.waitlist) out.push(line(at, 'seat', 'waitlist', next, { from: old.waitlist, to: next.waitlist }));
+  if (old.entryBlocked !== next.entryBlocked) out.push(line(at, 'table', next.entryBlocked ? 'blocked' : 'unblocked', next));
+  if (old.handsPaused !== next.handsPaused) out.push(line(at, 'table', next.handsPaused ? 'paused' : 'resumed', next));
+  return out;
+}
+
+/** A newer summary of an open room that dealt a new hand: its number. */
+export function handStarted(old: RoomEntry | undefined, room: MonitorRoom, name: string, at: number): TimelineEntry | null {
+  const before = old && 'room' in old ? old.room.handNumber : null;
+  if (before === null || room.handNumber <= before || !room.hand) return null;
+  return line(at, 'game', 'hand', { id: room.tableId, name }, { n: room.handNumber });
+}
+
+/** A line for an alert raised or resolved, or for a control this administrator used here. */
+export function timelineLine(at: number, kind: 'alert' | 'admin', code: string, t: { id: string; name: string }, params?: TimelineEntry['params']): TimelineEntry {
+  return line(at, kind, code, t, params);
+}
+
+/** New lines first, at most `cap`. */
+export function pushCapped<T>(list: readonly T[], add: readonly T[], cap = TIMELINE_MAX): T[] {
+  if (add.length === 0) return list as T[];
+  return [...[...add].reverse(), ...list].slice(0, cap);
 }

@@ -2,8 +2,11 @@
  * 종합 관제, the control center (docs/CONTROL_CENTER.md): every open table on one screen as a small oval, worst first,
  * what changed arriving on the console's own socket (/ws/admin/monitor), and one to four tables opened beside the grid.
  *
- * Read only. Watching is not spectating: no table counts this page among its spectators or its waitlist, and nothing
- * here shows a card a player holds (a room's summary has none). Acting on a table goes through the console's controls.
+ * Watching is not spectating: no table counts this page among its spectators or its waitlist, and nothing here shows a
+ * card a player holds (a room's summary has none). Acting on a table goes through the console's own control routes
+ * (pause, entry, timer recovery, safe close), with their grant, reason, re-authentication and audit, one table at a time.
+ * Alerts are what the readings show, tracked on this page; noting one changes nothing about the table. The timeline is
+ * what this page heard as it happened, kept in its memory only (the audit log is what lasts).
  *
  * What it costs: the list is one D1 read when the page opens and whenever its socket (re)connects (every 30 s while the
  * socket is down); a card's seats come from its room's summary, read only for the cards on screen or pinned, at most once
@@ -24,10 +27,12 @@ import {
   BanIcon,
   BotIcon,
   Button,
+  CheckIcon,
   CircleAlertIcon,
   cx,
   EyeIcon,
   formatChips,
+  HourglassIcon,
   InfoIcon,
   Input,
   ListOrderedIcon,
@@ -35,9 +40,12 @@ import {
   OctagonAlertIcon,
   PauseIcon,
   PinIcon,
+  PlayIcon,
   PlayingCard,
   RefreshCwIcon,
+  SettingsIcon,
   Spinner,
+  SquareIcon,
   Stat,
   TriangleAlertIcon,
   UsersIcon,
@@ -49,8 +57,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
 import { actionLabel, botLevelLabel, botStyleLabel, seatPhaseLabel, stageLabel, tableIssueLabel, tnStatusLabel, topUpStateLabel, type Tr } from '../labels';
-import { errText, useAdmin } from '../lib';
+import { REASONS } from '../adminTemplates';
+import { ApiError, errText, hasGrant, useAdmin } from '../lib';
 import {
+  alertChanges,
+  alertOrder,
   applyEvent,
   applyRooms,
   applySnapshot,
@@ -62,6 +73,8 @@ import {
   compare,
   FOCUS_MAX,
   freshnessOf,
+  handleAlert,
+  handStarted,
   keeps,
   levelOf,
   lingers,
@@ -70,16 +83,23 @@ import {
   newerRoom,
   paramsOf,
   POLL_MS,
+  PROBLEM_LEVEL,
   problemsOf,
+  pushCapped,
   roomsToRead,
   savePins,
   seatPoint,
   skewOf,
+  tableChanges,
   tablesPath,
+  timelineLine,
   toggleFocus,
   togglePin,
   totalsOf,
+  trackAlerts,
   viewOf,
+  type Alert,
+  type AlertHandling,
   type CcSize,
   type CcSort,
   type CcState,
@@ -92,8 +112,11 @@ import {
   type LinkState,
   type Problem,
   type RoomEntry,
+  type TimelineEntry,
 } from '../monitor';
 import { useMonitorSocket } from '../monitorSocket';
+import { AdminReasonField } from '../templateFields';
+import { Feedback, Modal, type Note } from '../ui';
 import { IDLE_AFTER_MS } from './Dashboard';
 
 // ------------------------------------------------------------------ words and looks
@@ -309,6 +332,14 @@ export function ControlCenterPage() {
   const visible = useRef(new Set<string>());
   const watching = useWatching();
   const now = useNow(5000);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const alertsRef = useRef(alerts);
+  /** The tables (and the rooms) this page has read before: a problem found at a first reading was there already. */
+  const readBefore = useRef({ tables: new Set<string>(), rooms: new Set<string>() });
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const addLines = useCallback((add: TimelineEntry[]) => {
+    if (add.length) setTimeline((l) => pushCapped(l, add));
+  }, []);
 
   const listPath = tablesPath(view);
   const scope: 'active' | 'closed' = view.state === 'closed' ? 'closed' : 'active';
@@ -420,13 +451,19 @@ export function ControlCenterPage() {
       if (e.type === 'admin.monitor.room') {
         const room = e.room as MonitorRoom;
         if (!newerRoom(roomsRef.current.get(room.tableId), room)) return;
+        const h = handStarted(roomsRef.current.get(room.tableId), room, tablesRef.current.get(room.tableId)?.name ?? room.tableId, Date.now());
+        if (h) addLines([h]);
         const m = new Map(roomsRef.current);
         m.set(room.tableId, { room, at: Date.now() });
         putRooms(m);
         return;
       }
+      const before = tablesRef.current.get(e.resourceId);
       const r = applyEvent(tablesRef.current, e, latest.current.eventScope);
-      if (r.tables !== tablesRef.current) putTables(r.tables);
+      if (r.tables !== tablesRef.current) {
+        putTables(r.tables);
+        addLines(tableChanges(before, r.tables.get(e.resourceId), Date.now()));
+      }
       if (e.type === 'admin.monitor.counts' && roomsRef.current.has(e.resourceId)) changed.current.add(e.resourceId);
       if (r.unknown && !latest.current.truncated) {
         clearTimeout(unknownTimer.current);
@@ -547,6 +584,50 @@ export function ControlCenterPage() {
   useEffect(() => {
     latest.current.sortedIds = grid.map((j) => j.table.id);
   }, [grid]);
+  // The alerts follow every reading of the tables held (a list read, an event, a room's answer, and the 5-second tick).
+  useEffect(() => {
+    if (!meta) return;
+    const at = Date.now();
+    const prev = alertsRef.current;
+    const next = trackAlerts(
+      prev,
+      all.map((j) => ({ table: j.table, problems: j.problems, roomAt: j.entry && 'room' in j.entry ? j.entry.at : null })),
+      at,
+    );
+    const seen = readBefore.current;
+    if (next !== prev) {
+      alertsRef.current = next;
+      setAlerts(next);
+      const { raised, resolved } = alertChanges(prev, next);
+      // What a table already had when this page first read it (or its room) is listed with the alerts, not on the
+      // timeline: the page did not see it happen (opening the page would otherwise fill the timeline with old problems).
+      const happened = (a: Alert) => (a.source === 'room' ? seen.rooms : seen.tables).has(a.tableId);
+      const what = (a: Alert) => ({ problem: a.code, level: a.level, source: a.source, n: a.n ?? '' });
+      addLines([
+        ...raised.filter(happened).map((a) => timelineLine(at, 'alert', 'raised', { id: a.tableId, name: a.name }, what(a))),
+        ...resolved.filter((a) => a.resolvedBy === 'cleared').map((a) => timelineLine(at, 'alert', 'resolved', { id: a.tableId, name: a.name }, what(a))),
+      ]);
+    }
+    for (const j of all) {
+      seen.tables.add(j.table.id);
+      if (j.entry) seen.rooms.add(j.table.id);
+    }
+  }, [all, meta, addLines]);
+  const onHandle = useCallback((id: string, h: AlertHandling) => {
+    const next = handleAlert(alertsRef.current, id, h);
+    alertsRef.current = next;
+    setAlerts(next);
+  }, []);
+  /** A control used from the panel: a line on the timeline, and the list and the rooms read again. */
+  const onActed = useCallback(
+    (tb: { id: string; name: string }, code: CtlAction, outcome: CtlOutcome) => {
+      addLines([timelineLine(Date.now(), 'admin', code, tb, { outcome })]);
+      void readList();
+      void readRooms(true);
+      void readFocus();
+    },
+    [addLines, readList, readRooms, readFocus],
+  );
 
   const onSelect = useCallback(
     (id: string, add: boolean) => {
@@ -557,6 +638,14 @@ export function ControlCenterPage() {
         if (activeRef.current !== id) return;
       }
       setView((v) => ({ focus: toggleFocus(v.focus, id, add) }));
+      setActiveId(id);
+    },
+    [setView],
+  );
+  /** A table named by an alert or a line of the timeline: opened, or brought to the front if open (never closed). */
+  const onOpen = useCallback(
+    (id: string) => {
+      setView((v) => (v.focus.includes(id) ? v : { focus: toggleFocus(v.focus, id, false) }));
       setActiveId(id);
     },
     [setView],
@@ -781,58 +870,65 @@ export function ControlCenterPage() {
           )}
         </section>
 
-        <aside
-          aria-label={t('ccPanel')}
-          data-testid="cc-panel"
-          className={cx(
-            'fixed inset-x-0 bottom-0 z-40 max-h-[62dvh] overflow-y-auto overscroll-contain rounded-t-2xl border-t border-white/10 bg-ink-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(0,0,0,0.55)]',
-            'xl:sticky xl:inset-auto xl:top-[calc(var(--shell-h,7rem)+1rem)] xl:z-auto xl:max-h-[calc(100dvh-var(--shell-h,7rem)-2rem)] xl:rounded-xl xl:border xl:shadow-none',
-            !view.focus.length && 'hidden xl:block',
-          )}
-        >
-          {!view.focus.length ? (
-            <p className="py-8 text-center text-sm text-ink-400">{t('ccPanelHint', { max: FOCUS_MAX })}</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {view.focus.length > 1 && (
-                <div role="tablist" aria-label={t('ccFocused', { n: view.focus.length, max: FOCUS_MAX })} className="flex gap-1 overflow-x-auto pb-1">
-                  {view.focus.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="tab"
-                      aria-selected={id === active}
-                      onClick={() => setActiveId(id)}
-                      className={cx(
-                        'h-8 max-w-[11rem] shrink-0 truncate rounded-full border px-3 text-xs font-semibold',
-                        id === active ? 'border-gold-500/50 bg-gold-500/12 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory',
-                      )}
-                    >
-                      {tables.get(id)?.name ?? id}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {active && activeTable && activeJudged ? (
-                <FocusPanel
-                  key={active}
-                  j={activeJudged}
-                  entry={rooms.get(active)}
-                  skew={skew.current}
-                  onClose={() => (view.focus.length > 1 ? closeOne(active) : closePanel())}
-                />
-              ) : (
-                <div className="flex items-center gap-3">
-                  <p className="min-w-0 flex-1 text-sm text-ink-400">{meta ? t('ccNotListed') : t('loading')}</p>
-                  <Button size="sm" variant="ghost" aria-label={t('ccClose')} onClick={() => (active && view.focus.length > 1 ? closeOne(active) : closePanel())}>
-                    <XIcon className="size-4" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-        </aside>
+        {/* The alerts, then the tables opened. On a phone the alerts come before the cards and the panel is a sheet. */}
+        <div className="order-first flex min-w-0 flex-col gap-4 xl:sticky xl:top-[calc(var(--shell-h,7rem)+1rem)] xl:order-none xl:max-h-[calc(100dvh-var(--shell-h,7rem)-2rem)]">
+          <AlertsPanel alerts={alerts} ready={meta !== null} onOpen={onOpen} onHandle={onHandle} />
+          <aside
+            aria-label={t('ccPanel')}
+            data-testid="cc-panel"
+            className={cx(
+              'fixed inset-x-0 bottom-0 z-40 max-h-[62dvh] overflow-y-auto overscroll-contain rounded-t-2xl border-t border-white/10 bg-ink-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(0,0,0,0.55)]',
+              'xl:static xl:inset-auto xl:z-auto xl:max-h-none xl:min-h-0 xl:flex-auto xl:rounded-xl xl:border xl:shadow-none',
+              !view.focus.length && 'hidden xl:block',
+            )}
+          >
+            {!view.focus.length ? (
+              <p className="py-8 text-center text-sm text-ink-400">{t('ccPanelHint', { max: FOCUS_MAX })}</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {view.focus.length > 1 && (
+                  <div role="tablist" aria-label={t('ccFocused', { n: view.focus.length, max: FOCUS_MAX })} className="flex gap-1 overflow-x-auto pb-1">
+                    {view.focus.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={id === active}
+                        onClick={() => setActiveId(id)}
+                        className={cx(
+                          'h-8 max-w-[11rem] shrink-0 truncate rounded-full border px-3 text-xs font-semibold',
+                          id === active ? 'border-gold-500/50 bg-gold-500/12 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory',
+                        )}
+                      >
+                        {tables.get(id)?.name ?? id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {active && activeTable && activeJudged ? (
+                  <FocusPanel
+                    key={active}
+                    j={activeJudged}
+                    entry={rooms.get(active)}
+                    skew={skew.current}
+                    onClose={() => (view.focus.length > 1 ? closeOne(active) : closePanel())}
+                    onActed={onActed}
+                  />
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <p className="min-w-0 flex-1 text-sm text-ink-400">{meta ? t('ccNotListed') : t('loading')}</p>
+                    <Button size="sm" variant="ghost" aria-label={t('ccClose')} onClick={() => (active && view.focus.length > 1 ? closeOne(active) : closePanel())}>
+                      <XIcon className="size-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </aside>
+        </div>
       </div>
+
+      <Timeline lines={timeline} onOpen={onOpen} />
     </div>
   );
 }
@@ -1079,9 +1175,22 @@ const dlCls = 'grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm';
 
 /**
  * The table opened beside the grid: its hand, its seats, its money in play, how its room and D1 agree, its bots and its
- * tournament. Only what the room's summary and D1's row say; a check of the ledger is the table page's.
+ * tournament. Only what the room's summary and D1's row say; a check of the ledger is the table page's. Last, its
+ * controls, for an administrator granted them.
  */
-function FocusPanel({ j, entry, skew, onClose }: { j: Judged; entry: RoomEntry | undefined; skew: number; onClose: () => void }) {
+function FocusPanel({
+  j,
+  entry,
+  skew,
+  onClose,
+  onActed,
+}: {
+  j: Judged;
+  entry: RoomEntry | undefined;
+  skew: number;
+  onClose: () => void;
+  onActed: (tb: { id: string; name: string }, code: CtlAction, outcome: CtlOutcome) => void;
+}) {
   const { t, locale } = useT();
   // The tick redraws the countdowns each second; the time is read at each drawing, so a room push that lands between
   // two ticks counts from now (a 30-second turn that just began reads 30, not 31).
@@ -1109,7 +1218,8 @@ function FocusPanel({ j, entry, skew, onClose }: { j: Judged; entry: RoomEntry |
   if (tb.status === 'closed') roomWord = t('ccFreshClosed');
   else if (!entry) roomWord = t('ccRoomNotRead');
   else if ('error' in entry) roomWord = entry.error === 'room_unavailable' ? t('ccRoomFailed', { time: timeOf(entry.at, locale) }) : t('ccFreshClosed');
-  else roomWord = t('ccRoomAnswered', { time: timeOf(entry.at, locale), ms: entry.ms ?? '–' });
+  // A summary the room pushed over the socket has no round trip to time; one the page read has.
+  else roomWord = entry.ms === undefined ? t('ccRoomPushed', { time: timeOf(entry.at, locale) }) : t('ccRoomAnswered', { time: timeOf(entry.at, locale), ms: entry.ms });
 
   return (
     <div data-testid="cc-detail" data-table={tb.id} className="flex flex-col gap-3">
@@ -1151,6 +1261,10 @@ function FocusPanel({ j, entry, skew, onClose }: { j: Judged; entry: RoomEntry |
       <div className="flex flex-wrap gap-2">
         <Link to={`/tables/${tb.id}`} className={linkBtn} data-testid="cc-open-detail">
           {t('ccOpenDetail')}
+        </Link>
+        {/* Every administrator has the audit page (their own entries; audit.all sees everyone's), as on the table page. */}
+        <Link to={`/audit?targetType=table&targetId=${encodeURIComponent(tb.id)}`} className={linkBtn} data-testid="cc-audit">
+          {t('ccAuditLink')}
         </Link>
       </div>
       <p className="text-xs text-ink-400" data-testid="cc-room-word">
@@ -1354,6 +1468,483 @@ function FocusPanel({ j, entry, skew, onClose }: { j: Judged; entry: RoomEntry |
           )}
         </Sec>
       )}
+
+      <ControlSection j={j} room={room} onActed={onActed} />
     </div>
+  );
+}
+
+// ------------------------------------------------------------------ acting on one table
+
+/** The console's own controls of a table (Console.tsx uses the same routes): what each changes, and its reasons. */
+type CtlAction = 'pause' | 'resume' | 'block' | 'unblock' | 'timer' | 'close';
+/** Done and confirmed by the room; saved but the room did not confirm (it applies it when it next loads); refused. */
+type CtlOutcome = 'ok' | 'unconfirmed' | 'failed';
+const CTL_LABEL: Record<CtlAction, Key> = {
+  pause: 'pauseHands',
+  resume: 'resumeHands',
+  block: 'entryBlocked',
+  unblock: 'unblockEntry',
+  timer: 'tbRecover',
+  close: 'closeTable',
+};
+const CTL_HINT: Record<CtlAction, Key> = {
+  pause: 'pauseHint',
+  resume: 'resumeHint',
+  block: 'blockHint',
+  unblock: 'unblockHint',
+  timer: 'tbRecoverConfirm',
+  close: 'closeConfirm',
+};
+const OUTCOME_KEY: Record<CtlOutcome, Key> = { ok: 'ccOutcomeOk', unconfirmed: 'ccOutcomeUnconfirmed', failed: 'ccOutcomeFailed' };
+
+interface ClosePreview {
+  seats: { userId: string; nickname: string | null; seatIndex: number; buyIn: number; stack: number | null; inHand: boolean | null }[];
+  chipsOnTable: number | null;
+  handInProgress: boolean | null;
+  waitlist: number | null;
+  roomAnswered: boolean;
+}
+type RecoverResult = 'bot_moved' | 'timed_out' | 'rearmed' | 'none';
+const RECOVER_TEXT: Record<RecoverResult, Key> = { bot_moved: 'tbRecoverBotMoved', timed_out: 'tbRecoverTimedOut', rearmed: 'tbRecoverRearmed', none: 'tbRecoverNone' };
+
+/**
+ * The table's controls: new hands paused or resumed, entry blocked or allowed, a stuck turn timer recovered, the table
+ * closed safely. Each asks first, naming the table, showing what it is now and what the control changes, with a reason
+ * (kept in the audit log); the console asks for the password again when its policy says so, and the server checks the
+ * grant, the reason and the table again. One table at a time; nothing here acts on several. Shown only with the
+ * tableControl grant (the routes refuse without it all the same). A tournament's table is run by its tournament: only
+ * its turn timer can be recovered here.
+ */
+function ControlSection({ j, room, onActed }: { j: Judged; room: MonitorRoom | null; onActed: (tb: { id: string; name: string }, code: CtlAction, outcome: CtlOutcome) => void }) {
+  const { t } = useT();
+  const { me, api } = useAdmin();
+  const tb = j.table;
+  const [ask, setAsk] = useState<CtlAction | null>(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<Note>(null);
+  const [pv, setPv] = useState<{ data: ClosePreview } | { error: unknown } | null>(null);
+  const pvSeq = useRef(0);
+
+  if (!hasGrant(me, 'tableControl')) {
+    return (
+      <Sec id="cc-sec-control" title={t('emergencyTitle')}>
+        <p className="text-sm text-ink-400" data-testid="cc-ctl-none">
+          {t('ccControlNoGrant')}
+        </p>
+      </Sec>
+    );
+  }
+
+  const open = tb.status === 'open';
+  const tournament = tb.roomType === 'tournament';
+  const hands: CtlAction = tb.handsPaused ? 'resume' : 'pause';
+  const entry: CtlAction = tb.entryBlocked ? 'unblock' : 'block';
+  const templates =
+    ask === 'pause' || ask === 'resume' || ask === 'block' || ask === 'unblock' ? REASONS.control[ask] : ask === 'timer' ? REASONS.timerRecover : [];
+  const reasonOk = reason.trim().length >= 2;
+
+  const begin = (a: CtlAction) => {
+    setAsk(a);
+    setReason('');
+    setNote(null);
+    setPv(null);
+    if (a !== 'close') return;
+    const seq = ++pvSeq.current;
+    api<ClosePreview>(`/api/admin/tables/${tb.id}/close`, { body: { preview: true } }).then(
+      (data) => seq === pvSeq.current && setPv({ data }),
+      (error: unknown) => seq === pvSeq.current && setPv({ error }),
+    );
+  };
+  const end = () => {
+    pvSeq.current++;
+    setAsk(null);
+    setPv(null);
+  };
+  const run = async () => {
+    const a = ask;
+    if (!a || !reasonOk) return;
+    const why = reason.trim();
+    // The question closes first, so a password asked for is the only dialog.
+    end();
+    setBusy(true);
+    try {
+      let text: string;
+      if (a === 'timer') {
+        const r = await api<{ result: RecoverResult }>(`/api/admin/tables/${tb.id}/timer-recover`, { body: { reason: why } });
+        text = t(RECOVER_TEXT[r.result] ?? 'tbRecoverNone');
+      } else if (a === 'close') {
+        await api(`/api/admin/tables/${tb.id}/close`, { body: { reason: why } });
+        text = t('saved');
+      } else {
+        const r = await api<{ paused: boolean; handInProgress: boolean }>(`/api/admin/tables/${tb.id}/control`, { body: { action: a, reason: why } });
+        text = a === 'pause' && r.handInProgress ? `${t('saved')} ${t('pausedAfterHand')}` : t('saved');
+      }
+      setNote({ ok: true, text });
+      onActed(tb, a, 'ok');
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'reauth_cancelled') return;
+      // The room did not confirm: the switch is saved and the room applies it (or finishes the close) when it next loads.
+      const saved = e instanceof ApiError && e.status === 503 && e.code === 'room_unavailable' && a !== 'timer';
+      setNote({ ok: false, text: saved ? t('ccCtlUnconfirmed') : errText(e, t) });
+      onActed(tb, a, saved ? 'unconfirmed' : 'failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const btn = (a: CtlAction, testid: string, Icon: LucideIcon, danger = false) => (
+    <Button size="sm" variant={danger ? 'danger' : 'outline'} disabled={busy} onClick={() => begin(a)} data-testid={testid}>
+      <Icon className="size-3.5" />
+      {t(CTL_LABEL[a])}
+    </Button>
+  );
+
+  return (
+    <Sec id="cc-sec-control" title={t('emergencyTitle')}>
+      {!open ? (
+        <p className="text-sm text-ink-400" data-testid="cc-ctl-closed">
+          {t('ccControlNotOpen')}
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {tournament && <p className="text-xs text-ink-400">{t('tnTableBody')}</p>}
+          <div className="flex flex-wrap gap-2">
+            {!tournament && btn(hands, 'cc-ctl-hands', hands === 'pause' ? PauseIcon : PlayIcon)}
+            {!tournament && btn(entry, 'cc-ctl-entry', entry === 'block' ? BanIcon : CheckIcon)}
+            {btn('timer', 'cc-ctl-timer', HourglassIcon)}
+            {!tournament && btn('close', 'cc-ctl-close', SquareIcon, true)}
+          </div>
+          <p className="text-xs text-ink-400">{t('ccCtlBasis')}</p>
+        </div>
+      )}
+      <div className="mt-2">
+        <Feedback note={note} testid="cc-ctl-note" />
+      </div>
+
+      <Modal
+        open={ask !== null}
+        onClose={end}
+        title={ask ? t(CTL_LABEL[ask]) : ''}
+        footer={
+          <>
+            <Button variant="ghost" onClick={end}>
+              {t('cancel')}
+            </Button>
+            <Button variant="danger" disabled={!reasonOk || (ask === 'close' && !(pv && 'data' in pv))} onClick={() => void run()} data-testid="cc-ctl-confirm">
+              {t('confirm')}
+            </Button>
+          </>
+        }
+      >
+        {ask && (
+          <div className="flex flex-col gap-3 text-sm">
+            <div data-testid="cc-ctl-target" className="rounded-lg border border-gold-500/30 bg-gold-500/8 px-3 py-2">
+              <p className="text-xs text-ink-400">{t('target')}</p>
+              <p className="break-all font-semibold text-ivory">{tb.name}</p>
+              <p className="break-all font-mono text-[11px] text-ink-400">{tb.id}</p>
+            </div>
+            <dl className={dlCls}>
+              <Row k={t('ccCtlNow')}>
+                {[
+                  t(FRESH_KEY[j.fresh]),
+                  tb.handsPaused ? t('pausedBadge') : null,
+                  tb.entryBlocked ? t('entryBlockedShort') : null,
+                  t('ccSeatedOf', { n: tb.seated, max: tb.maxSeats }),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Row>
+              {room && (
+                <Row k={t('ccHandNumber')}>
+                  #{room.handNumber} · {room.hand ? stageLabel(t, room.hand.stage) : t('idleState')}
+                </Row>
+              )}
+            </dl>
+            <p className="text-ink-300" data-testid="cc-ctl-after">
+              <span className="font-semibold text-gold-300">{t('ccCtlAfter')}</span> {t(CTL_HINT[ask])}
+            </p>
+
+            {ask === 'close' && (
+              <>
+                {!pv && (
+                  <p className="text-ink-400" aria-live="polite">
+                    {t('pvLoading')}
+                  </p>
+                )}
+                {pv && 'error' in pv && !(pv.error instanceof ApiError && pv.error.code === 'reauth_cancelled') && (
+                  <p className="break-all text-danger" role="alert">
+                    {errText(pv.error, t)}
+                  </p>
+                )}
+                {pv && 'data' in pv && (
+                  <div className="flex flex-col gap-1.5 rounded-lg border border-white/10 bg-ink-950/40 px-3 py-2" data-testid="cc-close-preview">
+                    {!pv.data.roomAnswered && (
+                      <p className="text-danger" role="alert">
+                        {t('pvRoomSilent')}
+                      </p>
+                    )}
+                    {pv.data.handInProgress && <p className="text-gold-300">{t('pvHandRunning')}</p>}
+                    <p>{pv.data.seats.length === 0 ? t('pvNoSeated') : t('pvSeated', { n: pv.data.seats.length })}</p>
+                    {pv.data.seats.length > 0 && (
+                      <ul className="flex flex-col gap-0.5 text-xs text-ink-300">
+                        {pv.data.seats.map((s) => (
+                          <li key={s.userId} className="flex flex-wrap items-center gap-x-2">
+                            <span className="min-w-0 truncate">
+                              #{s.seatIndex + 1} {s.nickname ?? s.userId}
+                            </span>
+                            <span className="font-mono">{t('pvStack', { chips: s.stack === null ? '—' : formatChips(s.stack) })}</span>
+                            <span>{t('seatBuyIn', { n: formatChips(s.buyIn) })}</span>
+                            {s.inHand && <Badge tone="gold">{t('pvInHand')}</Badge>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {pv.data.chipsOnTable !== null && <p>{t('pvChipsOnTable', { chips: formatChips(pv.data.chipsOnTable) })}</p>}
+                    {!!pv.data.waitlist && <p>{t('pvWaitlist', { n: pv.data.waitlist })}</p>}
+                    <p className="text-xs text-ink-400">{t('pvBasis')}</p>
+                  </div>
+                )}
+              </>
+            )}
+
+            <AdminReasonField
+              label={t('reasonRequired')}
+              templates={templates}
+              value={reason}
+              onChange={(v) => setReason(v)}
+              maxLength={200}
+              testid="cc-ctl-reason"
+              {...(ask === 'close' ? { hint: t('ccCloseReason') } : {})}
+            />
+          </div>
+        )}
+      </Modal>
+    </Sec>
+  );
+}
+
+// ------------------------------------------------------------------ alerts and the timeline
+
+const HANDLINGS = ['ack', 'investigating', 'dismissed'] as const;
+const HANDLING_KEY: Record<(typeof HANDLINGS)[number], Key> = { ack: 'ccAlertAck', investigating: 'ccAlertInvestigating', dismissed: 'ccAlertDismiss' };
+const problemOfAlert = (a: Alert): Problem => ({ code: a.code, level: a.level, source: a.source, ...(a.n !== undefined ? { n: a.n } : {}) });
+
+/**
+ * The alerts: each problem the readings show, one per table and cause, worst first, with when it was first and last
+ * seen. Noting one (seen, investigating, false alarm) is this page's note for the administrator and fixes nothing: the
+ * alert stays until the readings stop showing it, and one that gets worse is new again. Information (an issue D1's row
+ * kept from earlier) is folded away unless asked for. Gone ones stay a few minutes below, with why they went.
+ */
+function AlertsPanel({ alerts, ready, onOpen, onHandle }: { alerts: Alert[]; ready: boolean; onOpen: (id: string) => void; onHandle: (id: string, h: AlertHandling) => void }) {
+  const { t, locale } = useT();
+  const [showInfo, setShowInfo] = useState(false);
+  const sorted = useMemo(() => [...alerts].sort(alertOrder), [alerts]);
+  const active = sorted.filter((a) => a.resolvedAt === null);
+  const info = active.filter((a) => a.level < PROBLEM_LEVEL).length;
+  const shown = showInfo ? active : active.filter((a) => a.level >= PROBLEM_LEVEL);
+  const gone = sorted.filter((a) => a.resolvedAt !== null);
+
+  return (
+    <section aria-labelledby="cc-alerts-h" data-testid="cc-alerts" className="flex min-w-0 flex-col gap-2 rounded-xl border border-white/10 bg-ink-900 p-3 xl:shrink-0">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h2 id="cc-alerts-h" className="text-sm font-bold text-ivory">
+          {t('ccAlerts')}
+        </h2>
+        <span className="text-xs text-ink-400 tabular-nums" data-testid="cc-alerts-count">
+          {t('ccAlertsActive', { n: active.length - info })}
+        </span>
+        {info > 0 && (
+          <button
+            type="button"
+            aria-pressed={showInfo}
+            onClick={() => setShowInfo((v) => !v)}
+            className="ms-auto inline-flex h-8 items-center gap-1 rounded-md border border-white/10 px-2 text-[11px] font-semibold text-ink-300 hover:bg-white/5"
+            data-testid="cc-alerts-info"
+          >
+            <InfoIcon className="size-3" />
+            {t('ccAlertsShowInfo', { n: info })}
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-ink-400">{t('ccAlertNoteOnly')}</p>
+
+      {!ready ? (
+        <Spinner />
+      ) : shown.length === 0 ? (
+        <p className="text-sm text-ink-400" data-testid="cc-alerts-none">
+          {t('ccAlertsNone')}
+        </p>
+      ) : (
+        <ul className="flex max-h-52 flex-col gap-1.5 overflow-y-auto overscroll-contain xl:max-h-[30dvh]">
+          {shown.map((a) => (
+            <li
+              key={a.id}
+              data-testid="cc-alert"
+              data-table={a.tableId}
+              data-code={a.code}
+              data-handling={a.handling}
+              className={cx('rounded-lg border border-white/8 bg-ink-950/40 px-2.5 py-2', a.handling === 'dismissed' && 'opacity-60')}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <LevelChip level={a.level} word={t(LEVEL_KEY[a.level])} />
+                <button type="button" onClick={() => onOpen(a.tableId)} className="min-w-0 truncate text-left text-sm font-semibold text-ivory hover:underline">
+                  {a.name}
+                </button>
+              </div>
+              <p className={cx('mt-0.5 text-xs', LEVEL_TEXT[a.level])}>{problemLabel(t, problemOfAlert(a))}</p>
+              <p className="mt-0.5 text-[11px] text-ink-400 tabular-nums">
+                {t('ccAlertFirst', { time: timeOf(a.firstSeen, locale) })} · {t('ccAlertLast', { time: timeOf(a.lastSeen, locale) })}
+              </p>
+              <div role="group" aria-label={t('ccAlertHandling', { name: a.name })} className="mt-1.5 flex flex-wrap gap-1">
+                {HANDLINGS.map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    aria-pressed={a.handling === h}
+                    onClick={() => onHandle(a.id, a.handling === h ? 'new' : h)}
+                    className={cx(
+                      'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-[11px] font-semibold',
+                      a.handling === h ? 'border-gold-400/60 bg-gold-500/15 text-gold-200' : 'border-white/10 text-ink-300 hover:bg-white/5',
+                    )}
+                    data-testid={`cc-alert-${h}`}
+                  >
+                    {a.handling === h && <CheckIcon className="size-3" />}
+                    {t(HANDLING_KEY[h])}
+                  </button>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {gone.length > 0 && (
+        <details data-testid="cc-alerts-gone" className="text-xs">
+          <summary className="cursor-pointer py-1 text-ink-300">{t('ccAlertsGoneTitle', { n: gone.length })}</summary>
+          <ul className="mt-1 flex max-h-40 flex-col gap-1 overflow-y-auto">
+            {gone.map((a) => (
+              <li key={a.id} data-testid="cc-alert-gone" data-table={a.tableId} data-code={a.code} className="flex min-w-0 flex-wrap items-center gap-x-2 text-ink-400">
+                <span className="font-mono tabular-nums">{timeOf(a.resolvedAt ?? a.lastSeen, locale)}</span>
+                <button type="button" onClick={() => onOpen(a.tableId)} className="min-w-0 max-w-full truncate font-semibold text-ink-200 hover:underline">
+                  {a.name}
+                </button>
+                <span className="min-w-0">{problemLabel(t, problemOfAlert(a))}</span>
+                <span>· {a.resolvedBy === 'gone' ? t('ccAlertGone') : t('ccAlertResolved')}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+type TlKind = TimelineEntry['kind'];
+const TL_KINDS: readonly TlKind[] = ['table', 'seat', 'game', 'alert', 'admin'];
+const TL_KIND_KEY: Record<TlKind | 'all', Key> = {
+  all: 'ccTlKindAll',
+  table: 'ccTlKindTable',
+  seat: 'ccTlKindSeat',
+  game: 'ccTlKindGame',
+  alert: 'ccTlKindAlert',
+  admin: 'ccTlKindAdmin',
+};
+const TL_ICON: Record<TlKind, LucideIcon> = { table: SquareIcon, seat: UsersIcon, game: PlayIcon, alert: TriangleAlertIcon, admin: SettingsIcon };
+const TL_TABLE_KEY: Record<string, Key> = {
+  opened: 'ccTlOpened',
+  closing: 'ccTlClosing',
+  closed: 'ccTlClosed',
+  blocked: 'ccTlBlocked',
+  unblocked: 'ccTlUnblocked',
+  paused: 'ccTlPaused',
+  resumed: 'ccTlResumed',
+};
+
+/** One line of the timeline in words, from the codes monitor.ts writes. */
+function lineText(t: Tr, l: TimelineEntry): string {
+  const p = l.params ?? {};
+  if (l.kind === 'admin') {
+    const action = l.code in CTL_LABEL ? t(CTL_LABEL[l.code as CtlAction]) : l.code;
+    const outcome = typeof p.outcome === 'string' && p.outcome in OUTCOME_KEY ? t(OUTCOME_KEY[p.outcome as CtlOutcome]) : '';
+    return t('ccTlAdmin', { action, outcome });
+  }
+  if (l.kind === 'alert') {
+    const what = problemLabel(t, {
+      code: String(p.problem ?? ''),
+      level: (Number(p.level) || 1) as Level,
+      source: p.source === 'room' ? 'room' : 'd1',
+      ...(p.n !== undefined && p.n !== '' ? { n: Number(p.n) } : {}),
+    });
+    return t(l.code === 'resolved' ? 'ccTlResolved' : 'ccTlRaised', { what });
+  }
+  if (l.code === 'seated') return t('ccTlSeated', p);
+  if (l.code === 'waitlist') return t('ccTlWaitlist', p);
+  if (l.code === 'hand') return t('ccTlHand', p);
+  const key = TL_TABLE_KEY[l.code];
+  return key ? t(key) : l.code;
+}
+
+/**
+ * What this page heard, newest first: tables opened and closed, seats and the waitlist, hands begun at the tables
+ * opened beside the grid, alerts raised and cleared, and the controls used here. Kept in this page's memory only (at
+ * most TIMELINE_MAX lines); what lasts is the audit log.
+ */
+function Timeline({ lines, onOpen }: { lines: TimelineEntry[]; onOpen: (id: string) => void }) {
+  const { t, locale } = useT();
+  const [kind, setKind] = useState<TlKind | 'all'>('all');
+  const shown = kind === 'all' ? lines : lines.filter((l) => l.kind === kind);
+  return (
+    <section aria-labelledby="cc-tl-h" data-testid="cc-timeline" className="flex min-w-0 flex-col gap-2 rounded-xl border border-white/10 bg-ink-900 p-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <h2 id="cc-tl-h" className="text-sm font-bold text-ivory">
+          {t('ccTimeline')}
+        </h2>
+        <p className="text-[11px] text-ink-400">{t('ccTlBasis')}</p>
+        <div role="group" aria-label={t('ccTlFilter')} className="flex flex-wrap gap-1 sm:ms-auto">
+          {(['all', ...TL_KINDS] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={kind === k}
+              onClick={() => setKind(k)}
+              className={cx(
+                'h-8 rounded-md border px-2 text-[11px] font-semibold',
+                kind === k ? 'border-gold-400/60 bg-gold-500/15 text-gold-200' : 'border-white/10 text-ink-300 hover:bg-white/5',
+              )}
+              data-testid={`cc-tl-kind-${k}`}
+            >
+              {t(TL_KIND_KEY[k])}
+            </button>
+          ))}
+        </div>
+      </div>
+      {shown.length === 0 ? (
+        <p className="text-sm text-ink-400" data-testid="cc-tl-empty">
+          {t('ccTlEmpty')}
+        </p>
+      ) : (
+        <ol className="flex max-h-64 flex-col divide-y divide-white/5 overflow-y-auto overscroll-contain text-sm">
+          {shown.map((l) => {
+            const Icon = TL_ICON[l.kind];
+            const text = lineText(t, l);
+            return (
+              <li key={l.id} data-testid="cc-tl-line" data-kind={l.kind} data-code={l.code} data-table={l.tableId} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 py-1.5">
+                <time className="shrink-0 font-mono text-[11px] text-ink-400 tabular-nums" dateTime={new Date(l.at).toISOString()}>
+                  {timeOf(l.at, locale)}
+                </time>
+                <Icon className="size-3.5 shrink-0 text-ink-400" aria-hidden="true" />
+                <span className="sr-only">{t(TL_KIND_KEY[l.kind])}</span>
+                <button type="button" onClick={() => onOpen(l.tableId)} className="min-w-0 max-w-[45%] truncate font-semibold text-ivory hover:underline">
+                  {l.name}
+                </button>
+                <span className="min-w-0 basis-full text-ink-300 sm:basis-auto sm:flex-1">{text}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }

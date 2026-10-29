@@ -1,7 +1,7 @@
 import { hasPrivateKey } from '@jc/types';
 import { expect, type Page } from '@playwright/test';
 import { ADMIN, adminLogin, sql } from './analytics-helpers';
-import { signUp, sitWith, test, uid } from './helpers';
+import { balanceOf, PASSWORD, signUp, sitWith, test, uid } from './helpers';
 import { ALL_GRANTS, promoteSql } from '../support/grants';
 
 /** A table of its own for a test (a 6-max 5/10 with no bots), so what it shows is only what the test did there. */
@@ -39,6 +39,16 @@ async function noSideScroll(page: Page) {
 }
 
 const card = (page: Page, id: string) => page.locator(`[data-testid=cc-card][data-table="${id}"]`);
+
+/** The console's password question, when its policy asks again before a control. */
+async function reauth(page: Page) {
+  await expect(page.getByTestId('reauth-confirm')).toBeVisible();
+  await page.getByRole('dialog').getByLabel(/^(비밀번호|Password)$/).fill(PASSWORD);
+  await page.getByTestId('reauth-confirm').click();
+}
+
+/** A line of the page's timeline, by its kind and code, about one table. */
+const line = (page: Page, id: string, kind: string, code: string) => page.locator(`[data-testid=cc-tl-line][data-kind=${kind}][data-code=${code}][data-table="${id}"]`);
 
 test('control center: a member sitting down shows on the table’s card without a reload, the table opens beside the grid with its seats and hand, and no socket frame or room read carries a card in hand', async ({ browser }) => {
   test.setTimeout(150_000);
@@ -173,4 +183,153 @@ test('control center: an administrator without table access has no menu entry fo
   await expect(page.getByTestId('control-center').getByRole('alert')).toBeVisible();
   await expect(page.getByTestId('cc-card')).toHaveCount(0);
   await expect(page.getByTestId('cc-link')).not.toHaveAttribute('data-state', 'live');
+});
+
+test('control center: pausing a table asks first, naming it, with a reason and the password; the table shows it paused, the timeline has the action, the audit log keeps the reason, and resuming within the password window asks no password', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const id = newTable('E2E Control Act');
+  const op = await signUp(browser);
+  sql(promoteSql(`email = '${op.email}'`));
+  const page = await adminLogin(browser, op.email);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`${ADMIN}/control-center?focus=${id}`);
+  const detail = page.getByTestId('cc-detail');
+  await expect(detail).toHaveAttribute('data-table', id);
+
+  // The question names the table (name and id), says what it is now and what the control does, and waits for a reason.
+  await page.getByTestId('cc-ctl-hands').click();
+  await expect(page.getByTestId('cc-ctl-target')).toContainText('E2E Control Act');
+  await expect(page.getByTestId('cc-ctl-target')).toContainText(id);
+  await expect(page.getByTestId('cc-ctl-after')).toBeVisible();
+  const confirm = page.getByTestId('cc-ctl-confirm');
+  await expect(confirm).toBeDisabled();
+  await page.getByTestId('cc-ctl-reason').fill('x');
+  await expect(confirm).toBeDisabled();
+  await page.getByTestId('cc-ctl-reason').fill('점검 전 새 핸드 중단');
+  await page.screenshot({ path: 'test-results/control-center-control.png' });
+  await confirm.click();
+  // A fresh console session has not given its password yet: it is asked for before anything changes.
+  await reauth(page);
+  await expect(page.getByTestId('cc-ctl-note')).toHaveAttribute('role', 'status');
+  await expect(detail).toContainText(/핸드 중단됨|Hands paused/);
+  await expect(card(page, id).getByTitle(/^(핸드 중단됨|Hands paused)$/)).toBeVisible();
+  await expect(line(page, id, 'admin', 'pause')).toHaveCount(1);
+  await expect(line(page, id, 'table', 'paused')).toHaveCount(1);
+  await expect(page.getByTestId('cc-ctl-hands')).toHaveText(/운영 재개|Resume/);
+
+  // The table's audit entries, from the panel: the control with its reason.
+  await page.getByTestId('cc-audit').click();
+  await expect(page).toHaveURL(new RegExp(`/audit\\?targetType=table&targetId=${id}`));
+  const row = page.getByTestId('audit-row').filter({ hasText: 'table.control' });
+  await expect(row).toHaveCount(1);
+  await row.getByTestId('audit-detail-toggle').click();
+  await expect(page.getByTestId('audit-detail')).toContainText('점검 전 새 핸드 중단');
+  await expect(page.getByTestId('audit-detail')).toContainText('"action": "pause"');
+
+  // Resumed a moment later: the password given still counts, so only the question and its reason.
+  await page.goBack();
+  await expect(detail).toHaveAttribute('data-table', id);
+  await page.getByTestId('cc-ctl-hands').click();
+  await page.getByTestId('cc-ctl-reason').fill('점검 완료, 운영 재개');
+  await page.getByTestId('cc-ctl-confirm').click();
+  await expect(page.getByTestId('reauth-confirm')).toHaveCount(0);
+  await expect(page.getByTestId('cc-ctl-note')).toHaveAttribute('role', 'status');
+  await expect(detail).not.toContainText(/핸드 중단됨|Hands paused/);
+  await expect(page.getByTestId('cc-ctl-hands')).toHaveText(/새 핸드 중단|Pause new hands/);
+});
+
+test('control center: a safe close shows who sits there and with what before it asks for a reason; once closed the panel offers no controls, the member has their chips back, and the reason is in the audit log', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const id = newTable('E2E Control Close');
+  const a = await signUp(browser);
+  const before = await balanceOf(a.page);
+  await sitWith(a.page, id, 500);
+  expect(await balanceOf(a.page)).toBe(before - 500);
+  const op = await signUp(browser);
+  sql(promoteSql(`email = '${op.email}'`));
+  const page = await adminLogin(browser, op.email);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`${ADMIN}/control-center?focus=${id}`);
+  await expect(page.getByTestId('cc-seats')).toContainText(a.nickname);
+
+  // The preview first (no password for it): the member, the stack, and nothing to confirm until it has come.
+  await page.getByTestId('cc-ctl-close').click();
+  const preview = page.getByTestId('cc-close-preview');
+  await expect(preview).toContainText(a.nickname);
+  await expect(preview).toContainText('500');
+  await expect(page.getByTestId('reauth-confirm')).toHaveCount(0);
+  await page.getByTestId('cc-ctl-reason').fill('운영 점검 전 테이블 정리');
+  await page.getByTestId('cc-ctl-confirm').click();
+  await reauth(page);
+  await expect(page.getByTestId('cc-ctl-note')).toHaveAttribute('role', 'status');
+  await expect(page.getByTestId('cc-ctl-closed')).toBeVisible();
+  await expect(page.getByTestId('cc-ctl-hands')).toHaveCount(0);
+  await expect(line(page, id, 'admin', 'close')).toHaveCount(1);
+  // The member's chips went back to the wallet, all of them.
+  await expect.poll(() => balanceOf(a.page)).toBe(before);
+
+  await page.getByTestId('cc-audit').click();
+  const row = page.getByTestId('audit-row').filter({ hasText: 'table.close' });
+  await expect(row).toHaveCount(1);
+  await row.getByTestId('audit-detail-toggle').click();
+  await expect(page.getByTestId('audit-detail')).toContainText('운영 점검 전 테이블 정리');
+});
+
+test('control center: an administrator who may watch tables but not control them sees no controls, and the control route refuses them all the same', async ({ browser }) => {
+  const id = newTable('E2E Control Watch Only');
+  const op = await signUp(browser);
+  sql(promoteSql(`email = '${op.email}'`, ALL_GRANTS.filter((g) => g !== 'tableControl')));
+  const page = await adminLogin(browser, op.email);
+  await page.goto(`${ADMIN}/control-center?focus=${id}`);
+  await expect(page.getByTestId('cc-detail')).toHaveAttribute('data-table', id);
+  await expect(page.getByTestId('cc-ctl-none')).toBeVisible();
+  await expect(page.locator('[data-testid=cc-ctl-hands], [data-testid=cc-ctl-entry], [data-testid=cc-ctl-timer], [data-testid=cc-ctl-close]')).toHaveCount(0);
+  // Their own audit entries are theirs to read, as on the table page.
+  await expect(page.getByTestId('cc-audit')).toBeVisible();
+
+  // Hiding the buttons is not the protection: the server checks the switch on the request itself.
+  const refused = await page.evaluate(async (tableId) => {
+    const r = await fetch(`/api/admin/tables/${tableId}/control`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'pause', reason: '권한 없는 시도' }) });
+    return { status: r.status, body: (await r.json()) as { error?: { code?: string } } };
+  }, id);
+  expect(refused.status).toBe(403);
+  expect(refused.body.error?.code).toBe('permission_off');
+  await page.reload();
+  await expect(page.getByTestId('cc-detail')).not.toContainText(/핸드 중단됨|Hands paused/);
+});
+
+test('control center: a seated member losing their connection raises an alert at that table; noting it is only a note, and the alert resolves itself once the member is back', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const id = newTable('E2E Control Alert');
+  const a = await signUp(browser);
+  await sitWith(a.page, id, 500);
+  const op = await signUp(browser);
+  sql(promoteSql(`email = '${op.email}'`));
+  const page = await adminLogin(browser, op.email);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`${ADMIN}/control-center?focus=${id}`);
+  await expect(page.getByTestId('cc-seats')).toContainText(a.nickname);
+  const off = page.locator(`[data-testid=cc-alert][data-table="${id}"][data-code=disconnected]`);
+  await expect(off).toHaveCount(0);
+
+  // The member's page goes away: the seat stays (only the member leaves it), the connection does not.
+  await a.page.goto('about:blank');
+  await expect(off).toHaveCount(1, { timeout: 20_000 });
+  await expect(off).toHaveAttribute('data-handling', 'new');
+  await expect(line(page, id, 'alert', 'raised')).toHaveCount(1);
+  await expect(card(page, id)).toContainText('1/6');
+
+  // Noted: the page remembers who is on it, and the alert stays as long as the problem does.
+  await off.getByTestId('cc-alert-ack').click();
+  await expect(off).toHaveAttribute('data-handling', 'ack');
+  await expect(off.getByTestId('cc-alert-ack')).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: 'test-results/control-center-alert.png' });
+  await page.waitForTimeout(6_000);
+  await expect(off).toHaveCount(1);
+
+  // Back at the table: once the room has shown the member connected for a while, the alert resolves itself.
+  await a.page.goto(`/table/${id}`);
+  await expect(off).toHaveCount(0, { timeout: 40_000 });
+  await expect(page.locator(`[data-testid=cc-alert-gone][data-table="${id}"][data-code=disconnected]`)).toHaveCount(1);
+  await expect(line(page, id, 'alert', 'resolved')).toHaveCount(1);
 });

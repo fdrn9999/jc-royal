@@ -174,3 +174,20 @@ describe('the grid and the rooms', () => {
     expect(row.raw).not.toContain(w.me.id);
   });
 });
+
+describe('acting from the control center (the console’s own routes)', () => {
+  it('a close keeps the reason it was given in the record; a reason too short closes nothing', async () => {
+    expect((await admin.post('/api/admin/auth/reauth', { password: PASSWORD })).status).toBe(200);
+    const short = await admin.post('/api/admin/tables/it-mon-close/close', { reason: 'x' });
+    expect(short.status).toBe(400);
+    expect(short.body.error.code).toBe('bad_request');
+    expect(await d1(`SELECT status FROM tables WHERE id = 'it-mon-close'`)).toEqual([{ status: 'open' }]);
+    expect(await d1(`SELECT COUNT(*) AS n FROM admin_audit_log WHERE action = 'table.close' AND target_id = 'it-mon-close'`)).toEqual([{ n: 0 }]);
+
+    const closed = await admin.post('/api/admin/tables/it-mon-close/close', { reason: '점검 전 정리' });
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+    const logged = await d1<{ detail: string }>(`SELECT detail FROM admin_audit_log WHERE action = 'table.close' AND target_id = 'it-mon-close'`);
+    expect(logged).toHaveLength(1);
+    expect(JSON.parse(logged[0]!.detail)).toMatchObject({ reason: '점검 전 정리' });
+  });
+});

@@ -62,6 +62,7 @@ const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', 'user.vip', ...CHIP_AC
 
 /** Emergency table controls: `pause` lets the running hand finish and deals no new one until `resume`. */
 const TableControlSchema = z.object({ action: z.enum(['pause', 'resume', 'block', 'unblock']), reason: ReasonSchema });
+const CloseSchema = z.object({ reason: ReasonSchema.optional() });
 
 type LiveSeat = { userId: string; nickname: string; phase: string; tableSessionId: string } | null;
 
@@ -1186,6 +1187,11 @@ const admin = new Hono<AppEnv>()
         roomAnswered: !!live,
       });
     }
+    // A reason is optional here (the console's close sends none; the control center's asks for one) and kept in the log.
+    // A request with no body closes as it always did; a reason that is sent must be a valid one.
+    const sent = CloseSchema.safeParse((await c.req.json().catch(() => null)) ?? {});
+    if (!sent.success) fail(400, 'bad_request', 'validation failed', sent.error.issues.map((i) => ({ path: i.path, message: i.message })));
+    const { reason } = sent.data;
     // Stop new hands; the room finishes the current hand, cashes everyone out, then marks the table closed.
     await c.var.db.update(schema.tables).set({ status: 'closing', entryBlocked: true, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
     lobbyTableChanged(c, id);
@@ -1193,7 +1199,7 @@ const admin = new Hono<AppEnv>()
     // If the room cannot be reached the table stays 'closing' (no one can join) and the room finishes the close when it
     // next loads; the admin is told to retry, which is safe.
     const live = (await roomCall(c, id, 'close')) ?? (await roomCall(c, id, 'close'));
-    await audit(c, 'table.close', { type: 'table', id }, live ?? { roomConfirmed: false });
+    await audit(c, 'table.close', { type: 'table', id }, { ...(live ?? { roomConfirmed: false }), ...(reason ? { reason } : {}) });
     if (!live) fail(503, 'room_unavailable', 'the table did not confirm the close; try again');
     return c.json({ ok: true, live });
   })

@@ -32,6 +32,18 @@ test('control center on a phone: summary, filters and cards fit the screen, a ta
   await expect(card).toContainText('0/9');
   await fitsPhone(page);
   await page.screenshot({ path: 'test-results/control-center-mobile.png', fullPage: true });
+  // The alerts come before the cards and the timeline after them, each the screen's width at most.
+  const width = page.viewportSize()!.width;
+  for (const part of ['cc-alerts', 'cc-timeline']) {
+    const el = page.getByTestId(part);
+    await el.scrollIntoViewIfNeeded();
+    const r = (await el.boundingBox())!;
+    expect(r.x, part).toBeGreaterThanOrEqual(0);
+    expect(r.x + r.width, part).toBeLessThanOrEqual(width + 0.5);
+  }
+  expect((await page.getByTestId('cc-alerts').boundingBox())!.y).toBeLessThan((await card.boundingBox())!.y);
+  await page.getByTestId('cc-timeline').screenshot({ path: 'test-results/control-center-mobile-timeline.png' });
+  await page.evaluate(() => window.scrollTo(0, 0));
 
   // Tapped: a sheet from the bottom, at most about two thirds of the screen, with the table's name and seats.
   await card.getByRole('button', { name: /^E2E Control Phone With A Rather Long Name, / }).tap();

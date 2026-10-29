@@ -1,8 +1,10 @@
 // The control center's model (src/monitor.ts): the address, filters and order, problems, how current the data is, and
-// how a snapshot and the socket's events combine without ever taking a table back.
+// how a snapshot and the socket's events combine without ever taking a table back, the alerts and the timeline.
 import type { AdminMonitorEvent, MonitorRoom, MonitorTable } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import {
+  alertChanges,
+  alertOrder,
   applyEvent,
   applyRooms,
   applySnapshot,
@@ -10,6 +12,8 @@ import {
   compare,
   DEFAULT_VIEW,
   freshnessOf,
+  handleAlert,
+  handStarted,
   keeps,
   levelOf,
   lingers,
@@ -17,20 +21,28 @@ import {
   mergeTable,
   paramsOf,
   problemsOf,
+  pushCapped,
+  RESOLVE_AFTER_MS,
+  RESOLVED_KEEP_MS,
+  RESOLVED_MAX,
   ROOMS_CHANGED_EVERY_MS,
   roomsToRead,
   seatPoint,
   SeenEvents,
   skewOf,
   STALE_AFTER_MS,
+  tableChanges,
   tablesPath,
+  timelineLine,
   toggleFocus,
   togglePin,
   totalsOf,
+  trackAlerts,
   viewOf,
   withCounts,
   type CcView,
   type Judged,
+  type Reading,
   type RoomEntry,
 } from '../src/monitor';
 
@@ -337,5 +349,126 @@ describe('small things', () => {
 
   it('the clock difference from one answer', () => {
     expect(skewOf(10_500, 1_000, 1_200)).toBe(9_400);
+  });
+});
+
+describe('alerts', () => {
+  const read = (t: MonitorTable, entry?: RoomEntry): Reading => ({ table: t, problems: problemsOf(t, entry), roomAt: entry && 'room' in entry ? entry.at : null });
+  // Two of three seated members without a connection (D1's counts): a caution, from the row alone.
+  const off = table({ seated: 3, connections: 1 });
+
+  it('one active alert per table and problem: read again, it keeps when it was first seen and moves when it was last seen', () => {
+    const a = trackAlerts([], [read(off)], 10_000);
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ key: 't1:disconnected', code: 'disconnected', level: 2, source: 'd1', n: 2, firstSeen: 10_000, lastSeen: 10_000, handling: 'new', resolvedAt: null });
+    const b = trackAlerts(a, [read(table({ seated: 4, connections: 1 }))], 14_000);
+    expect(b).toHaveLength(1);
+    expect(b[0]).toMatchObject({ id: a[0]!.id, firstSeen: 10_000, lastSeen: 14_000, n: 3 });
+    // Nothing new to read: the same list back, so the page does not draw it again.
+    const c = trackAlerts(b, [read(table({ seated: 4, connections: 1 }))], 14_000);
+    expect(c).toBe(b);
+  });
+
+  it('noting an alert as seen changes the note only: the problem stays active and shown, and it resolves only when the readings stop showing it', () => {
+    let a = trackAlerts([], [read(off)], 10_000);
+    a = handleAlert(a, a[0]!.id, 'ack');
+    a = trackAlerts(a, [read(off)], 20_000);
+    expect(a[0]).toMatchObject({ handling: 'ack', resolvedAt: null, lastSeen: 20_000 });
+    a = handleAlert(a, a[0]!.id, 'dismissed');
+    a = trackAlerts(a, [read(off)], 30_000);
+    expect(a[0]).toMatchObject({ handling: 'dismissed', resolvedAt: null });
+  });
+
+  it('a problem gone for less than the window is the same alert when it comes back; gone for the window, it resolves from when it went', () => {
+    const fine = table({ seated: 3, connections: 3 });
+    let a = trackAlerts([], [read(off)], 10_000);
+    a = trackAlerts(a, [read(fine)], 12_000);
+    expect(a[0]).toMatchObject({ clearSince: 12_000, resolvedAt: null });
+    a = trackAlerts(a, [read(off)], 13_000);
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ clearSince: null, firstSeen: 10_000 });
+    a = trackAlerts(a, [read(fine)], 15_000);
+    a = trackAlerts(a, [read(fine)], 15_000 + RESOLVE_AFTER_MS - 1);
+    expect(a[0]!.resolvedAt).toBeNull();
+    a = trackAlerts(a, [read(fine)], 15_000 + RESOLVE_AFTER_MS);
+    expect(a[0]).toMatchObject({ resolvedAt: 15_000, resolvedBy: 'cleared' });
+    // Back after it resolved: a new alert, first seen now.
+    a = trackAlerts(a, [read(off)], 40_000);
+    expect(a.filter((x) => x.resolvedAt === null)).toEqual([expect.objectContaining({ firstSeen: 40_000, handling: 'new' })]);
+    expect(a.filter((x) => x.resolvedAt !== null)).toHaveLength(1);
+  });
+
+  it('a room that stops answering hides its issues, it does not fix them: they resolve only on a newer answer without them', () => {
+    const stuck: RoomEntry = { room: room({ issues: ['turn_overdue'] }), at: 10_000 };
+    let a = trackAlerts([], [read(table(), stuck)], 10_500);
+    expect(a[0]).toMatchObject({ code: 'turn_overdue', level: 4, source: 'room', firstSeen: 10_000 });
+    // No answer now: the alert stays as it was (the room's own failure is an alert of its own).
+    a = trackAlerts(a, [read(table(), { error: 'room_unavailable', at: 20_000 })], 60_000);
+    expect(a.find((x) => x.code === 'turn_overdue')).toMatchObject({ resolvedAt: null, clearSince: null });
+    expect(a.find((x) => x.code === 'room_unavailable')).toMatchObject({ level: 3, resolvedAt: null });
+    // An answer without it: resolved once the window passed since that answer.
+    a = trackAlerts(a, [read(table(), { room: room({ version: 2 }), at: 70_000 })], 70_000 + RESOLVE_AFTER_MS);
+    expect(a.find((x) => x.code === 'turn_overdue')).toMatchObject({ resolvedAt: 70_000, resolvedBy: 'cleared' });
+  });
+
+  it('a worse level shows as new again; a table that left the list resolves its alerts as gone', () => {
+    const pending: RoomEntry = { room: room({ issues: ['pending_seat'] }), at: 1_000 };
+    let a = trackAlerts([], [read(table(), pending)], 1_000);
+    a = handleAlert(a, a[0]!.id, 'investigating');
+    expect(a[0]!.handling).toBe('investigating');
+    a = trackAlerts(a, [], 2_000);
+    expect(a[0]).toMatchObject({ resolvedAt: 2_000, resolvedBy: 'gone' });
+    // A resolved alert keeps its note; a note on it changes nothing.
+    expect(handleAlert(a, a[0]!.id, 'ack')[0]!.handling).toBe('investigating');
+  });
+
+  it('resolved alerts are kept a while, the latest at most RESOLVED_MAX', () => {
+    const many = Array.from({ length: RESOLVED_MAX + 5 }, (_, i) => table({ id: `t${i}`, seated: 1 }));
+    let a = trackAlerts([], many.map((t) => read(t)), 1_000);
+    expect(a).toHaveLength(RESOLVED_MAX + 5);
+    a = trackAlerts(a, [], 2_000);
+    expect(a).toHaveLength(RESOLVED_MAX);
+    expect(trackAlerts(a, [], 2_000 + RESOLVED_KEEP_MS)).toEqual([]);
+  });
+
+  it('listed active first and worst first, and only caution and worse make a timeline line', () => {
+    const a = trackAlerts([], [read(table({ id: 'a', seated: 1, lastIssue: 'x' })), read(table({ id: 'b', flags: ['close_overdue'], status: 'closing' }))], 1_000);
+    expect([...a].sort(alertOrder).map((x) => `${x.tableId}:${x.code}`)).toEqual(['b:close_overdue', 'a:disconnected', 'a:last_issue']);
+    const { raised } = alertChanges([], a);
+    expect(raised.map((x) => x.code).sort()).toEqual(['close_overdue', 'disconnected']);
+  });
+});
+
+describe('the timeline', () => {
+  it('what an event changed about a table, in lines; whether a hand is being played is not one', () => {
+    const old = table({ seated: 1, waitlist: 0 });
+    const lines = tableChanges(old, table({ seated: 2, waitlist: 1, playing: true, entryBlocked: true, handsPaused: true }), 5_000);
+    expect(lines.map((l) => [l.kind, l.code, l.params])).toEqual([
+      ['seat', 'seated', { from: 1, to: 2, max: 6 }],
+      ['seat', 'waitlist', { from: 0, to: 1 }],
+      ['table', 'blocked', undefined],
+      ['table', 'paused', undefined],
+    ]);
+    expect(tableChanges(old, table({ seated: 1, playing: true, spectators: 4, connections: 6 }), 5_000)).toEqual([]);
+    expect(tableChanges(undefined, table(), 5_000).map((l) => l.code)).toEqual(['opened']);
+    expect(tableChanges(table(), table({ status: 'closing' }), 5_000).map((l) => l.code)).toEqual(['closing']);
+    expect(tableChanges(table({ status: 'closing' }), table({ status: 'closed' }), 5_000).map((l) => l.code)).toEqual(['closed']);
+  });
+
+  it('an open room dealing a new hand is a line; the same hand read again is not', () => {
+    const hand = { stage: 'preflop', buttonSeat: 0, sbSeat: 0, bbSeat: 1, board: [], potTotal: 15, actorSeat: 0, turn: null } as unknown as NonNullable<MonitorRoom['hand']>;
+    const before: RoomEntry = { room: room({ handNumber: 3 }), at: 1 };
+    expect(handStarted(before, room({ handNumber: 4, hand }), 'T', 9)).toMatchObject({ kind: 'game', code: 'hand', params: { n: 4 } });
+    expect(handStarted(before, room({ handNumber: 3, hand }), 'T', 9)).toBeNull();
+    expect(handStarted(undefined, room({ handNumber: 4, hand }), 'T', 9)).toBeNull();
+  });
+
+  it('new lines first, at most the cap', () => {
+    const l = (n: number) => timelineLine(n, 'admin', 'pause', { id: 't', name: 'T' });
+    let list = pushCapped([], [l(1), l(2)], 3);
+    expect(list.map((x) => x.at)).toEqual([2, 1]);
+    list = pushCapped(list, [l(3), l(4)], 3);
+    expect(list.map((x) => x.at)).toEqual([4, 3, 2]);
+    expect(pushCapped(list, [], 3)).toBe(list);
   });
 });
