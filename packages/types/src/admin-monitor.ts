@@ -198,9 +198,13 @@ export const ADMIN_MONITOR_CLOSE = {
 export const MONITOR_PRIVATE_KEYS = ['holeCards', 'shown', 'showdown', 'result', 'deck', 'joinCode', 'joinCodeHash', 'join_code_hash', 'waitlistUsers', 'liveWaitlistUsers', 'live_waitlist_users'] as const;
 
 const PRIVATE = new Set<string>(MONITOR_PRIVATE_KEYS);
-/** Whether `v` has one of MONITOR_PRIVATE_KEYS anywhere (checked by the hub before it sends anything). */
+/**
+ * Whether `v` has one of MONITOR_PRIVATE_KEYS anywhere (checked by the hub before it sends anything). Nothing the hub
+ * sends nests deeper than four; an object nested deeper than eight is refused as if it had one, unread.
+ */
 export function hasPrivateKey(v: unknown, depth = 0): boolean {
-  if (depth > 8 || v === null || typeof v !== 'object') return false;
+  if (v === null || typeof v !== 'object') return false;
+  if (depth > 8) return true;
   if (Array.isArray(v)) return v.some((x) => hasPrivateKey(x, depth + 1));
   for (const [k, x] of Object.entries(v)) if (PRIVATE.has(k) || hasPrivateKey(x, depth + 1)) return true;
   return false;

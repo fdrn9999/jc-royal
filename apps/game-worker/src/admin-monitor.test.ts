@@ -118,6 +118,14 @@ describe('what the socket carries', () => {
     expect(hasPrivateKey('holeCards')).toBe(false);
   });
 
+  it('refuses what nests too deep to be read through, rather than letting a field below the limit pass', () => {
+    const nest = (inner: unknown, n: number) => Array.from({ length: n }).reduce<unknown>((x) => ({ x }), inner);
+    expect(hasPrivateKey(nest({ deck: [] }, 12))).toBe(true);
+    expect(hasPrivateKey(nest(1, 12))).toBe(true);
+    expect(hasPrivateKey(nest(1, 8))).toBe(false);
+    expect(AdminMonitorEventSchema.safeParse({ ...base, type: 'admin.monitor.room', room: { ...room, extra: nest({ deck: [] }, 12) } }).success).toBe(false);
+  });
+
   it('refuses a table row or a room summary with a card, a join code or who waits', () => {
     expect(AdminMonitorEventSchema.safeParse({ ...base, type: 'admin.monitor.table', table: row }).success).toBe(true);
     expect(AdminMonitorEventSchema.safeParse({ ...base, type: 'admin.monitor.room', room }).success).toBe(true);
