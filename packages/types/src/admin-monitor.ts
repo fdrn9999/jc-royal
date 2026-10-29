@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { BotStyle } from './bots';
 import type { Card } from './cards';
 import type { ActionType, BotLevel, HandStage, MaxSeats, SeatState } from './table';
@@ -170,3 +171,83 @@ export interface MonitorRoomsResponse {
   rooms: Record<string, { room: MonitorRoom; ms: number } | { error: 'not_found' | 'closed' | 'room_unavailable'; ms?: number }>;
   at: number;
 }
+
+// ------------------------------------------------------------------ the control center's socket (GET /ws/admin/monitor)
+//
+// An administrator's console page, signed in to the console (jc_asid) with table duty, opened from the console's own
+// origin: never a member's session or /ws/realtime. It gets what changed, never more than the REST reads above give;
+// the page reads the grid again over REST when it connects, reconnects or meets a table it does not know.
+
+export const ADMIN_MONITOR_PROTOCOL = 1;
+/** The one hub every console socket is on (a few administrators, not every member). */
+export const ADMIN_MONITOR_HUB = 'admin-0';
+/** Rooms one page may follow live at once (the tables an operator has opened), and that one rooms read may start following. */
+export const ADMIN_MONITOR_WATCH_MAX = 4;
+
+/** Close codes of /ws/admin/monitor past the standard ones (as REALTIME_CLOSE). */
+export const ADMIN_MONITOR_CLOSE = {
+  /** Past its check, or the administrator's role or duties changed: reconnect now (the api checks again and may refuse). */
+  reauth: 4000,
+  /** The console sign-in ended (logout, suspension, a role taken away): do not reconnect. */
+  signedOut: 4401,
+  /** More console pages of this administrator than the hub keeps: the oldest closes. */
+  tooMany: 4008,
+} as const;
+
+/** Field names nothing on this socket may carry, at any depth: a held or shown card, a result, a join code, who waits. */
+export const MONITOR_PRIVATE_KEYS = ['holeCards', 'shown', 'showdown', 'result', 'deck', 'joinCode', 'joinCodeHash', 'join_code_hash', 'waitlistUsers', 'liveWaitlistUsers', 'live_waitlist_users'] as const;
+
+const PRIVATE = new Set<string>(MONITOR_PRIVATE_KEYS);
+/** Whether `v` has one of MONITOR_PRIVATE_KEYS anywhere (checked by the hub before it sends anything). */
+export function hasPrivateKey(v: unknown, depth = 0): boolean {
+  if (depth > 8 || v === null || typeof v !== 'object') return false;
+  if (Array.isArray(v)) return v.some((x) => hasPrivateKey(x, depth + 1));
+  for (const [k, x] of Object.entries(v)) if (PRIVATE.has(k) || hasPrivateKey(x, depth + 1)) return true;
+  return false;
+}
+
+const mId = z.string().min(1).max(64);
+const mCount = z.number().int().min(0);
+const mBase = { eventId: mId, occurredAt: z.number(), resourceId: mId, revision: z.number() };
+const objectWith = <T>(id: string, version: string) =>
+  z.custom<T>(
+    (v) =>
+      typeof v === 'object' &&
+      v !== null &&
+      typeof (v as Record<string, unknown>)[id] === 'string' &&
+      typeof (v as Record<string, unknown>)[version] === 'number' &&
+      !hasPrivateKey(v),
+  );
+
+/** The counts a room wrote to tables.live_* (as the grid reads them), and the table's status then. Never who. */
+export const MonitorCountsSchema = z.object({
+  seated: mCount,
+  bots: mCount,
+  playing: z.boolean(),
+  waitlist: mCount,
+  spectators: mCount,
+  connections: mCount,
+  status: z.enum(['open', 'closing', 'closed']),
+  /** The problem written with these counts (tables.last_issue), if one was; null leaves the last one. */
+  issue: z.string().max(300).nullable(),
+});
+export type MonitorCounts = z.infer<typeof MonitorCountsSchema>;
+
+export const AdminMonitorEventSchema = z.discriminatedUnion('type', [
+  /** A table's row as the grid lists it, after its settings, its switches or its status changed (revision: updatedAt). */
+  z.object({ ...mBase, type: z.literal('admin.monitor.table'), table: objectWith<MonitorTable>('id', 'updatedAt') }),
+  /** A room's counts after it wrote them (revision: tables.live_updated_at of that write). */
+  z.object({ ...mBase, type: z.literal('admin.monitor.counts'), counts: MonitorCountsSchema }),
+  /** A followed room's summary after it changed (revision: the room's version); only to the pages following it. */
+  z.object({ ...mBase, type: z.literal('admin.monitor.room'), room: objectWith<MonitorRoom>('tableId', 'version') }),
+]);
+export type AdminMonitorEvent = z.infer<typeof AdminMonitorEventSchema>;
+export type AdminMonitorEventType = AdminMonitorEvent['type'];
+/** What a publisher hands over: the hub's helpers stamp eventId and occurredAt. */
+export type AdminMonitorEventInput = AdminMonitorEvent extends infer E ? (E extends unknown ? Omit<E, 'eventId' | 'occurredAt'> : never) : never;
+
+/** What the page may send: which rooms it follows (the room keeps pushing only while a rooms read asked it to). */
+export const AdminMonitorClientFrameSchema = z.object({ t: z.literal('watch'), tables: z.array(mId).max(ADMIN_MONITOR_WATCH_MAX) });
+export type AdminMonitorClientFrame = z.infer<typeof AdminMonitorClientFrameSchema>;
+
+export type AdminMonitorServerFrame = { t: 'hello'; v: number; at: number } | { t: 'event'; e: AdminMonitorEvent };

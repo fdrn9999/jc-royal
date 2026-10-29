@@ -11,6 +11,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
+import { adminMonitorRevoke } from '../lib/admin-monitor';
 import { audit, searchAudit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
 import { CAPABILITIES, FEATURES, GRANT_OF, GRANTS, ROUTE_RULES, can, capabilitiesOf, effectiveFeatures, grantsOf, parseGrants, type Grant } from '../lib/permissions';
@@ -114,6 +115,7 @@ export const adminSecurityRoutes = new Hono<AppEnv>()
     const own = s.userId === me.id;
     if (!own && !can(me.role, 'sessions.all')) fail(403, 'forbidden', "only a super admin can end other administrators' sessions");
     await c.env.DB.prepare(`DELETE FROM sessions WHERE id = ?1`).bind(id).run();
+    adminMonitorRevoke(c, { user: s.userId, session: id });
     await audit(c, 'admin.session.end', { type: 'user', id: s.userId }, { sessionId: id, own, current: id === c.var.session!.id });
     return c.json({ ok: true, current: id === c.var.session!.id });
   })
@@ -122,6 +124,7 @@ export const adminSecurityRoutes = new Hono<AppEnv>()
     const me = c.var.user!;
     const r = await c.env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?1 AND kind = 'admin' AND id != ?2`).bind(me.id, c.var.session!.id).run();
     const ended = r.meta.changes ?? 0;
+    adminMonitorRevoke(c, { user: me.id, except: c.var.session!.id });
     await audit(c, 'admin.session.end_others', { type: 'user', id: me.id }, { ended });
     return c.json({ ok: true, ended });
   })
@@ -275,6 +278,8 @@ export const adminSecurityRoutes = new Hono<AppEnv>()
       conflict(staffOf(again));
     }
     const version = body.baseVersion + 1;
+    // Their open control center pages reconnect, and the handshake reads the new switches (it refuses without table duty).
+    adminMonitorRevoke(c, { user: id }, { reauth: true });
     await audit(c, 'admin.grants.update', { type: 'user', id }, { before: from, after: to, gained, lost, reason: body.reason, version });
     return c.json({ ok: true, grants: to, version });
   });

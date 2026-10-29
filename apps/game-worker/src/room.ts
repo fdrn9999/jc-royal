@@ -81,6 +81,7 @@ import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
 import { LobbyFeed, placesMoved, placesOf } from './lobby-feed';
 import { publishToAll, publishToUsers } from './realtime-publish';
+import { publishToAdmins } from './admin-monitor-publish';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
@@ -89,6 +90,8 @@ export interface Env {
   ENVIRONMENT: string;
   /** The realtime hubs (realtime.ts): a room tells lobby pages its new counts and members their wallet moved. */
   REALTIME: DurableObjectNamespace;
+  /** The control center's hub (admin-monitor.ts): a room tells the console its counts, and its summary while followed. */
+  ADMIN_MONITOR?: DurableObjectNamespace;
 }
 
 interface Identity {
@@ -279,6 +282,11 @@ const BOT_SYNC_WAIT_MS = 2_000;
 /** A member's time bank is kept this long after they leave their seat (and for at most this many members per room). */
 const BANK_KEEP_MS = 6 * 60 * 60_000;
 const BANK_KEEP_MAX = 100;
+/** While the control center follows a room, its summary goes to the console at most this often (as the lobby's counts). */
+const MONITOR_PUSH_MS = 1_000;
+/** The longest one rooms read follows a room for: the console asks again while the table stays open on screen. */
+const MONITOR_FOLLOW_MAX_MS = 120_000;
+const MONITOR_UNTIL_KEY = 'monitor-until';
 
 /** A finished hand kept in room storage until its D1 record is written. */
 interface UnrecordedHand {
@@ -356,20 +364,30 @@ export class TableRoom extends DurableObject<Env> {
   private oppRead = false;
   /** When the seated bots' settings were last read from D1 (`syncBotProfiles`); 0 after a wake-up or a failed read. */
   private botSyncAt = 0;
+  /**
+   * Until when the control center follows this room (a rooms read asked it to, `followFor`): its summary is pushed to
+   * the console after changes meanwhile. Stored too, so a room evicted mid-hand and woken again still pushes.
+   */
+  private monitorUntil = 0;
+  /** The next summary push (at most one a MONITOR_PUSH_MS), and when the last one went. Memory only. */
+  private monitorTimer: ReturnType<typeof setTimeout> | null = null;
+  private monitorSentAt = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Keep-alive pings are answered by the runtime: they neither wake a hibernating room nor wait behind its work.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
     ctx.blockConcurrencyWhile(async () => {
-      const [room, hand, chat, tableId, unrecorded] = await Promise.all([
+      const [room, hand, chat, tableId, unrecorded, monitorUntil] = await Promise.all([
         ctx.storage.get<RoomState>('room'),
         ctx.storage.get<PersistedHand>('hand'),
         ctx.storage.get<ChatMessage[]>('chat'),
         ctx.storage.get<string>('tableId'),
         ctx.storage.list({ prefix: UNRECORDED_PREFIX }),
+        ctx.storage.get<number>(MONITOR_UNTIL_KEY),
       ]);
       this.tableId = tableId ?? null;
+      this.monitorUntil = monitorUntil ?? 0;
       this.room = room ?? emptyRoom(9);
       // A room saved before automatic top-up kept an automatic rebuy on its own (an older build writes only that).
       for (const s of this.room.seats) {
@@ -567,6 +585,34 @@ export class TableRoom extends DurableObject<Env> {
       this.send(ws, { t: 'state', state: this.view(a, connected), cues });
     }
     void this.publishStats();
+    this.toMonitor();
+  }
+
+  /**
+   * While the control center follows this room: its summary to the console after a change, the first at once and then
+   * at most one a MONITOR_PUSH_MS with the state as it is then (a burst of changes is one push). Read in the room's
+   * queue like any other, sent in the background; a push that fails is lost (the console reads the room again).
+   */
+  private toMonitor() {
+    if (this.monitorTimer || Date.now() >= this.monitorUntil || !this.env.ADMIN_MONITOR) return;
+    this.monitorTimer = setTimeout(() => {
+      this.monitorTimer = null;
+      if (Date.now() >= this.monitorUntil) return;
+      this.monitorSentAt = Date.now();
+      void this.run(() => this.monitorSummary()).then(
+        (room) => this.ctx.waitUntil(publishToAdmins(this.env, { type: 'admin.monitor.room', resourceId: room.tableId, revision: room.version, room })),
+        (e: unknown) => console.warn('admin monitor summary', e instanceof Error ? e.message : String(e)),
+      );
+    }, Math.max(0, this.monitorSentAt + MONITOR_PUSH_MS - Date.now()));
+  }
+
+  /** A rooms read asked to follow this room for `ms` more (capped at MONITOR_FOLLOW_MAX_MS from now; never shortened). */
+  private async followFor(ms: number) {
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    const until = Date.now() + Math.min(ms, MONITOR_FOLLOW_MAX_MS);
+    if (until <= this.monitorUntil) return;
+    this.monitorUntil = until;
+    await this.ctx.storage.put(MONITOR_UNTIL_KEY, until);
   }
 
   /**
@@ -606,7 +652,10 @@ export class TableRoom extends DurableObject<Env> {
     try {
       const { maintenance: m, live } = await publishLiveStats(this.env.DB, this.tableId, stats, issue, ops, now);
       if (this.takeMaint(m, read)) void this.run(() => this.maintenanceChanged());
-      if (live) this.toLobby(stats, live, taken.filter((s) => !s.bot).map((s) => s.userId));
+      if (live) {
+        this.toLobby(stats, live, taken.filter((s) => !s.bot).map((s) => s.userId));
+        this.countsToMonitor(stats, live, issue);
+      }
     } catch (e) {
       this.ops.restore(ops);
       this.pendingIssue ??= issue;
@@ -632,8 +681,26 @@ export class TableRoom extends DurableObject<Env> {
     if (moved.length) this.ctx.waitUntil(publishToUsers(this.env, moved, { scope: 'user', type: 'lobby.mine.changed', resourceId: id }));
   }
 
-  /** After D1 has the table closed: the lobbies drop it. */
+  /**
+   * After an occupancy write committed: the counts it wrote to the control center (every table, a tournament's too), as
+   * the grid reads them from D1 — never who waits. Never awaited.
+   */
+  private countsToMonitor(s: LiveStats, live: LiveWritten, issue: string | null) {
+    const status = live.status === 'open' || live.status === 'closing' ? live.status : 'closed';
+    const counts = { seated: s.seated, bots: s.bots, playing: s.playing, waitlist: s.waitlist, spectators: s.spectators, connections: s.connections, status, issue } as const;
+    this.ctx.waitUntil(publishToAdmins(this.env, { type: 'admin.monitor.counts', resourceId: this.tableId!, revision: live.rev, counts }));
+  }
+
+  /** After D1 has the table closed: the lobbies drop it, and the control center's grid shows it closed. */
   private tableGone() {
+    this.ctx.waitUntil(
+      publishToAdmins(this.env, {
+        type: 'admin.monitor.counts',
+        resourceId: this.tableId!,
+        revision: Date.now(),
+        counts: { seated: 0, bots: 0, playing: false, waitlist: 0, spectators: 0, connections: 0, status: 'closed', issue: null },
+      }),
+    );
     if (!this.table || this.table.roomType === 'tournament') return;
     this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.removed', resourceId: this.tableId! }));
   }
@@ -712,6 +779,8 @@ export class TableRoom extends DurableObject<Env> {
           case 'status':
             return Response.json(await this.adminStatus());
           case 'monitor':
+            // A read for a page that follows the room asks for its changes too (`toMonitor`), for a while.
+            await this.followFor(Number(url.searchParams.get('follow')));
             return Response.json(await this.monitorSummary());
           case 'timer-recover':
             return Response.json(await this.recoverTimer());
