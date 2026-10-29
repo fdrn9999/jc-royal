@@ -1,25 +1,18 @@
 /**
- * Installing JC ROYAL as an app (lib/install.ts): the lobby's offer, the steps for each kind of device, and the settings
- * section. Loaded on demand (InstallLazy.tsx) — only when the offer shows or the settings open — so its text lives here
- * rather than in the entry chunk.
+ * Installing JC ROYAL as an app (lib/install.ts): the steps for each kind of device and the settings section. Loaded on
+ * demand — while the lobby's offer (InstallOffer.tsx) shows or when the settings open (InstallLazy.tsx) — so its text
+ * lives here rather than in the entry chunk.
  */
-import { Button, createTranslator, cx, formatDate, Logo, Modal } from '@jc/ui';
+import { Button, createTranslator, cx, formatDate } from '@jc/ui';
 import { useId, useState } from 'react';
 import { useI18n } from '../lib/i18n';
-import { guideOsOf, hideInstallOffer, isSnoozed, LATER_MS, promptInstall, showInstallOffer, SNOOZE_MS, useInstall, type GuideOs } from '../lib/install';
+import { guideOsOf, isSnoozed, showInstallOffer, useInstall, type GuideOs } from '../lib/install';
 import { copyText, siteUrl } from '../lib/share';
+import { Note, offerEn, offerKo, TAP, usePrompt } from './InstallOffer';
 
 const ko = {
-  offerTitle: 'JC ROYAL을 앱으로 설치',
-  offerBody: '홈 화면 아이콘으로 바로 열고, 주소창 없는 전체 화면으로 플레이할 수 있습니다. 설치 방법은 설정에서도 다시 볼 수 있습니다.',
-  offerInApp: '지금은 다른 앱 안의 브라우저라 설치할 수 없습니다. Safari나 Chrome에서 열면 앱으로 설치할 수 있습니다.',
-  installNow: '설치하기',
-  howTo: '설치 방법',
-  later: '나중에',
-  snooze: '30일 동안 보지 않기',
-  promptDismissed: '설치하지 않았습니다. 나중에 설정이나 브라우저 메뉴에서 다시 설치할 수 있습니다.',
+  ...offerKo,
   promptHint: '브라우저의 설치 창이 열립니다. 여기서 설치되지 않으면 아래 방법을 따라 주세요.',
-  guideTitle: '앱으로 설치하는 방법',
   guideIntro: '앱 스토어 없이 브라우저에서 홈 화면에 추가해 앱처럼 쓸 수 있습니다. 기기·브라우저·버전에 따라 메뉴 이름과 위치가 다르고, 설치를 지원하지 않는 브라우저도 있습니다.',
   inApp: "카카오톡·네이버·인스타그램처럼 다른 앱 안에서 연 화면에서는 설치할 수 없습니다. 화면 위나 아래의 메뉴에서 '다른 브라우저로 열기'(또는 'Safari로 열기'·'기본 브라우저로 열기')를 누르거나, 주소를 복사해 Safari·Chrome에 붙여 넣어 주세요.",
   copyAddress: '주소 복사',
@@ -61,22 +54,13 @@ const ko = {
   hideGuide: '설치 방법 접기',
   hiddenUntil: '로비의 설치 안내를 {date}까지 숨겼습니다.',
   showAgain: '다시 보이기',
-  close: '닫기',
 } as const;
 
 type Key = keyof typeof ko;
 
 const en: Record<Key, string> = {
-  offerTitle: 'Install JC ROYAL as an app',
-  offerBody: 'Open it straight from your home screen and play full screen without the address bar. The steps are also in Settings.',
-  offerInApp: "This is a browser inside another app, which can't install. Open the site in Safari or Chrome to install it.",
-  installNow: 'Install',
-  howTo: 'How to install',
-  later: 'Later',
-  snooze: "Don't show for 30 days",
-  promptDismissed: 'Not installed. You can install it later from Settings or your browser menu.',
+  ...offerEn,
   promptHint: "Your browser's install dialog opens. If it doesn't install from here, follow the steps below.",
-  guideTitle: 'How to install the app',
   guideIntro: 'You can add JC ROYAL to your home screen from the browser and use it like an app, without an app store. Menu names and places differ by device, browser and version, and some browsers cannot install.',
   inApp: "Pages opened inside apps such as KakaoTalk, NAVER or Instagram can't install. Use 'Open in another browser' (or 'Open in Safari' / 'Open in default browser') in the menu at the top or bottom, or copy the address and paste it into Safari or Chrome.",
   copyAddress: 'Copy address',
@@ -118,7 +102,6 @@ const en: Record<Key, string> = {
   hideGuide: 'Hide the steps',
   hiddenUntil: 'The lobby install banner is hidden until {date}.',
   showAgain: 'Show again',
-  close: 'Close',
 };
 
 const translate = createTranslator({ ko, en });
@@ -129,29 +112,6 @@ function useTr(): Tr {
 }
 
 const OSES: GuideOs[] = ['ios', 'android', 'desktop'];
-// Phones get a 40px tap target; wider screens keep the compact size.
-const TAP = 'h-10! sm:h-8!';
-
-/** The browser's install dialog, and what to say when it was closed without installing. */
-function usePrompt() {
-  const [note, setNote] = useState<Key | null>(null);
-  const run = async (fallback: () => void) => {
-    setNote(null);
-    const r = await promptInstall();
-    if (r === 'dismissed') setNote('promptDismissed');
-    else if (r === 'unavailable') fallback();
-  };
-  return [run, note] as const;
-}
-
-function Note({ tr, note }: { tr: Tr; note: Key | null }) {
-  if (!note) return null;
-  return (
-    <p role="status" className="text-xs text-gold-300" data-testid="install-note">
-      {tr(note)}
-    </p>
-  );
-}
 
 function Steps({ tr, title, steps, note, testId }: { tr: Tr; title: string; steps: Key[]; note?: Key; testId: string }) {
   return (
@@ -186,7 +146,7 @@ function InAppNote({ tr }: { tr: Tr }) {
 }
 
 /** The steps for iPhone·iPad, Android and computers, opened on this device's own; menus differ, and some browsers cannot install at all. */
-function InstallGuide() {
+export function InstallGuide() {
   const tr = useTr();
   const s = useInstall();
   const [os, setOs] = useState<GuideOs>(() => guideOsOf(s.platform));
@@ -205,7 +165,7 @@ function InstallGuide() {
           <p className="text-xs text-ink-400">{tr('promptHint')}</p>
         </div>
       )}
-      <Note tr={tr} note={note} />
+      <Note text={note && tr(note)} />
       <div className="grid grid-cols-3 rounded-lg border border-white/10 p-0.5" role="tablist" aria-label={tr('osLabel')}>
         {OSES.map((o) => (
           <button
@@ -244,52 +204,6 @@ function InstallGuide() {
   );
 }
 
-/**
- * The lobby's offer to install, in the page (never over a table or a game, never a dialog of its own). InstallLazy.tsx
- * renders it only while lib/install.ts offerVisible() says so.
- */
-export function InstallOffer() {
-  const tr = useTr();
-  const s = useInstall();
-  const [guide, setGuide] = useState(false);
-  const [run, note] = usePrompt();
-  const inApp = s.platform === 'in-app-ios' || s.platform === 'in-app-android';
-  return (
-    <section className="jc-panel flex flex-col gap-3 border-gold-500/25 p-4" aria-labelledby="install-offer-title" data-testid="install-offer">
-      <div className="flex items-start gap-3">
-        <Logo size={40} className="shrink-0" />
-        <div className="min-w-0">
-          <h2 id="install-offer-title" className="font-bold text-ivory">
-            {tr('offerTitle')}
-          </h2>
-          <p className="mt-0.5 text-xs text-ink-300">{tr(inApp ? 'offerInApp' : 'offerBody')}</p>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {s.canPrompt ? (
-          <Button size="sm" className={TAP} onClick={() => run(() => setGuide(true))} data-testid="install-offer-prompt">
-            {tr('installNow')}
-          </Button>
-        ) : (
-          <Button size="sm" className={TAP} onClick={() => setGuide(true)} data-testid="install-offer-guide">
-            {tr('howTo')}
-          </Button>
-        )}
-        <Button size="sm" variant="ghost" className={TAP} onClick={() => hideInstallOffer(LATER_MS)} data-testid="install-later">
-          {tr('later')}
-        </Button>
-        <Button size="sm" variant="ghost" className={TAP} onClick={() => hideInstallOffer(SNOOZE_MS)} data-testid="install-snooze">
-          {tr('snooze')}
-        </Button>
-      </div>
-      <Note tr={tr} note={note} />
-      <Modal open={guide} onClose={() => setGuide(false)} title={tr('guideTitle')} closeLabel={tr('close')}>
-        <InstallGuide />
-      </Modal>
-    </section>
-  );
-}
-
 /** Settings: whether this is the app, the steps again, and bringing back a hidden lobby offer. */
 export function InstallSettings() {
   const tr = useTr();
@@ -320,7 +234,7 @@ export function InstallSettings() {
             </Button>
           </div>
         )}
-        <Note tr={tr} note={note} />
+        <Note text={note && tr(note)} />
         {hidden && (
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-300">
             <span data-testid="install-hidden-until">{tr('hiddenUntil', { date: formatDate(s.until, locale) })}</span>

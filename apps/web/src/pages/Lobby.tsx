@@ -7,7 +7,7 @@ import { JoinCodeModal } from '../components/JoinCode';
 import { BOT_LEVEL_LABEL, HostedBy } from '../components/MemberName';
 import { ANY, filtersOf, QuickPlayPanel, useLobbyFilters, type QuickFilters } from '../components/QuickPlay';
 import { CreateRoomModal } from '../components/Rooms';
-import { InstallOfferLazy } from '../components/InstallLazy';
+import { InstallOffer } from '../components/InstallOffer';
 import { MaintenanceNote } from '../components/MaintenanceNote';
 import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
@@ -359,7 +359,7 @@ function Lobby() {
         </div>
       </div>
 
-      <InstallOfferLazy />
+      <InstallOffer />
       {paused && <MaintenanceNote m={paused} what="games" />}
       <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} paused={!!paused} mine={mine} />
 
