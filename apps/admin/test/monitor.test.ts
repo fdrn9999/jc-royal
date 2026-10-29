@@ -288,6 +288,8 @@ describe('snapshot and events', () => {
     expect(applyEvent(prev, ev({ type: 'admin.monitor.counts', resourceId: 't9', revision: 5, counts }), null).unknown).toBe(false);
     const same = applyEvent(prev, ev({ type: 'admin.monitor.table', resourceId: 't1', revision: 1, table: table() }), 'active');
     expect(same.tables).toBe(prev);
+    // Another administrator's change to a member or a tournament is for the pages that show those, not the grid.
+    expect(applyEvent(prev, ev({ type: 'admin.monitor.changed', kind: 'vip', resourceId: 't1', revision: 3 }), 'active')).toEqual({ tables: prev, unknown: false });
   });
 
   it('a room summary is kept only when it is not older', () => {

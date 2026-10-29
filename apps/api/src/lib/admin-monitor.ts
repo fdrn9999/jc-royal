@@ -145,6 +145,16 @@ export function adminMonitorTableChanged(c: Context<AppEnv>, id: string) {
 }
 
 /**
+ * After a tournament changed in D1 (lib/tournament.ts tournamentChanged): its version, to the console pages of
+ * administrators with the tournaments permission, which read it again. Read here so the version is D1's.
+ */
+export async function adminTournamentChanged(env: Env, id: string): Promise<void> {
+  if (!env.ADMIN_MONITOR) return;
+  const r = await env.DB.prepare('SELECT version FROM tournaments WHERE id = ?1').bind(id).first<{ version: number }>();
+  if (r) await sendToAdmins(env, { type: 'admin.monitor.changed', kind: 'tournament', resourceId: id, revision: r.version });
+}
+
+/**
  * Closes the console sockets of ended console sign-ins (logout, a session ended from the security page, a suspension, a
  * role taken away), or with `reauth` those of an administrator whose duties changed (the page reconnects and the api
  * checks again). Tried twice, as realtimeSignOut; a revoke the hub never hears of leaves the socket open until the hub's

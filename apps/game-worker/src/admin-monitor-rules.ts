@@ -1,3 +1,4 @@
+import { ADMIN_CHANGE_GRANT, ADMIN_CHANGE_KINDS, type AdminChangeKind } from '@jc/types';
 import type { RealtimeIdentity } from './realtime-rules';
 
 /**
@@ -9,6 +10,11 @@ import type { RealtimeIdentity } from './realtime-rules';
 export interface MonitorAttachment extends RealtimeIdentity {
   /** The rooms this page follows (admin.monitor.room goes to it only for these). */
   watch: string[];
+  /**
+   * The other administrators' changes this page may hear of (admin.monitor.changed), from the administrator's
+   * permissions when the api checked the handshake. Missing on a socket opened before there were any: none.
+   */
+  kinds?: AdminChangeKind[];
 }
 
 /** A console socket is checked again at least this often (the console sign-in's idle limit, ADMIN_IDLE_TTL). */
@@ -45,15 +51,45 @@ export const liveAdminSessionsSql = (n: number) =>
 
 /** As apps/api/src/lib/permissions.ts grantsOf: a super admin has every duty; a plain administrator the stored ones. */
 export function hasTableDuty(role: string, grants: string | null): boolean {
+  return hasDuty(role, grants, 'tables');
+}
+
+function hasDuty(role: string, grants: string | null, grant: string): boolean {
   if (role === 'super_admin') return true;
   if (role !== 'admin' || !grants) return false;
   try {
     const v: unknown = JSON.parse(grants);
-    return Array.isArray(v) && v.includes('tables');
+    return Array.isArray(v) && v.includes(grant);
   } catch {
     return false;
   }
 }
+
+/** The other administrators' changes an administrator with this role and these stored duties may hear of. */
+export const changeKindsOf = (role: string, grants: string | null): AdminChangeKind[] =>
+  ADMIN_CHANGE_KINDS.filter((k) => hasDuty(role, grants, ADMIN_CHANGE_GRANT[k]));
+
+/**
+ * The kinds the api put on the handshake (x-jc-monitor-kinds, a JSON list): only known ones, each once. Missing (an
+ * api from before these): none. Anything else is not the api's, and the handshake is refused.
+ */
+export function kindsOf(raw: string | null): AdminChangeKind[] | null {
+  if (raw === null) return [];
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(v) || !v.every((k) => (ADMIN_CHANGE_KINDS as readonly unknown[]).includes(k))) return null;
+  return ADMIN_CHANGE_KINDS.filter((k) => v.includes(k));
+}
+
+/** Whether a socket's kinds are still the ones its administrator's permissions give (otherwise it is checked again). */
+export const sameKinds = (a: readonly AdminChangeKind[] | undefined, b: readonly AdminChangeKind[]) => {
+  const x = a ?? [];
+  return x.length === b.length && x.every((k) => b.includes(k));
+};
 
 /** The rooms a page asked to follow, as the hub keeps them (deduplicated, in the page's order). */
 export const watchOf = (tables: readonly string[]): string[] => [...new Set(tables)];

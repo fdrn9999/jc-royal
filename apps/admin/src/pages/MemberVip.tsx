@@ -5,19 +5,21 @@
  * Making a member VIP (gold unless another color is picked first), changing the color and ending it all show the
  * server's preview first (from → to, the tables where the name redraws), then take a reason and the password. The page
  * sends the version it showed: when another administrator changed it in between, the server refuses and the panel
- * shows the state as it is now, ready to try again. Staff, table bots and deleted accounts cannot be made VIP (the
+ * shows the state as it is now, ready to try again. A change another administrator saves while the panel is open is
+ * announced (adminChanges.ts) and read only when asked, the color picked and the reason typed kept. Staff, table bots and deleted accounts cannot be made VIP (the
  * server refuses them too); a color such an account still has can be ended.
  */
 import { VIP_COLORS, VIP_DEFAULT_COLOR, type AdminVipDto, type AdminVipPreviewDto, type AdminVipResultDto, type VipColor } from '@jc/types';
 import { Badge, Button, formatDate, Panel } from '@jc/ui';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { useHeardRevision } from '../adminChanges';
 import { REASONS } from '../adminTemplates';
 import { useT } from '../i18n';
 import type { Tr } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
 import { AdminReasonField } from '../templateFields';
-import { Feedback, jumpTarget, Modal, PageState, type Note } from '../ui';
+import { ChangedNotice, Feedback, jumpTarget, Modal, PageState, type Note } from '../ui';
 
 type Change = { enabled: true; color: VipColor } | { enabled: false };
 
@@ -56,7 +58,7 @@ export function VipName({ name, color }: { name: string; color: VipColor | null 
 export function MemberVipPanel({ userId, onChanged }: { userId: string; onChanged?: () => void }) {
   const { t, locale } = useT();
   const { api } = useAdmin();
-  const { data, error, loading, reload } = useData<AdminVipDto>(`/api/admin/users/${userId}/vip`);
+  const { data, error, loading, reload, setData } = useData<AdminVipDto>(`/api/admin/users/${userId}/vip`);
   // The color picked on the panel; null until the administrator picks one (the member's own color, or gold).
   const [pick, setPick] = useState<VipColor | null>(null);
   const [act, setAct] = useState<Change | null>(null);
@@ -65,6 +67,8 @@ export function MemberVipPanel({ userId, onChanged }: { userId: string; onChange
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
   const seq = useRef(0);
+  const [reading, setReading] = useState(false);
+  const heard = useHeardRevision(userId, (e) => e.type === 'admin.monitor.changed' && e.kind === 'vip' && e.resourceId === userId);
   const title = t('vipTitle');
   if (!data) {
     return (
@@ -80,14 +84,14 @@ export function MemberVipPanel({ userId, onChanged }: { userId: string; onChange
   const conflict = (e: unknown) => e instanceof ApiError && e.code === 'vip_conflict';
   const url = `/api/admin/users/${userId}/vip`;
 
-  const open = async (c: Change) => {
+  const open = async (c: Change, version = d.version, keepReason = false) => {
     const n = ++seq.current;
     setNote(null);
-    setReason('');
+    if (!keepReason) setReason('');
     setAct(c);
     setPv(null);
     try {
-      const r = await api<AdminVipPreviewDto>(url, { method: 'PATCH', body: { ...c, expectedVersion: d.version, preview: true } });
+      const r = await api<AdminVipPreviewDto>(url, { method: 'PATCH', body: { ...c, expectedVersion: version, preview: true } });
       if (seq.current === n) setPv({ data: r });
     } catch (e) {
       if (seq.current !== n) return;
@@ -103,6 +107,23 @@ export function MemberVipPanel({ userId, onChanged }: { userId: string; onChange
     setAct(null);
     setPv(null);
   };
+  // Another administrator changed it since it was shown: read it again and, with the modal open, redo its preview from
+  // that (the color picked and the reason typed stay).
+  const again = async () => {
+    const c = act;
+    const n = seq.current;
+    setReading(true);
+    try {
+      const fresh = await api<AdminVipDto>(url);
+      setData(fresh);
+      if (c && seq.current === n) await open(c, fresh.version, true);
+    } catch (e) {
+      setNote({ ok: false, text: errText(e, t) });
+    } finally {
+      setReading(false);
+    }
+  };
+  const stale = heard !== null && heard > d.version && !busy;
   const confirm = async () => {
     if (!act || !pv || !('data' in pv)) return;
     setBusy(true);
@@ -136,6 +157,7 @@ export function MemberVipPanel({ userId, onChanged }: { userId: string; onChange
     <Panel title={title} id="member-vip" className={jumpTarget}>
       <div className={`flex flex-col gap-4 text-sm transition-opacity ${loading ? 'opacity-60' : ''}`} data-testid="member-vip" data-vip={d.color ?? ''} data-version={d.version}>
         {error && <Feedback note={{ ok: false, text: errText(error, t) }} />}
+        {stale && act === null && <ChangedNotice onRefresh={() => void again()} busy={reading} testid="vip-changed" />}
         <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-3">
           <div>
             <dt className="text-xs text-ink-400">{t('vipState')}</dt>
@@ -219,7 +241,7 @@ export function MemberVipPanel({ userId, onChanged }: { userId: string; onChange
             <Button variant="ghost" onClick={close}>{t('cancel')}</Button>
             <Button
               variant={kind === 'remove' ? 'danger' : 'gold'}
-              disabled={!pvData || !pvData.changed || reason.trim().length < 2}
+              disabled={stale || !pvData || !pvData.changed || reason.trim().length < 2}
               loading={busy}
               onClick={() => void confirm()}
               data-testid="vip-confirm"
@@ -230,6 +252,7 @@ export function MemberVipPanel({ userId, onChanged }: { userId: string; onChange
         }
       >
         <div className="flex flex-col gap-3 text-sm" data-testid="vip-act" data-kind={kind ?? undefined}>
+          {stale && <ChangedNotice onRefresh={() => void again()} busy={reading} testid="vip-changed-modal" />}
           <p className="text-ink-200">{kind && t(`vipConfirm_${kind}`, { name: d.member.nickname })}</p>
           {!pv ? (
             <p className="text-ink-400" aria-live="polite">{t('pvLoading')}</p>

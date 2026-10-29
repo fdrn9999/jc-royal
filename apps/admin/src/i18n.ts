@@ -1069,6 +1069,9 @@ const ko = {
   // B9 console states, lists and confirmations
   closeDialog: '닫기',
   closeNote: '결과 메시지 닫기',
+  changedByOther: '다른 관리자가 이 데이터를 변경했습니다. 지금 보이는 내용과 작성 중인 내용은 그대로 두었습니다.',
+  changedRefresh: '최신 정보 확인',
+  changedTableByOther: '다른 관리자나 방장이 이 테이블을 변경했습니다. 지금 보이는 내용과 작성 중인 내용은 그대로 두었습니다.',
   jumpTo: '바로 가기',
   retry: '다시 시도',
   stEmpty: '표시할 항목이 없습니다.',
@@ -3415,6 +3418,9 @@ const en: Dict = {
   // B9 console states, lists and confirmations
   closeDialog: 'Close',
   closeNote: 'Close the message',
+  changedByOther: 'Another administrator changed this. What is shown and what you are writing were left as they are.',
+  changedRefresh: 'Check the latest',
+  changedTableByOther: "Another administrator or the room's host changed this table. What is shown and what you are writing were left as they are.",
   jumpTo: 'Jump to',
   retry: 'Try again',
   stEmpty: 'Nothing to show.',

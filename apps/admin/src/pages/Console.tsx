@@ -2,6 +2,7 @@ import { ArrowRightIcon, Badge, BotIcon, Button, Empty, Field, formatChips, form
 import { academyItemName, ageOn, BOT_LEVELS, BOT_TABLE_STYLES, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type BotTableStyle, type VipColor } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
+import { useHeardRevision } from '../adminChanges';
 import { REASONS, type AdminTemplate } from '../adminTemplates';
 import { useT } from '../i18n';
 import {
@@ -24,7 +25,7 @@ import {
 } from '../labels';
 import { ApiError, canDo, errText, hasGrant, useAdmin, useData } from '../lib';
 import { AdminReasonField } from '../templateFields';
-import { dayStart, Feedback, JumpNav, jumpTarget, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
+import { ChangedNotice, dayStart, Feedback, JumpNav, jumpTarget, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
 import { MemberSettingsPanel } from './MemberSettings';
 import { MemberVipPanel, vipColorLabel } from './MemberVip';
@@ -1391,7 +1392,22 @@ export function TableDetailPage() {
   const [edit, setEdit] = useState<{ smallBlind?: number; bigBlind?: number; minBuyIn?: number; maxBuyIn?: number }>({});
   // Bumped after a conflict so the blinds form starts again from the reloaded values (its inputs are uncontrolled).
   const [blindsForm, setBlindsForm] = useState(0);
+  // Another administrator's (or the room's host's) change to the table's settings, switches or status (adminChanges.ts):
+  // announced, read when asked. This page's own saves are not announced to it (counted while they run and read again after).
+  const heard = useHeardRevision(id || null, (e) => e.type === 'admin.monitor.table' && e.resourceId === id);
+  const [saving, setSaving] = useState(0);
+  const [reading, setReading] = useState(false);
+  // Read again when asked: the blinds form starts again from what is read, but what was typed in it stays.
+  const again = async () => {
+    setReading(true);
+    try {
+      if (await reload()) setBlindsForm((n) => n + 1);
+    } finally {
+      setReading(false);
+    }
+  };
   const act = async (fn: () => Promise<unknown>) => {
+    setSaving((n) => n + 1);
     try {
       await fn();
       setNote({ ok: true, text: t('saved') });
@@ -1405,11 +1421,14 @@ export function TableDetailPage() {
         setEdit({});
         setBlindsForm((n) => n + 1);
       }
+    } finally {
+      setSaving((n) => n - 1);
     }
   };
   const runControl = async (action: TableControl) => {
     setControl(null);
     setNote(null);
+    setSaving((n) => n + 1);
     try {
       const r = await api<{ paused: boolean; handInProgress: boolean }>(`/api/admin/tables/${id}/control`, { body: { action, reason: cReason } });
       setNote({ ok: true, text: action === 'pause' && r.handInProgress ? `${t('saved')} ${t('pausedAfterHand')}` : t('saved') });
@@ -1419,6 +1438,8 @@ export function TableDetailPage() {
     } catch (e) {
       setNote({ ok: false, text: errText(e, t) });
       await reload();
+    } finally {
+      setSaving((n) => n - 1);
     }
   };
   // Closing shows who is cashed out first; the password is asked when it is confirmed.
@@ -1449,6 +1470,7 @@ export function TableDetailPage() {
   // A tournament's table is paused, closed and set up from its tournament (the API refuses these here: tournament_table).
   const tn = tb.roomType === 'tournament' ? (data.tournament ?? null) : null;
   const tnTable = tb.roomType === 'tournament';
+  const stale = heard !== null && heard > tb.updatedAt && saving === 0;
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -1472,6 +1494,7 @@ export function TableDetailPage() {
         ]}
       />
       <Feedback note={note} pin />
+      {stale && <ChangedNotice text={t('changedTableByOther')} onRefresh={() => void again()} busy={reading} testid="table-changed" pin />}
       {error && <LoadError error={error} onRetry={reload} />}
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title={t('live')} id="table-live" className={jumpTarget}>
@@ -1632,7 +1655,7 @@ export function TableDetailPage() {
         <Panel title={t('blinds')} id="table-settings" className={jumpTarget}>
           <form key={blindsForm} data-testid="table-blinds" className="grid grid-cols-2 gap-3" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api(`/api/admin/tables/${id}`, { method: 'PATCH', body: { ...edit, ifUpdatedAt: tb.updatedAt } })); }}>
             {(['smallBlind', 'bigBlind', 'minBuyIn', 'maxBuyIn'] as const).map((k) => (
-              <Field key={k} label={t(k)}>{(fid) => <Input id={fid} inputMode="numeric" defaultValue={tb[k]} onChange={(e) => setEdit({ ...edit, [k]: Number(e.target.value) || undefined })} />}</Field>
+              <Field key={k} label={t(k)}>{(fid) => <Input id={fid} inputMode="numeric" defaultValue={edit[k] ?? tb[k]} onChange={(e) => setEdit({ ...edit, [k]: Number(e.target.value) || undefined })} />}</Field>
             ))}
             <p className="col-span-2 text-xs text-ink-400">{t('appliesNextHand')}</p>
             <div className="col-span-2 flex flex-wrap gap-2">

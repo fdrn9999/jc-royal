@@ -233,6 +233,16 @@ export const MonitorCountsSchema = z.object({
 });
 export type MonitorCounts = z.infer<typeof MonitorCountsSchema>;
 
+/**
+ * What another administrator changed (admin.monitor.changed), for a console page showing it: a member's VIP state
+ * (resourceId: the member, revision: the VIP version) or a tournament (resourceId: the tournament, revision: its
+ * version). A table's own changes are admin.monitor.table.
+ */
+export const ADMIN_CHANGE_KINDS = ['vip', 'tournament'] as const;
+export type AdminChangeKind = (typeof ADMIN_CHANGE_KINDS)[number];
+/** The console permission (apps/api/src/lib/permissions.ts GRANTS) whose pages show each: only those hear of it. */
+export const ADMIN_CHANGE_GRANT: Record<AdminChangeKind, string> = { vip: 'vip', tournament: 'tournaments' };
+
 export const AdminMonitorEventSchema = z.discriminatedUnion('type', [
   /** A table's row as the grid lists it, after its settings, its switches or its status changed (revision: updatedAt). */
   z.object({ ...mBase, type: z.literal('admin.monitor.table'), table: objectWith<MonitorTable>('id', 'updatedAt') }),
@@ -240,6 +250,12 @@ export const AdminMonitorEventSchema = z.discriminatedUnion('type', [
   z.object({ ...mBase, type: z.literal('admin.monitor.counts'), counts: MonitorCountsSchema }),
   /** A followed room's summary after it changed (revision: the room's version); only to the pages following it. */
   z.object({ ...mBase, type: z.literal('admin.monitor.room'), room: objectWith<MonitorRoom>('tableId', 'version') }),
+  /**
+   * Another administrator's change to a member's VIP state or a tournament, saved: what it was and its new version,
+   * nothing else (never the reason or the change itself; the page reads it when the administrator asks). Only to the
+   * pages of administrators with that permission (ADMIN_CHANGE_GRANT).
+   */
+  z.strictObject({ ...mBase, type: z.literal('admin.monitor.changed'), kind: z.enum(ADMIN_CHANGE_KINDS) }),
 ]);
 export type AdminMonitorEvent = z.infer<typeof AdminMonitorEventSchema>;
 export type AdminMonitorEventType = AdminMonitorEvent['type'];

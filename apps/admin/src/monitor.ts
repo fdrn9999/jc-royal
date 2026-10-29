@@ -350,7 +350,7 @@ export function applySnapshot(prev: ReadonlyMap<string, MonitorTable>, items: Mo
  * by a search the server ran, so nothing is added to it and nothing unknown is worth a read.
  */
 export function applyEvent(prev: ReadonlyMap<string, MonitorTable>, e: AdminMonitorEvent, scope: 'active' | 'closed' | null): { tables: ReadonlyMap<string, MonitorTable>; unknown: boolean } {
-  if (e.type === 'admin.monitor.room') return { tables: prev, unknown: false };
+  if (e.type === 'admin.monitor.room' || e.type === 'admin.monitor.changed') return { tables: prev, unknown: false };
   const old = prev.get(e.resourceId);
   if (e.type === 'admin.monitor.table') {
     const t = e.table as MonitorTable;

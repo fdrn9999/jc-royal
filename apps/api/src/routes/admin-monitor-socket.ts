@@ -1,8 +1,8 @@
-import { ADMIN_MONITOR_HUB } from '@jc/types';
+import { ADMIN_CHANGE_GRANT, ADMIN_CHANGE_KINDS, ADMIN_MONITOR_HUB } from '@jc/types';
 import type { Handler } from 'hono';
 import type { AppEnv } from '../env';
 import { fail } from '../lib/http';
-import { hasGrant } from '../lib/permissions';
+import { grantsOf, hasGrant } from '../lib/permissions';
 import { clientIp, rateLimit } from '../lib/rate-limit';
 import { resolveSession } from '../lib/session';
 import { IDENTITY_HEADER, INTERNAL_HEADER } from './tables';
@@ -15,7 +15,8 @@ import { IDENTITY_HEADER, INTERNAL_HEADER } from './tables';
  * (the `tables` feature, read from D1; a super admin has every one). A member's sign-in is not one, whatever its role.
  * The hub (the game worker's AdminMonitorHub) gets who this is from the api, never from the page, and checks the
  * sign-in and the duty again on its sweep; logouts, ended sessions, suspensions and role or duty changes close the
- * socket at once (lib/admin-monitor.ts adminMonitorRevoke).
+ * socket at once (lib/admin-monitor.ts adminMonitorRevoke). Which other administrators' changes the page hears of (a VIP
+ * state, a tournament: admin.monitor.changed) is the administrator's permissions as read here, never the page's to say.
  */
 export const adminMonitorSocket: Handler<AppEnv> = async (c) => {
   if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') fail(426, 'bad_request', 'websocket upgrade required');
@@ -32,6 +33,8 @@ export const adminMonitorSocket: Handler<AppEnv> = async (c) => {
   const headers = new Headers(c.req.raw.headers);
   headers.set(INTERNAL_HEADER, c.env.INTERNAL_SECRET);
   headers.set(IDENTITY_HEADER, encodeURIComponent(JSON.stringify(identity)));
+  const grants: readonly string[] = await grantsOf(c);
+  headers.set('x-jc-monitor-kinds', JSON.stringify(ADMIN_CHANGE_KINDS.filter((k) => grants.includes(ADMIN_CHANGE_GRANT[k]))));
   // Local tests only (as /ws/realtime): the hub's sign-in sweep runs this often instead of every few minutes.
   if (c.env.REALTIME_SWEEP_MS) headers.set('x-jc-sweep-ms', c.env.REALTIME_SWEEP_MS);
   else headers.delete('x-jc-sweep-ms');

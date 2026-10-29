@@ -18,11 +18,14 @@ export class AdminMonitorSocket {
   closed: { code: number; reason: string } | null = null;
   private listeners: (() => void)[] = [];
 
-  /** Resolves once the hub said hello; `refused` resolves on open instead (for a socket the hub accepts only to close). */
-  static async open(client: Client, opts: { origin?: string; refused?: boolean } = {}) {
+  /**
+   * Resolves once the hub said hello; `refused` resolves on open instead (for a socket the hub accepts only to close).
+   * `headers`: more request headers, as a page cannot send but a crafted client can.
+   */
+  static async open(client: Client, opts: { origin?: string; refused?: boolean; headers?: Record<string, string> } = {}) {
     const s = new AdminMonitorSocket();
     const url = `${BASE().replace(/^http/, 'ws')}${PATH}`;
-    s.ws = new (WebSocket as unknown as new (u: string, init: unknown) => WebSocket)(url, { headers: { Cookie: client.cookieHeader(), Origin: opts.origin ?? ADMIN_ORIGIN } });
+    s.ws = new (WebSocket as unknown as new (u: string, init: unknown) => WebSocket)(url, { headers: { ...opts.headers, Cookie: client.cookieHeader(), Origin: opts.origin ?? ADMIN_ORIGIN } });
     s.ws.addEventListener('message', (ev) => {
       const raw = String(ev.data);
       s.frames.push(raw);

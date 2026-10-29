@@ -1,15 +1,18 @@
 import { DurableObject } from 'cloudflare:workers';
-import { ADMIN_MONITOR_CLOSE, ADMIN_MONITOR_PROTOCOL, AdminMonitorClientFrameSchema, AdminMonitorEventSchema } from '@jc/types';
+import { ADMIN_MONITOR_CLOSE, ADMIN_MONITOR_PROTOCOL, AdminMonitorClientFrameSchema, AdminMonitorEventSchema, type AdminChangeKind } from '@jc/types';
 import type { Env } from './room';
 import {
   ADMIN_ABSOLUTE_MS,
+  changeKindsOf,
   hasTableDuty,
+  kindsOf,
   liveAdminSessionsSql,
   MONITOR_FRAMES_PER_MIN,
   MONITOR_MAX_PER_ADMIN,
   MONITOR_MAX_PER_HUB,
   MONITOR_SWEEP_CHUNK,
   MONITOR_SWEEP_MS,
+  sameKinds,
   staleMonitor,
   watchOf,
   type MonitorAttachment,
@@ -21,7 +24,9 @@ import { parseIdentity, REVOKE_WINDOW_MS, revokes, SWEEP_RETRY_MS, sweepAlarmFor
  * (ADMIN_MONITOR_HUB), never on the member hubs and never with a member's session. The api checks the console sign-in,
  * the role and table duty and the console's origin before a page reaches here; the hub then hands it what the api and
  * the table rooms publish for the control center, and checks the sign-in and the duty again on its sweep. Nothing a
- * page sends changes anything but which followed rooms' summaries it gets.
+ * page sends changes anything but which followed rooms' summaries it gets. Another administrator's change to a VIP state or
+ * a tournament (admin.monitor.changed) goes only to the pages of administrators with that permission, as the api read it
+ * on the handshake and the sweep reads it again.
  */
 
 const isId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 64;
@@ -61,6 +66,8 @@ export class AdminMonitorHub extends DurableObject<Env> {
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('upgrade required', { status: 426 });
     const identity = parseIdentity(request.headers.get('x-jc-identity'));
     if (!identity) return new Response('bad identity', { status: 400 });
+    const kinds = kindsOf(request.headers.get('x-jc-monitor-kinds'));
+    if (!kinds) return new Response('bad kinds', { status: 400 });
     const now = Date.now();
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
@@ -83,7 +90,7 @@ export class AdminMonitorHub extends DurableObject<Env> {
       for (const { ws } of oldest) this.close(ws, ADMIN_MONITOR_CLOSE.tooMany, 'too many pages');
     }
     this.ctx.acceptWebSocket(server, [`a:${identity.userId}`]);
-    server.serializeAttachment({ ...identity, watch: [] } satisfies MonitorAttachment);
+    server.serializeAttachment({ ...identity, watch: [], kinds } satisfies MonitorAttachment);
     server.send(JSON.stringify({ t: 'hello', v: ADMIN_MONITOR_PROTOCOL, at: now }));
     // Local tests only: the api passes a shorter sweep (REALTIME_SWEEP_MS), kept for the alarms after this one.
     const every = sweepMsOf(request.headers.get('x-jc-sweep-ms'));
@@ -97,22 +104,25 @@ export class AdminMonitorHub extends DurableObject<Env> {
     return (await this.ctx.storage.get<number>(SWEEP_KEY)) ?? MONITOR_SWEEP_MS;
   }
 
-  /** Of these sessions, those D1 still has as a console sign-in of an active administrator, with whether they have table duty. */
-  private async liveSessions(ids: string[], now: number): Promise<Map<string, boolean>> {
+  /**
+   * Of these sessions, those D1 still has as a console sign-in of an active administrator, with whether they have table
+   * duty and the other administrators' changes their permissions let them hear of.
+   */
+  private async liveSessions(ids: string[], now: number): Promise<Map<string, { duty: boolean; kinds: AdminChangeKind[] }>> {
     const statements: D1PreparedStatement[] = [];
     for (let i = 0; i < ids.length; i += MONITOR_SWEEP_CHUNK) {
       const part = ids.slice(i, i + MONITOR_SWEEP_CHUNK);
       statements.push(this.env.DB.prepare(liveAdminSessionsSql(part.length)).bind(...part, now, now - ADMIN_ABSOLUTE_MS));
     }
-    const live = new Map<string, boolean>();
+    const live = new Map<string, { duty: boolean; kinds: AdminChangeKind[] }>();
     for (const r of await this.env.DB.batch<{ id: string; role: string; grants: string | null }>(statements))
-      for (const row of r.results) live.set(row.id, hasTableDuty(row.role, row.grants));
+      for (const row of r.results) live.set(row.id, { duty: hasTableDuty(row.role, row.grants), kinds: changeKindsOf(row.role, row.grants) });
     return live;
   }
 
   /**
    * An event for every console page, except a followed room's summary, which goes only to the pages following that
-   * room. Refused unless it is one of the control center's events, with nothing private in it (AdminMonitorEventSchema).
+   * room, and another administrator's change, only to the pages whose administrator may hear of that kind. Refused unless it is one of the control center's events, with nothing private in it (AdminMonitorEventSchema).
    */
   private publish(body: Record<string, unknown>): Response {
     const parsed = AdminMonitorEventSchema.safeParse(body.event);
@@ -130,6 +140,7 @@ export class AdminMonitorHub extends DurableObject<Env> {
         continue;
       }
       if (e.type === 'admin.monitor.room' && !a.watch.includes(e.resourceId)) continue;
+      if (e.type === 'admin.monitor.changed' && !(a.kinds ?? []).includes(e.kind)) continue;
       try {
         ws.send(frame);
         sent++;
@@ -181,7 +192,7 @@ export class AdminMonitorHub extends DurableObject<Env> {
   /**
    * Closes sockets past their check; those whose console sign-in D1 no longer has (signed out, expired, past the
    * absolute limit, the account no longer an active administrator) for good; and those of an administrator who no
-   * longer has table duty for a fresh check (which the api refuses). One D1 batch for all sockets, never one per event.
+   * longer has table duty (which the api then refuses), or whose other permissions changed, for a fresh check. One D1 batch for all sockets, never one per event.
    */
   override async alarm() {
     const now = Date.now();
@@ -196,9 +207,9 @@ export class AdminMonitorHub extends DurableObject<Env> {
       try {
         const live = await this.liveSessions([...new Set(open.map(({ a }) => a.sessionId))], now);
         for (const { ws, a } of open) {
-          const duty = live.get(a.sessionId);
-          if (duty === undefined) this.close(ws, ADMIN_MONITOR_CLOSE.signedOut, 'signed out');
-          else if (!duty) this.close(ws, ADMIN_MONITOR_CLOSE.reauth, 'reauth');
+          const held = live.get(a.sessionId);
+          if (held === undefined) this.close(ws, ADMIN_MONITOR_CLOSE.signedOut, 'signed out');
+          else if (!held.duty || !sameKinds(a.kinds, held.kinds)) this.close(ws, ADMIN_MONITOR_CLOSE.reauth, 'reauth');
         }
       } catch (e) {
         checked = false;

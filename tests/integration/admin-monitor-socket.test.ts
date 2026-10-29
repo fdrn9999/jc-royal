@@ -3,9 +3,9 @@
 // the rooms a page follows, their summaries, with no card anyone holds and no waiting member; a page's frames change
 // nothing; and every way a console sign-in or its duty ends closes it, at once or at the hub's next check.
 import { afterEach, describe, expect, it } from 'vitest';
-import { MONITOR_PRIVATE_KEYS } from '@jc/types';
+import { MONITOR_PRIVATE_KEYS, type TournamentStructure } from '@jc/types';
 import { ADMIN_ORIGIN, AdminMonitorSocket, monitorHandshake } from '../support/admin-monitor';
-import { Client, newUser, PASSWORD, sharedAdmin } from '../support/client';
+import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
 import { d1 } from '../support/d1';
 import { ALL_GRANTS, promoteSql } from '../support/grants';
 import { TableSocket } from '../support/ws';
@@ -173,6 +173,86 @@ describe('what the socket carries', () => {
   });
 });
 
+/** Sets a member's VIP state as a console page does, from the version it read. */
+async function setVip(id: string, reason: string) {
+  await reauth();
+  const version = (await admin.get(`/api/admin/users/${id}/vip`)).body.version as number;
+  const r = await admin.patch(`/api/admin/users/${id}/vip`, { enabled: true, reason, expectedVersion: version });
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+  return r.body.vip.version as number;
+}
+
+const TOURNAMENT: TournamentStructure = {
+  name: 'mon',
+  capacity: 3,
+  minPlayers: 2,
+  startStack: 200,
+  levels: [
+    { sb: 10, bb: 20 },
+    { sb: 20, bb: 40 },
+  ],
+  levelMinutes: 5,
+  turnSeconds: 10,
+  timeBank: { enabled: true, initialMs: 30_000, maxMs: 60_000, unitMs: 10_000, refillHands: 10, refillMs: 5_000 },
+  minHands: 0,
+  requireVerified: false,
+  autoStart: true,
+};
+
+describe('what a page hears of other administrators’ changes', () => {
+  it('a VIP change reaches the pages with the VIP permission, as the version alone; a page cannot ask for more itself', async () => {
+    const [vip, tablesOnly, m] = await Promise.all([staffWith(['tables', 'vip']), staffWith(['tables']), newUser()]);
+    const [hears, deaf] = [await monitor(vip.c), await monitor(tablesOnly.c)];
+    // The list of what a page hears of is the api's, from the grants: one a client sends itself is replaced.
+    const forged = await AdminMonitorSocket.open(tablesOnly.c, { headers: { 'x-jc-monitor-kinds': '["vip","tournament"]' } });
+    open.push(forged);
+    expect(forged.hello).toBe(true);
+    const reason = uniq('관제 동기화 사유');
+    const version = await setVip(m.me.id, reason);
+    const e = await hears.event('admin.monitor.changed', 15_000, (x) => x.resourceId === m.me.id);
+    expect(e).toMatchObject({ kind: 'vip', revision: version });
+    // The frame as it came: which member and which version, never the color, the reason or who changed it.
+    expect(Object.keys(e).sort()).toEqual(['eventId', 'kind', 'occurredAt', 'resourceId', 'revision', 'type']);
+    const frame = hears.frames.find((f) => f.includes(e.eventId))!;
+    for (const no of [reason, 'gold', (await admin.get('/api/admin/auth/me')).body.user.id as string]) expect(frame).not.toContain(no);
+    expect(scan(hears)).not.toContain(reason);
+    await quiet(deaf, 'admin.monitor.changed');
+    await quiet(forged, 'admin.monitor.changed');
+  });
+
+  it('a tournament change reaches the pages with the tournament permission, at each version', async () => {
+    const [tn, tablesOnly] = await Promise.all([staffWith(['tables', 'tournaments']), staffWith(['tables'])]);
+    const [hears, deaf] = [await monitor(tn.c), await monitor(tablesOnly.c)];
+    await reauth();
+    const tpl = await admin.post('/api/admin/tournament-templates', { ...TOURNAMENT, name: uniq('mon tpl'), reason: '관제 동기화 확인' });
+    expect(tpl.status, JSON.stringify(tpl.body)).toBe(200);
+    const made = await admin.post('/api/admin/tournaments', { templateId: tpl.body.template.id, templateVersion: tpl.body.template.version, name: uniq('MON') });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const { id, version } = made.body.tournament as { id: string; version: number };
+    expect((await hears.event('admin.monitor.changed', 15_000, (x) => x.kind === 'tournament' && x.resourceId === id)).revision).toBe(version);
+    const cancel = await admin.post(`/api/admin/tournaments/${id}/cancel`, { baseVersion: version, reason: '관제 동기화 확인 끝' });
+    expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
+    const after = (await admin.get(`/api/admin/tournaments/${id}`)).body.tournament.version as number;
+    expect(after).toBeGreaterThan(version);
+    await hears.event('admin.monitor.changed', 15_000, (x) => x.resourceId === id && x.revision === after);
+    await quiet(deaf, 'admin.monitor.changed');
+  });
+
+  it('a permission given closes the page to check again, and the next one hears of what it allows', async () => {
+    const staff = await staffWith(['tables']);
+    const s = await monitor(staff.c);
+    await reauth();
+    const { version } = (await admin.get(`/api/admin/security/admins/${staff.me.id}`)).body.admin;
+    const put = await admin.req('PUT', `/api/admin/security/admins/${staff.me.id}/grants`, { grants: ['tables', 'vip'], baseVersion: version, reason: 'VIP 업무 추가' });
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    expect(await s.waitClose()).toBe(4000);
+    const again = await monitor(staff.c);
+    const m = await newUser();
+    const v = await setVip(m.me.id, '권한 추가 뒤 확인');
+    expect((await again.event('admin.monitor.changed', 15_000, (x) => x.resourceId === m.me.id)).revision).toBe(v);
+  });
+});
+
 describe('when a console sign-in or its duty ends', () => {
   it('a logout closes that page for good', async () => {
     const staff = await staffWith(['tables']);
@@ -217,10 +297,13 @@ describe('when a console sign-in or its duty ends', () => {
   it('a sign-in or a duty gone from D1 without a revoke is found by the hub’s check', async () => {
     const gone = await staffWith(['tables']);
     const offDuty = await staffWith(['tables']);
-    const [a, b] = [await monitor(gone.c), await monitor(offDuty.c)];
+    const moreDuty = await staffWith(['tables']);
+    const [a, b, c] = [await monitor(gone.c), await monitor(offDuty.c), await monitor(moreDuty.c)];
     await d1(`DELETE FROM sessions WHERE user_id = '${gone.me.id}' AND kind = 'admin'`);
     await d1(`UPDATE admin_permissions SET grants = '["vip"]' WHERE user_id = '${offDuty.me.id}'`);
+    // A permission added the same way changes what the page may hear of: it too is checked again.
+    await d1(`UPDATE admin_permissions SET grants = '["tables","vip"]' WHERE user_id = '${moreDuty.me.id}'`);
     // The hub checks every REALTIME_SWEEP_MS (15 s here); the close reaches the client ten seconds later.
-    expect(await Promise.all([a.waitClose(50_000), b.waitClose(50_000)])).toEqual([4401, 4000]);
+    expect(await Promise.all([a.waitClose(50_000), b.waitClose(50_000), c.waitClose(50_000)])).toEqual([4401, 4000, 4000]);
   }, 70_000);
 });

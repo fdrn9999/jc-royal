@@ -20,6 +20,8 @@ const PONG_WAIT_MS = 10_000;
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000];
 
 export interface MonitorSocketOptions {
+  /** false: no socket (an administrator the hub would refuse); default true. */
+  enabled?: boolean;
   /** The tables open in the panel: their rooms' summaries come on the socket too (at most ADMIN_MONITOR_WATCH_MAX). */
   watch: string[];
   onEvent: (e: AdminMonitorEvent) => void;
@@ -36,8 +38,10 @@ export function useMonitorSocket(opts: MonitorSocketOptions) {
   latest.current = opts;
   const sendWatch = useRef<() => void>(() => undefined);
   const wakeNow = useRef<() => void>(() => undefined);
+  const enabled = opts.enabled ?? true;
 
   useEffect(() => {
+    if (!enabled) return;
     let gen = 0;
     let ws: WebSocket | null = null;
     let opened = false;
@@ -165,9 +169,11 @@ export function useMonitorSocket(opts: MonitorSocketOptions) {
       window.removeEventListener('keydown', onPointer);
       ws?.close(1000);
       ws = null;
+      sendWatch.current = () => undefined;
+      wakeNow.current = () => undefined;
       setStatus('off');
     };
-  }, []);
+  }, [enabled]);
 
   const watchKey = opts.watch.join(',');
   useEffect(() => {

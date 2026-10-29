@@ -21,6 +21,7 @@ import {
 } from '@jc/types';
 import { outboxForEntries } from '@jc/db';
 import type { Env } from '../env';
+import { adminTournamentChanged } from './admin-monitor';
 import { fail } from './http';
 import { notices } from './notices';
 import { queuePush } from './notify';
@@ -207,9 +208,11 @@ export interface StartResult {
 /**
  * A tournament changed in D1 (opened, registration, a start, a cancel, a pause): the tournament pages read it again.
  * Public and carries only the id; in the background, never failing the change (without `ctx` the pages' poll finds it).
+ * The console's tournament pages hear of it too, with its version (admin.monitor.changed).
  */
 export function tournamentChanged(env: Env, id: string, ctx: Pick<ExecutionContext, 'waitUntil'> | undefined) {
   ctx?.waitUntil(sendToAll(env, { scope: 'lobby', type: 'tournament.changed', resourceId: id }).catch((err) => console.warn('realtime tournament change not sent', String(err))));
+  ctx?.waitUntil(adminTournamentChanged(env, id).catch((err) => console.warn('admin monitor tournament publish failed', String(err))));
 }
 
 /** Tries before giving up on a roster that keeps changing (each registration changes it). */

@@ -3,7 +3,7 @@
 // handshake, the revokes and the frames themselves are tested in tests/integration/admin-monitor-socket.test.ts.
 import { ADMIN_MONITOR_WATCH_MAX, AdminMonitorClientFrameSchema, AdminMonitorEventSchema, hasPrivateKey, MONITOR_PRIVATE_KEYS } from '@jc/types';
 import { describe, expect, it } from 'vitest';
-import { hasTableDuty, liveAdminSessionsSql, MONITOR_MAX_AGE_MS, MONITOR_SWEEP_CHUNK, staleMonitor, watchOf } from './admin-monitor-rules';
+import { changeKindsOf, hasTableDuty, kindsOf, liveAdminSessionsSql, MONITOR_MAX_AGE_MS, MONITOR_SWEEP_CHUNK, sameKinds, staleMonitor, watchOf } from './admin-monitor-rules';
 import { revokes, type RealtimeIdentity } from './realtime-rules';
 
 const T0 = 1_800_000_000_000;
@@ -32,6 +32,45 @@ describe('hasTableDuty', () => {
     expect(hasTableDuty('admin', 'not json')).toBe(false);
     expect(hasTableDuty('admin', '{"tables":true}')).toBe(false);
     expect(hasTableDuty('user', '["tables"]')).toBe(false);
+  });
+});
+
+describe("the other administrators' changes a socket hears of", () => {
+  it('follows the permissions: VIP with the vip duty, tournaments with the tournaments duty, both for a super admin', () => {
+    expect(changeKindsOf('super_admin', null)).toEqual(['vip', 'tournament']);
+    expect(changeKindsOf('admin', '["tables","vip"]')).toEqual(['vip']);
+    expect(changeKindsOf('admin', '["tables","tournaments"]')).toEqual(['tournament']);
+    expect(changeKindsOf('admin', '["tables"]')).toEqual([]);
+    expect(changeKindsOf('admin', 'not json')).toEqual([]);
+    expect(changeKindsOf('user', '["vip","tournaments"]')).toEqual([]);
+  });
+
+  it("reads the api's list: missing is none, known kinds once in order, anything else refuses the handshake", () => {
+    expect(kindsOf(null)).toEqual([]);
+    expect(kindsOf('[]')).toEqual([]);
+    expect(kindsOf('["tournament","vip","vip"]')).toEqual(['vip', 'tournament']);
+    expect(kindsOf('["vip","reports"]')).toBeNull();
+    expect(kindsOf('"vip"')).toBeNull();
+    expect(kindsOf('{"vip":true}')).toBeNull();
+    expect(kindsOf('vip')).toBeNull();
+  });
+
+  it('checks a socket again when its kinds are no longer what the permissions give', () => {
+    expect(sameKinds(['vip'], ['vip'])).toBe(true);
+    expect(sameKinds(['tournament', 'vip'], ['vip', 'tournament'])).toBe(true);
+    expect(sameKinds(['vip'], ['vip', 'tournament'])).toBe(false);
+    expect(sameKinds(['vip', 'tournament'], ['vip'])).toBe(false);
+    expect(sameKinds(undefined, [])).toBe(true);
+    expect(sameKinds(undefined, ['vip'])).toBe(false);
+  });
+
+  it('says only what changed and its version: never a reason, a color or anything else', () => {
+    const changed = { ...base, resourceId: 'u1', type: 'admin.monitor.changed', kind: 'vip' };
+    expect(AdminMonitorEventSchema.safeParse(changed).success).toBe(true);
+    expect(AdminMonitorEventSchema.safeParse({ ...changed, kind: 'tournament' }).success).toBe(true);
+    expect(AdminMonitorEventSchema.safeParse({ ...changed, kind: 'reports' }).success).toBe(false);
+    expect(AdminMonitorEventSchema.safeParse({ ...changed, reason: 'chargeback' }).success).toBe(false);
+    expect(AdminMonitorEventSchema.safeParse({ ...changed, color: 'gold' }).success).toBe(false);
   });
 });
 
