@@ -7,7 +7,7 @@ import { Table } from './Console';
 
 type Metric = 'ws_retry' | 'ws_drop' | 'room_error' | 'api_error';
 /** Absent from an API older than these counters. */
-type Later = 'action_dup' | 'recover_fail' | 'web_error';
+type Later = 'action_dup' | 'recover_fail' | 'web_error' | 'rt_undelivered' | 'rt_revoke_fail';
 type Counts = Record<Metric, number> & Partial<Record<Later, number>>;
 /** `seated` is members; table bots are `bots`. */
 interface TypeStats { tables: number; closing: number; blocked: number; occupied: number; playing: number; seated: number; bots?: number; waitlist: number; spectators: number; connections: number }
@@ -227,6 +227,8 @@ function OpsPanel({ d }: { d: Live }) {
         <Stat label={t('retries1h')} value={formatChips(lastHour.ws_retry)} />
         <Stat label={t('actionDup1h')} value={<span data-testid="ops-action-dup">{formatChips(lastHour.action_dup ?? 0)}</span>} sub={t('recoverFailN', { n: lastHour.recover_fail ?? 0 })} />
         <Stat label={t('webErrors1h')} value={<span data-testid="ops-web-error">{formatChips(lastHour.web_error ?? 0)}</span>} sub={t('webErrorsSub')} />
+        <Stat label={t('rtUndelivered1h')} value={<span data-testid="ops-rt-undelivered">{formatChips(lastHour.rt_undelivered ?? 0)}</span>} sub={t('rtUndeliveredSub')} />
+        <Stat label={t('rtRevokeFail1h')} value={<span data-testid="ops-rt-revoke-fail">{formatChips(lastHour.rt_revoke_fail ?? 0)}</span>} sub={t('rtRevokeFailSub')} />
       </div>
       <figure className="mt-4" data-testid="ops-trend">
         <div

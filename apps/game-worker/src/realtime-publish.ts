@@ -5,7 +5,7 @@ import type { Env } from './room';
  * A table room's publishing to the realtime hubs (realtime.ts, docs/REALTIME.md), by the api's rules
  * (apps/api/src/lib/realtime.ts): only after the D1 write it reports has committed, in the background, and never
  * failing or repeating what the room did. A hub that cannot be reached loses the event; the page catches up on its next
- * read, reconnect or poll.
+ * read, reconnect or poll. Each returns how many hubs missed it, which the room counts (rt_undelivered).
  */
 
 async function hubPost(env: Env, shard: number, body: unknown): Promise<void> {
@@ -20,14 +20,15 @@ async function hubPost(env: Env, shard: number, body: unknown): Promise<void> {
 
 const stamp = (e: PersonalRealtimeEvent | PublicRealtimeEvent): RealtimeEvent => ({ ...e, eventId: crypto.randomUUID(), occurredAt: Date.now() }) as RealtimeEvent;
 
-async function settle(calls: Promise<void>[], what: string) {
+async function settle(calls: Promise<void>[], what: string): Promise<number> {
   const failed = (await Promise.allSettled(calls)).filter((r) => r.status === 'rejected').length;
   if (failed) console.warn(`realtime ${what} not delivered to ${failed} of ${calls.length} hubs`);
+  return failed;
 }
 
 /** A personal event for these members' pages (each hub once, with the members it holds). Never throws. */
-export async function publishToUsers(env: Env, userIds: readonly string[], e: PersonalRealtimeEvent): Promise<void> {
-  if (!env.REALTIME || userIds.length === 0) return;
+export async function publishToUsers(env: Env, userIds: readonly string[], e: PersonalRealtimeEvent): Promise<number> {
+  if (!env.REALTIME || userIds.length === 0) return 0;
   const event = stamp(e);
   const byShard = new Map<number, string[]>();
   for (const id of new Set(userIds)) {
@@ -36,14 +37,14 @@ export async function publishToUsers(env: Env, userIds: readonly string[], e: Pe
   }
   const calls: Promise<void>[] = [];
   for (const [shard, ids] of byShard) for (let i = 0; i < ids.length; i += 500) calls.push(hubPost(env, shard, { users: ids.slice(i, i + 500), event }));
-  await settle(calls, e.type);
+  return settle(calls, e.type);
 }
 
 /** A public event (nothing in it but what every member may see) for the pages that want its topic. Never throws. */
-export async function publishToAll(env: Env, e: PublicRealtimeEvent): Promise<void> {
-  if (!env.REALTIME) return;
+export async function publishToAll(env: Env, e: PublicRealtimeEvent): Promise<number> {
+  if (!env.REALTIME) return 0;
   const event = stamp(e);
-  await settle(
+  return settle(
     Array.from({ length: REALTIME_SHARDS }, (_, shard) => hubPost(env, shard, { event })),
     e.type,
   );

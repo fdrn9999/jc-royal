@@ -3,6 +3,7 @@
 import type { AdminMonitorEvent, MonitorRoom, MonitorTable } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import {
+  addDelay,
   alertChanges,
   alertOrder,
   applyEvent,
@@ -11,6 +12,9 @@ import {
   CLOSED_LINGER_MS,
   compare,
   DEFAULT_VIEW,
+  delayOf,
+  DELAYS_KEEP_MS,
+  DELAYS_MAX,
   freshnessOf,
   handleAlert,
   handStarted,
@@ -41,6 +45,7 @@ import {
   viewOf,
   withCounts,
   type CcView,
+  type Delay,
   type Judged,
   type Reading,
   type RoomEntry,
@@ -351,6 +356,41 @@ describe('small things', () => {
 
   it('the clock difference from one answer', () => {
     expect(skewOf(10_500, 1_000, 1_200)).toBe(9_400);
+  });
+});
+
+describe('event delay', () => {
+  // This page's clock is 9.4 s behind the server's (skewOf above).
+  const skew = 9_400;
+
+  it('is the server time an event came at, less its stamp; never below 0 (the skew is only so exact)', () => {
+    const d = addDelay([], 10_300, 1_000, skew);
+    expect(d).toEqual([{ at: 1_000, ms: 100 }]);
+    expect(addDelay([], 10_500, 1_000, skew)[0]!.ms).toBe(0);
+  });
+
+  it('keeps the latest DELAYS_MAX, none older than DELAYS_KEEP_MS', () => {
+    let d: Delay[] = [];
+    for (let i = 0; i < DELAYS_MAX + 5; i++) d = addDelay(d, 10_000 + i, 1_000 + i, skew);
+    expect(d).toHaveLength(DELAYS_MAX);
+    expect(d[0]!.at).toBe(1_005);
+    // DELAYS_KEEP_MS after the sixth: the first six (at 1_005 to 1_010) go.
+    const later = addDelay(d, 0, 1_010 + DELAYS_KEEP_MS, skew);
+    expect(later.map((x) => x.at)).toEqual([...Array.from({ length: 14 }, (_, i) => 1_011 + i), 1_010 + DELAYS_KEEP_MS]);
+  });
+
+  it('shows the median of the recent ones, or nothing', () => {
+    expect(delayOf([], 0)).toBeNull();
+    const d: Delay[] = [
+      { at: 100, ms: 900 },
+      { at: 200, ms: 40 },
+      { at: 300, ms: 60 },
+    ];
+    expect(delayOf(d, 300)).toEqual({ ms: 60, n: 3 });
+    expect(delayOf([...d, { at: 400, ms: 80 }], 400)).toEqual({ ms: 70, n: 4 });
+    // The slow one has aged out.
+    expect(delayOf(d, 100 + DELAYS_KEEP_MS)).toEqual({ ms: 50, n: 2 });
+    expect(delayOf(d, 300 + DELAYS_KEEP_MS)).toBeNull();
   });
 });
 

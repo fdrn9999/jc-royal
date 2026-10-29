@@ -1,3 +1,4 @@
+import { writeOps } from '@jc/db';
 import type { Context } from 'hono';
 import { ADMIN_MONITOR_HUB, type AdminMonitorEvent, type AdminMonitorEventInput, type MonitorTable, type MonitorTableFlag, type MonitorTotals } from '@jc/types';
 import type { AppEnv, Env } from '../env';
@@ -110,10 +111,15 @@ const hubPost = async (env: Env, op: 'publish' | 'revoke', body: unknown): Promi
   if (!res.ok) throw new Error(`admin monitor ${op}: ${res.status}`);
 };
 
-/** Sends an event to the console pages (a followed room's summary only to those following it). */
+/** Sends an event to the console pages (a followed room's summary only to those following it). A miss is counted (rt_undelivered), then thrown. */
 export async function sendToAdmins(env: Env, e: AdminMonitorEventInput): Promise<void> {
   if (!env.ADMIN_MONITOR) return;
-  await hubPost(env, 'publish', { event: { ...e, eventId: crypto.randomUUID(), occurredAt: Date.now() } as AdminMonitorEvent });
+  try {
+    await hubPost(env, 'publish', { event: { ...e, eventId: crypto.randomUUID(), occurredAt: Date.now() } as AdminMonitorEvent });
+  } catch (err) {
+    await writeOps(env.DB, 'rt_undelivered');
+    throw err;
+  }
 }
 
 /** In the background of a request, after its write: never throws, never delays the response. */
@@ -166,6 +172,9 @@ export function adminMonitorRevoke(c: Context<AppEnv>, scope: SignOutScope, opts
   c.executionCtx.waitUntil(
     hubPost(c.env, 'revoke', body)
       .catch(() => hubPost(c.env, 'revoke', body))
-      .catch((err) => console.warn('admin monitor revoke not delivered', String(err))),
+      .catch((err) => {
+        console.warn('admin monitor revoke not delivered', String(err));
+        return writeOps(c.env.DB, 'rt_revoke_fail');
+      }),
   );
 }

@@ -70,7 +70,9 @@ import {
   CC_STATES,
   CC_TABS,
   CC_TYPES,
+  addDelay,
   compare,
+  delayOf,
   FOCUS_MAX,
   freshnessOf,
   handleAlert,
@@ -106,6 +108,7 @@ import {
   type CcTab,
   type CcType,
   type CcView,
+  type Delay,
   type Freshness,
   type Judged,
   type Level,
@@ -327,6 +330,10 @@ export function ControlCenterPage() {
   const [pins, setPins] = useState<string[]>(loadPins);
   const [activeId, setActiveId] = useState<string | null>(null);
   const skew = useRef(0);
+  /** The last list read's round trip, the skew's error twice over (null: not read yet, so no delay is measured). */
+  const rtt = useRef<number | null>(null);
+  /** The recent events' delays from their server stamp (addDelay), shown in the header. */
+  const delays = useRef<Delay[]>([]);
   /** Tables whose room counts changed since their summary was read: read again sooner. */
   const changed = useRef(new Set<string>());
   const visible = useRef(new Set<string>());
@@ -366,6 +373,7 @@ export function ControlCenterPage() {
         if (path === latest.current.listPath) {
           const got = Date.now();
           skew.current = skewOf(r.at, sent, got);
+          rtt.current = got - sent;
           // A table that just closed stays a while on the open list, shown closed, though the read no longer lists it.
           putTables(applySnapshot(tablesRef.current, r.items, sc === 'active' ? (x) => x.status === 'closed' && lingers(x, 'active', r.at) : undefined));
           setMeta({ truncated: r.truncated, seatedOnClosed: r.seatedOnClosed, memberTables: r.memberTables, at: r.at, d1Ms: r.d1Ms });
@@ -448,6 +456,7 @@ export function ControlCenterPage() {
       void readFocus();
     },
     onEvent: (e: AdminMonitorEvent) => {
+      if (rtt.current !== null) delays.current = addDelay(delays.current, e.occurredAt, Date.now(), skew.current);
       if (e.type === 'admin.monitor.room') {
         const room = e.room as MonitorRoom;
         if (!newerRoom(roomsRef.current.get(room.tableId), room)) return;
@@ -556,6 +565,8 @@ export function ControlCenterPage() {
   }, []);
 
   const link = linkOf(socket.status === 'parked' ? 'down' : socket.status, lastReadAt, now);
+  // Measured on events only, so shown only while they come (an old figure would read as the link's state).
+  const delay = link === 'live' && rtt.current !== null ? delayOf(delays.current, now) : null;
   const cache = useRef(new Map<string, Cached>());
   const all = useMemo(() => {
     const next = new Map<string, Cached>();
@@ -717,6 +728,11 @@ export function ControlCenterPage() {
           {meta && (
             <span data-testid="cc-meta" className="tabular-nums">
               {t('updatedAt', { time: timeOf(meta.at, locale) })} · {t('ccD1Ms', { ms: meta.d1Ms })}
+            </span>
+          )}
+          {delay && (
+            <span data-testid="cc-delay" className="tabular-nums" title={t('ccDelayTitle', { n: delay.n, err: Math.ceil((rtt.current ?? 0) / 2) })}>
+              {t('ccDelay', { ms: delay.ms })}
             </span>
           )}
           <Button size="sm" variant="subtle" disabled={reading} onClick={doRefresh} aria-label={t('refresh')}>

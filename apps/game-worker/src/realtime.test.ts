@@ -1,8 +1,11 @@
 // The realtime hub's rules (realtime-rules.ts): which sign-out ends which socket, when a socket is checked again, which
 // public events a page gets, and the shard a member's sockets live on. The api side and the sockets themselves are
 // tested in tests/integration/realtime.test.ts.
-import { REALTIME_SHARDS, RealtimeClientFrameSchema, RealtimeEventSchema, realtimeShardOf, type RealtimeEvent } from '@jc/types';
-import { describe, expect, it } from 'vitest';
+import { REALTIME_SHARDS, RealtimeClientFrameSchema, RealtimeEventSchema, realtimeHubName, realtimeShardOf, type RealtimeEvent } from '@jc/types';
+import { describe, expect, it, vi } from 'vitest';
+import { publishToAdmins } from './admin-monitor-publish';
+import { publishToAll, publishToUsers } from './realtime-publish';
+import type { Env } from './room';
 import {
   liveSessionsSql,
   parseIdentity,
@@ -143,5 +146,41 @@ describe('realtimeShardOf', () => {
     for (let i = 0; i < 4000; i++) counts[realtimeShardOf(crypto.randomUUID())]!++;
     for (const n of counts) expect(n).toBeGreaterThan((4000 / REALTIME_SHARDS) * 0.8);
     expect(realtimeShardOf('abc', 1)).toBe(0);
+  });
+});
+
+describe("a room's publishing", () => {
+  /** A hub namespace whose stubs answer `status(name)` (0: unreachable). */
+  const ns = (status: (name: string) => number) => ({
+    idFromName: (name: string) => name,
+    get: (name: string) => ({
+      fetch: async () => {
+        const s = status(name);
+        if (!s) throw new Error('hub unreachable');
+        return new Response(null, { status: s });
+      },
+    }),
+  });
+  const envOf = (over: Record<string, unknown>) => ({ INTERNAL_SECRET: 'x', ...over }) as unknown as Env;
+
+  it('gives back how many hubs missed an event (the room counts them), never throwing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const half = envOf({ REALTIME: ns((name) => (name === realtimeHubName(0) ? 0 : name === realtimeHubName(1) ? 503 : 200)) });
+    await expect(publishToAll(half, { scope: 'lobby', type: 'lobby.table.removed', resourceId: 't1' })).resolves.toBe(2);
+    const all = envOf({ REALTIME: ns(() => 200) });
+    await expect(publishToAll(all, { scope: 'lobby', type: 'lobby.table.removed', resourceId: 't1' })).resolves.toBe(0);
+    const down = envOf({ REALTIME: ns(() => 0) });
+    // One call (so one miss) per hub holding any of them.
+    const ids = ['m1', 'm2', 'm3', 'm4', 'm5', 'm1'];
+    await expect(publishToUsers(down, ids, { scope: 'user', type: 'wallet.changed' })).resolves.toBe(new Set(ids.map((id) => realtimeShardOf(id))).size);
+    await expect(publishToUsers(down, [], { scope: 'user', type: 'wallet.changed' })).resolves.toBe(0);
+    await expect(publishToAll(envOf({}), { scope: 'lobby', type: 'lobby.table.removed', resourceId: 't1' })).resolves.toBe(0);
+
+    const e = { type: 'admin.monitor.changed', kind: 'tournament', resourceId: 't1', revision: 3 } as const;
+    await expect(publishToAdmins(envOf({ ADMIN_MONITOR: ns(() => 500) }), e)).resolves.toBe(1);
+    await expect(publishToAdmins(envOf({ ADMIN_MONITOR: ns(() => 0) }), e)).resolves.toBe(1);
+    await expect(publishToAdmins(envOf({ ADMIN_MONITOR: ns(() => 200) }), e)).resolves.toBe(0);
+    await expect(publishToAdmins(envOf({}), e)).resolves.toBe(0);
+    warn.mockRestore();
   });
 });

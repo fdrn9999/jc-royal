@@ -336,7 +336,7 @@ export class TableRoom extends DurableObject<Env> {
   private publishStats = oneAtATime(() => this.writeStats());
   /** The written counts to every lobby (lobby-feed.ts); never who. */
   private lobbyFeed = new LobbyFeed((p) =>
-    this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.changed', resourceId: p.id, revision: p.rev, payload: p })),
+    this.published(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.changed', resourceId: p.id, revision: p.rev, payload: p })),
   );
   /** Each member's place here as last written (placesOf): who to tell that theirs moved. */
   private lobbyPlaces = new Map<string, string>();
@@ -600,7 +600,7 @@ export class TableRoom extends DurableObject<Env> {
       if (Date.now() >= this.monitorUntil) return;
       this.monitorSentAt = Date.now();
       void this.run(() => this.monitorSummary()).then(
-        (room) => this.ctx.waitUntil(publishToAdmins(this.env, { type: 'admin.monitor.room', resourceId: room.tableId, revision: room.version, room })),
+        (room) => this.published(publishToAdmins(this.env, { type: 'admin.monitor.room', resourceId: room.tableId, revision: room.version, room })),
         (e: unknown) => console.warn('admin monitor summary', e instanceof Error ? e.message : String(e)),
       );
     }, Math.max(0, this.monitorSentAt + MONITOR_PUSH_MS - Date.now()));
@@ -654,7 +654,8 @@ export class TableRoom extends DurableObject<Env> {
       if (this.takeMaint(m, read)) void this.run(() => this.maintenanceChanged());
       if (live) {
         this.toLobby(stats, live, taken.filter((s) => !s.bot).map((s) => s.userId));
-        this.countsToMonitor(stats, live, issue);
+        // A write that carried only counters changed nothing the grid shows (the lobby feed drops the same counts itself).
+        if (changed || issue !== null) this.countsToMonitor(stats, live, issue);
       }
     } catch (e) {
       this.ops.restore(ops);
@@ -678,7 +679,7 @@ export class TableRoom extends DurableObject<Env> {
     const places = placesOf(seated, s.waitlistUsers);
     const moved = placesMoved(this.lobbyPlaces, places);
     this.lobbyPlaces = places;
-    if (moved.length) this.ctx.waitUntil(publishToUsers(this.env, moved, { scope: 'user', type: 'lobby.mine.changed', resourceId: id }));
+    if (moved.length) this.published(publishToUsers(this.env, moved, { scope: 'user', type: 'lobby.mine.changed', resourceId: id }));
   }
 
   /**
@@ -688,12 +689,12 @@ export class TableRoom extends DurableObject<Env> {
   private countsToMonitor(s: LiveStats, live: LiveWritten, issue: string | null) {
     const status = live.status === 'open' || live.status === 'closing' ? live.status : 'closed';
     const counts = { seated: s.seated, bots: s.bots, playing: s.playing, waitlist: s.waitlist, spectators: s.spectators, connections: s.connections, status, issue } as const;
-    this.ctx.waitUntil(publishToAdmins(this.env, { type: 'admin.monitor.counts', resourceId: this.tableId!, revision: live.rev, counts }));
+    this.published(publishToAdmins(this.env, { type: 'admin.monitor.counts', resourceId: this.tableId!, revision: live.rev, counts }));
   }
 
   /** After D1 has the table closed: the lobbies drop it, and the control center's grid shows it closed. */
   private tableGone() {
-    this.ctx.waitUntil(
+    this.published(
       publishToAdmins(this.env, {
         type: 'admin.monitor.counts',
         resourceId: this.tableId!,
@@ -702,7 +703,22 @@ export class TableRoom extends DurableObject<Env> {
       }),
     );
     if (!this.table || this.table.roomType === 'tournament') return;
-    this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.removed', resourceId: this.tableId! }));
+    this.published(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.removed', resourceId: this.tableId! }));
+  }
+
+  /**
+   * A publish in the background. The hubs that missed it are counted (rt_undelivered) and written like any counter,
+   * within OPS_FLUSH_MS. That write publishes nothing itself (writeStats sends no unchanged counts), so a hub that stays
+   * down is not asked again and again for the count of its own misses.
+   */
+  private published(p: Promise<number>) {
+    this.ctx.waitUntil(
+      p.then((n) => {
+        if (!n) return;
+        this.ops.add('rt_undelivered', n);
+        this.flushOpsIn(OPS_FLUSH_MS);
+      }),
+    );
   }
 
   private flushOpsIn(ms: number) {
@@ -1337,7 +1353,7 @@ export class TableRoom extends DurableObject<Env> {
    */
   private walletMoved(seat: SeatState) {
     if (seat.bot) return;
-    this.ctx.waitUntil(publishToUsers(this.env, [seat.userId], { scope: 'user', type: 'wallet.changed' }));
+    this.published(publishToUsers(this.env, [seat.userId], { scope: 'user', type: 'wallet.changed' }));
   }
 
   private handHasPlayer(userId: string) {
@@ -2194,7 +2210,7 @@ export class TableRoom extends DurableObject<Env> {
     tn.dirty = false;
     tn.confirmed = tn.places.length;
     // A bust or the finish, now in D1, for the tournament pages; stacks and the level clock they read on their own.
-    if (r.standings) this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
+    if (r.standings) this.published(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
     if (this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
     if (tn.status === 'running') tn.pauseRequested = r.pauseRequested;
     const aborted = r.status === 'aborted' && tn.status !== 'aborted';

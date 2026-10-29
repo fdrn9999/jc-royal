@@ -71,6 +71,9 @@ test('control center: a member sitting down shows on the table’s card without 
   const a = await signUp(browser);
   await sitWith(a.page, id, 500);
   await expect(card(page, id)).toContainText('1/6');
+  // That came as an event, so the header shows how long events take to get here (and from how many).
+  await expect(page.getByTestId('cc-delay')).toHaveText(/^(이벤트 지연 ≈\d+ms|Event delay ≈\d+ ms)$/);
+  await expect(page.getByTestId('cc-delay')).toHaveAttribute('title', /(최근 이벤트 [1-9]\d*개|last [1-9]\d* events)/);
 
   // Open it: beside the grid, with its room's answer and the member on a seat.
   await card(page, id).getByRole('button', { name: /^E2E Control Watch, / }).click();

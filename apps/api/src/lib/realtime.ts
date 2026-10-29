@@ -1,3 +1,4 @@
+import { writeOps } from '@jc/db';
 import type { Context } from 'hono';
 import { REALTIME_SHARDS, realtimeHubName, realtimeShardOf, type PersonalRealtimeEvent, type PublicRealtimeEvent, type RealtimeEvent } from '@jc/types';
 import type { AppEnv, Env } from '../env';
@@ -35,21 +36,25 @@ export async function sendToUsers(env: Env, userIds: readonly string[], e: Perso
   for (const [shard, ids] of byShard) {
     for (let i = 0; i < ids.length; i += 500) calls.push(hubPost(env, shard, 'publish', { users: ids.slice(i, i + 500), event }));
   }
-  await settle(calls, e.type);
+  await settle(env, calls, e.type);
 }
 
 /** Sends a public event to every hub, for the pages that want it. */
 export async function sendToAll(env: Env, e: PublicRealtimeEvent): Promise<void> {
   const event = stamp(e);
   await settle(
+    env,
     Array.from({ length: REALTIME_SHARDS }, (_, shard) => hubPost(env, shard, 'publish', { event })),
     e.type,
   );
 }
 
-async function settle(calls: Promise<void>[], what: string) {
+/** Waits for every hub; the ones that did not take the event are logged and counted (rt_undelivered). */
+async function settle(env: Env, calls: Promise<void>[], what: string) {
   const failed = (await Promise.allSettled(calls)).filter((r) => r.status === 'rejected').length;
-  if (failed) console.warn(`realtime ${what} not delivered to ${failed} of ${calls.length} hubs`);
+  if (!failed) return;
+  console.warn(`realtime ${what} not delivered to ${failed} of ${calls.length} hubs`);
+  await writeOps(env.DB, 'rt_undelivered', failed);
 }
 
 /** In the background of a request, after its write: never throws, never delays the response. */
@@ -80,6 +85,9 @@ export function realtimeSignOut(c: Context<AppEnv>, scope: SignOutScope) {
   c.executionCtx.waitUntil(
     hubPost(c.env, shard, 'revoke', body)
       .catch(() => hubPost(c.env, shard, 'revoke', body))
-      .catch((err) => console.warn('realtime sign-out not delivered', String(err))),
+      .catch((err) => {
+        console.warn('realtime sign-out not delivered', String(err));
+        return writeOps(c.env.DB, 'rt_revoke_fail');
+      }),
   );
 }

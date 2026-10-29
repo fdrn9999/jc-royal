@@ -498,6 +498,36 @@ export function skewOf(serverAt: number, sentAt: number, gotAt: number): number 
   return Math.round(serverAt - (sentAt + gotAt) / 2);
 }
 
+/** The event delays the header shows: the latest DELAYS_MAX, none older than DELAYS_KEEP_MS. */
+export const DELAYS_MAX = 20;
+export const DELAYS_KEEP_MS = 5 * 60_000;
+
+/** How long one event took from its server stamp to this page (`at`: when it came, by this page's clock). */
+export interface Delay {
+  at: number;
+  ms: number;
+}
+
+/**
+ * Adds an event's delay: when it came, on the server's clock (this page's plus `skew`, from a list read), less when it was
+ * stamped. Only as exact as the skew (half that read's round trip), so a delay smaller than that error reads 0, never less.
+ */
+export function addDelay(list: readonly Delay[], occurredAt: number, gotAt: number, skew: number): Delay[] {
+  const ms = Math.max(0, Math.round(gotAt + skew - occurredAt));
+  return [...list.filter((d) => d.at > gotAt - DELAYS_KEEP_MS), { at: gotAt, ms }].slice(-DELAYS_MAX);
+}
+
+/** The median of the delays still recent at `now`, and of how many (null: none). */
+export function delayOf(list: readonly Delay[], now: number): { ms: number; n: number } | null {
+  const ms = list
+    .filter((d) => d.at > now - DELAYS_KEEP_MS)
+    .map((d) => d.ms)
+    .sort((a, b) => a - b);
+  if (!ms.length) return null;
+  const mid = ms.length >> 1;
+  return { ms: ms.length % 2 ? ms[mid]! : Math.round((ms[mid - 1]! + ms[mid]!) / 2), n: ms.length };
+}
+
 // ------------------------------------------------------------------ alerts
 
 /**

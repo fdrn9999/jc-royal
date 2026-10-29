@@ -19,6 +19,12 @@
  *   counted as `room_error`.
  * - `web_error`: an error a signed-in member's page reported (a script error, a part of the page that did not load).
  *   Only the count is kept, at most a few per page.
+ * - `rt_undelivered`: an event for the realtime hubs (members' pages, docs/REALTIME.md) or the control center's hub that
+ *   a hub did not take (unreachable, or it refused): one per hub missed. Those pages lose the event and catch up on their
+ *   next read or reconnect; what the write it reported did is unaffected. Only the publishers count it: a hub's own
+ *   troubles (a session check that failed, a socket refused) are in the worker log only.
+ * - `rt_revoke_fail`: a sign-out's closing of its live sockets (a member's, or a console sign-in's) that no hub took
+ *   after the second try. Those sockets stay open until the hub's sweep finds the sign-in gone.
  */
 export const OPS_METRICS = [
   'ws_retry',
@@ -32,6 +38,8 @@ export const OPS_METRICS = [
   'action_dup',
   'recover_fail',
   'web_error',
+  'rt_undelivered',
+  'rt_revoke_fail',
 ] as const;
 export type OpsMetric = (typeof OPS_METRICS)[number];
 
@@ -56,6 +64,18 @@ export function opsUpserts(d1: D1Database, counts: OpsCount[]): D1PreparedStatem
         .prepare(`INSERT INTO ops_metrics (bucket, metric, n) VALUES (?1, ?2, ?3) ON CONFLICT (bucket, metric) DO UPDATE SET n = n + excluded.n`)
         .bind(x.bucket, x.metric, x.n),
     );
+}
+
+/**
+ * Adds `n` to a counter now, outside a table room (which carries its counts in its own writes). Never throws: a count
+ * that cannot be written is only logged.
+ */
+export async function writeOps(d1: D1Database, metric: OpsMetric, n = 1, at = Date.now()): Promise<void> {
+  try {
+    await d1.batch(opsUpserts(d1, [{ bucket: opsBucket(at), metric, n }]));
+  } catch (e) {
+    console.error('ops counter', e instanceof Error ? e.message : String(e));
+  }
 }
 
 /**
