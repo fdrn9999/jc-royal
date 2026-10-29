@@ -1,8 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 import { balanceOf, signUp, test, widerThanDevice } from './helpers';
 
-// On a phone the lobby's install offer loads after the page (its own chunk) and lands above quick play, pushing it down
-// (184px at 390×844): a tap sent before it is in place can land on the offer instead of the size it aimed at.
+// On a phone the lobby's install offer sits above quick play. It draws with the lobby (InstallOffer.tsx), so this passes
+// at once; it once loaded after the page and pushed quick play down (184px at 390×844) under a tap already on its way.
 const settled = (page: Page) => expect(page.getByTestId('install-offer')).toBeVisible();
 
 test('mobile: quick play seats players at the table, then explains a full table and what to do instead', async ({ browser }) => {
