@@ -277,6 +277,9 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /tables/:id/close': r('tableControl', 'table.close', { reauth, preview, target: 'table' }),
   // A turn whose timer failed, recovered by the room's own rules (routes/admin-timebank.ts); no one's time is set by hand.
   'POST /tables/:id/timer-recover': r('tableControl', 'table.timer_recover', { reauth, target: 'table' }),
+  // The control center's reads (routes/admin-monitor.ts): table duty sees them; its buttons are the routes above.
+  'GET /monitor/tables': r('tables', 'monitor.tables'),
+  'POST /monitor/rooms': r('tables', 'monitor.rooms'),
 
   // Time bank (routes/admin-timebank.ts): anyone on table duty reads it; the policy is a super admin's.
   'GET /time-bank': r('tables', 'timebank.view'),

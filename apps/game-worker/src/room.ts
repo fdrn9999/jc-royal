@@ -42,6 +42,8 @@ import {
   type HandStage,
   type LegalOption,
   type MaxSeats,
+  type MonitorRoom,
+  type MonitorSeat,
   type NoticeCode,
   type PreActionKind,
   type PublicRole,
@@ -709,6 +711,8 @@ export class TableRoom extends DurableObject<Env> {
         switch (action) {
           case 'status':
             return Response.json(await this.adminStatus());
+          case 'monitor':
+            return Response.json(await this.monitorSummary());
           case 'timer-recover':
             return Response.json(await this.recoverTimer());
           case 'reload': {
@@ -2934,23 +2938,8 @@ export class TableRoom extends DurableObject<Env> {
     const now = Date.now();
     const deadline = live ? h!.deadline() : null;
     const alarmAt = await this.ctx.storage.getAlarm();
-    const issues: string[] = [];
-    if (live && h!.isStalled()) issues.push('stalled_hand');
-    if (deadline && deadline + OVERDUE_MS < now) issues.push('turn_overdue');
-    // (No hand is due while the table is paused or the service is in maintenance.)
-    const dealing = this.dealsNow();
-    if (!live && dealing && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
-    if (!live && dealing && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
-    if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
-    if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.waitsForHand(s))) issues.push('cashing_seat');
-    if (this.room.seats.some((s) => s?.topUp?.state === 'debiting')) issues.push('topup_debiting');
-    if (this.unrecorded.size > 0) issues.push('unrecorded_hands');
-    if (this.room.closing && !this.room.closed && !live) issues.push('close_unfinished');
-    if (this.unfinishedWork() && !alarmAt) issues.push('no_retry_alarm');
-    // A running turn whose alarm is missing or set past its deadline: nothing would time it out.
-    if (live && deadline && !h!.isStalled() && (!alarmAt || alarmAt > Math.max(deadline, now) + 1_000)) issues.push('timer_unarmed');
+    const issues = this.issuesAt(now, alarmAt);
     const tn = this.room.tourney;
-    if (tn?.dirty) issues.push('tournament_unsynced');
     const nextRules = this.nextBankRules();
     return {
       tableId: this.tableId,
@@ -3045,6 +3034,137 @@ export class TableRoom extends DurableObject<Env> {
       issues,
       at: now,
     };
+  }
+
+  /**
+   * The control center's summary of this room (docs/CONTROL_CENTER.md): what a spectator at the table sees, at any
+   * table, with the room's `issues`. Never a card a player holds, a card shown after the hand, the showdown or the deck,
+   * and no one's waitlist place. Reading it changes nothing: no socket, no spectator, no write.
+   */
+  private async monitorSummary(): Promise<MonitorRoom> {
+    const t = this.table!;
+    const h = this.hand;
+    const live = !!h && !h.isSettled;
+    const now = Date.now();
+    const connected = this.connectedUsers();
+    const muck = h ? this.muckOf(h) : undefined;
+    const info = h ? h.seatInfo(null, muck) : null;
+    const hv = h ? h.handView(muck) : null;
+    const deadline = live ? h!.deadline() : null;
+    const seats = this.room.seats.map((s, i): MonitorSeat => {
+      if (!s) {
+        const held = this.handHolds(i);
+        return {
+          seatIndex: i,
+          state: 'empty',
+          ...(held ? { held: true } : {}),
+          stack: 0,
+          streetBet: held ? (info?.get(i)?.streetBet ?? 0) : 0,
+          connected: false,
+          lastAction: null,
+          hasCards: false,
+          leaving: false,
+          timeouts: 0,
+          sitOutSince: null,
+          phase: null,
+          topUp: null,
+        };
+      }
+      // As in `view`: the hand's word on a seat is about the player it dealt there.
+      const hi = h?.startingSeats.some((p) => p.seatIndex === i && p.playerId === s.userId) ? info?.get(i) : undefined;
+      let state: MonitorSeat['state'] = s.sittingOut ? 'sittingOut' : 'waiting';
+      if (hi?.inHand) state = hi.folded ? 'folded' : hi.allIn ? 'allin' : 'active';
+      return {
+        seatIndex: i,
+        state,
+        userId: s.userId,
+        nickname: s.nickname,
+        ...(s.bot ? { bot: s.bot, botStyle: s.botStyle ?? styleFor(s.userId) } : {}),
+        stack: hi && !h!.isSettled ? hi.stack : s.stack,
+        streetBet: hi?.streetBet ?? 0,
+        connected: !!s.bot || connected.has(s.userId),
+        lastAction: hi?.lastAction ?? null,
+        hasCards: !!hi?.inHand && !hi.folded,
+        leaving: s.leaveAfterHand,
+        timeouts: s.timeouts,
+        sitOutSince: s.sitOutSince,
+        phase: s.phase === 'seated' ? null : s.phase,
+        topUp: s.topUp?.state ?? null,
+      };
+    });
+    const tn = t.roomType === 'tournament' ? this.room.tourney : undefined;
+    const blinds = tn ? blindsAt(tn.levels, tn.level) : null;
+    const res = this.room.reservation;
+    return {
+      tableId: t.id,
+      version: this.room.version,
+      status: this.room.closed ? 'closed' : this.room.closing ? 'closing' : live ? 'playing' : 'waiting',
+      handNumber: this.room.handNumber,
+      // The board and the pot are what every player at the table sees; a result's cards are left out.
+      hand: hv
+        ? {
+            stage: hv.stage,
+            buttonSeat: hv.buttonSeat,
+            sbSeat: hv.sbSeat,
+            bbSeat: hv.bbSeat,
+            board: hv.board,
+            potTotal: hv.potTotal,
+            actorSeat: hv.actorSeat,
+            turn: live && deadline ? { startedAt: h!.turnStartedAt, baseMs: h!.rules.turnMs, extraMs: h!.turnExtraMs, deadline } : null,
+          }
+        : null,
+      nextHandAt: t.handsPaused || tn?.pauseRequested || (this.room.nextHandAt && this.inMaintenance(this.room.nextHandAt)) ? null : this.room.nextHandAt,
+      paused: t.handsPaused,
+      maintenance: this.inMaintenance(now),
+      entryBlocked: t.entryBlocked,
+      waitlist: this.room.waitlist.length,
+      spectators: this.spectatorsOf(connected),
+      connections: this.sockets().length,
+      reservation: res && res.until > now ? { seatIndex: res.seatIndex, until: res.until } : null,
+      tournament:
+        tn && blinds
+          ? {
+              id: tn.id,
+              status: tn.status,
+              level: tn.level,
+              levelCount: tn.levels.length,
+              smallBlind: blinds.sb,
+              bigBlind: blinds.bb,
+              levelEndsAt: tn.levelEndsAt,
+              paused: tn.pauseRequested,
+              playersLeft: playersLeft(tn),
+              entrants: Object.keys(tn.players).length,
+            }
+          : null,
+      seats,
+      issues: this.issuesAt(now, await this.ctx.storage.getAlarm()),
+      at: now,
+    };
+  }
+
+  /** What looks wrong in this room now: the admin table page's and the control center's `issues`. */
+  private issuesAt(now: number, alarmAt: number | null): string[] {
+    const t = this.table!;
+    const h = this.hand;
+    const live = !!h && !h.isSettled;
+    const deadline = live ? h!.deadline() : null;
+    const issues: string[] = [];
+    if (live && h!.isStalled()) issues.push('stalled_hand');
+    if (deadline && deadline + OVERDUE_MS < now) issues.push('turn_overdue');
+    // (No hand is due while the table is paused or the service is in maintenance.)
+    const dealing = this.dealsNow();
+    if (!live && dealing && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
+    if (!live && dealing && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
+    if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
+    if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.waitsForHand(s))) issues.push('cashing_seat');
+    if (this.room.seats.some((s) => s?.topUp?.state === 'debiting')) issues.push('topup_debiting');
+    if (this.unrecorded.size > 0) issues.push('unrecorded_hands');
+    if (this.room.closing && !this.room.closed && !live) issues.push('close_unfinished');
+    if (this.unfinishedWork() && !alarmAt) issues.push('no_retry_alarm');
+    // A running turn whose alarm is missing or set past its deadline: nothing would time it out.
+    if (live && deadline && !h!.isStalled() && (!alarmAt || alarmAt > Math.max(deadline, now) + 1_000)) issues.push('timer_unarmed');
+    if (this.room.tourney?.dirty) issues.push('tournament_unsynced');
+    return issues;
   }
 
   // ------------------------------------------------------------------ projection

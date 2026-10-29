@@ -131,6 +131,10 @@ export const TABLES: TestTable[] = [
   { id: 'it-social-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   // Platform realtime: a buy-in and a cash-out each tell the member's other pages that the wallet moved.
   { id: 'it-rt-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Control center reads: a full heads-up table with a waitlist, a private table, and one closed before any room woke.
+  { id: 'it-mon-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  { id: 'it-mon-priv', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, isPrivate: true, joinCode: 'mon-secret' },
+  { id: 'it-mon-closed', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
 ];
 
 async function sha256b64url(s: string) {
