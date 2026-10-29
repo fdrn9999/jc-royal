@@ -12,7 +12,8 @@
  *   vip_conflict, with the state as it is now), and so is a change that lost a race to another administrator.
  * - Each change raises the version and records when and by whom; the audit row (`user.vip`) keeps the color before and
  *   after, and the reason. The tables where the member sits redraw the name: nobody is disconnected and no hand is
- *   touched.
+ *   touched. Other members' open pages that show the name (friends, conversations, board, lobby hosts) get the shown
+ *   color alone (realtime `member.vip.changed`), never the reason or who changed it.
  */
 import {
   AdminVipPreviewSchema,
@@ -30,7 +31,7 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
-import { realtimeToUsers } from '../lib/realtime';
+import { realtimeToAll, realtimeToUsers } from '../lib/realtime';
 import { refreshVipEverywhere } from '../lib/room';
 
 interface Row {
@@ -124,6 +125,10 @@ export const adminVipRoutes = new Hono<AppEnv>()
     const after = await load(c, id);
     // What other players see (nothing while the member is suspended); the room never reads more than this.
     const shown = shownVip({ role: after.member.role, status: after.member.status, isBot: after.member.isBot, vipColor: after.color }) ?? null;
+    // Other members' open pages that show this name: the shown color only, and only when it changed (a suspended
+    // member's stays hidden, so a change to theirs says nothing to anyone).
+    const before = shownVip({ role: vip.member.role, status: vip.member.status, isBot: vip.member.isBot, vipColor: from }) ?? null;
+    if (shown !== before) realtimeToAll(c, { scope: 'service', type: 'member.vip.changed', resourceId: id, revision: after.version, payload: { vip: shown } });
     const rooms = await refreshVipEverywhere(c.env, id, shown);
     return c.json({ changed: true, vip: after, tables: rooms.tables, reached: rooms.reached } satisfies AdminVipResultDto);
   });

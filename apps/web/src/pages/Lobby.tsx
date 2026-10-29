@@ -16,6 +16,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { entryOf, keepCard, latest, lobbyPoller, mergeList, newLobbyLive, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Latest } from '../lib/lobby';
 import { rememberLobby } from '../lib/lobbyReturn';
 import { setFavourite, useFavourites } from '../lib/prefs';
+import { onMemberVip, withHeardVip, withMemberVip } from '../lib/memberVip';
 import { coalesced, onRealtime, realtimeUp, useRealtimeStatus, wantTopic } from '../lib/realtime';
 import { useMaintenance } from '../lib/service';
 import { siteUrl } from '../lib/share';
@@ -56,7 +57,7 @@ function useLobbyTables() {
         return api<LobbyTableDto[]>('/api/tables', { signal }).then((list) => ({ list, at }));
       },
       (read) => {
-        base = read;
+        base = { ...read, list: withHeardVip(read.list, read.at) };
         show(true);
         setError(false);
       },
@@ -75,7 +76,7 @@ function useLobbyTables() {
           const t = await api<LobbyTableDto>(`/api/tables/${encodeURIComponent(id)}`).catch(() => null);
           if (!t || t.roomType === 'tournament') return;
           const { myParticipation, ...card } = t;
-          keepCard(live, id, card, at);
+          keepCard(live, id, withHeardVip(card, at), at);
           live.mine.set(id, { p: myParticipation ?? { status: 'none' }, at });
           show();
         });
@@ -97,6 +98,12 @@ function useLobbyTables() {
         show();
       }),
       onRealtime('lobby.mine.changed', ({ resourceId: id }) => readMine(id)),
+      // A room host's VIP color: on the list read and the cards kept, until the next read has it.
+      onMemberVip((id, vip) => {
+        if (base) base = { ...base, list: withMemberVip(base.list, id, vip) };
+        for (const c of live.cards.values()) c.card = withMemberVip(c.card, id, vip);
+        show();
+      }),
     ];
     const p = lobbyPoller(f, () => document.visibilityState === 'visible', Date.now, realtimeUp);
     poller.current = p;

@@ -24,6 +24,7 @@ import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { entryOf, RESUME, RESUME_WAIT } from '../lib/lobby';
+import { useMemberVip, withHeardVip } from '../lib/memberVip';
 import { setPrefs, usePrefs } from '../lib/prefs';
 import { setPresenceView, sortFriends, useFriendsLastOnline, useFriendsPresence } from '../lib/presence';
 import { closeReadPushes } from '../lib/push';
@@ -172,7 +173,8 @@ export function FriendsPage() {
   const [failed, setFailed] = useState(false);
   const load = useCallback(async () => {
     try {
-      setData(await api<FriendsDto>('/api/friends'));
+      const at = Date.now();
+      setData(withHeardVip(await api<FriendsDto>('/api/friends'), at));
       setFailed(false);
     } catch {
       // Offline: the last list stays; with none yet, the page says it could not load (the poll keeps trying).
@@ -189,6 +191,7 @@ export function FriendsPage() {
   useRealtime('social.dm.created', () => void reload());
   useRealtime('social.dm.read', () => void reload());
   useEffect(() => onRealtimeResync(() => void reload()), [reload]);
+  useMemberVip(setData);
   useVisiblePoll(() => void load(), useRealtimeStatus() === 'open' ? LIVE_LIST_POLL_MS : 15_000);
   const prefs = usePrefs();
   const presence = useFriendsPresence(data?.friends.map((f) => f.id).join(','));
@@ -372,8 +375,10 @@ export function FriendSettingsPage() {
   useEffect(() => {
     if (!meId) return;
     setFailed((f) => ({ ...f, blocks: false }));
-    void loadBlocks(meId).then(setBlocks, () => setFailed((f) => ({ ...f, blocks: true })));
+    const at = Date.now();
+    void loadBlocks(meId).then((b) => setBlocks(withHeardVip(b, at)), () => setFailed((f) => ({ ...f, blocks: true })));
   }, [meId, attempt.blocks]);
+  useMemberVip(setBlocks);
   const retry = (k: 'settings' | 'blocks') => setAttempt((a) => ({ ...a, [k]: a[k] + 1 }));
 
   async function save(patch: Partial<SocialSettingsDto>) {
@@ -638,11 +643,12 @@ export function ConversationPage() {
     synced.current = 0;
     opening.current = 'out';
     pollAgain.current = false;
+    const at = Date.now();
     void api<ConversationDto>(`/api/dm/${userId}`)
       .then(({ messages, peerRead: _, ...rest }) => {
         if (!live) return;
         opening.current = 'in';
-        setConv(rest);
+        setConv(withHeardVip(rest, at));
         scroll.current = { kind: 'bottom' };
         sync(messages);
         setMsgs(messages);
@@ -719,6 +725,8 @@ export function ConversationPage() {
   // A friendship or a block changed, never saying which: whether I can still write here comes with the poll.
   useRealtime('social.friend.changed', pollSoon);
   useEffect(() => onRealtimeResync(pollSoon), [pollSoon]);
+  // Their VIP color in the header, should an administrator change it (the poll reads the messages only).
+  useMemberVip(setConv);
   useVisiblePoll(() => {
     if (conv) void poll();
   }, useRealtimeStatus() === 'open' ? LIVE_POLL_MS : POLL_MS);
