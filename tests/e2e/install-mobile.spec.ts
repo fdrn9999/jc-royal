@@ -91,6 +91,38 @@ test('mobile: Android Chrome lobby offers the install steps; Later and the 30-da
   console.log(`real beforeinstallprompt events: ${await realBip(page)}`);
 });
 
+test('mobile: the offer draws with the lobby, so quick play is not pushed down while the install steps are still loading', async ({ browser }) => {
+  const { page } = await signUp(browser, { mobile: true });
+  await emulateInstall(page);
+  // Held until released below. The offer used to come in this chunk and land above quick play when it arrived (184px
+  // lower at 390×844), under a finger already on its way to quick play.
+  let release!: () => void;
+  const steps = new Promise<void>((r) => (release = r));
+  await page.route('**/assets/Install-*.js', async (route) => {
+    await steps;
+    await route.continue();
+  });
+  await page.reload();
+  const offer = page.getByTestId('install-offer');
+  const quick = page.getByTestId('quick-play');
+  await expect(quick).toBeVisible();
+  await expect(offer).toBeVisible();
+  // The web font swaps in after the first paint and reflows all lobby text by itself (12–16px at 320 and 430 wide).
+  await page.evaluate(() => document.fonts.ready);
+  const at = (await quick.boundingBox())!.y;
+  expect((await offer.boundingBox())!.y).toBeLessThan(at);
+
+  // Opened before the steps arrive, the dialog fills in when they do.
+  await page.getByTestId('install-offer-guide').tap();
+  await expect(page.getByRole('dialog').getByText('앱으로 설치하는 방법')).toBeVisible();
+  await expect(page.getByTestId('install-steps-android')).toHaveCount(0);
+  release();
+  await expect(page.getByTestId('install-steps-android').locator('li')).toHaveCount(4);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('install-guide')).toHaveCount(0);
+  expect((await quick.boundingBox())!.y).toBe(at);
+});
+
 test('mobile: the browser install prompt — dismissed keeps the offer, installed hides it until the browser offers again; never in the app or at a table', async ({ browser }) => {
   const { page } = await signUp(browser, { mobile: true });
   await emulateInstall(page);
