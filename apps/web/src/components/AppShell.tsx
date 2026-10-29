@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useTopOnNewPage } from '../lib/scroll';
 import { useUnread } from '../lib/unread';
+import { Arrivals } from './Arrivals';
 import { PresenceMenu } from './Presence';
 import { ServiceBanner } from './ServiceBanner';
 
@@ -149,6 +150,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <LegalLinks />
       </footer>
       <SettingsModal open={settings} onClose={() => setSettings(false)} onLogout={me ? signOut : undefined} />
+      {me && <Arrivals />}
       {/* Mobile bottom navigation */}
       <nav className="fixed inset-x-0 bottom-0 z-40 flex overflow-x-auto border-t border-gold-500/15 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
         <NavLink to="/" end className={tab}>

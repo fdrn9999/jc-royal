@@ -11,7 +11,23 @@ let counts: UnreadCountsDto = NONE;
 /** The account the counters are about; another account's are never shown, and their late answers are dropped. */
 let owner: string | null = null;
 let gen = 0;
+/** Whether `counts` were read for this account: until then a read is where the counters start, not something new. */
+let known = false;
 const subs = new Set<() => void>();
+
+export type UnreadKind = 'unread' | 'dmUnread' | 'friendRequests';
+const KINDS: UnreadKind[] = ['unread', 'dmUnread', 'friendRequests'];
+/** The counters that went up from `prev` to `next` (something new arrived), in a fixed order. */
+export const risen = (prev: UnreadCountsDto, next: UnreadCountsDto): UnreadKind[] => KINDS.filter((k) => next[k] > prev[k]);
+const rises = new Set<(kinds: UnreadKind[], counts: UnreadCountsDto) => void>();
+/**
+ * `f` hears of each counter going up for the account it counts for, with the counters now (the arrival notice). The
+ * first read after signing in, loading the page or a sign-in that was gone is where they start, and is never news.
+ */
+export function onUnreadRise(f: (kinds: UnreadKind[], counts: UnreadCountsDto) => void): () => void {
+  rises.add(f);
+  return () => rises.delete(f);
+}
 
 function set(next: UnreadCountsDto) {
   counts = next;
@@ -23,6 +39,7 @@ function own(account: string) {
   if (account === owner) return;
   owner = account;
   gen++;
+  known = false;
   set(NONE);
 }
 
@@ -33,11 +50,17 @@ export async function refreshUnread() {
     if (r.serviceRev !== undefined) refreshService(r.serviceRev);
     // Asked for the account before this one (signed out and in as someone else meanwhile).
     if (asked !== gen) return;
+    const news = known ? risen(counts, r) : [];
+    known = true;
     if (r.unread === counts.unread && r.dmUnread === counts.dmUnread && r.friendRequests === counts.friendRequests) return;
     set(r);
+    if (news.length) rises.forEach((f) => f(news, r));
   } catch (e) {
     // Signed out (here or on every device): nothing unread is shown for a sign-in that is gone. Offline: kept.
-    if (asked === gen && e instanceof ApiError && e.status === 401 && counts !== NONE) set(NONE);
+    if (asked === gen && e instanceof ApiError && e.status === 401) {
+      known = false;
+      if (counts !== NONE) set(NONE);
+    }
   }
 }
 

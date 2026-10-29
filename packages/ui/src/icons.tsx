@@ -56,6 +56,7 @@ export {
   TriangleAlertIcon,
   TrophyIcon,
   UserIcon,
+  UserPlusIcon,
   UsersIcon,
   WifiOffIcon,
   XIcon,
