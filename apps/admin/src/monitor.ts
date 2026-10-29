@@ -306,15 +306,22 @@ export function seatPoint(seat: number, maxSeats: number): { x: number; y: numbe
 
 const countsNewer = (a: MonitorTable, b: MonitorTable) => (a.liveAt ?? -Infinity) > (b.liveAt ?? -Infinity);
 
+const STATUS_RANK: Record<MonitorTable['status'], number> = { open: 0, closing: 1, closed: 2 };
+/**
+ * A table only goes open → closing → closed (nothing writes it back), so of two readings the further one is current:
+ * counts counted before the close, or a room that has not yet heard of it, never reopen a closing table.
+ */
+const further = (a: MonitorTable['status'], b: MonitorTable['status']) => (STATUS_RANK[b] > STATUS_RANK[a] ? b : a);
+
 /**
  * One table from two readings (a snapshot and an event, in either order): its settings from the one written later
- * (updatedAt), its counts from the one counted later (liveAt), so a slow answer never takes a table back. Closed is
- * final: nothing reopens a table.
+ * (updatedAt), its counts from the one counted later (liveAt), so a slow answer never takes a table back. Its status is
+ * the further of the two: nothing reopens a closing or closed table.
  */
 export function mergeTable(old: MonitorTable, next: MonitorTable): MonitorTable {
   const base = next.updatedAt >= old.updatedAt ? next : old;
   const counts = countsNewer(old, next) ? old : next;
-  const merged: MonitorTable = {
+  return {
     ...base,
     seated: counts.seated,
     bots: counts.bots,
@@ -324,9 +331,8 @@ export function mergeTable(old: MonitorTable, next: MonitorTable): MonitorTable 
     connections: counts.connections,
     liveAt: counts.liveAt,
     lastIssue: counts.lastIssue ?? base.lastIssue,
+    status: further(old.status, next.status),
   };
-  if (old.status === 'closed' || next.status === 'closed') merged.status = 'closed';
-  return merged;
 }
 
 /**
@@ -378,7 +384,7 @@ export function applyEvent(prev: ReadonlyMap<string, MonitorTable>, e: AdminMoni
 /** A room's counts (revision: tables.live_updated_at) unless the page already has these or later ones. */
 export function withCounts(old: MonitorTable, c: MonitorCounts, revision: number): MonitorTable {
   if (old.liveAt !== null && revision <= old.liveAt) return old;
-  const status = old.status === 'closed' || c.status === 'closed' ? 'closed' : c.status;
+  const status = further(old.status, c.status);
   return {
     ...old,
     seated: c.seated,

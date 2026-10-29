@@ -279,6 +279,21 @@ describe('snapshot and events', () => {
     expect(withCounts(closed, c, 9_999).status).toBe('closed');
   });
 
+  it('nothing reopens a closing table: counts counted before the close, in either order with the table row', () => {
+    const counts = { seated: 2, bots: 0, playing: true, waitlist: 0, spectators: 0, connections: 2, status: 'open' as const, issue: null };
+    const row = table({ status: 'closing', updatedAt: 300, liveAt: 100, entryBlocked: true });
+    // The row first, then the older counts (revision 200, still open when counted): the counts apply, the status stays.
+    const late = applyEvent(new Map([['t1', table({ liveAt: 100, updatedAt: 200 })]]), ev({ type: 'admin.monitor.table', resourceId: 't1', revision: 300, table: row }), 'active').tables;
+    const after = applyEvent(late, ev({ type: 'admin.monitor.counts', resourceId: 't1', revision: 200, counts }), 'active').tables.get('t1')!;
+    expect(after).toMatchObject({ status: 'closing', seated: 2, liveAt: 200, entryBlocked: true });
+    // The counts first, then the row: the same table.
+    const early = applyEvent(new Map([['t1', table({ liveAt: 100, updatedAt: 200 })]]), ev({ type: 'admin.monitor.counts', resourceId: 't1', revision: 200, counts }), 'active').tables;
+    expect(applyEvent(early, ev({ type: 'admin.monitor.table', resourceId: 't1', revision: 300, table: row }), 'active').tables.get('t1')).toEqual(after);
+    // A row written before the close (a settings change that arrives late) does not reopen it either.
+    expect(mergeTable(table({ status: 'closing', updatedAt: 300 }), table({ status: 'open', updatedAt: 400 })).status).toBe('closing');
+    expect(applySnapshot(new Map([['t1', table({ status: 'closing' })]]), [table({ status: 'open' })]).get('t1')!.status).toBe('closing');
+  });
+
   it('applies events to known tables, adds an open one, and flags counts for one it does not hold', () => {
     const prev = new Map([['t1', table()]]);
     const r1 = applyEvent(prev, ev({ type: 'admin.monitor.table', resourceId: 't2', revision: 1, table: table({ id: 't2' }) }), 'active');
