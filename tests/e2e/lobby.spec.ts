@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { signUp, sitWith, test, widerThanDevice } from './helpers';
+import { signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
 const lobbyGets = (page: Page) => {
   const seen = { n: 0 };
@@ -158,6 +158,8 @@ test('lobby: on a slow device a tab tapped and a search typed right after both s
 test('lobby: polls only while visible, never overlaps, and refreshes on coming back', async ({ browser }) => {
   const { page: first } = await signUp(browser);
   const page = await first.context().newPage();
+  // The fallback when the realtime socket is down (refused here): the list is polled as before.
+  await page.routeWebSocket(/\/ws\/realtime/, (ws) => ws.close());
   const gets = lobbyGets(page);
   await page.clock.install();
   await page.goto('/');
@@ -203,6 +205,8 @@ test('lobby: polls only while visible, never overlaps, and refreshes on coming b
 test('lobby: slows to every 30 seconds after a minute without input, and the next input refreshes at once', async ({ browser }) => {
   const { page: first } = await signUp(browser);
   const page = await first.context().newPage();
+  // The fallback when the realtime socket is down (refused here): the list is polled as before.
+  await page.routeWebSocket(/\/ws\/realtime/, (ws) => ws.close());
   const gets = lobbyGets(page);
   const done = { n: 0 };
   page.on('response', (r) => {
@@ -236,4 +240,45 @@ test('lobby: slows to every 30 seconds after a minute without input, and the nex
   let next = 0;
   for (let i = 0; i < 4; i++) next += await step();
   expect(next).toBeGreaterThanOrEqual(3);
+});
+
+test('lobby: with the realtime socket up, a new room, a seat taken there and its close show at once, without reading the list again', async ({ browser }) => {
+  const host = await signUp(browser);
+  const { page: first } = await signUp(browser);
+  const page = await first.context().newPage();
+  const hello = new Promise<void>((resolve) => {
+    page.on('websocket', (ws) => {
+      if (ws.url().includes('/ws/realtime')) ws.on('framereceived', (f) => void (String(f.payload).includes('"hello"') && resolve()));
+    });
+  });
+  const gets = lobbyGets(page);
+  const done = { n: 0 };
+  page.on('response', (r) => {
+    if (isList(r)) done.n += 1;
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('lobby-table').first()).toBeVisible();
+  await hello;
+  // The socket coming up reads the list once more (for changes made before it); after that, only once a minute.
+  await page.waitForTimeout(1_000);
+  await expect.poll(() => done.n).toBe(gets.n);
+  const base = gets.n;
+
+  // Another member opens a room: its card comes over the socket.
+  const name = `RT ${Date.now() % 100_000}`;
+  const id = await host.page.evaluate(async (n) => {
+    const r = await fetch('/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: n, maxSeats: 6, bigBlind: 10, minBuyIn: 100, maxBuyIn: 1000 }) });
+    return ((await r.json()) as { id: string }).id;
+  }, name);
+  const card = page.locator(`[data-testid="lobby-table"][data-table="${id}"]`);
+  await expect(card).toContainText(name);
+  await expect(card).toContainText('0/6');
+  // The host sits down, and the seat count follows; then stands up and closes the room, and the card goes.
+  await sitWith(host.page, id, 200);
+  await expect(card).toContainText('1/6');
+  await standUp(host.page);
+  await expect(card).toContainText('0/6');
+  expect(await host.page.evaluate(async (t) => (await fetch(`/api/rooms/${t}/close`, { method: 'POST' })).status, id)).toBe(200);
+  await expect(card).toHaveCount(0);
+  expect(gets.n).toBe(base);
 });

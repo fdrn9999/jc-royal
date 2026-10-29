@@ -24,6 +24,7 @@ import type { Env } from '../env';
 import { fail } from './http';
 import { notices } from './notices';
 import { queuePush } from './notify';
+import { sendToAll } from './realtime';
 import { roomCallEnv } from './room';
 import { currentMaintenance } from './service';
 
@@ -203,6 +204,14 @@ export interface StartResult {
   roomConfirmed: boolean;
 }
 
+/**
+ * A tournament changed in D1 (opened, registration, a start, a cancel, a pause): the tournament pages read it again.
+ * Public and carries only the id; in the background, never failing the change (without `ctx` the pages' poll finds it).
+ */
+export function tournamentChanged(env: Env, id: string, ctx: Pick<ExecutionContext, 'waitUntil'> | undefined) {
+  ctx?.waitUntil(sendToAll(env, { scope: 'lobby', type: 'tournament.changed', resourceId: id }).catch((err) => console.warn('realtime tournament change not sent', String(err))));
+}
+
 /** Tries before giving up on a roster that keeps changing (each registration changes it). */
 const START_ATTEMPTS = 4;
 
@@ -298,6 +307,7 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
         db.prepare(`UPDATE tournaments SET roster = roster + 1, updated_at = ?2 WHERE id = ?1 AND status IN ('registering', 'closed')`).bind(id, now),
       ]);
       dropped.push(...lost);
+      tournamentChanged(env, id, opts.ctx);
       // The automatic start keeps registration open for the seats this freed.
       if (opts.auto) return no('ineligible');
       continue;
@@ -349,6 +359,7 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     // The tournament changed (another start, a cancel, a registration closed or opened) or a registration came or went:
     // look again (a start that already happened is refused at the top).
     if (!res[0]?.meta.changes) continue;
+    tournamentChanged(env, id, opts.ctx);
     const live = await reloadRoom(env, tableId);
     // After the start is saved, never with it: a push that can't be queued leaves the start as it is.
     await queuePush(

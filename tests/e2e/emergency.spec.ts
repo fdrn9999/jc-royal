@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { expect } from '@playwright/test';
+import { expect, type WebSocket } from '@playwright/test';
 import { PASSWORD, signUp, test } from './helpers';
 import { promoteSql } from '../support/grants';
 
@@ -26,8 +26,10 @@ test('emergency controls: an admin ends a seated member’s connections, the pag
   sql(promoteSql(`email = '${op.email}'`));
 
   const opened: string[] = [];
+  let platform: WebSocket | undefined;
   a.page.on('websocket', (ws) => {
     if (/\/ws\/tables\//.test(ws.url())) opened.push(ws.url());
+    else if (new URL(ws.url()).pathname === '/ws/realtime') platform = ws;
   });
   await a.page.goto('/table/e2e-kick?sit=1');
   await a.page.getByTestId('buyin-confirm').click();
@@ -71,10 +73,19 @@ test('emergency controls: an admin ends a seated member’s connections, the pag
   await expect(a.page.getByTestId('action-bar')).toHaveCount(0);
   await expect(a.page.locator('[data-testid^=seat-]')).toHaveCount(0);
   await expect(aOnB).toContainText(/오프라인|Offline/);
-  await a.page.waitForTimeout(4_000);
+  // The sign-ins went too, so the page's platform socket is closed as signed out (seconds later, locally) and the page
+  // reads the account as signed out: it still says why rather than turning into the sign-in page.
+  if (!platform!.isClosed()) await platform!.waitForEvent('close', { timeout: 20_000 });
+  await a.page.waitForTimeout(1_000);
+  await expect(a.page.getByText(/관리자가 이 테이블 연결을 종료했습니다|An administrator ended this table connection/)).toBeVisible();
+  await expect(a.page.getByTestId('kicked-lobby')).toBeVisible();
+  await a.page.waitForTimeout(3_000);
   expect(opened).toHaveLength(1);
   expect(await a.page.evaluate(async () => (await fetch('/api/auth/me')).status)).toBe(401);
   await a.page.screenshot({ path: 'test-results/table-kicked.png' });
+  // Leaving it is signing in again: the lobby is not shown signed out.
+  await a.page.getByTestId('kicked-lobby').click();
+  await expect(a.page).toHaveURL(/\/login$/);
 
   // Table detail: pausing new hands needs a reason and a confirmation; the hand in progress plays on.
   await page.goto(`${ADMIN}/tables/e2e-kick`);

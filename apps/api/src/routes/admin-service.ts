@@ -10,7 +10,8 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { fail, parseBody } from '../lib/http';
-import { tellRoomsAboutMaintenance, type RoomFanOut } from '../lib/service';
+import { realtimeToAll, sendToAll, spreadFor } from '../lib/realtime';
+import { SERVICE_REV_SQL, tellRoomsAboutMaintenance, type RoomFanOut } from '../lib/service';
 import { audit } from './admin-auth';
 
 const ReasonSchema = z.string().trim().min(2).max(200);
@@ -102,6 +103,19 @@ function checkMaintenanceWindow(startsAt: number, endsAt: number, now: number) {
   if (startsAt - now > MAX_LEAD_MS) fail(400, 'bad_request', 'maintenance can be planned at most 90 days ahead');
 }
 
+/**
+ * A notice or a maintenance window changed, committed: every page reads GET /api/service/status again, unless it holds
+ * this `rev` already, after a random wait sized like an announcement to every member (spreadFor), so the reads come at
+ * a steady rate. In the background, never failing the change.
+ */
+function serviceChanged(c: Context<AppEnv>) {
+  const send = async () => {
+    const r = await c.env.DB.prepare(`SELECT ${SERVICE_REV_SQL} AS rev, (SELECT COUNT(*) FROM users WHERE status = 'active' AND is_bot = 0) AS members`).first<{ rev: number; members: number }>();
+    await sendToAll(c.env, { scope: 'service', type: 'service.changed', payload: { rev: Number(r?.rev ?? 0), spreadMs: spreadFor(Number(r?.members ?? 0)) } });
+  };
+  c.executionCtx.waitUntil(send().catch((err) => console.warn('realtime service change not sent', String(err))));
+}
+
 /** The board post: Korean first, the English version below it (the board has one language per post). */
 function boardBody(n: { titleKo: string; titleEn: string; bodyKo: string | null; bodyEn: string | null }) {
   return `${n.bodyKo ?? n.titleKo}\n\n---\n\n[English] ${n.titleEn}${n.bodyEn ? `\n\n${n.bodyEn}` : ''}`;
@@ -163,6 +177,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       createdAt: now,
       updatedAt: now,
     });
+    serviceChanged(c);
     let sent = 0;
     let batchId: string | null = null;
     if (body.sendInbox) {
@@ -177,6 +192,8 @@ export const adminServiceRoutes = new Hono<AppEnv>()
         .bind(body.titleEn, body.titleKo, body.bodyEn ?? body.titleEn, body.bodyKo ?? body.titleKo, me, batchId, now)
         .run();
       sent = r.meta.changes ?? 0;
+      // Every member got one: one event for every page, each reading its count after its own wait (no row per member here).
+      if (sent) realtimeToAll(c, { scope: 'service', type: 'inbox.broadcast', payload: { spreadMs: spreadFor(sent) } });
     }
     await audit(c, 'service.notice.create', { type: 'notice', id }, { kind: body.kind, titleKo: body.titleKo, startsAt, endsAt: body.endsAt ?? null, postId, batchId, sent });
     return c.json({ id, postId, batchId, sent }, 201);
@@ -200,6 +217,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       endsAt,
     };
     await c.var.db.update(schema.serviceNotices).set({ ...next, updatedAt: now }).where(eq(schema.serviceNotices.id, id));
+    serviceChanged(c);
     // The board post written with it follows the edit; an inbox message already sent stays as it was.
     if (n.postId) await c.var.db.update(schema.posts).set({ title: next.titleKo, body: boardBody(next), updatedAt: now }).where(eq(schema.posts.id, n.postId));
     await audit(c, 'service.notice.update', { type: 'notice', id }, { before: { titleKo: n.titleKo, startsAt: n.startsAt, endsAt: n.endsAt, kind: n.kind }, after: { titleKo: next.titleKo, startsAt, endsAt, kind: next.kind } });
@@ -216,6 +234,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       .where(and(eq(N.id, id), isNull(N.deletedAt), or(isNull(N.endsAt), gt(N.endsAt, now))))
       .returning({ id: N.id });
     if (!r[0]) fail(409, 'conflict', 'this notice has already ended');
+    serviceChanged(c);
     await audit(c, 'service.notice.end', { type: 'notice', id });
     return c.json({ ok: true });
   })
@@ -230,6 +249,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       .where(and(eq(N.id, id), isNull(N.deletedAt)))
       .returning({ titleKo: N.titleKo });
     if (!r[0]) fail(404, 'not_found', 'notice not found');
+    serviceChanged(c);
     await audit(c, 'service.notice.delete', { type: 'notice', id }, { titleKo: r[0].titleKo });
     return c.json({ ok: true });
   })
@@ -268,6 +288,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       .bind(id, startsAt, body.endsAt, body.blockLogin ? 1 : 0, body.messageKo, body.messageEn, c.var.user!.id, now)
       .run();
     if (!r.meta.changes) fail(409, 'conflict', 'another maintenance window is planned or under way');
+    serviceChanged(c);
     const rooms = await tellRoomsAboutMaintenance(c.env);
     await audit(c, 'maintenance.schedule', { type: 'maintenance', id }, { startsAt, endsAt: body.endsAt, blockLogin: !!body.blockLogin, reason: body.reason, rooms: fanOutSummary(rooms) });
     return c.json({ id, startsAt, rooms }, 201);
@@ -300,6 +321,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       .where(and(eq(W.id, id), isNull(W.endedAt), isNull(W.cancelledAt), gt(W.endsAt, now)))
       .returning({ id: W.id });
     if (!r[0]) fail(409, 'conflict', 'this maintenance is already over');
+    serviceChanged(c);
     const rooms = await tellRoomsAboutMaintenance(c.env);
     await audit(
       c,
@@ -326,6 +348,7 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       .returning({ startsAt: W.startsAt, endsAt: W.endsAt });
     if (!r[0]) fail(409, 'conflict', 'this maintenance is already over');
     const action = r[0].startsAt <= now ? 'maintenance.end' : 'maintenance.cancel';
+    serviceChanged(c);
     const rooms = await tellRoomsAboutMaintenance(c.env);
     await audit(c, action, { type: 'maintenance', id }, { startsAt: r[0].startsAt, plannedEnd: r[0].endsAt, reason: body.reason, rooms: fanOutSummary(rooms) });
     return c.json({ ok: true, ended: action === 'maintenance.end', rooms });

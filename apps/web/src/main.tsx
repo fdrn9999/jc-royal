@@ -210,10 +210,10 @@ function SettingsSync() {
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { me, loading } = useAuth();
+  const { me, loading, kept } = useAuth();
   const loc = useLocation();
   if (loading) return <Splash />;
-  if (!me) return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />;
+  if (!me && kept !== loc.pathname) return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />;
   return <>{children}</>;
 }
 

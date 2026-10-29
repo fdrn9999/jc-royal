@@ -11,6 +11,7 @@ import { fail, parseBody } from '../lib/http';
 import { countOps } from '../lib/ops';
 import { rateLimit } from '../lib/rate-limit';
 import { referralMe } from '../lib/referral';
+import { realtimeToUsers } from '../lib/realtime';
 import { claimRefill, REFILL_RATE, refillSnapshot } from '../lib/refill';
 import { clientFails, countSettings, markSynced, needsSyncMark, readRow, saveFailure, saveSettings, toDto, toState } from '../lib/settings';
 
@@ -33,6 +34,8 @@ export const meRoutes = new Hono<AppEnv>()
     await rateLimit(c, `refill:${uid}`, REFILL_RATE.limit, REFILL_RATE.windowMs);
     const r = await claimRefill(c.env, uid);
     if (!r.ok) fail(409, r.code, r.code === 'refill_changed' ? 'chips changed while the refill was decided; try again' : 'no refill now', { status: r.status });
+    // The member's other pages read the new balance; this one has it in the answer.
+    if (!r.claim.duplicate) realtimeToUsers(c, [uid], { scope: 'user', type: 'wallet.changed' });
     return c.json(r.claim);
   })
   /**

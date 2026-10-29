@@ -22,6 +22,7 @@ import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
 import { notices } from '../lib/notices';
 import { can } from '../lib/permissions';
+import { realtimeToUsers } from '../lib/realtime';
 import { countSettings, diagnose, favList, parseFav, parsePrefs, resetInfo, toState, type SettingsRow } from '../lib/settings';
 
 const ReasonSchema = z.string().trim().min(2).max(200);
@@ -121,6 +122,8 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     ]);
     const done = (up!.results as { rev: number; epoch: number }[])[0];
     if (!done) fail(409, 'settings_changed', 'the settings changed while resetting', { settings: (await load(c, id)).diag });
+    // The notice written with it: the member's pages read their unread count (the settings themselves on their next read).
+    realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });
     await countSettings(db, { ss_reset: 1 }, now);
     await audit(c, 'settings.reset', { type: 'user', id }, {
       reason,
@@ -164,6 +167,7 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     ]);
     const done = (up!.results as { rev: number; epoch: number }[])[0];
     if (!done) fail(409, 'settings_changed', 'the settings changed while restoring', { settings: (await load(c, id)).diag });
+    realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });
     await countSettings(db, { ss_restore: 1 }, now);
     await audit(c, 'settings.restore', { type: 'user', id }, {
       reason,

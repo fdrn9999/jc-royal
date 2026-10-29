@@ -34,6 +34,7 @@ import { fail, parseBody } from '../lib/http';
 import { queuePush } from '../lib/notify';
 import { applyMode, hubCall, type HubQuery } from '../lib/presence';
 import { rateLimit } from '../lib/rate-limit';
+import { realtimeToUsers } from '../lib/realtime';
 
 const DM_PAGE = 50;
 
@@ -112,6 +113,19 @@ function pushTo(c: Context<AppEnv>, to: string, e: Omit<OutboxOne, 'userId' | 'n
   return queuePush(c.env, [outboxOne(c.env.DB, { ...e, userId: to, now, night: isKstNight(now) })], ctx, to);
 }
 
+/**
+ * The friends lists (and received-request counts) of these members changed, after the write: their pages read them
+ * again. The event says nothing of what changed, so a member told of an ended friendship cannot tell an unfriending
+ * from a block; it goes to the other player only when a row they can see was written or removed.
+ */
+const friendsChanged = (c: Context<AppEnv>, ...ids: string[]) => realtimeToUsers(c, ids, { scope: 'user', type: 'social.friend.changed' });
+
+/** A 1:1 message from `from` to `to` was saved as `seq`: the recipient's pages, and the sender's other ones. */
+function dmCreated(c: Context<AppEnv>, from: string, to: string, seq: number) {
+  realtimeToUsers(c, [to], { scope: 'user', type: 'social.dm.created', payload: { peerId: from, seq } });
+  realtimeToUsers(c, [from], { scope: 'user', type: 'social.dm.created', payload: { peerId: to, seq } });
+}
+
 /** Turns the pending request between the two into a friendship (the one who asked is told). False when there was none to accept. */
 async function accept(c: Context<AppEnv>, me: string, other: string): Promise<boolean> {
   if ((await friendCount(c, me)) >= MAX_FRIENDS || (await friendCount(c, other)) >= MAX_FRIENDS) fail(409, 'friend_limit', `at most ${MAX_FRIENDS} friends`);
@@ -120,6 +134,7 @@ async function accept(c: Context<AppEnv>, me: string, other: string): Promise<bo
     .bind(a, b, Date.now())
     .run();
   if (!r.meta.changes) return false;
+  friendsChanged(c, me, other);
   await pushTo(c, other, { dedupeKey: `friend_accepted:${me}:${other}`, type: 'friend_accepted', url: `/friends/${me}`, coalesceKey: `fa:${me}` });
   return true;
 }
@@ -262,8 +277,10 @@ export const friendRoutes = new Hono<AppEnv>()
       return c.json({ status: 'accepted', user } satisfies FriendRequestResultDto);
     }
     // Told only when this made the request (the same request again within the outbox's week is not told twice).
-    if (made.meta.changes > 0 && row.requesterId === me && row.status === 'pending')
+    if (made.meta.changes > 0 && row.requesterId === me && row.status === 'pending') {
+      friendsChanged(c, me, user.id);
       await pushTo(c, user.id, { dedupeKey: `friend_request:${me}:${user.id}`, type: 'friend_request', url: '/friends', coalesceKey: `fr:${me}` });
+    }
     return c.json({ status: row.status, user } satisfies FriendRequestResultDto, 201);
   })
   .get('/settings', async (c) => {
@@ -312,18 +329,22 @@ export const friendRoutes = new Hono<AppEnv>()
       .first<{ id: string; name: string }>();
     if (!t) fail(409, 'table_unavailable', 'this table is not open');
     const row = await insertDm(c, me, other, { body: t.name, kind: 'invite', tableId: t.id });
+    dmCreated(c, me, other, row.seq);
     // The push opens the conversation; joining is checked by the table as always.
     await pushTo(c, other, { dedupeKey: `invite:${row.id}`, type: 'invite', url: `/friends/${me}`, coalesceKey: `invite:${me}` });
     return c.json(toDm(me)(row), 201);
   })
   /** Declines a received request, cancels a sent one, or removes a friend. */
   .delete('/:userId', async (c) => {
-    const [a, b] = pairOf(c.var.user!.id, c.req.param('userId'));
+    const me = c.var.user!.id;
+    const other = c.req.param('userId');
+    const [a, b] = pairOf(me, other);
     const r = await c.var.db
       .delete(schema.friendships)
       .where(and(eq(schema.friendships.userA, a), eq(schema.friendships.userB, b)))
       .returning({ a: schema.friendships.userA });
     if (!r[0]) fail(404, 'not_found', 'no friendship or request with this player');
+    friendsChanged(c, me, other);
     return c.json({ ok: true });
   });
 
@@ -356,10 +377,14 @@ export const blockRoutes = new Hono<AppEnv>()
     if ((n?.n ?? 0) >= MAX_BLOCKS && (await blockState(c, me, other)) !== 'mine') fail(409, 'block_limit', `at most ${MAX_BLOCKS} blocked players`);
     const [a, b] = pairOf(me, other);
     // One transaction: the block row and the end of any friendship or request between the two.
-    await c.env.DB.batch([
+    const [, ended] = await c.env.DB.batch([
       c.env.DB.prepare(`INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id, created_at) VALUES (?1, ?2, ?3)`).bind(me, other, Date.now()),
       c.env.DB.prepare(`DELETE FROM friendships WHERE user_a = ?1 AND user_b = ?2`).bind(a, b),
     ]);
+    // My other pages; the blocked player only when a friendship or request they saw ended, which reads to them as an
+    // unfriending or a declined request. With nothing between the two they are not told anything.
+    if (ended?.meta.changes) friendsChanged(c, me, other);
+    else friendsChanged(c, me);
     return c.json({ ok: true });
   })
   .delete('/:userId', async (c) => {
@@ -368,6 +393,7 @@ export const blockRoutes = new Hono<AppEnv>()
       .where(and(eq(schema.userBlocks.blockerId, c.var.user!.id), eq(schema.userBlocks.blockedId, c.req.param('userId'))))
       .returning({ id: schema.userBlocks.blockedId });
     if (!r[0]) fail(404, 'not_found', 'this player is not blocked');
+    friendsChanged(c, c.var.user!.id);
     return c.json({ ok: true });
   });
 
@@ -473,6 +499,7 @@ export const dmRoutes = new Hono<AppEnv>()
     if (!user) fail(404, 'user_not_found', 'no such player');
     await rateLimit(c, `dm:${me}`, 30, 60_000);
     const row = await insertDm(c, me, other, { body: body.text, kind: 'text', tableId: null });
+    dmCreated(c, me, other, row.seq);
     await pushTo(c, other, { dedupeKey: `dm:${row.id}`, type: 'dm', url: `/friends/${me}`, coalesceKey: `dm:${me}` });
     return c.json(toDm(me)(row), 201);
   })
@@ -486,10 +513,18 @@ export const dmRoutes = new Hono<AppEnv>()
     const parsed = DmReadSchema.safeParse(raw ?? {});
     if (!parsed.success) fail(400, 'bad_request', 'validation failed');
     const upTo = parsed.data.upToSeq;
+    const other = c.req.param('userId');
     const t = schema.directMessages;
-    await c.var.db
+    const read = await c.var.db
       .update(t)
       .set({ readAt: Date.now() })
-      .where(and(eq(t.pairKey, pairKey(me, c.req.param('userId'))), eq(t.recipientId, me), isNull(t.readAt), upTo === undefined ? undefined : lte(t.seq, upTo)));
+      .where(and(eq(t.pairKey, pairKey(me, other)), eq(t.recipientId, me), isNull(t.readAt), upTo === undefined ? undefined : lte(t.seq, upTo)))
+      .returning({ seq: t.seq });
+    // Marked just now: the sender's pages show how far I read (as GET /api/dm/:userId does), mine drop the unread count.
+    if (read.length) {
+      const seq = Math.max(...read.map((r) => r.seq));
+      realtimeToUsers(c, [other], { scope: 'user', type: 'social.dm.read', payload: { peerId: me, readerId: me, seq } });
+      realtimeToUsers(c, [me], { scope: 'user', type: 'social.dm.read', payload: { peerId: other, readerId: me, seq } });
+    }
     return c.json({ ok: true });
   });

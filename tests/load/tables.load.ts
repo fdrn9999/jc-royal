@@ -368,8 +368,10 @@ it(`${cfg.tables} tables × ${cfg.players} players + ${cfg.spectators} spectator
   for (const r of perTableHands) if (!short.has(r.table_id)) expect(r.n).toBeGreaterThanOrEqual(cfg.hands);
   expect(short.size, 'every table stopped early').toBeLessThan(cfg.tables);
   expect(await d1(`SELECT h.id FROM hands h LEFT JOIN hand_players p ON p.hand_id = h.id GROUP BY h.id HAVING COUNT(p.user_id) < 2 OR SUM(p.net) != 0`)).toEqual([]);
-  // Each seat session is one buy-in plus one cash-out (none for a stack of 0), and no more.
-  const [s] = await d1<{ sessions: number; paid: number }>(`SELECT COUNT(*) AS sessions, SUM(cash_out > 0) AS paid FROM table_sessions WHERE status = 'closed'`);
+  // Each of this run's seat sessions is one buy-in plus one cash-out (none for a stack of 0), and no more. Only these
+  // players' sessions: the realtime scenario (realtime.load.ts) sits at the same tables in the same worker.
+  const playerIds = tables.flatMap((t) => t.players.map((p) => `'${p.user.me.id}'`)).join(', ');
+  const [s] = await d1<{ sessions: number; paid: number }>(`SELECT COUNT(*) AS sessions, SUM(cash_out > 0) AS paid FROM table_sessions WHERE status = 'closed' AND user_id IN (${playerIds})`);
   expect(s!.sessions).toBe(cfg.tables * cfg.players);
   expect(delta.chip_ledger).toBe(s!.sessions + s!.paid);
 });

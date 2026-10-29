@@ -1,6 +1,7 @@
 import { createDb } from '@jc/db';
 import { Hono, type Context } from 'hono';
 import type { AppEnv, Env } from './env';
+import { countingD1, type D1Counts } from './lib/d1-stats';
 import { housekeeping } from './lib/housekeeping';
 import { flushPush } from './lib/notify';
 import { sharePageResponse } from './lib/og';
@@ -20,6 +21,7 @@ import { roomRoutes } from './routes/rooms';
 import { serviceRoutes } from './routes/service';
 import { notificationRoutes } from './routes/notifications';
 import { presenceRoutes } from './routes/presence';
+import { realtimeSocket } from './routes/realtime';
 import { blockRoutes, dmRoutes, friendPresenceRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 import { tournamentRoutes } from './routes/tournaments';
@@ -31,8 +33,26 @@ const app = new Hono<AppEnv>();
 
 app.use('*', securityHeaders);
 app.use('*', async (c, next) => {
+  if (c.env.D1_STATS !== '1') {
+    c.set('db', createDb(c.env.DB));
+    return next();
+  }
+  // Local measurement (lib/d1-stats.ts): this request's own copy of the bindings, its D1 counted.
+  const n: D1Counts = { queries: 0, read: 0, written: 0, unmeasured: 0 };
+  const where = `${c.req.method} ${c.req.path}`;
+  const trace = (sql: string, meta: D1Meta | undefined) =>
+    console.log(`d1-stats ${where} read=${meta?.rows_read ?? '?'} written=${meta?.rows_written ?? '?'} ${sql.replace(/\s+/g, ' ').slice(0, 2000)}`);
+  c.env = { ...c.env, DB: countingD1(c.env.DB, n, trace) };
   c.set('db', createDb(c.env.DB));
-  return next();
+  await next();
+  try {
+    c.res.headers.set('x-d1-queries', String(n.queries));
+    c.res.headers.set('x-d1-rows-read', String(n.read));
+    c.res.headers.set('x-d1-rows-written', String(n.written));
+    c.res.headers.set('x-d1-unmeasured', String(n.unmeasured));
+  } catch {
+    // A response whose headers cannot change (a socket handed on by a room).
+  }
 });
 app.use('/api/*', csrfGuard);
 
@@ -58,6 +78,7 @@ app.route('/api/academy', academyRoutes);
 app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
+app.get('/ws/realtime', realtimeSocket);
 
 /**
  * Shareable pages (wrangler.jsonc run_worker_first): the app's index.html with the page's own link preview, so a

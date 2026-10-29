@@ -67,6 +67,8 @@ import {
   recordHand,
   topUp,
   walletBalance,
+  type LiveStats,
+  type LiveWritten,
   type Maintenance,
   type TableRow,
 } from './settlement';
@@ -75,12 +77,16 @@ import { botManners, emptyManners } from './bot-manners';
 import { addShown, afterHandMs } from './muck';
 import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
+import { LobbyFeed, placesMoved, placesOf } from './lobby-feed';
+import { publishToAll, publishToUsers } from './realtime-publish';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
   DB: D1Database;
   INTERNAL_SECRET: string;
   ENVIRONMENT: string;
+  /** The realtime hubs (realtime.ts): a room tells lobby pages its new counts and members their wallet moved. */
+  REALTIME: DurableObjectNamespace;
 }
 
 interface Identity {
@@ -318,6 +324,12 @@ export class TableRoom extends DurableObject<Env> {
   private lastStats = '';
   /** Occupancy to D1 (writeStats), one write at a time so an older one never lands after a newer one. */
   private publishStats = oneAtATime(() => this.writeStats());
+  /** The written counts to every lobby (lobby-feed.ts); never who. */
+  private lobbyFeed = new LobbyFeed((p) =>
+    this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.changed', resourceId: p.id, revision: p.rev, payload: p })),
+  );
+  /** Each member's place here as last written (placesOf): who to tell that theirs moved. */
+  private lobbyPlaces = new Map<string, string>();
   /** Operations counters (packages/db/src/ops.ts) and the latest problem, not written yet (see `publishStats`). */
   private ops = new OpsCounter();
   private pendingIssue: string | null = null;
@@ -590,8 +602,9 @@ export class TableRoom extends DurableObject<Env> {
     if (extra) this.lastOpsFlush = now;
     const read = ++this.maintReads;
     try {
-      const m = await publishLiveStats(this.env.DB, this.tableId, stats, issue, ops, now);
+      const { maintenance: m, live } = await publishLiveStats(this.env.DB, this.tableId, stats, issue, ops, now);
       if (this.takeMaint(m, read)) void this.run(() => this.maintenanceChanged());
+      if (live) this.toLobby(stats, live, taken.filter((s) => !s.bot).map((s) => s.userId));
     } catch (e) {
       this.ops.restore(ops);
       this.pendingIssue ??= issue;
@@ -601,6 +614,26 @@ export class TableRoom extends DurableObject<Env> {
       console.error('live stats', (e as Error).message);
       this.flushOpsIn(OPS_FLUSH_MS);
     }
+  }
+
+  /**
+   * After an occupancy write committed: its counts to the lobbies (a tournament's table is not in the lobby), and to
+   * the members whose seat or waitlist place it changed, a note to read their own place again. Never awaited.
+   */
+  private toLobby(s: LiveStats, live: LiveWritten, seated: string[]) {
+    if (!this.table || this.table.roomType === 'tournament') return;
+    const id = this.tableId!;
+    this.lobbyFeed.push({ id, rev: live.rev, seated: s.seated, bots: s.bots, playing: s.playing, waitlist: s.waitlist, spectators: s.spectators, status: live.status === 'open' ? 'open' : 'closed' });
+    const places = placesOf(seated, s.waitlistUsers);
+    const moved = placesMoved(this.lobbyPlaces, places);
+    this.lobbyPlaces = places;
+    if (moved.length) this.ctx.waitUntil(publishToUsers(this.env, moved, { scope: 'user', type: 'lobby.mine.changed', resourceId: id }));
+  }
+
+  /** After D1 has the table closed: the lobbies drop it. */
+  private tableGone() {
+    if (!this.table || this.table.roomType === 'tournament') return;
+    this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.removed', resourceId: this.tableId! }));
   }
 
   private flushOpsIn(ms: number) {
@@ -699,7 +732,10 @@ export class TableRoom extends DurableObject<Env> {
               if (!this.dealsNow()) await this.stopTourneyClock();
               if (t.status === 'closing' && !this.room.closed) await this.beginClose();
               // A room an older build closed before telling D1.
-              else if (this.room.closed && t.status !== 'closed') await markTableClosed(this.env.DB, tableId);
+              else if (this.room.closed && t.status !== 'closed') {
+                await markTableClosed(this.env.DB, tableId);
+                this.tableGone();
+              }
               // A new join code, privacy or spectator setting applies to people already here.
               await this.enforceAccess();
               // New bot settings or a new bot policy (a larger fund, say): a bot may try to join again now, not after the backoff.
@@ -1151,6 +1187,7 @@ export class TableRoom extends DurableObject<Env> {
     if (this.room.reservation?.userId === a.userId) this.room.reservation = null;
     this.remember(reqId);
     await this.save();
+    this.walletMoved(seat);
     this.broadcast([{ kind: 'seat', seatIndex, nickname: a.nickname }]);
     await this.afterChange();
   }
@@ -1184,6 +1221,7 @@ export class TableRoom extends DurableObject<Env> {
           continue;
         }
         s.phase = 'seated';
+        this.walletMoved(s);
       }
       // A player in the hand being played waits for it to end, except one who folded and left: their cash-out cut
       // short is finished here (the seat kept the stack to pay, top-up included). One not begun is `standFolded`'s,
@@ -1217,6 +1255,16 @@ export class TableRoom extends DurableObject<Env> {
       this.ops.add('cashout_fail');
       throw e;
     }
+    if (seat.stack > 0) this.walletMoved(seat);
+  }
+
+  /**
+   * Tells the member's other pages (the header's balance, the wallet history) that their wallet moved, after the ledger
+   * committed it: they read it again. Never awaited, so no game step waits on it; a table bot has no pages.
+   */
+  private walletMoved(seat: SeatState) {
+    if (seat.bot) return;
+    this.ctx.waitUntil(publishToUsers(this.env, [seat.userId], { scope: 'user', type: 'wallet.changed' }));
   }
 
   private handHasPlayer(userId: string) {
@@ -1431,6 +1479,7 @@ export class TableRoom extends DurableObject<Env> {
     seat.topUp = null;
     if (r === 'applied') this.addChips(seat, p.amount, p.auto);
     await this.save();
+    if (r === 'applied') this.walletMoved(seat);
     return r;
   }
 
@@ -1449,7 +1498,10 @@ export class TableRoom extends DurableObject<Env> {
     const p = seat.topUp;
     if (p?.state !== 'debiting') return false;
     const taken = await committedTopUp(this.env.DB, p.key);
-    if (taken !== null) this.addChips(seat, taken, p.auto);
+    if (taken !== null) {
+      this.addChips(seat, taken, p.auto);
+      this.walletMoved(seat);
+    }
     seat.topUp = null;
     return true;
   }
@@ -2068,6 +2120,8 @@ export class TableRoom extends DurableObject<Env> {
     }
     tn.dirty = false;
     tn.confirmed = tn.places.length;
+    // A bust or the finish, now in D1, for the tournament pages; stacks and the level clock they read on their own.
+    if (r.standings) this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
     if (this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
     if (tn.status === 'running') tn.pauseRequested = r.pauseRequested;
     const aborted = r.status === 'aborted' && tn.status !== 'aborted';
@@ -2761,6 +2815,7 @@ export class TableRoom extends DurableObject<Env> {
     if (this.room.seats.some((s) => s) || this.room.tourney?.dirty) return;
     // D1 first: a room that counts itself closed retries nothing, so D1 must not be left saying 'closing'.
     await markTableClosed(this.env.DB, this.tableId!);
+    this.tableGone();
     this.room.closed = true;
     this.room.closedAt = Date.now();
     this.room.nextHandAt = null;

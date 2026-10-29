@@ -7,6 +7,8 @@ export interface Env {
   TABLES: DurableObjectNamespace;
   /** PresenceHub Durable Object namespace hosted by the game worker (friends' status, in memory only). */
   PRESENCE: DurableObjectNamespace;
+  /** RealtimeHub Durable Object namespace hosted by the game worker (pages' sockets outside the tables, lib/realtime.ts). */
+  REALTIME: DurableObjectNamespace;
   ASSETS?: Fetcher;
   ENVIRONMENT: 'development' | 'test' | 'production';
   /** Comma separated list of browser origins allowed to send state-changing requests. */
@@ -29,6 +31,10 @@ export interface Env {
   RATE_LIMIT_IP_SCALE?: string;
   /** Local tests only: members' empty rooms close after this many ms instead of MEMBER_IDLE_CLOSE_MS. */
   MEMBER_IDLE_CLOSE_MS?: string;
+  /** Local tests only: the realtime hubs check their sockets' sign-ins in D1 this often (ms) instead of every 5 minutes. */
+  REALTIME_SWEEP_MS?: string;
+  /** Local measurement only (lib/d1-stats.ts): `1` adds each response's D1 row counts as x-d1-* headers. */
+  D1_STATS?: string;
   /** Web Push (VAPID, RFC 8292) key pair, base64url: the 65-byte public point and the 32-byte private scalar (secrets). Without both, no push is sent. */
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;

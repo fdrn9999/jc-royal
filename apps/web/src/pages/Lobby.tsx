@@ -13,9 +13,10 @@ import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { entryOf, latest, lobbyPoller, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Latest } from '../lib/lobby';
+import { entryOf, keepCard, latest, lobbyPoller, mergeList, newLobbyLive, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Latest } from '../lib/lobby';
 import { rememberLobby } from '../lib/lobbyReturn';
 import { setFavourite, useFavourites } from '../lib/prefs';
+import { coalesced, onRealtime, realtimeUp, useRealtimeStatus, wantTopic } from '../lib/realtime';
 import { useMaintenance } from '../lib/service';
 import { siteUrl } from '../lib/share';
 
@@ -31,31 +32,84 @@ function statusOf(t: LobbyTableDto): 'playing' | 'waiting' | 'empty' {
 /**
  * The table list: refreshed every POLL_MS while the page is visible and in use (every IDLE_POLL_MS when nobody has
  * touched it for a minute), and at once when it becomes visible again, the window gets focus back, the connection
- * returns or someone uses an idle lobby. Requests never overlap and an outdated answer is never applied.
+ * returns or someone uses an idle lobby. Requests never overlap and an outdated answer is never applied. While the
+ * realtime socket is up, each table's public changes arrive on it and are laid over the last read (mergeList); a
+ * change to the player's own place makes one read of that table (it holds myParticipation), and the list itself is
+ * read only every LIVE_POLL_MS, and once more whenever the socket comes (back) up.
  */
 function useLobbyTables() {
   const [tables, setTables] = useState<LobbyTableDto[] | null>(null);
   const [error, setError] = useState(false);
   const feed = useRef<Latest | null>(null);
+  const poller = useRef<ReturnType<typeof lobbyPoller> | null>(null);
+  const up = useRealtimeStatus() === 'open';
   useEffect(() => {
+    const live = newLobbyLive();
+    let base: { list: LobbyTableDto[]; at: number } | null = null;
+    let stopped = false;
+    const show = (fresh = false) => {
+      if (base && !stopped) setTables(mergeList(base.list, base.at, live, fresh));
+    };
     const f = latest(
-      (signal) => api<LobbyTableDto[]>('/api/tables', { signal }),
-      (list) => {
-        setTables(list);
+      (signal) => {
+        const at = Date.now();
+        return api<LobbyTableDto[]>('/api/tables', { signal }).then((list) => ({ list, at }));
+      },
+      (read) => {
+        base = read;
+        show(true);
         setError(false);
       },
       () => setError(true),
     );
     feed.current = f;
+    // Asked for before the first read, so a change committed after that read began is not missed.
+    const release = wantTopic('lobby');
     f.run();
-    const p = lobbyPoller(f, () => document.visibilityState === 'visible');
+    const reads = new Map<string, () => Promise<void>>();
+    const readMine = (id: string) => {
+      let read = reads.get(id);
+      if (!read) {
+        read = coalesced(async () => {
+          const at = Date.now();
+          const t = await api<LobbyTableDto>(`/api/tables/${encodeURIComponent(id)}`).catch(() => null);
+          if (!t || t.roomType === 'tournament') return;
+          const { myParticipation, ...card } = t;
+          keepCard(live, id, card, at);
+          live.mine.set(id, { p: myParticipation ?? { status: 'none' }, at });
+          show();
+        });
+        reads.set(id, read);
+      }
+      void read();
+    };
+    const off = [
+      onRealtime('lobby.table.changed', ({ payload: p }) => {
+        if ((live.patches.get(p.id)?.rev ?? -1) < p.rev) live.patches.set(p.id, p);
+        show();
+      }),
+      onRealtime('lobby.table.updated', ({ resourceId: id, payload: card }) => {
+        keepCard(live, id, card, Date.now());
+        show();
+      }),
+      onRealtime('lobby.table.removed', ({ resourceId: id }) => {
+        live.gone.add(id);
+        show();
+      }),
+      onRealtime('lobby.mine.changed', ({ resourceId: id }) => readMine(id)),
+    ];
+    const p = lobbyPoller(f, () => document.visibilityState === 'visible', Date.now, realtimeUp);
+    poller.current = p;
     const h = setInterval(p.tick, POLL_MS);
     document.addEventListener('visibilitychange', p.wake);
     window.addEventListener('focus', p.wake);
     window.addEventListener('online', p.wake);
     for (const e of INPUT_EVENTS) window.addEventListener(e, p.input, { passive: true });
     return () => {
+      stopped = true;
       f.stop();
+      release();
+      for (const o of off) o();
       clearInterval(h);
       document.removeEventListener('visibilitychange', p.wake);
       window.removeEventListener('focus', p.wake);
@@ -63,6 +117,12 @@ function useLobbyTables() {
       for (const e of INPUT_EVENTS) window.removeEventListener(e, p.input);
     };
   }, []);
+  // The socket (back) up: changes arrive from now on, and the list is read once more for any made before.
+  const wasUp = useRef(up);
+  useEffect(() => {
+    if (up && !wasUp.current) poller.current?.up();
+    wasUp.current = up;
+  }, [up]);
   // The refresh button replaces a request already out rather than waiting for it.
   const refresh = useCallback(() => void feed.current?.run(true), []);
   return { tables, error, refresh };

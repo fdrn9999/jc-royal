@@ -19,6 +19,40 @@ function int(name: string, fallback: number, min: number, max: number) {
   return v;
 }
 
+/** The realtime scenario (realtime.load.ts); it uses the first tables LOAD_TABLES seeds. */
+export interface RealtimeLoadConfig {
+  /** Lobby pages, one member and one realtime socket each, that every lobby event reaches. */
+  viewers: number;
+  /** Tables where a seat is taken and then given up, one change at a time (also how many members sit). */
+  changes: number;
+  /** Spectators who open one table at the same moment, then leave it together (the burst). */
+  burst: number;
+  /** Members granted chips by an administrator, and how many pages (devices) each has open. */
+  grantees: number;
+  devices: number;
+}
+
+/**
+ * The viewers play every part, in groups that do not overlap where an event would be counted twice: the first `changes`
+ * sit, the next one opens a room, the next `grantees` are granted chips; the last `burst` are the spectators.
+ */
+export function realtimeConfig(): RealtimeLoadConfig {
+  const tables = loadConfig().tables;
+  const viewers = int('RT_VIEWERS', 100, 10, 2_000);
+  const changes = int('RT_CHANGES', Math.min(6, tables - 1), 1, 59);
+  const c = {
+    viewers,
+    changes,
+    burst: int('RT_BURST', Math.min(30, viewers), 1, viewers),
+    grantees: int('RT_GRANTEES', Math.min(20, viewers - changes - 1), 1, viewers),
+    // A member's sockets on one hub stop at 10 (apps/game-worker/src/realtime.ts).
+    devices: int('RT_DEVICES', 3, 1, 10),
+  };
+  if (changes + 1 > tables) throw new Error(`RT_CHANGES needs LOAD_TABLES of at least ${changes + 1}`);
+  if (changes + 1 + c.grantees > viewers) throw new Error(`RT_GRANTEES is at most RT_VIEWERS - RT_CHANGES - 1`);
+  return c;
+}
+
 export function loadConfig(): LoadConfig {
   return {
     tables: int('LOAD_TABLES', 10, 1, 60),

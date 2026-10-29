@@ -1,9 +1,10 @@
 import type { MessageDto } from '@jc/types';
 import { Badge, Button, Empty, formatDate } from '@jc/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LoadFailed, Loading } from '../components/Loading';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { coalesced, onRealtimeResync, useRealtime } from '../lib/realtime';
 import { refreshUnread } from '../lib/unread';
 
 const tone = { system: 'neutral', event: 'green', sanction: 'red', notice: 'gold', admin: 'blue' } as const;
@@ -13,18 +14,40 @@ export function MessagesPage() {
   const [list, setList] = useState<MessageDto[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const load = useCallback(async () => {
+  const fetchList = useCallback(async () => {
     setFailed(false);
     try {
       setList(await api<MessageDto[]>('/api/messages'));
+      return true;
     } catch {
       // A list already shown stays; with none, the page says it could not load.
       setFailed(true);
-      return;
+      return false;
     }
-    void refreshUnread();
   }, []);
+  const load = useCallback(async () => {
+    if (await fetchList()) void refreshUnread();
+  }, [fetchList]);
   useEffect(() => { void load(); }, [load]);
+  // A message that arrived, or one read or deleted on another device: the list again, once for a burst (the header's
+  // count follows the same events by itself). An announcement to many waits a random while first, as the count does.
+  const reload = useMemo(() => coalesced(fetchList), [fetchList]);
+  const later = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const spread = useCallback(
+    (ms: number) => {
+      if (!ms) return void reload();
+      const h = setTimeout(() => {
+        later.current.delete(h);
+        void reload();
+      }, Math.random() * ms);
+      later.current.add(h);
+    },
+    [reload],
+  );
+  useEffect(() => () => later.current.forEach(clearTimeout), []);
+  useRealtime('message.changed', (e) => spread(e.payload?.spreadMs ?? 0));
+  useRealtime('inbox.broadcast', (e) => spread(e.payload.spreadMs));
+  useEffect(() => onRealtimeResync(() => void reload()), [reload]);
 
   async function expand(m: MessageDto) {
     setOpen((o) => (o === m.id ? null : m.id));

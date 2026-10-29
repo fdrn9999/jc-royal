@@ -28,6 +28,7 @@ import { fail, isPreview, parseBody } from '../lib/http';
 import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { realtimeToUsers } from '../lib/realtime';
 import { audit } from './admin-auth';
 import { isUniqueViolation } from './auth';
 import { INTERNAL_HEADER } from './tables';
@@ -607,7 +608,8 @@ export const adminReportRoutes = new Hono<AppEnv>()
              SELECT lower(hex(randomblob(16))), u.id, 'notice', CASE WHEN u.locale = 'en' THEN ?5 ELSE ?6 END, CASE WHEN u.locale = 'en' THEN ?7 ELSE ?8 END, ?3, ?4
                FROM users u
               WHERE u.id IN (SELECT reporter_id FROM reports WHERE target_type = ?9 AND target_id = ?10 AND handled_by = ?3 AND handled_at = ?4)
-                AND u.status != 'deleted' AND ${claimed}`,
+                AND u.status != 'deleted' AND ${claimed}
+             RETURNING user_id AS userId`,
           ).bind(claim, id, me, at, e.title, k.title, e.body, k.body, r.targetType, r.targetId),
         ) - 1;
     }
@@ -621,7 +623,8 @@ export const adminReportRoutes = new Hono<AppEnv>()
           DB.prepare(
             `INSERT INTO messages (id, user_id, category, title, body, sender_id, created_at)
              SELECT lower(hex(randomblob(16))), id, 'sanction', CASE WHEN locale = 'en' THEN ?5 ELSE ?6 END, CASE WHEN locale = 'en' THEN ?7 ELSE ?8 END, ?3, ?4
-               FROM users WHERE id = ?9 AND status != 'deleted' AND ${claimed}`,
+               FROM users WHERE id = ?9 AND status != 'deleted' AND ${claimed}
+             RETURNING user_id AS userId`,
           ).bind(claim, id, me, at, e.title, k.title, e.body, k.body, r.targetUserId),
         ) - 1;
     }
@@ -637,5 +640,8 @@ export const adminReportRoutes = new Hono<AppEnv>()
     const results = await DB.batch(stmts);
     if (!results[0]!.meta.changes) fail(409, 'report_closed', 'report already handled');
     const changes = (i: number) => (i < 0 ? 0 : results[i]!.meta.changes);
+    // The members just told: their pages read their unread count.
+    const told = [reportersAt, targetAt].flatMap((i) => (i < 0 ? [] : (results[i]!.results as { userId: string }[]).map((r) => r.userId)));
+    realtimeToUsers(c, told, { scope: 'user', type: 'message.changed' });
     return c.json({ ok: true, closed: changes(closeAt), notified: { reporters: changes(reportersAt), target: changes(targetAt) } });
   });

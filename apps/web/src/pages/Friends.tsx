@@ -12,7 +12,7 @@ import {
   type SocialSettingsDto,
 } from '@jc/types';
 import { ArrowLeftIcon, Button, cx, Empty, formatChips, HourglassIcon, Input, LockIcon, Modal, Panel, PlayIcon, Spinner } from '@jc/ui';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { EmojiPicker } from '../components/EmojiPicker';
 import { JoinCodeModal } from '../components/JoinCode';
@@ -27,10 +27,14 @@ import { entryOf, RESUME, RESUME_WAIT } from '../lib/lobby';
 import { setPrefs, usePrefs } from '../lib/prefs';
 import { setPresenceView, sortFriends, useFriendsLastOnline, useFriendsPresence } from '../lib/presence';
 import { closeReadPushes } from '../lib/push';
+import { coalesced, onRealtimeResync, useRealtime, useRealtimeStatus } from '../lib/realtime';
 import { blockUser, loadBlocks, unblockUser } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
 
 const POLL_MS = 4_000;
+/** While the realtime socket is up a new message or read is announced: the conversation and the list poll only as a fallback. */
+const LIVE_POLL_MS = 30_000;
+const LIVE_LIST_POLL_MS = 60_000;
 
 /** Today → time; otherwise the date. */
 function shortTime(ms: number, locale: string) {
@@ -178,7 +182,14 @@ export function FriendsPage() {
   useEffect(() => {
     void load();
   }, [load]);
-  useVisiblePoll(() => void load(), 15_000);
+  // A request, a friendship or a 1:1 message (its last line and unread count) changed: the list again, once for a burst.
+  // While those events arrive the poll is only a fallback.
+  const reload = useMemo(() => coalesced(load), [load]);
+  useRealtime('social.friend.changed', () => void reload());
+  useRealtime('social.dm.created', () => void reload());
+  useRealtime('social.dm.read', () => void reload());
+  useEffect(() => onRealtimeResync(() => void reload()), [reload]);
+  useVisiblePoll(() => void load(), useRealtimeStatus() === 'open' ? LIVE_LIST_POLL_MS : 15_000);
   const prefs = usePrefs();
   const presence = useFriendsPresence(data?.friends.map((f) => f.id).join(','));
   const lastOnline = useFriendsLastOnline();
@@ -560,7 +571,13 @@ export function ConversationPage() {
   // The conversation on screen: a request still running for one left behind must not touch it.
   const current = useRef(userId);
   current.current = userId;
-  const polling = useRef(false);
+  // The conversation a poll is out for: one left running for a conversation left behind does not hold up this one's.
+  const polling = useRef<string | null>(null);
+  // An event came while a poll was out (it may have asked before that message was saved): one more poll after it.
+  const pollAgain = useRef(false);
+  // The first read of the conversation: an event, or the socket coming up, while it is out asks for the same poll after
+  // it (its read may be older than that message); once it failed there is nothing to poll.
+  const opening = useRef<'out' | 'in' | 'failed'>('out');
   const presence = useFriendsPresence(userId);
   const lastOnline = useFriendsLastOnline();
   // While this conversation is on screen the server skips a push of a message from them (lib/presence.ts).
@@ -619,29 +636,39 @@ export function ConversationPage() {
     setMissing(false);
     setFailed(false);
     synced.current = 0;
+    opening.current = 'out';
+    pollAgain.current = false;
     void api<ConversationDto>(`/api/dm/${userId}`)
       .then(({ messages, peerRead: _, ...rest }) => {
         if (!live) return;
+        opening.current = 'in';
         setConv(rest);
         scroll.current = { kind: 'bottom' };
         sync(messages);
         setMsgs(messages);
         if (messages.some((m) => !m.fromMe && !m.readAt)) void markRead(synced.current);
+        if (pollAgain.current) {
+          pollAgain.current = false;
+          void poll();
+        }
       })
       .catch((e: unknown) => {
+        if (!live) return;
+        opening.current = 'failed';
+        pollAgain.current = false;
         // No such player reads as not found; a lost connection offers a retry.
-        if (live) (isGone(e) ? setMissing : setFailed)(true);
+        (isGone(e) ? setMissing : setFailed)(true);
       });
     return () => {
       live = false;
     };
   }, [userId, markRead, attempt]);
 
-  const poll = useCallback(async () => {
-    // One at a time: a slow request is not stacked under the next tick.
-    if (polling.current) return;
-    polling.current = true;
+  const poll: () => Promise<void> = useCallback(async () => {
     const id = userId;
+    // One at a time: a slow request is not stacked under the next tick.
+    if (polling.current === id) return;
+    polling.current = id;
     const cur = msgsRef.current;
     try {
       // A burst, or a while offline, can leave more than a page: keep going from the last one received.
@@ -664,12 +691,37 @@ export function ConversationPage() {
     } catch {
       /* offline: the next tick, or the connection coming back, continues from the same seq */
     } finally {
-      polling.current = false;
+      if (polling.current === id) polling.current = null;
+      if (pollAgain.current && current.current === id) {
+        pollAgain.current = false;
+        void poll();
+      }
     }
   }, [userId, merge, markRead]);
+  /**
+   * For an event or the socket (back) up: a poll now, or one more after the one out (whose read may be older). A hidden
+   * tab with none out asks nothing: it polls once it is shown.
+   */
+  const pollSoon = useCallback(() => {
+    if (opening.current === 'failed') return;
+    if (opening.current === 'out' || polling.current === userId) pollAgain.current = true;
+    else if (document.visibilityState === 'visible') void poll();
+  }, [poll, userId]);
+  // A message in this conversation (from them, or mine sent from another device: one already shown is not asked for),
+  // and their reading mine. The event says only that and where: the messages and the read mark come from the poll.
+  // Also while the conversation is first read: that read may be older than the event.
+  useRealtime('social.dm.created', (e) => {
+    if (e.payload.peerId === userId && !msgsRef.current.some((m) => m.seq === e.payload.seq)) pollSoon();
+  });
+  useRealtime('social.dm.read', (e) => {
+    if (e.payload.peerId === userId && e.payload.readerId === userId) pollSoon();
+  });
+  // A friendship or a block changed, never saying which: whether I can still write here comes with the poll.
+  useRealtime('social.friend.changed', pollSoon);
+  useEffect(() => onRealtimeResync(pollSoon), [pollSoon]);
   useVisiblePoll(() => {
     if (conv) void poll();
-  }, POLL_MS);
+  }, useRealtimeStatus() === 'open' ? LIVE_POLL_MS : POLL_MS);
 
   useLayoutEffect(() => {
     const el = box.current;

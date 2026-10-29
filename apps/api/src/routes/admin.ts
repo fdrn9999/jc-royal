@@ -4,7 +4,7 @@
  * to admin_audit_log, refused and failed attempts too (lib/audit.ts). Actions marked so take preview: true and answer
  * what they would change without changing it.
  */
-import { applyLedger, findLedgerMismatches, schema } from '@jc/db';
+import { applyLedger, findLedgerMismatches, LEDGER_GUARD, schema } from '@jc/db';
 import { botSettingsIssues, ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, ne, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
@@ -16,6 +16,7 @@ import { randomToken, sha256 } from '../lib/crypto';
 import { toCsv } from '../lib/csv';
 import { fail, isPreview, parseBody } from '../lib/http';
 import { can, capabilitiesOf, hasGrant, matchedRoute, parseGrants, requirePermission } from '../lib/permissions';
+import { clientIp } from '../lib/rate-limit';
 import { adminAuthRoutes, requireAdminOrigin } from './admin-auth';
 import { adminCommunityRoutes } from './admin-community';
 import { adminSecurityRoutes } from './admin-security';
@@ -32,10 +33,12 @@ import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
 import { adminIntegrityRoutes } from './admin-integrity';
 import { adminReportRoutes } from './reports';
+import { lobbyTableChanged } from './tables';
 import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
+import { realtimeToUsers } from '../lib/realtime';
 import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
 import { kickEverywhere, refreshRoleEverywhere, roomCall } from '../lib/room';
@@ -192,6 +195,24 @@ function cursorOf(raw: string | undefined, timed: boolean): { at: number; seq: n
   const m = timed ? /^(\d{1,15})\.(\d{1,15})$/.exec(raw) : /^(\d{1,15})$/.exec(raw);
   if (!m) fail(400, 'bad_request', 'invalid cursor');
   return timed ? { at: Number(m[1]), seq: Number(m[2]) } : { at: 0, seq: Number(m[1]) };
+}
+
+/**
+ * The `user.chips` record of a chip adjustment: written only if its ledger row is there and has no record yet, in one
+ * statement, so a first try and a repeat racing it write one record between them. The adjustment runs it in the ledger's
+ * own batch (the chips and their record commit together or neither does); a repeat runs it alone for a row recorded
+ * before that. `+action` keeps the planner on audit_target_idx (this member's rows): with no ANALYZE statistics it chose
+ * audit_action_idx, every `user.chips` row ever written (docs/LOAD_TEST.md).
+ */
+function chipsRecord(db: D1Database, member: string, actor: string, ip: string | null, detail: { ledgerId: string } & Record<string, unknown>) {
+  return db
+    .prepare(
+      `INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, detail, ip)
+       SELECT ?1, ?2, 'user.chips', 'user', ?3, ?4, ?5
+       WHERE NOT EXISTS (SELECT 1 FROM admin_audit_log WHERE target_type = 'user' AND target_id = ?3 AND +action = 'user.chips' AND json_extract(detail, '$.ledgerId') = ?6)
+         AND ${LEDGER_GUARD}`,
+    )
+    .bind(crypto.randomUUID(), actor, member, JSON.stringify(detail), ip, detail.ledgerId, detail.ledgerId);
 }
 
 /** The member a list is narrowed to, by exact id, email or nickname (nicknames are unique ignoring case). */
@@ -802,6 +823,8 @@ const admin = new Hono<AppEnv>()
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
     if (vipEnded) await audit(c, 'user.vip', { type: 'user', id }, { from: vipEnded.color, to: null, reason: body.reason, cause: 'role', role: body.role, version: vipEnded.version + 1 });
+    // The member's own pages read their account again (the role, a VIP color it ended).
+    realtimeToUsers(c, [id], { scope: 'user', type: 'account.changed' });
     // The staff badge other players see at the tables where the member sits.
     const tables = await refreshRoleEverywhere(c.env, id, body.role);
     return c.json({ ok: true, tables });
@@ -835,8 +858,19 @@ const admin = new Hono<AppEnv>()
           .first<{ id: string; type: string; amount: number; createdAt: number }>()
       : null;
     if (body.refLedgerId && !ref) fail(400, 'ref_not_found', 'the linked transaction is not one of this member\'s');
+    // A key already used repeats that adjustment only for the same member, amount, memo and linked transaction (from any
+    // administrator: a double click, a lost answer). Anything else under it is neither that adjustment nor a new one.
+    const key = `admin:${body.idempotencyKey}`;
+    const madeBy = () =>
+      c.env.DB.prepare(`SELECT id, user_id AS userId, type, amount, memo, ref_id AS refId, actor_id AS actorId FROM chip_ledger WHERE idempotency_key = ?1`)
+        .bind(key)
+        .first<{ id: string; userId: string; type: string; amount: number; memo: string | null; refId: string | null; actorId: string | null }>();
+    const repeats = (m: { userId: string; type: string; amount: number; memo: string | null; refId: string | null }) =>
+      m.userId === id && m.type === 'admin_adjust' && m.amount === body.amount && m.memo === body.memo && m.refId === (ref?.id ?? null);
+    const conflict = () => refuse('idempotency_conflict', 409, 'idempotency_conflict', 'this key was already used for another adjustment');
     if (preview) {
-      const done = await c.env.DB.prepare(`SELECT 1 AS x FROM chip_ledger WHERE idempotency_key = ?1`).bind(`admin:${body.idempotencyKey}`).first();
+      const done = await madeBy();
+      if (done && !repeats(done)) await conflict();
       if (!target || (!done && target.balance + body.amount < 0)) await refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
       return c.json({
         preview: true,
@@ -849,26 +883,45 @@ const admin = new Hono<AppEnv>()
         ref,
       });
     }
-    const r = await applyLedger(c.env.DB, {
-      userId: id,
-      type: 'admin_adjust',
-      amount: body.amount,
-      idempotencyKey: `admin:${body.idempotencyKey}`,
-      actorId: c.var.user!.id,
-      memo: body.memo,
-      refId: ref?.id ?? null,
-    });
+    const linked = ref ? { refLedgerId: ref.id, refType: ref.type } : {};
+    // The record goes in the ledger's batch: if it cannot be written, no chips move and the request fails (the console
+    // keeps its key, so sending it again is this adjustment, once).
+    const r = await applyLedger(
+      c.env.DB,
+      {
+        userId: id,
+        type: 'admin_adjust',
+        amount: body.amount,
+        idempotencyKey: key,
+        actorId: c.var.user!.id,
+        memo: body.memo,
+        refId: ref?.id ?? null,
+      },
+      (ledgerId) => [chipsRecord(c.env.DB, id, c.var.user!.id, clientIp(c), { amount: body.amount, memo: body.memo, ledgerId, ...linked })],
+    );
     if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
-    // The same request again (a retry, a double click): nothing changed, and that is on record.
-    if (r.status === 'duplicate') await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
+    // The same request again (a retry, a double click): nothing changed, and that is on record. An adjustment made before
+    // its record shared its batch, whose record was not written, gets it now, marked late: as its ledger row has it, by
+    // who made it.
+    if (r.status === 'duplicate') {
+      const done = await madeBy();
+      if (!done || !repeats(done)) return conflict();
+      await chipsRecord(c.env.DB, id, done.actorId ?? c.var.user!.id, null, { amount: done.amount, memo: done.memo, ledgerId: done.id, ...linked, late: true }).run();
+      await audit(c, 'user.chips_duplicate', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id } : {}) });
+    }
     if (r.status === 'applied') {
+      c.set('audited', true);
+      // The adjustment and its record are committed: what follows reports it and never turns it into a failure (the
+      // admin would see an error for chips that moved, and the retry finds them moved). The notice is logged if it fails.
       await sendMessages(c.var.db, {
         userIds: [id],
         category: body.amount > 0 ? 'event' : 'admin',
         ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
-      });
-      await audit(c, 'user.chips', { type: 'user', id }, { amount: body.amount, memo: body.memo, ledgerId: r.ledgerId, ...(ref ? { refLedgerId: ref.id, refType: ref.type } : {}) });
+      }).catch((e) => console.error('chips notice not written', id, r.ledgerId, e));
+      // The member's open pages read the balance, the ledger and the inbox again (the event says only that they changed).
+      realtimeToUsers(c, [id], { scope: 'user', type: 'wallet.changed' });
+      realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });
     }
     return c.json({ ok: true, duplicate: r.status === 'duplicate', balanceAfter: r.balanceAfter });
   })
@@ -954,6 +1007,7 @@ const admin = new Hono<AppEnv>()
       createdBy: c.var.user!.id,
     });
     await audit(c, 'table.create', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : undefined });
+    lobbyTableChanged(c, id);
     return c.json({ id }, 201);
   })
   .get('/tables/:id', async (c) => {
@@ -982,6 +1036,8 @@ const admin = new Hono<AppEnv>()
     const set =
       body.action === 'pause' || body.action === 'resume' ? { handsPaused: body.action === 'pause' } : { entryBlocked: body.action === 'block' };
     await c.var.db.update(schema.tables).set({ ...set, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
+    // A pause does not show on the lobby card; blocking entry does.
+    if ('entryBlocked' in set) lobbyTableChanged(c, id);
     const live = (await roomCall(c, id, 'reload')) ?? (await roomCall(c, id, 'reload'));
     await audit(c, 'table.control', { type: 'table', id }, { ...body, roomConfirmed: !!live, handInProgress: live?.handInProgress ?? null });
     // The row is saved either way: a room that did not answer takes it on when it next loads, and sending it again is safe.
@@ -1077,6 +1133,7 @@ const admin = new Hono<AppEnv>()
       }
     };
     const t = await save();
+    lobbyTableChanged(c, id);
     // Blind changes apply from the next hand; the running hand keeps its config. Bot settings apply at once without
     // touching the running hand: a bot over the new limits stands up after it, and a bot that sits down meanwhile is dealt
     // in from the next one. A room that does not confirm keeps its old settings (entry blocking included) until it
@@ -1124,6 +1181,7 @@ const admin = new Hono<AppEnv>()
     }
     // Stop new hands; the room finishes the current hand, cashes everyone out, then marks the table closed.
     await c.var.db.update(schema.tables).set({ status: 'closing', entryBlocked: true, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
+    lobbyTableChanged(c, id);
     // If the room cannot be reached the table stays 'closing' (no one can join) and the room finishes the close when it
     // next loads; the admin is told to retry, which is safe.
     const live = (await roomCall(c, id, 'close')) ?? (await roomCall(c, id, 'close'));
@@ -1409,7 +1467,10 @@ const admin = new Hono<AppEnv>()
     }
     if (revert && before.status !== 'deleted' && balanceAfter !== null) {
       await sendMessages(c.var.db, { userIds: [e.subjectId], category: 'admin', ...notices(before.locale).reconcileReverted(-difference, balanceAfter), senderId: actor });
+      realtimeToUsers(c, [e.subjectId], { scope: 'user', type: 'message.changed' });
     }
+    // A recorded difference is a new row of the member's history; a revert also moves the balance.
+    realtimeToUsers(c, [e.subjectId], { scope: 'user', type: 'wallet.changed' });
     await audit(c, 'user.reconcile', { type: 'user', id: e.subjectId }, { eventId: id, action: body.action, difference, note: body.note, ledgerIds, balanceBefore: before.balance, balanceAfter });
     return c.json({ ok: true, action: body.action, ledgerIds, balanceAfter });
   })

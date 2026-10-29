@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { answerAll, CARD_ANSWERS, playScenario, sortBySwaps } from './academy-helpers';
+import { answerAll, CARD_ANSWERS, offlineWatch, playScenario, sortBySwaps } from './academy-helpers';
 import { balanceOf, checkOrCall, signUp, test } from './helpers';
 
 // Engine-decided answers for Lesson 2's compare quiz, in question order (see data/handQuiz.ts).
@@ -88,8 +88,7 @@ test('academy practice: real table UI offline — no socket, wallet unchanged, s
   const { page: p } = await signUp(browser);
   const before = await balanceOf(p);
   const ledgerBefore = await p.evaluate(async () => ((await (await fetch('/api/me/ledger')).json()) as unknown[]).length);
-  const sockets: string[] = [];
-  p.on('websocket', (ws) => sockets.push(ws.url()));
+  const { sockets, platformSent } = offlineWatch(p);
   await p.goto('/academy/practice');
   await p.getByTestId('scenario-A').click();
   await expect(p.getByTestId('practice-table')).toBeVisible();
@@ -112,6 +111,7 @@ test('academy practice: real table UI offline — no socket, wallet unchanged, s
   await expect(p.getByTestId('practice-done')).toBeVisible();
 
   expect(sockets).toEqual([]);
+  expect(platformSent.filter((t) => t !== 'sub' && t !== 'ping')).toEqual([]);
   expect(await balanceOf(p)).toBe(before);
   await p.goto('/academy/practice');
   await expect(p.getByTestId('scenario-A')).toContainText(/완료|Done/);

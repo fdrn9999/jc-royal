@@ -11,6 +11,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { MemberName } from '../components/MemberName';
 import { api, ApiError } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { onRealtime, onRealtimeResync, useRealtimeStatus, wantTopic } from '../lib/realtime';
 import { when } from '../lib/service';
 import { useTn, type Tn, type TnKey } from '../game/tournament-text';
 
@@ -18,6 +19,14 @@ const PAGE = 20;
 /** How often a page refreshes while it is visible and the tournament can still change. */
 const LIST_POLL_MS = 15_000;
 const DETAIL_POLL_MS = 5_000;
+/**
+ * While the realtime socket is up, a registration, start, bust, finish or cancel comes as an event, so the polls only
+ * check now and then; a running tournament's stacks (no event per hand) are still read every RUNNING_POLL_MS.
+ */
+const LIVE_POLL_MS = 60_000;
+const RUNNING_POLL_MS = 15_000;
+/** The reads one change sets off on every page showing it are spread over this long (not all in the same second). */
+const CHANGE_SPREAD_MS = 3_000;
 
 interface ListDto {
   tournaments: TournamentSummaryDto[];
@@ -72,6 +81,35 @@ function useVisiblePoll(tick: () => void, ms: number, on: boolean) {
       window.removeEventListener('online', wake);
     };
   }, [ms, on]);
+}
+
+/**
+ * Reads again (`reload`) after a random wait when a tournament this page shows (`shows`) changed, once however many
+ * changes come meanwhile, and at once when the realtime socket is back after being down. A hidden page waits for its
+ * poll's wake. Whether the socket is up, to pick the poll interval.
+ */
+function useTournamentEvents(reload: () => void, shows: (id: string) => boolean): boolean {
+  const up = useRealtimeStatus() === 'open';
+  const ref = useRef({ reload, shows });
+  ref.current = { reload, shows };
+  useEffect(() => {
+    const release = wantTopic('tournaments');
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const changed = (id: string) => {
+      if (timer || document.visibilityState !== 'visible' || !ref.current.shows(id)) return;
+      timer = setTimeout(() => {
+        timer = null;
+        ref.current.reload();
+      }, Math.random() * CHANGE_SPREAD_MS);
+    };
+    const offs = [onRealtime('tournament.changed', (e) => changed(e.resourceId)), onRealtimeResync(() => ref.current.reload())];
+    return () => {
+      release();
+      if (timer) clearTimeout(timer);
+      for (const f of offs) f();
+    };
+  }, []);
+  return up;
 }
 
 /** Re-renders every second while `on` (countdowns). */
@@ -212,7 +250,8 @@ export function TournamentsPage() {
   useEffect(() => {
     void load();
   }, [load]);
-  useVisiblePoll(() => void load(true), LIST_POLL_MS, tab === 'active');
+  const up = useTournamentEvents(() => void load(true), () => true);
+  useVisiblePoll(() => void load(true), up ? LIVE_POLL_MS : LIST_POLL_MS, tab === 'active');
 
   async function more() {
     if (!data) return;
@@ -349,7 +388,8 @@ export function TournamentPage() {
     void load();
   }, [load]);
   const live = !d || ACTIVE.includes(d.status);
-  useVisiblePoll(() => void load(true), DETAIL_POLL_MS, live);
+  const up = useTournamentEvents(() => void load(true), (changed) => changed === id);
+  useVisiblePoll(() => void load(true), !up ? DETAIL_POLL_MS : d?.status === 'running' ? RUNNING_POLL_MS : LIVE_POLL_MS, live);
   useTicker(d?.status === 'running' && d.levelEndsAt !== null);
 
   async function register(on: boolean) {

@@ -129,6 +129,8 @@ export const TABLES: TestTable[] = [
   // (heads-up, so one fold ends a hand for the history).
   { id: 'it-social-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   { id: 'it-social-1', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Platform realtime: a buy-in and a cash-out each tell the member's other pages that the wallet moved.
+  { id: 'it-rt-0', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {
@@ -223,7 +225,8 @@ export function ensureDevVars() {
   }
 }
 
-export async function startWorker(port: number, state: string): Promise<RunningWorker> {
+/** `vars`: more wrangler --var values for this worker, e.g. a shorter realtime sweep (REALTIME_SWEEP_MS) for one suite. */
+export async function startWorker(port: number, state: string, vars: Record<string, string> = {}): Promise<RunningWorker> {
   ensureDevVars();
   const url = `http://127.0.0.1:${port}`;
   // A server left on the port would pass the health check below in place of this one.
@@ -248,6 +251,9 @@ export async function startWorker(port: number, state: string): Promise<RunningW
       '--var', `VAPID_PUBLIC_KEY:${vapid.publicKey}`,
       '--var', `VAPID_PRIVATE_KEY:${vapid.privateKey}`,
       ...(sink ? ['--var', `PUSH_SINK_URL:${sink}`] : []),
+      // The load runs read each response's D1 row counts (apps/api/src/lib/d1-stats.ts).
+      ...(process.env.TEST_D1_STATS === '1' ? ['--var', 'D1_STATS:1'] : []),
+      ...Object.entries(vars).flatMap(([k, v]) => ['--var', `${k}:${v}`]),
     ],
     {
       cwd: root,

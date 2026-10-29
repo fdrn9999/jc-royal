@@ -8,6 +8,7 @@ import { badgesFor, type Badge } from '../lib/badges';
 import { sha256 } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { clientIp, rateLimit } from '../lib/rate-limit';
+import { sendToAll } from '../lib/realtime';
 import { roomCall } from '../lib/room';
 import { hasRoomAccess, issueRoomAccess } from '../lib/room-access';
 import { refuseNewGamesInMaintenance } from '../lib/service';
@@ -64,7 +65,25 @@ export function toLobbyDto(t: TableRow, hostUser: HostUser | null = null, badge:
     waitlist: t.liveWaitlist,
     spectators: t.liveSpectators,
     myParticipation: mine,
+    liveRev: t.liveUpdatedAt ?? 0,
+    rev: t.updatedAt,
   };
+}
+
+/**
+ * A table opened, or its card changed (settings, entry, closing), committed in D1: the card as every member sees it,
+ * read once here, to every lobby; a table already closed leaves them. A tournament's table is never in the lobby.
+ * In the background, never failing the request.
+ */
+export function lobbyTableChanged(c: Context<AppEnv>, id: string) {
+  const send = async () => {
+    const [r] = await withHost(c).where(eq(schema.tables.id, id));
+    if (!r || r.t.roomType === 'tournament') return;
+    if (r.t.status === 'closed') return sendToAll(c.env, { scope: 'lobby', type: 'lobby.table.removed', resourceId: id });
+    const { myParticipation: _, ...card } = toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null]));
+    await sendToAll(c.env, { scope: 'lobby', type: 'lobby.table.updated', resourceId: id, revision: r.t.updatedAt, payload: card });
+  };
+  c.executionCtx.waitUntil(send().catch((err) => console.warn('realtime lobby card not sent', String(err))));
 }
 
 /**

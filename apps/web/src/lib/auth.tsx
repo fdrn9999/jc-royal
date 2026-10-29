@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, ApiError } from './api';
 import { useI18n } from './i18n';
 import { flushSettings } from './prefs';
+import { coalesced, onRealtime, onRealtimeResync, startRealtime, stopRealtime } from './realtime';
 
 interface AuthCtx {
   me: MeDto | null;
@@ -12,6 +13,14 @@ interface AuthCtx {
   logout: () => Promise<void>;
   /** Switches the UI language and, when signed in, saves it as the account language (mail and system messages use it). */
   chooseLocale: (locale: MeDto['locale']) => void;
+  /** The page shown at this address even signed out (`keepSignedOut`), or null. */
+  kept: string | null;
+  /**
+   * A page that says why it ended (a table connection an administrator closed, which signs the member out too) stays
+   * at `path` when the sign-in goes, rather than turning into the sign-in page; any other address asks to sign in as
+   * before. Returns the release.
+   */
+  keepSignedOut: (path: string) => () => void;
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -58,6 +67,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
 
+  // The realtime socket lives as long as this member's sign-in here. The wallet or the account changed (an admin grant,
+  // a table's cash-out, VIP): the account is read again, once for a burst, never adjusted from the event. So it is when
+  // the socket comes back, for what changed while it was down.
+  useEffect(() => {
+    if (!meId) return;
+    const again = coalesced(refresh);
+    startRealtime(meId, () => void again());
+    const offs = [onRealtime('wallet.changed', () => void again()), onRealtime('account.changed', () => void again()), onRealtimeResync(() => void again())];
+    return () => {
+      for (const off of offs) off();
+      stopRealtime();
+    };
+  }, [meId, refresh]);
+
   useEffect(() => {
     if (me) setLocale(me.locale);
   }, [me?.locale]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -88,7 +111,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [setLocale, meId, meLocale],
   );
 
-  const value = useMemo(() => ({ me, loading, refresh, setMe, logout, chooseLocale }), [me, loading, refresh, logout, chooseLocale]);
+  const [kept, setKept] = useState<string | null>(null);
+  const keepSignedOut = useCallback((path: string) => {
+    setKept(path);
+    return () => setKept((k) => (k === path ? null : k));
+  }, []);
+
+  const value = useMemo(
+    () => ({ me, loading, refresh, setMe, logout, chooseLocale, kept, keepSignedOut }),
+    [me, loading, refresh, logout, chooseLocale, kept, keepSignedOut],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

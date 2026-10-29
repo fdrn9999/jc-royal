@@ -1,5 +1,5 @@
 import { expect, type Browser } from '@playwright/test';
-import { answerAll, CARD_ANSWERS } from './academy-helpers';
+import { answerAll, CARD_ANSWERS, offlineWatch } from './academy-helpers';
 import { balanceOf, checkOrCall, PASSWORD, signUp, test } from './helpers';
 
 async function loginOnNewDevice(browser: Browser, email: string) {
@@ -87,8 +87,7 @@ test('compare quiz explains a wrong pick with the deciding cards; review page ta
 test('free practice: rule-based bots, any legal action, several hands, still offline', async ({ browser }) => {
   const { page: p } = await signUp(browser);
   const before = await balanceOf(p);
-  const sockets: string[] = [];
-  p.on('websocket', (ws) => sockets.push(ws.url()));
+  const { sockets, platformSent } = offlineWatch(p);
   await p.goto('/academy/practice');
   await p.getByTestId('scenario-free').click();
   await p.locator('[data-bots="2"]').click();
@@ -114,6 +113,7 @@ test('free practice: rule-based bots, any legal action, several hands, still off
   }
   await expect(p.getByTestId('free-table')).toContainText(/핸드 3|Hand 3/);
   expect(sockets).toEqual([]);
+  expect(platformSent.filter((t) => t !== 'sub' && t !== 'ping')).toEqual([]);
   expect(await balanceOf(p)).toBe(before);
 });
 

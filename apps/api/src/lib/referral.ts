@@ -14,6 +14,7 @@ import type { Env } from '../env';
 import { sendMessages } from './community';
 import { hmacSign } from './crypto';
 import { notices } from './notices';
+import { sendToUsers } from './realtime';
 
 /**
  * Referral rewards: a member shares their code (or the link `/register?ref=CODE`); a new member who signs up with it
@@ -494,6 +495,10 @@ async function finish(db: D1Database, id: string, paid: SettleResult['paid']): P
 async function notify(env: Env, to: Person, side: 'referrer' | 'invitee', amount: number, other: string | null) {
   const n = notices(to.locale === 'en' ? 'en' : 'ko');
   await sendMessages(createDb(env.DB), { userIds: [to.id], category: 'system', ...n.referralPaid(side, amount, other) }).catch((e) => console.error('referral notice', e));
+  // Paid here from a request or the daily run, with no request context to hand the publish to: awaited, and it never throws.
+  await Promise.all([sendToUsers(env, [to.id], { scope: 'user', type: 'wallet.changed' }), sendToUsers(env, [to.id], { scope: 'user', type: 'message.changed' })]).catch((e) =>
+    console.warn('realtime referral', String(e)),
+  );
 }
 
 /**

@@ -83,6 +83,7 @@ const BY_CODE: Record<string, Key> = {
   internal: 'errServer',
   note_pii: 'errNotePii',
   large_adjustment: 'errLargeAdjustment',
+  idempotency_conflict: 'errIdempotencyConflict',
   reconcile_stale: 'errReconcileStale',
   already_resolved: 'errAlreadyResolved',
   already_suspended: 'errAlreadySuspended',
