@@ -2,14 +2,53 @@
 // a member's events reach only that member's pages, a sign-out (here, on other devices, by an administrator, by a
 // suspension) ends the sockets it ends, and nothing a page sends changes anything. Events only say what changed: the
 // page reads the balance again, so a grant counted once in D1 is shown once however often its event comes.
+//
+// Its own worker and state, not the shared one: every table room of a worker tells the hubs of its lobby counts, and
+// the rooms other files leave playing on the shared worker keep waking them. A page hears of a close the hub made only
+// once the hub has been idle for about ten seconds (tests/support/realtime.ts), so there it could take any time (after
+// fold-leave.test.ts, a hub that closed a socket at once was sent 16 publishes in the next 22 s, never 10 s apart).
 import http from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
-import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
-import { d1 } from '../support/d1';
+import { resolve } from 'node:path';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { Client, PASSWORD, signupBody, uniq, WEB_ORIGIN } from '../support/client';
+import { d1 as d1At } from '../support/d1';
 import { RealtimeSocket } from '../support/realtime';
+import { prepareState, root, startWorker, TABLES, type RunningWorker } from '../support/worker';
 import { TableSocket } from '../support/ws';
 
-const admin = sharedAdmin();
+let own: RunningWorker | undefined;
+/** This file's worker and the local D1 it writes. */
+let where: { base: string; state: string };
+let admin: Client;
+
+beforeAll(async () => {
+  const state = resolve(root, 'tests/.state/realtime');
+  await prepareState(state, TABLES.filter((t) => t.id === 'it-rt-0'));
+  // The hubs check their sockets' sign-ins every 15 s, as on the shared worker (tests/support/global-setup.ts).
+  own = await startWorker(8817, state, { REALTIME_SWEEP_MS: '15000' });
+  where = { base: own.url, state };
+  admin = await superAdmin();
+}, 240_000);
+
+afterAll(async () => {
+  await own?.stop();
+});
+
+/** SQL on this file's D1. */
+const d1 = <T = Record<string, unknown>>(sql: string) => d1At<T>(sql, where.state);
+
+/** A new member of this file's worker, signed in on the member site. */
+async function newUser() {
+  const client = new Client(WEB_ORIGIN, where.base);
+  const email = `${uniq('e')}@test.dev`;
+  const r = await client.post('/api/auth/register', await signupBody(client, { email, nickname: uniq('p').slice(0, 14) }));
+  expect(r.status, JSON.stringify(r.body)).toBe(201);
+  return { client, me: r.body as { id: string; nickname: string; balance: number; locale: string }, email };
+}
+
+/** Another page (a device) on this file's worker, signed in to nothing yet. */
+const device = () => new Client(WEB_ORIGIN, where.base);
+
 const open: RealtimeSocket[] = [];
 const tables: TableSocket[] = [];
 afterEach(() => {
@@ -27,7 +66,7 @@ async function quiet(s: RealtimeSocket, type: string, expected: number) {
 }
 
 async function rt(client: Client, opts: Parameters<typeof RealtimeSocket.open>[1] = {}) {
-  const s = await RealtimeSocket.open(client, opts);
+  const s = await RealtimeSocket.open(client, { base: where.base, ...opts });
   open.push(s);
   return s;
 }
@@ -39,11 +78,11 @@ async function reauth(c: Client = admin) {
   expect(r.status, JSON.stringify(r.body)).toBe(200);
 }
 
-/** Another super admin (a member promoted in D1, signed in to the console), with the password confirmed. */
-async function otherAdmin() {
+/** A super admin (a member promoted in D1, signed in to the console), with the password confirmed. */
+async function superAdmin() {
   const u = await newUser();
   await d1(`UPDATE users SET role = 'super_admin' WHERE id = '${u.me.id}'`);
-  const c = new Client('http://localhost:5174');
+  const c = new Client('http://localhost:5174', where.base);
   expect((await c.post('/api/admin/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
   await reauth(c);
   return c;
@@ -51,7 +90,7 @@ async function otherAdmin() {
 
 /** The status the api answers a handshake with, 101 when it opens (fetch() forbids the Upgrade header). */
 function handshake(client: Client, origin = 'http://localhost:5173'): Promise<number> {
-  const u = new URL(`${process.env.TEST_BASE_URL}/ws/realtime`);
+  const u = new URL(`${where.base}/ws/realtime`);
   const headers: Record<string, string> = { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==', Origin: origin };
   if (client.cookies.size) headers.Cookie = client.cookieHeader();
   return new Promise((resolve, reject) => {
@@ -71,7 +110,7 @@ function handshake(client: Client, origin = 'http://localhost:5173'): Promise<nu
 
 describe('realtime socket: who may open one', () => {
   it('refuses a page without a sign-in and a page from another site', async () => {
-    expect(await handshake(new Client())).toBe(401);
+    expect(await handshake(device())).toBe(401);
     const u = await newUser();
     expect(await handshake(u.client, 'https://evil.example')).toBe(403);
     // a plain request is not a socket
@@ -135,7 +174,7 @@ describe('realtime socket: personal events', () => {
     expect(altered.body.error.code).toBe('idempotency_conflict');
     expect(await recorded()).toEqual([]);
     // The same request from another administrator: the record is the grant's, by the one who made it.
-    const second = await otherAdmin();
+    const second = await superAdmin();
     expect((await second.post(`/api/admin/users/${target.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: true, balanceAfter: 10_300 });
     const audits = await recorded();
     expect(audits).toHaveLength(1);
@@ -306,7 +345,7 @@ describe('realtime socket: the account and the wallet', () => {
 
   it("a profile saved on one device reaches the member's other devices", async () => {
     const m = await newUser();
-    const phone = new Client();
+    const phone = device();
     expect((await phone.post('/api/auth/login', { email: m.email, password: PASSWORD })).status).toBe(200);
     const [here, there] = await Promise.all([rt(m.client), rt(phone)]);
     const nickname = uniq('rn').slice(0, 14);
@@ -338,7 +377,7 @@ describe('realtime socket: the account and the wallet', () => {
   it('a buy-in and a cash-out at a table each tell the pages away from it', async () => {
     const m = await newUser();
     const s = await rt(m.client);
-    const ws = await TableSocket.open(m.client, 'it-rt-0');
+    const ws = await TableSocket.open(m.client, 'it-rt-0', { base: where.base });
     tables.push(ws);
     expect(await ws.request({ t: 'sit', seatIndex: 0, buyIn: 400 })).toMatchObject({ t: 'ack' });
     await s.event('wallet.changed');
@@ -404,7 +443,7 @@ describe('realtime socket: friends and 1:1 messages', () => {
   it("a 1:1 message reaches the other player and the sender's other device, and reading it tells both", async () => {
     const [a, b] = await friends();
     const outsider = await newUser();
-    const phone = new Client();
+    const phone = device();
     expect((await phone.post('/api/auth/login', { email: a.email, password: PASSWORD })).status).toBe(200);
     const [sa, saPhone, sb, so] = await Promise.all([rt(a.client), rt(phone), rt(b.client), rt(outsider.client)]);
     const sent = await a.client.post(`/api/dm/${b.me.id}`, { text: 'realtime hello' });
@@ -444,7 +483,7 @@ describe('realtime socket: friends and 1:1 messages', () => {
 describe('realtime socket: the inbox', () => {
   it("reading or deleting a message reaches the member's other devices; reading nothing new tells nobody", async () => {
     const m = await newUser();
-    const phone = new Client();
+    const phone = device();
     expect((await phone.post('/api/auth/login', { email: m.email, password: PASSWORD })).status).toBe(200);
     const [here, there] = await Promise.all([rt(m.client), rt(phone)]);
     for (const n of [1, 2]) expect((await admin.post('/api/admin/messages', { userIds: [m.me.id], category: 'notice', title: `rt ${n}`, body: 'IT' })).status).toBe(201);
@@ -514,9 +553,9 @@ describe('realtime socket: the inbox', () => {
 describe('realtime socket: sign-outs', () => {
   it('logging out ends this device; "other devices" keeps the device that asked', async () => {
     const u = await newUser();
-    const phone = new Client();
+    const phone = device();
     expect((await phone.post('/api/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
-    const laptop = new Client();
+    const laptop = device();
     expect((await laptop.post('/api/auth/login', { email: u.email, password: PASSWORD })).status).toBe(200);
     const [sHere, sPhone, sLaptop] = await Promise.all([rt(u.client), rt(phone), rt(laptop)]);
 
@@ -552,14 +591,14 @@ describe('realtime socket: sign-outs', () => {
 
   it('a sign-out the hub never heard of ends the socket at its next check of D1, and only that one', async () => {
     const [a, b] = await Promise.all([newUser(), newUser()]);
-    const phone = new Client();
+    const phone = device();
     expect((await phone.post('/api/auth/login', { email: a.email, password: PASSWORD })).status).toBe(200);
     const [sa, sPhone, sb] = await Promise.all([rt(a.client), rt(phone), rt(b.client)]);
     // A revoke lost on the way: the sign-in ends in D1 alone. The first of a's two sessions goes (the phone's, on the
     // same hub, stays); b's account stops being active.
     await d1(`DELETE FROM sessions WHERE id = (SELECT id FROM sessions WHERE user_id = '${a.me.id}' ORDER BY created_at LIMIT 1)`);
     await d1(`UPDATE users SET status = 'suspended' WHERE id = '${b.me.id}'`);
-    // The integration worker's hubs read their sockets' sessions every 15 s (REALTIME_SWEEP_MS; 5 min in production).
+    // This file's hubs read their sockets' sessions every 15 s (REALTIME_SWEEP_MS; 5 min in production).
     expect(await Promise.all([sa.waitClose(50_000), sb.waitClose(50_000)])).toEqual([4401, 4401]);
     // the phone's socket outlived the sweep that ended the other, and still gets a's events
     await reauth();
