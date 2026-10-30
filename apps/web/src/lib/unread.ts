@@ -11,6 +11,13 @@ let counts: UnreadCountsDto = NONE;
 /** The account the counters are about; another account's are never shown, and their late answers are dropped. */
 let owner: string | null = null;
 let gen = 0;
+/**
+ * Reads in the order they were asked, and the last whose answer shows: an answer to a read asked before that one is
+ * older than what shows, and changes nothing (it would put back counters from before, and a message the newer read
+ * already told of would be news again).
+ */
+let asks = 0;
+let showing = 0;
 /** Whether `counts` were read for this account: until then a read is where the counters start, not something new. */
 let known = false;
 const subs = new Set<() => void>();
@@ -60,12 +67,15 @@ function own(account: string) {
 
 export async function refreshUnread() {
   const asked = gen;
+  const ask = ++asks;
   const upTo = heardTick;
   try {
     const r = await api<UnreadCountsDto>('/api/messages/unread-count');
     if (r.serviceRev !== undefined) refreshService(r.serviceRev);
-    // Asked for the account before this one (signed out and in as someone else meanwhile).
-    if (asked !== gen) return;
+    // Asked for the account before this one (signed out and in as someone else meanwhile), or before a read whose
+    // answer already shows.
+    if (asked !== gen || ask < showing) return;
+    showing = ask;
     const dmFrom = [...heard.keys()];
     for (const [peer, at] of heard) if (at <= upTo) heard.delete(peer);
     const news = known ? risen(counts, r) : [];
@@ -75,7 +85,8 @@ export async function refreshUnread() {
     if (news.length) rises.forEach((f) => f(news, r, dmFrom));
   } catch (e) {
     // Signed out (here or on every device): nothing unread is shown for a sign-in that is gone. Offline: kept.
-    if (asked === gen && e instanceof ApiError && e.status === 401) {
+    if (asked === gen && ask > showing && e instanceof ApiError && e.status === 401) {
+      showing = ask;
       known = false;
       heard.clear();
       if (counts !== NONE) set(NONE);

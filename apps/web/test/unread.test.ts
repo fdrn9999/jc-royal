@@ -16,6 +16,12 @@ async function answer(r: Response | Error) {
   pending.shift()!(r);
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
+/** Answers the newest request still waiting, before the older ones. */
+async function answerNewest(r: Response | Error) {
+  await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0));
+  pending.pop()!(r);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 beforeEach(() => {
   pending = [];
@@ -147,6 +153,39 @@ describe('arrivals', () => {
       void refreshUnread();
       await answer(counts(0, 2));
       expect(from.at(-1)).toEqual([]);
+    } finally {
+      off();
+    }
+  });
+
+  it('an answer that comes back after a newer one changes nothing: the newer holds the counters and whose messages they are', async () => {
+    const from: (readonly string[])[] = [];
+    const off = onUnreadRise((kinds, _c, dmFrom) => {
+      if (kinds.includes('dmUnread')) from.push(dmFrom);
+    });
+    try {
+      stop = watchUnread('H', 30_000);
+      await answer(counts(0, 0));
+      // A read asked before the message is still out when the socket tells of one from the friend whose conversation is
+      // open, and a read asked after it comes back first.
+      void refreshUnread();
+      heardDm('open');
+      void refreshUnread();
+      await answerNewest(counts(0, 1));
+      expect(from).toEqual([['open']]);
+      // The older answer, from before the message: dropped.
+      await answer(counts(0, 0));
+      expect(unreadOf('H').dmUnread).toBe(1);
+      // The next poll finds the same message: not news again, and not put on no one.
+      void refreshUnread();
+      await answer(counts(0, 1));
+      expect(from).toHaveLength(1);
+      // Signed out meanwhile: a late answer from before is not counters for a sign-in that is gone.
+      void refreshUnread();
+      void refreshUnread();
+      await answerNewest(unauthorized());
+      await answer(counts(4, 4));
+      expect(unreadOf('H')).toEqual(NONE);
     } finally {
       off();
     }
