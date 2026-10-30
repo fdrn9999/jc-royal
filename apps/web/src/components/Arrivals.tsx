@@ -91,11 +91,12 @@ export function Arrivals() {
   }, [list.length]);
 
   const close = (kind: UnreadKind) => setList((cur) => cur.filter((a) => a.kind !== kind));
-  // Kept on the page while empty: a screen reader reads what is added to a live region it already knew.
+  // Kept on the page while empty: a screen reader reads what is added to a live region it already knew. Not a status
+  // role: that is the page's own message (a page shows one of its own), and being atomic it would read every notice
+  // still up each time one is added; a polite region reads the one added.
   return (
     <div
       className="fixed inset-x-4 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-50 flex flex-col gap-2 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-80"
-      role="status"
       aria-live="polite"
       onPointerEnter={() => setHeld(true)}
       onPointerLeave={() => setHeld(false)}
