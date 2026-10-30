@@ -19,6 +19,8 @@ const hubPost = async (env: Env, shard: number, op: 'publish' | 'revoke', body: 
     headers: { [INTERNAL_HEADER]: env.INTERNAL_SECRET, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
+  // The reply is not needed: left unread it keeps the hub busy (apps/game-worker/src/admin-monitor-publish.ts).
+  await res.body?.cancel().catch(() => {});
   if (!res.ok) throw new Error(`realtime ${op}: ${res.status}`);
 };
 
