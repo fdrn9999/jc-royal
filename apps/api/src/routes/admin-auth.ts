@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
+import { adminMonitorRevoke } from '../lib/admin-monitor';
 import { audit } from '../lib/audit';
 import { requireAdmin } from '../lib/auth';
 import { DUMMY_HASH, verifyPassword } from '../lib/crypto';
@@ -73,7 +74,9 @@ export const adminAuthRoutes = new Hono<AppEnv>()
     return c.json({ ok: true });
   })
   .post('/logout', async (c) => {
-    await destroySession(c, 'admin');
+    const gone = await destroySession(c, 'admin');
+    // Its control center sockets close too (they do not reconnect).
+    if (gone) adminMonitorRevoke(c, { user: gone.userId, session: gone.id });
     return c.json({ ok: true });
   })
   .get('/me', requireAdmin, async (c) => {

@@ -6,10 +6,11 @@
  */
 import { applyLedger, findLedgerMismatches, LEDGER_GUARD, schema } from '@jc/db';
 import { botSettingsIssues, ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
+import { adminMonitorRevoke, adminMonitorTableChanged } from '../lib/admin-monitor';
 import { audit, auditFailures, searchAudit, AUDIT_COUNT_CAP } from '../lib/audit';
 import { assertRecentReauth, requireAdmin } from '../lib/auth';
 import { randomToken, sha256 } from '../lib/crypto';
@@ -32,6 +33,7 @@ import { adminTournamentRoutes } from './admin-tournaments';
 import { adminServiceRoutes } from './admin-service';
 import { adminStatsRoutes } from './admin-stats';
 import { adminIntegrityRoutes } from './admin-integrity';
+import { adminMonitorRoutes } from './admin-monitor';
 import { adminReportRoutes } from './reports';
 import { lobbyTableChanged } from './tables';
 import { sendMessages } from '../lib/community';
@@ -60,6 +62,7 @@ const MEMBER_ACTIONS = [...SANCTION_ACTIONS, 'user.role', 'user.vip', ...CHIP_AC
 
 /** Emergency table controls: `pause` lets the running hand finish and deals no new one until `resume`. */
 const TableControlSchema = z.object({ action: z.enum(['pause', 'resume', 'block', 'unblock']), reason: ReasonSchema });
+const CloseSchema = z.object({ reason: ReasonSchema.optional() });
 
 type LiveSeat = { userId: string; nickname: string; phase: string; tableSessionId: string } | null;
 
@@ -823,6 +826,8 @@ const admin = new Hono<AppEnv>()
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
     if (vipEnded) await audit(c, 'user.vip', { type: 'user', id }, { from: vipEnded.color, to: null, reason: body.reason, cause: 'role', role: body.role, version: vipEnded.version + 1 });
+    // Their console sign-ins ended with the role change: their control center sockets close too.
+    adminMonitorRevoke(c, { user: id });
     // The member's own pages read their account again (the role, a VIP color it ended).
     realtimeToUsers(c, [id], { scope: 'user', type: 'account.changed' });
     // The staff badge other players see at the tables where the member sits.
@@ -962,7 +967,8 @@ const admin = new Hono<AppEnv>()
     const where = paged
       ? and(
           q ? or(like(T.name, `%${q}%`), eq(T.id, q)) : undefined,
-          status === 'open' || status === 'closing' || status === 'closed' ? eq(T.status, status) : status === 'active' ? ne(T.status, 'closed') : undefined,
+          // `IN` (not `<> 'closed'`) so SQLite searches tables_status_idx instead of scanning every closed room ever made.
+          status === 'open' || status === 'closing' || status === 'closed' ? eq(T.status, status) : status === 'active' ? inArray(T.status, ['open', 'closing']) : undefined,
           roomType === 'official' || roomType === 'member' || roomType === 'tournament' ? eq(T.roomType, roomType) : undefined,
           c.req.query('issue') === '1' ? isNotNull(T.lastIssue) : undefined,
         )
@@ -1008,6 +1014,7 @@ const admin = new Hono<AppEnv>()
     });
     await audit(c, 'table.create', { type: 'table', id }, { ...body, joinCode: body.joinCode ? '***' : undefined });
     lobbyTableChanged(c, id);
+    adminMonitorTableChanged(c, id);
     return c.json({ id }, 201);
   })
   .get('/tables/:id', async (c) => {
@@ -1038,6 +1045,7 @@ const admin = new Hono<AppEnv>()
     await c.var.db.update(schema.tables).set({ ...set, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
     // A pause does not show on the lobby card; blocking entry does.
     if ('entryBlocked' in set) lobbyTableChanged(c, id);
+    adminMonitorTableChanged(c, id);
     const live = (await roomCall(c, id, 'reload')) ?? (await roomCall(c, id, 'reload'));
     await audit(c, 'table.control', { type: 'table', id }, { ...body, roomConfirmed: !!live, handInProgress: live?.handInProgress ?? null });
     // The row is saved either way: a room that did not answer takes it on when it next loads, and sending it again is safe.
@@ -1134,6 +1142,7 @@ const admin = new Hono<AppEnv>()
     };
     const t = await save();
     lobbyTableChanged(c, id);
+    adminMonitorTableChanged(c, id);
     // Blind changes apply from the next hand; the running hand keeps its config. Bot settings apply at once without
     // touching the running hand: a bot over the new limits stands up after it, and a bot that sits down meanwhile is dealt
     // in from the next one. A room that does not confirm keeps its old settings (entry blocking included) until it
@@ -1179,13 +1188,19 @@ const admin = new Hono<AppEnv>()
         roomAnswered: !!live,
       });
     }
+    // A reason is optional here (the console's close sends none; the control center's asks for one) and kept in the log.
+    // A request with no body closes as it always did; a reason that is sent must be a valid one.
+    const sent = CloseSchema.safeParse((await c.req.json().catch(() => null)) ?? {});
+    if (!sent.success) fail(400, 'bad_request', 'validation failed', sent.error.issues.map((i) => ({ path: i.path, message: i.message })));
+    const { reason } = sent.data;
     // Stop new hands; the room finishes the current hand, cashes everyone out, then marks the table closed.
     await c.var.db.update(schema.tables).set({ status: 'closing', entryBlocked: true, updatedAt: Date.now() }).where(eq(schema.tables.id, id));
     lobbyTableChanged(c, id);
+    adminMonitorTableChanged(c, id);
     // If the room cannot be reached the table stays 'closing' (no one can join) and the room finishes the close when it
     // next loads; the admin is told to retry, which is safe.
     const live = (await roomCall(c, id, 'close')) ?? (await roomCall(c, id, 'close'));
-    await audit(c, 'table.close', { type: 'table', id }, live ?? { roomConfirmed: false });
+    await audit(c, 'table.close', { type: 'table', id }, { ...(live ?? { roomConfirmed: false }), ...(reason ? { reason } : {}) });
     if (!live) fail(503, 'room_unavailable', 'the table did not confirm the close; try again');
     return c.json({ ok: true, live });
   })
@@ -1481,4 +1496,4 @@ const admin = new Hono<AppEnv>()
     return c.json(out);
   });
 
-export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminIntegrityRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes).route('/', adminVipRoutes));
+export const adminRoutes = new Hono<AppEnv>().route('/auth', adminAuthRoutes).route('/', admin.route('/', adminCommunityRoutes).route('/', adminReportRoutes).route('/', adminIntegrityRoutes).route('/', adminMonitorRoutes).route('/', adminServiceRoutes).route('/', adminSecurityRoutes).route('/', adminStatsRoutes).route('/', adminRefillRoutes).route('/', adminBotRoutes).route('/', adminTimeBankRoutes).route('/', adminTournamentRoutes).route('/', adminReferralRoutes).route('/', adminSettingsRoutes).route('/', adminSocialRoutes).route('/', adminBrandRoutes).route('/', adminVipRoutes));

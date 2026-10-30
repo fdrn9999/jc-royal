@@ -42,7 +42,7 @@ LOAD_TABLES=30 LOAD_PLAYERS=6 LOAD_SPECTATORS=4 pnpm test:load  # PowerShell: $e
 | `LOAD_HANDS` | 5 | 1–200 | 테이블마다 진행할 핸드 수 |
 | `LOAD_PORT` | 8796 | | 로컬 Worker 포트(통합 8799, E2E 8798과 겹치지 않음) |
 
-`pnpm test:load`는 6절의 실시간 시나리오(`tests/load/realtime.load.ts`)도 같은 Worker에서 차례로 돌린다(파일을 동시에 돌리지 않음). 두 시나리오는 같은 테이블에 앉으므로, 테이블 시나리오의 착석 세션 검사는 자기 플레이어의 세션만 센다. 실시간 시나리오만 돌리려면 다음과 같이 한다.
+`pnpm test:load`는 6절의 실시간 시나리오(`tests/load/realtime.load.ts`)와 7절의 관제센터 시나리오(`tests/load/monitor.load.ts`)도 같은 Worker에서 차례로 돌린다(파일을 동시에 돌리지 않음). 시나리오들이 같은 테이블에 앉으므로, 테이블 시나리오의 착석 세션 검사는 자기 플레이어의 세션만 센다. 관제센터 시나리오가 먼저 돌아 닫힌 테이블 5,000개를 남겨도 나머지 둘은 통과했다(2026-10-30, 기본값으로 세 파일 모두 통과, 192초). 실시간 시나리오만 돌리려면 다음과 같이 한다.
 
 ```bash
 pnpm exec vitest run --config tests/load/vitest.config.ts tests/load/realtime.load.ts
@@ -276,6 +276,122 @@ PART A를 모두 마친 코드로 기본 구성을 다시 돌린 값(트레이�
 
 이 변경 뒤 관리자 칩·멱등·감사 통합 테스트(`admin`, `admin-concurrency`, `economy`, `realtime`)를 다시 돌려 62개 모두 통과했다. 늦게 쓰는 감사 행(`late: true`) 경로도 들어 있다.
 
-**새 인덱스는 만들지 않았다.** 측정한 경로에서 근거가 나온 것은 위 하나였다.
+**새 인덱스는 만들지 않았다.** 측정한 경로에서 근거가 나온 것은 위 하나였다. (이 실행의 데이터 기준이다. 7절에서 닫힌 기록을 쌓고 다시 재어, 근거가 나온 부분 인덱스 하나를 더했다.)
 
 **남은 후보(바꾸지 않음)**: 반복 신고 대상 목록(`apps/api/src/routes/reports.ts`의 정지 횟수 하위 쿼리, `a.action = 'user.suspend'`)도 같은 계획을 고른다. 대상마다 `audit_action_idx`로 모든 `user.suspend` 행을 읽는다. `+a.action`이면 `audit_target_idx`를 탄다(같은 D1 파일의 `EXPLAIN QUERY PLAN`). 관리자 화면 하나만 쓰고 부하 시나리오에 없어서 읽은 행을 재지 않았다. 재고 나서 고친다.
+
+## 7. 관제센터와 닫힌 기록의 D1 행 (2026-10-29)
+
+> 이 절의 숫자도 개발 PC 한 대의 로컬 `wrangler dev`(workerd) 결과다. API, 테이블 방, 관제 허브(`admin-0`), 관리자 소켓, 테스트 클라이언트가 모두 한 PC에서 돈다. 엣지 지연, 실제 네트워크, 과금이 아니다. 운영 데이터와 실제 사용자에게는 돌리지 않았다. 구조는 `docs/CONTROL_CENTER.md`.
+
+### 7.1 무엇을 하는가
+
+`tests/load/monitor.load.ts`:
+
+1. 셋업이 만든 `load-*` 테이블 옆에 빈 열린 테이블 `mon-*`을 넣어 열린 테이블을 `MON_TABLES`개로 맞춘다(2·6·9석을 섞음).
+2. 관리자 `MON_ADMINS`명(`dashboard`·`tables`·`tableControl` 권한)이 관리자 콘솔 Origin으로 로그인하고 각자 `/ws/admin/monitor` 소켓을 하나씩 연다.
+3. **D1 행**: 콘솔과 로비가 읽는 경로 8개를 두 번씩 부르고 두 번째 응답의 `x-d1-*` 헤더를 기록한다(`TEST_D1_STATS=1`일 때만; 6.3과 같은 방법).
+4. **닫힌 기록**: 닫힌 테이블 `MON_CLOSED`개와, 검색할 회원 한 명의 닫힌 좌석(최대 2,000개)을 넣고 3을 다시 잰다. 닫힌 테이블과 닫힌 좌석은 어떤 코드도 지우지 않으므로 운영에서 계속 늘어난다.
+5. **그리드 첫 읽기**: 모든 관리자가 동시에 관제 목록(`GET /api/admin/monitor/tables`)을 읽는다. 같은 때 대시보드 요약(`GET /api/admin/ops/live`)도 읽는다(대시보드 화면이 30초마다 읽는 것; 관제 화면은 자기 목록으로 센다). 3번 한다.
+6. **방 요약**: 모든 관리자가 동시에 화면의 카드처럼 방 요약(`POST /api/admin/monitor/rooms`, 한 번에 최대 24개)을 읽는다. 한 번도 깨지 않은 방(cold), 그다음 한 번 더(warm).
+7. **좌석 변경**: 테이블 `MON_SITS`개에서 회원이 한 명씩 앉았다 일어선다(변경 사이 1.1초). 각 관리자 소켓이 `admin.monitor.counts`를 받기까지 잰다. 그다음 모든 관리자가 그 테이블을 따라가게(`follow`) 하고 다시 한다. 이때는 방 요약 푸시 `admin.monitor.room`도 잰다.
+8. **핸드**: 회원 2명이 `MON_HANDS`핸드를 친다. 아무도 따라가지 않을 때, 그리고 모든 관리자가 따라갈 때의 액션 왕복(보낸 뒤 결과 상태가 올 때까지)을 잰다.
+9. 모든 소켓이 받은 프레임 원문 전체를 비공개 키(`MONITOR_PRIVATE_KEYS`: 홀카드, 공개한 카드, 쇼다운, 덱, 입장 코드·해시, 대기자 원본)로 검사하고, 같은 `eventId`와 끊긴 소켓을 센다. 보고서는 `tests/.state/monitor-load-report-<테이블>x<관리자>.json`이다.
+
+**통과 조건**(하나라도 어기면 실패): 오류, 이벤트 누락(counts, 따라갈 때 room), 응답하지 않은 방, 중복 이벤트, 비공개 키가 든 프레임, 끊긴 소켓이 모두 0.
+
+```bash
+pnpm exec vitest run --config tests/load/vitest.config.ts tests/load/monitor.load.ts
+MON_TABLES=200 MON_ADMINS=10 MON_HANDS=4 pnpm exec vitest run --config tests/load/vitest.config.ts tests/load/monitor.load.ts
+TEST_D1_STATS=1 pnpm exec vitest run --config tests/load/vitest.config.ts tests/load/monitor.load.ts   # D1 행 수
+```
+
+| 변수 | 기본값 | 범위 | 뜻 |
+|---|---|---|---|
+| `MON_TABLES` | max(20, `LOAD_TABLES`) | `LOAD_TABLES`–500 | 열린 테이블 수(셋업 테이블 포함) |
+| `MON_ADMINS` | 1 | 1–10 | 관리자 수(소켓 1개씩). 한 주소의 콘솔 로그인은 15분에 20번까지다 |
+| `MON_CLOSED` | 5,000 | 0–50,000 | 4단계에 넣는 닫힌 테이블 |
+| `MON_SITS` | min(4, `LOAD_TABLES`) | 1–min(4, `LOAD_TABLES`) | 앉았다 일어서는 테이블(한 화면이 따라가는 방은 4개까지) |
+| `MON_HANDS` | 6 | 0–100 | 핸드 수(0이면 핸드 단계를 건너뜀) |
+
+### 7.2 지연 (D1 행 측정을 끈 실행)
+
+원본 보고서는 `docs/test-logs/monitor-load-20x1.json`, `-50x3.json`, `-100x5.json`, `-200x10.json`이다(열린 테이블 × 관리자). 모두 `MON_CLOSED` 5,000, `MON_HANDS` 4, `LOAD_TABLES` 4로 돌렸다. 4개 모두 통과했고, Worker 로그 오류 줄도 0이었다.
+
+| 항목 (ms) | 20 × 1 | 50 × 3 | 100 × 5 | 200 × 10 |
+|---|---|---|---|---|
+| 관제 목록, 모든 관리자 동시 p50 / p95 | 9 / 10 | 44 / 49 | 74 / 78 | 150 / 175 |
+| 같은 때 대시보드 요약 p50 / p95 | 16 / 16 | 45 / 49 | 74 / 78 | 149 / 173 |
+| 방 요약 요청, cold (요청 수) | 239 (1) | 346 / 347 (3) | 351 (5) | 428 / 429 (10) |
+| 그 안의 방 하나, cold p50 / p95 / 최대 | 168 / 228 / 228 | 7 / 293 / 314 | 15 / 267 / 293 | 33 / 246 / 320 |
+| 방 요약 요청, warm | 16 | 42 | 58 | 118 / 119 |
+| 그 안의 방 하나, warm p50 / p95 | 3 / 3 | 8 / 9 | 13 / 14 | 34 / 37 |
+| 요청 하나가 읽은 방 | 20 | 24 | 24 | 24 |
+| 착석 → 모든 관리자 `counts`, 따라가지 않음 p50 / p95 (건수) | 12 / 12 (8) | 11 / 13 (24) | 11 / 14 (40) | 11 / 13 (80) |
+| 같은 것, 모두 따라감 | 11 / 13 (8) | 9 / 11 (24) | 9 / 12 (40) | 10 / 12 (80) |
+| 착석 → 모든 관리자 `room`, 모두 따라감 p50 / p95 | 17 / 17 | 17 / 18 | 17 / 18 | 18 / 18 |
+| 착석·일어서기 응답 p50, 따라가지 않음 / 따라감 | 7–9 / 8–9 | 8 / 7–8 | 7–8 / 7 | 7–9 / 6–7 |
+| 액션 왕복, 따라가지 않음 p50 / p95 / p99 (건수) | 4 / 7 / 9 (33) | 4 / 9 / 16 (36) | 4 / 9 / 9 (36) | 4 / 8 / 9 (38) |
+| 액션 왕복, 모두 따라감 p50 / p95 / p99 (건수) | 5 / 6 / 7 (32) | 5 / 6 / 6 (36) | 4 / 6 / 6 (33) | 4 / 6 / 6 (35) |
+| 소켓마다 받은 이벤트 / 중복 / 비공개 프레임 / 끊긴 소켓 | 51 / 0 / 0 / 0 | 51 / 0 / 0 / 0 | 51 / 0 / 0 / 0 | 51 / 0 / 0 / 0 |
+| 테스트 시간 | 73.4 s | 74.2 s | 74.0 s | 74.8 s |
+
+- **게임에 주는 영향은 이 규모에서 보이지 않았다.** 관리자 10명이 모두 방을 따라가도 액션 왕복 p95는 6 ms로, 따라가지 않을 때(8–9 ms)와 같은 범위다. 방 요약 푸시는 액션 응답 밖에서(`ctx.waitUntil`) 보내고, 1초에 한 번까지다. 4핸드(약 19.6초) 동안 관리자 한 명이 받은 방 요약 푸시는 9개였다.
+- **관리자 수가 늘어도 소켓마다 받는 이벤트는 51개 그대로다.** 좌석·관전 수(`counts`)는 테이블마다 바뀔 때만 오고, 방 요약은 그 방을 따라가는 소켓에만 간다.
+- **방 요약을 읽어도 방이 수를 바꾸지 않는다.** cold·warm 읽기 뒤 3초 동안 `counts` 이벤트가 0개였다. 관리자 읽기는 관전자나 연결로 세지 않는다.
+- **그리드 첫 읽기는 관리자 수 × 테이블 수에 따라 늘었다**(200 × 10에서 p95 175 ms). 관리자 10명의 요청 30개가 한 프로세스의 같은 로컬 D1 파일을 동시에 읽은 결과다. 엣지 D1의 지연이 아니다.
+- **cold 방 하나의 p50이 50 × 3부터 작은 까닭**은 같은 방을 여러 관리자가 함께 읽어, 방을 처음 깨우는 시간(p95, 약 250–320 ms)을 일부 요청만 냈기 때문으로 보인다. 요청이 방에 닿은 순서는 재지 않았다.
+- `TEST_D1_STATS=1`로 돌린 20 × 1(`docs/test-logs/monitor-load-20x1-d1-stats.json`)은 통계가 문장을 한 번 더 돌리므로 더 느리다(목록 22 ms, cold 요청 465 ms, `room` 33 ms, 액션 p95 9 ms). 지연으로 인용하지 않는다.
+
+### 7.3 닫힌 기록과 D1 행
+
+`TEST_D1_STATS=1`로 열린 테이블 20개에서 쟀다. "기록 뒤"는 닫힌 테이블 5,000개와 검색한 회원의 닫힌 좌석 2,000개를 넣은 뒤다. 원본은 고치기 전 `docs/test-logs/monitor-load-20x1-d1-stats-before-fix.json`, 고친 뒤 `monitor-load-20x1-d1-stats.json`이다. 쓴 행과 측정 못 한 쿼리는 모든 요청에서 0이었다.
+
+| 요청 | 쿼리 | 고치기 전: 기록 전 → 뒤 | 고친 뒤: 기록 전 → 뒤 |
+|---|---|---|---|
+| 관제 목록 `GET /api/admin/monitor/tables` | 4 | 45 → 5,046 | 46 → 46 |
+| 닫힌 테이블 보기 `…?scope=closed` | 4 | 4 → 15,005 | 5 → 10,005 |
+| 착석 회원 검색 `…?member=` | 4 | 28 → 7,029 | 29 → 29 |
+| 대시보드 요약 `GET /api/admin/ops/live` | 10 | 83 → 83 | 83 → 83 |
+| 테이블 관리 `GET /api/admin/tables?paged=1&limit=50` (모든 상태, 기본) | 4 | 63 → 15,063 | 63 → 15,063 |
+| 같은 목록 `&status=active` | 4 | 63 → 10,063 | 67 → 67 |
+| 방 요약 `POST /api/admin/monitor/rooms` (4개) | 3 | 11 → 11 | 11 → 11 |
+| 로비 `GET /api/tables` (그 회원으로) | 3 | 44 → 2,044 | 44 → 44 |
+
+고치기 전과 뒤는 다른 실행이라 기록 전 값이 1–4행 다르다. 원인은 같은 실행의 로컬 D1 파일 사본에 `EXPLAIN QUERY PLAN`을 돌려 확인했다(`node:sqlite`, 읽기 전용). D1에는 `ANALYZE` 통계가 없어 SQLite가 인덱스를 규칙으로 고른다(6.4).
+
+**고친 것**
+
+1. **닫힌 테이블에 남은 좌석**(`seatedOnClosed`, `apps/api/src/routes/admin-monitor.ts`). `JOIN`이면 SQLite가 `SEARCH t USING INDEX tables_status_idx (status=?)`로 모든 닫힌 테이블부터 읽었다(+5,001행). `CROSS JOIN`으로 순서를 고정해 열린 좌석(`SCAN s USING COVERING INDEX tsess_…`, 지금 앉아 있는 사람 수만큼)에서 시작하고 테이블은 기본 키(`SEARCH t USING INDEX sqlite_autoindex_tables_1 (id=?)`)로 찾는다. 대시보드(`apps/api/src/lib/ops.ts`)는 이미 이렇게 해서 83행 그대로였다.
+2. **한 회원의 열린 좌석**(`user_id = ? AND status = 'seated'`). 인덱스가 `tsess_user_idx(user_id)`뿐이라 그 회원이 앉았던 모든 좌석(닫힌 것 포함)을 읽었다(로비 +2,000, 회원 검색 +2,000). **부분 인덱스 `tsess_seated_user_idx`를 더했다**(`packages/db/migrations/0037_seated_user_index.sql`):
+   ```sql
+   CREATE INDEX `tsess_seated_user_idx` ON `table_sessions` (`user_id`) WHERE status = 'seated';
+   ```
+   열린 좌석만 들어 있다. 이 조회는 로비의 `myParticipation`(`routes/tables.ts`), VIP 반영(`lib/room.ts`, `routes/admin-vip.ts`), 자동 충전(`lib/refill.ts`), 관리자 회원 상세(`routes/admin.ts`), 봇 고르기(`apps/game-worker/src/bots.ts`), 관제 회원 검색에서 돈다. 봇 계정은 하루 종일 앉고 일어나서 닫힌 좌석이 가장 빨리 쌓이고, 방이 빈 봇을 찾을 때마다 봇마다 이 조회를 한다. 계획은 `INDEX tsess_user_idx (user_id=?)`에서 `INDEX tsess_seated_user_idx (user_id=?)`로 바뀐다. 기록 조회(`user_id = ? ORDER BY created_at`)는 그대로 `tsess_user_idx`를 쓴다.
+3. **테이블 관리의 활성 목록**(`routes/admin.ts`). `status <> 'closed'`는 인덱스를 타지 못해 모든 테이블을 읽었다. 로비처럼 `status IN ('open', 'closing')`으로 바꿔 `tables_status_idx`를 탄다. 결과는 같다.
+
+**회귀 테스트**: `tests/integration/seat-plans.test.ts`가 실제 마이그레이션 파일로 메모리 SQLite를 만들고, 소스에서 옮긴 문장(소스에 그대로 있는지도 검사)의 계획을 본다. 0037을 빼면 로비 계획이 `SEARCH table_sessions USING INDEX tsess_user_idx (user_id=?)`로 돌아가고, 예전 `JOIN`은 `tables_status_idx`로 시작해 둘 다 실패함을 확인했다.
+
+**인덱스 비용(재지 않음)**: 좌석이 열릴 때 인덱스 항목 하나를 쓰고, 닫힐 때(`seated` → `closed`) 지운다. 항목 수는 지금 열린 좌석 수다. 이 시나리오의 착석·일어서기에서 쓴 행은 따로 세지 않았다. 마이그레이션은 만들 때 `table_sessions`를 한 번 읽는다. 운영 `table_sessions`의 행 수는 재지 않았다. 되돌리려면 `DROP INDEX tsess_seated_user_idx;`면 된다(결과는 같고 계획만 예전으로 돌아감). CI 배포는 D1 마이그레이션을 Worker보다 먼저 적용한다(`docs/DEPLOYMENT.md`).
+
+**열린 테이블 200개**(`docs/test-logs/monitor-load-200x1-d1-stats.json`, 핸드 0, 같은 기록):
+
+| 요청 | 쿼리 | 기록 전 → 뒤 |
+|---|---|---|
+| 관제 목록 | 4 | 406 → 406 |
+| 닫힌 테이블 보기 | 4 | 5 → 10,005 |
+| 착석 회원 검색 | 4 | 209 → 209 |
+| 대시보드 요약 | 10 | 623 → 623 |
+| 테이블 관리(모든 상태) | 4 | 603 → 15,603 |
+| 테이블 관리 `&status=active` | 4 | 607 → 607 |
+| 방 요약(4개) | 3 | 11 → 11 |
+| 로비 | 3 | 404 → 404 |
+
+고친 경로는 닫힌 기록이 아니라 열린 테이블 수에 따라 는다. Worker 로그에서 로비 목록 문장과 관제 목록 문장이 각각 402행을 읽었다(열린 테이블 하나에 약 2행). 관제 목록은 한 번에 500개까지만 보여 준다(`MONITOR_TABLES_MAX`).
+
+**남은 것(바꾸지 않음)**
+
+- **닫힌 테이블 보기**는 닫힌 테이블 수의 약 2배를 읽는다. 최근 500개를 보여 주려고 닫힌 테이블 전체를 `created_at`으로 정렬한다(`(status, created_at)` 인덱스가 없음). 관리자가 필터를 고를 때만 읽는다(그 필터로 소켓이 다시 연결될 때와, 소켓이 끊긴 동안 30초마다 포함).
+- **테이블 관리의 기본 목록**(모든 상태)은 모든 테이블을 읽는다(목록 정렬과 `COUNT(*)`). 원래 있던 동작이고, 화면을 열 때만 읽으며 폴링하지 않는다.
+- 둘 다 자주 쓰이면 `tables (status, created_at)` 인덱스가 후보다. 지금은 열 때만 드는 비용이라 더하지 않았다.
+- 게임 Worker의 D1 읽기는 이 계측에 들어가지 않는다. `bots.ts`의 좌석 조회는 위 회귀 테스트의 계획으로만 확인했다.

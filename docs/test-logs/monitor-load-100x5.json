@@ -1,0 +1,317 @@
+{
+  "at": "2026-10-29T21:36:33.167Z",
+  "config": {
+    "tables": 100,
+    "admins": 5,
+    "closed": 5000,
+    "sits": 4,
+    "hands": 4,
+    "seededTables": 4,
+    "d1Stats": false
+  },
+  "note": "local wrangler dev (workerd) on one machine; every room and hub shares one process. Not edge latency, not billing. Timings with d1Stats on include its re-run reads.",
+  "durationMs": 74013,
+  "listed": {
+    "items": 100,
+    "truncated": false
+  },
+  "rows": {
+    "before": [
+      {
+        "method": "GET",
+        "path": "/api/admin/monitor/tables",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/monitor/tables?scope=closed",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/monitor/tables?member=pmvu2b1ap19185",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/ops/live",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/tables?paged=1&limit=50&offset=0",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/tables?paged=1&limit=50&offset=0&status=active",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/monitor/rooms",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/tables",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      }
+    ],
+    "after": [
+      {
+        "method": "GET",
+        "path": "/api/admin/monitor/tables",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/monitor/tables?scope=closed",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/monitor/tables?member=pmvu2b1ap19185",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/ops/live",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/tables?paged=1&limit=50&offset=0",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/tables?paged=1&limit=50&offset=0&status=active",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/monitor/rooms",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      },
+      {
+        "method": "GET",
+        "path": "/api/tables",
+        "status": 200,
+        "queries": null,
+        "rowsRead": null,
+        "rowsWritten": null,
+        "unmeasured": null
+      }
+    ]
+  },
+  "latencyMs": {
+    "gridTables": {
+      "n": 15,
+      "p50": 74,
+      "p95": 78,
+      "p99": 78,
+      "max": 78
+    },
+    "gridOps": {
+      "n": 15,
+      "p50": 74,
+      "p95": 78,
+      "p99": 78,
+      "max": 78
+    },
+    "roomsColdRequest": {
+      "n": 5,
+      "p50": 351,
+      "p95": 351,
+      "p99": 351,
+      "max": 351
+    },
+    "roomsColdRoom": {
+      "n": 120,
+      "p50": 15,
+      "p95": 267,
+      "p99": 288,
+      "max": 293
+    },
+    "roomsWarmRequest": {
+      "n": 5,
+      "p50": 58,
+      "p95": 58,
+      "p99": 58,
+      "max": 58
+    },
+    "roomsWarmRoom": {
+      "n": 120,
+      "p50": 13,
+      "p95": 14,
+      "p99": 14,
+      "max": 14
+    },
+    "unfollowedSitAck": {
+      "n": 4,
+      "p50": 8,
+      "p95": 10,
+      "p99": 10,
+      "max": 10
+    },
+    "unfollowedLeaveAck": {
+      "n": 4,
+      "p50": 7,
+      "p95": 9,
+      "p99": 9,
+      "max": 9
+    },
+    "unfollowedCounts": {
+      "n": 40,
+      "p50": 11,
+      "p95": 14,
+      "p99": 14,
+      "max": 14
+    },
+    "followedSitAck": {
+      "n": 4,
+      "p50": 7,
+      "p95": 7,
+      "p99": 7,
+      "max": 7
+    },
+    "followedLeaveAck": {
+      "n": 4,
+      "p50": 7,
+      "p95": 9,
+      "p99": 9,
+      "max": 9
+    },
+    "followedCounts": {
+      "n": 40,
+      "p50": 9,
+      "p95": 12,
+      "p99": 12,
+      "max": 12
+    },
+    "followedRoom": {
+      "n": 40,
+      "p50": 17,
+      "p95": 18,
+      "p99": 18,
+      "max": 18
+    },
+    "unfollowedAction": {
+      "n": 36,
+      "p50": 4,
+      "p95": 9,
+      "p99": 9,
+      "max": 9
+    },
+    "followedAction": {
+      "n": 33,
+      "p50": 4,
+      "p95": 6,
+      "p99": 6,
+      "max": 6
+    }
+  },
+  "roomsCalls": {
+    "perRead": 24,
+    "cold": 120,
+    "warm": 120,
+    "coldUnavailable": 0,
+    "warmUnavailable": 0,
+    "countsEventsAfterCold": 0,
+    "countsEventsAfterWarm": 0
+  },
+  "hands": {
+    "unfollowed": {
+      "hands": 4,
+      "actions": 36,
+      "short": false,
+      "durationMs": 19673
+    },
+    "followed": {
+      "hands": 4,
+      "actions": 33,
+      "short": false,
+      "durationMs": 19619,
+      "roomPushesToOneAdmin": 9
+    }
+  },
+  "missed": {
+    "unfollowedCounts": 0,
+    "followedCounts": 0,
+    "followedRoom": 0
+  },
+  "events": {
+    "perSocket": {
+      "n": 5,
+      "p50": 51,
+      "p95": 51,
+      "p99": 51,
+      "max": 51
+    },
+    "duplicates": 0
+  },
+  "privateFrames": 0,
+  "lostSockets": 0,
+  "errors": []
+}

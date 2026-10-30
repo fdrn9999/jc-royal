@@ -1,0 +1,1 @@
+CREATE INDEX `tsess_seated_user_idx` ON `table_sessions` (`user_id`) WHERE status = 'seated';

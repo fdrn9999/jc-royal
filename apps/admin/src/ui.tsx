@@ -2,7 +2,7 @@
  * Console building blocks the pages share: the dialog in the console's language, what a list shows besides its rows
  * (first load, nothing found, a failed load with a retry), the result of an action, and a page-by-page pager.
  */
-import { Badge, Button, Modal as BaseModal, XIcon } from '@jc/ui';
+import { Badge, Button, InfoIcon, Modal as BaseModal, XIcon } from '@jc/ui';
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { useT } from './i18n';
 
@@ -147,6 +147,26 @@ export function Feedback({ note, testid = 'feedback', pin }: { note: Note; testi
       </button>
     </div>
   );
+}
+
+/**
+ * Another administrator changed what this shows since it was read (adminChanges.ts): nothing shown or typed here is
+ * replaced until the administrator asks for the latest. `pin` is for a page whose forms are further down (a table's
+ * blinds): it stays in sight under the header, and under a pinned result (Feedback's --pin-h).
+ */
+export function ChangedNotice({ text, onRefresh, busy, testid = 'changed-notice', pin }: { text?: string; onRefresh: () => void; busy?: boolean; testid?: string; pin?: boolean }) {
+  const { t } = useT();
+  const box = (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-info/40 bg-info/10 px-3 py-2 text-sm text-[#a9c8ee]" role="status" data-testid={testid}>
+      <InfoIcon aria-hidden className="size-4 shrink-0" />
+      <span className="min-w-0 flex-1 break-words">{text ?? t('changedByOther')}</span>
+      <Button size="sm" variant="outline" loading={busy} onClick={onRefresh} data-testid={`${testid}-refresh`}>
+        {t('changedRefresh')}
+      </Button>
+    </div>
+  );
+  if (!pin) return box;
+  return <div className="sticky top-[calc(var(--shell-h,0px)_+_var(--pin-h,0px)_+_0.5rem)] z-20 rounded-lg bg-ink-950 shadow-lg shadow-black/40">{box}</div>;
 }
 
 /** Previous / next for a list read page by page; `range` says which rows are shown. */

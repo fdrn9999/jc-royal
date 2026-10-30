@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { LobbyTableDto } from './api';
+import { VIP_COLORS } from './vip';
 
 // ------------------------------------------------------------------ platform realtime (GET /ws/realtime)
 //
@@ -116,6 +117,13 @@ export const RealtimeEventSchema = z.discriminatedUnion('type', [
   z.object({ ...pub, type: z.literal('service.changed'), payload: z.object({ rev: z.number(), spreadMs: count }) }),
   /** Messages went to many members at once (an announcement): each page reads its unread count after a random wait. */
   z.object({ ...pub, type: z.literal('inbox.broadcast'), payload: z.object({ spreadMs: count }) }),
+  /**
+   * An administrator changed member `resourceId`'s VIP color as other players see it (null: none now). `revision` is the
+   * member's VIP version: a page keeps the newest it heard. Only the color every page already shows on that member's
+   * name, never who changed it or why; sent only when what others see changed (never for a suspended member). A page
+   * showing that member lays it over what it read; no page reads anything again for it. Every page.
+   */
+  z.object({ ...pub, type: z.literal('member.vip.changed'), resourceId: id, revision: z.number().int().min(0), payload: z.object({ vip: z.enum(VIP_COLORS).nullable() }) }),
 ]);
 export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
 export type RealtimeEventType = RealtimeEvent['type'];

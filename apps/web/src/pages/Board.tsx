@@ -10,6 +10,7 @@ import { PlayerCard, ReportModal, type ReportSubject } from '../components/Socia
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { useMemberVip, withHeardVip } from '../lib/memberVip';
 import { useMaintenance, when } from '../lib/service';
 
 type Card = Parameters<typeof PlayingCard>[0]['card'];
@@ -80,14 +81,16 @@ export function BoardPage() {
     let live = true;
     setData(null);
     setFailed(false);
+    const at = Date.now();
     api<PostPageDto>(`/api/board/posts?page=${page}&q=${encodeURIComponent(q)}`).then(
-      (d) => live && setData(d),
+      (d) => live && setData(withHeardVip(d, at)),
       () => live && setFailed(true),
     );
     return () => {
       live = false;
     };
   }, [page, q, attempt]);
+  useMemberVip(setData);
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   return (
     <div className="flex flex-col gap-5">
@@ -144,7 +147,8 @@ export function PostPage() {
   const load = useCallback(async () => {
     setFailed(false);
     try {
-      setPost(await api<PostDetailDto>(`/api/board/posts/${id}`));
+      const at = Date.now();
+      setPost(withHeardVip(await api<PostDetailDto>(`/api/board/posts/${id}`), at));
     } catch (e) {
       // Gone (deleted, never there) reads as not found; a lost connection keeps the post shown, or offers a retry.
       if (isGone(e)) setMissing(true);
@@ -152,6 +156,9 @@ export function PostPage() {
     }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
+  // The author's and commenters' VIP color, and the player card opened from a name.
+  useMemberVip(setPost);
+  useMemberVip(setPicked);
 
   async function run(fn: () => Promise<unknown>) {
     setError(null);

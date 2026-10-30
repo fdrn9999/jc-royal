@@ -1,9 +1,10 @@
+import { CLOSE_OVERDUE_AFTER_MS } from '@jc/types';
 import type { Context } from 'hono';
 import type { AppEnv, Env } from '../env';
 import { INTERNAL_HEADER } from '../routes/tables';
 import { fail } from './http';
 
-type RoomAction = 'status' | 'reload' | 'bot-profiles' | 'close' | 'seat-check' | 'kick' | 'role' | 'vip' | 'holdings' | 'timer-recover';
+type RoomAction = 'status' | 'monitor' | 'reload' | 'bot-profiles' | 'close' | 'seat-check' | 'kick' | 'role' | 'vip' | 'holdings' | 'timer-recover';
 
 /** Calls a table room's internal endpoint with the worker's bindings (also from the cron handler). Null when unreachable. */
 export async function roomCallEnv(env: Env, tableId: string, action: RoomAction, query: Record<string, string> = {}): Promise<Record<string, unknown> | null> {
@@ -25,8 +26,8 @@ export function roomCall(c: Context<AppEnv>, tableId: string, action: RoomAction
   return roomCallEnv(c.env, tableId, action, query);
 }
 
-/** How long a close may stay unfinished before the daily sweep nudges the room. */
-export const SWEEP_CLOSING_AFTER_MS = 15 * 60_000;
+/** How long a close may stay unfinished before the daily sweep nudges the room (the control center's close_overdue). */
+export const SWEEP_CLOSING_AFTER_MS = CLOSE_OVERDUE_AFTER_MS;
 /** An empty member room older than this whose room never armed its idle close (its opening call failed). */
 export const SWEEP_EMPTY_ROOM_AFTER_MS = 60 * 60_000;
 

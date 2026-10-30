@@ -22,6 +22,11 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await expect(page.getByTestId('live-state')).toContainText('30초마다 자동 갱신');
   await expect(page.getByTestId('live-meta')).toContainText('읽은 행');
   await expect(page.getByTestId('ops-stats')).toContainText('최근 5분 오류');
+  // The realtime hubs' misses, as the publishers counted them in the last hour.
+  await expect(page.getByTestId('ops-stats')).toContainText('실시간 전달 누락');
+  await expect(page.getByTestId('ops-rt-undelivered')).toHaveText(/^\d[\d,]*$/);
+  await expect(page.getByTestId('ops-rt-revoke-fail')).toHaveText(/^\d[\d,]*$/);
+  await page.getByTestId('ops-stats').screenshot({ path: 'test-results/admin-ops-stats.png' });
   await expect(page.getByTestId('totals')).toBeVisible();
 
   // Create a table → visible in the player lobby.

@@ -259,6 +259,39 @@ describe('realtime socket: the account and the wallet', () => {
     await quiet(theirs, 'account.changed', 0);
   });
 
+  it("other members' pages hear a VIP color they would see, as the member's id and the color alone; a suspended member's change tells nobody", async () => {
+    const [m, other] = await Promise.all([newUser(), newUser()]);
+    const theirs = await rt(other.client);
+    await reauth();
+    const set = async (body: Record<string, unknown>) => {
+      const version = (await admin.get(`/api/admin/users/${m.me.id}/vip`)).body.version as number;
+      const r = await admin.patch(`/api/admin/users/${m.me.id}/vip`, { ...body, reason: 'public vip reason', expectedVersion: version });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body as { changed: boolean; vip: { version: number } };
+    };
+    const heard = () => theirs.events.filter((e) => e.type === 'member.vip.changed' && e.resourceId === m.me.id);
+    const made = await set({ enabled: true });
+    const e = await theirs.event('member.vip.changed', 15_000, (x) => x.resourceId === m.me.id);
+    // the frame as it arrived: these fields and nothing else (no reason, administrator, nickname or e-mail)
+    expect(Object.keys(e).sort()).toEqual(['eventId', 'occurredAt', 'payload', 'resourceId', 'revision', 'scope', 'type']);
+    expect(e).toMatchObject({ scope: 'service', payload: { vip: 'gold' }, revision: made.vip.version });
+    const adminId = (await admin.get('/api/admin/auth/me')).body.user.id as string;
+    for (const secret of ['public vip reason', adminId, m.email, m.me.nickname]) expect(JSON.stringify(e)).not.toContain(secret);
+    // a color change is heard with a newer revision; the color it already has tells nobody
+    const recolored = await set({ enabled: true, color: 'rose' });
+    await theirs.until(() => heard().length === 2, 15_000, 'second member.vip.changed');
+    expect(heard()[1]).toMatchObject({ payload: { vip: 'rose' }, revision: recolored.vip.version });
+    expect(recolored.vip.version).toBeGreaterThan(made.vip.version);
+    expect(await set({ enabled: true, color: 'rose' })).toMatchObject({ changed: false });
+    // suspended: others see no color either way, so neither a new color nor its end says anything
+    expect((await admin.post(`/api/admin/users/${m.me.id}/suspend`, { reason: 'public vip check' })).status).toBe(200);
+    expect(await set({ enabled: true, color: 'emerald' })).toMatchObject({ changed: true });
+    expect(await set({ enabled: false })).toMatchObject({ changed: true });
+    await theirs.ping();
+    await new Promise((r) => setTimeout(r, 500));
+    expect(heard()).toHaveLength(2);
+  });
+
   it('a role change tells the member, whose own sign-in stays', async () => {
     const m = await newUser();
     const s = await rt(m.client);

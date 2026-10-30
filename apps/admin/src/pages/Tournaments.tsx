@@ -4,7 +4,8 @@
  * resume, abort, asking the room to recover) and the templates tournaments are opened from.
  *
  * Every control names the version the page showed: a change by someone else meanwhile is refused and the page loads
- * again. Nothing here edits a stack, a card, a winner or a place: the table decides them and the room reports them.
+ * again. Another administrator's change is heard on the control center's socket (adminChanges.ts): the list and the
+ * tournament are read again, and an open dialog says it is behind (keeping what was typed). Nothing here edits a stack, a card, a winner or a place: the table decides them and the room reports them.
  */
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat, TrophyIcon, XIcon } from '@jc/ui';
 import {
@@ -21,8 +22,9 @@ import {
   type TournamentTemplateDto,
   type TournamentTimeBank,
 } from '@jc/types';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { useAdminChanges, useHeardRevision } from '../adminChanges';
 import { REASONS, type AdminTemplate } from '../adminTemplates';
 import { useT, type Key } from '../i18n';
 import {
@@ -38,7 +40,7 @@ import {
 } from '../labels';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
 import { AdminReasonField } from '../templateFields';
-import { Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
+import { ChangedNotice, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { Table } from './Console';
 
 type Tone = 'neutral' | 'gold' | 'green' | 'red' | 'blue';
@@ -116,6 +118,18 @@ export function TournamentsPage() {
   if (q) params.set('q', q);
   if (recovery) params.set('recovery', '1');
   const { data, error, loading, reload } = useData<ListData>(`/api/admin/tournaments?${params}`);
+  // A tournament someone else changed: the list is read again, once for the changes of a second.
+  const again = useRef(reload);
+  again.current = reload;
+  const soon = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useAdminChanges(true, (e) => {
+    if (e.type !== 'admin.monitor.changed' || e.kind !== 'tournament' || soon.current !== undefined) return;
+    soon.current = setTimeout(() => {
+      soon.current = undefined;
+      void again.current();
+    }, 1_000);
+  });
+  useEffect(() => () => clearTimeout(soon.current), []);
   const now = useServerNow(data?.now, !!data?.tournaments.some((r) => r.status === 'running' && r.levelEndsAt !== null));
   // Any change to what is searched starts again from the first page.
   const filter = <T,>(set: (v: T) => void) => (v: T) => {
@@ -437,7 +451,7 @@ export function TournamentDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useT();
   const { api } = useAdmin();
-  const { data, error, loading, reload } = useData<DetailData>(`/api/admin/tournaments/${id}`);
+  const { data, error, loading, reload, setData } = useData<DetailData>(`/api/admin/tournaments/${id}`);
   const [note, setNote] = useState<Note>(null);
   const [act, setAct] = useState<{ act: Act; version: number } | null>(null);
   const [reason, setReason] = useState('');
@@ -455,6 +469,15 @@ export function TournamentDetailPage() {
     }, 15_000);
     return () => clearInterval(h);
   }, [active, reload]);
+  // Someone else's change to it (adminChanges.ts) is read at once, as the 15-second look would. A dialog opened before
+  // it names the older version, so it says it is behind and its confirm waits until it is read again (what was typed
+  // stays); the server refuses an older version either way.
+  const heard = useHeardRevision(id || null, (e) => e.type === 'admin.monitor.changed' && e.kind === 'tournament' && e.resourceId === id);
+  const shown = r?.version;
+  useEffect(() => {
+    if (heard !== null && shown !== undefined && heard > shown && !busy) void reload();
+  }, [heard, shown, busy, reload]);
+  const [reading, setReading] = useState(false);
   const header = (
     <div className="flex flex-wrap items-center gap-3">
       <Link to="/tournaments" className="text-sm text-gold-300 hover:underline">← {t('tnTitle')}</Link>
@@ -469,6 +492,20 @@ export function TournamentDetailPage() {
     setActError(null);
   };
   const spec = act ? ACT[act.act] : null;
+  const behind = act !== null && !busy && Math.max(heard ?? 0, r.version) > act.version;
+  const again = async () => {
+    setReading(true);
+    try {
+      const fresh = await api<DetailData>(`/api/admin/tournaments/${id}`);
+      setData(fresh);
+      setAct((a) => a && { act: a.act, version: fresh.tournament.version });
+      setActError(null);
+    } catch (e) {
+      setActError(errText(e, t));
+    } finally {
+      setReading(false);
+    }
+  };
   const reasonOk = !spec || spec.reason === 'none' || (spec.reason === 'optional' ? reason.trim().length === 0 || reason.trim().length >= 2 : reason.trim().length >= 2);
   const nameOk = act?.act !== 'abort' || confirmName.trim() === r.name.trim();
   const run = async () => {
@@ -612,12 +649,13 @@ export function TournamentDetailPage() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setAct(null)}>{t('cancel')}</Button>
-            <Button variant={spec?.danger ? 'danger' : 'gold'} disabled={!reasonOk || !nameOk} loading={busy} onClick={run} data-testid="tn-act-confirm">{spec ? t(spec.title) : t('confirm')}</Button>
+            <Button variant={spec?.danger ? 'danger' : 'gold'} disabled={behind || !reasonOk || !nameOk} loading={busy} onClick={run} data-testid="tn-act-confirm">{spec ? t(spec.title) : t('confirm')}</Button>
           </>
         }
       >
         {act && spec && (
           <div className="flex flex-col gap-3 text-sm" data-testid="tn-act-dialog" data-act={act.act}>
+            {behind && <ChangedNotice onRefresh={() => void again()} busy={reading} testid="tn-changed" />}
             <p className="text-ink-200">{t(spec.hint)}</p>
             {act.act === 'start' && <p className="text-xs text-ink-300">{t('tnStartCheck', { n: r.registered, min: r.minPlayers, cap: r.capacity })}</p>}
             {(act.act === 'cancel' || act.act === 'abort') && <p className="text-xs text-gold-200">{t('tnNotifyNote')}</p>}

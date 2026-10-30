@@ -24,7 +24,8 @@
     "bindings": [
       { "name": "TABLES", "class_name": "TableRoom", "script_name": "jc-royal-game" },
       { "name": "PRESENCE", "class_name": "PresenceHub", "script_name": "jc-royal-game" },
-      { "name": "REALTIME", "class_name": "RealtimeHub", "script_name": "jc-royal-game" }
+      { "name": "REALTIME", "class_name": "RealtimeHub", "script_name": "jc-royal-game" },
+      { "name": "ADMIN_MONITOR", "class_name": "AdminMonitorHub", "script_name": "jc-royal-game" }
     ]
   },
   "vars": {
@@ -60,7 +61,8 @@
         "bindings": [
           { "name": "TABLES", "class_name": "TableRoom", "script_name": "jc-royal-game-prod" },
           { "name": "PRESENCE", "class_name": "PresenceHub", "script_name": "jc-royal-game-prod" },
-          { "name": "REALTIME", "class_name": "RealtimeHub", "script_name": "jc-royal-game-prod" }
+          { "name": "REALTIME", "class_name": "RealtimeHub", "script_name": "jc-royal-game-prod" },
+          { "name": "ADMIN_MONITOR", "class_name": "AdminMonitorHub", "script_name": "jc-royal-game-prod" }
         ]
       },
       "vars": {

@@ -42,6 +42,8 @@ import {
   type HandStage,
   type LegalOption,
   type MaxSeats,
+  type MonitorRoom,
+  type MonitorSeat,
   type NoticeCode,
   type PreActionKind,
   type PublicRole,
@@ -79,6 +81,7 @@ import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
 import { LobbyFeed, placesMoved, placesOf } from './lobby-feed';
 import { publishToAll, publishToUsers } from './realtime-publish';
+import { publishToAdmins } from './admin-monitor-publish';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
 
 export interface Env {
@@ -87,6 +90,8 @@ export interface Env {
   ENVIRONMENT: string;
   /** The realtime hubs (realtime.ts): a room tells lobby pages its new counts and members their wallet moved. */
   REALTIME: DurableObjectNamespace;
+  /** The control center's hub (admin-monitor.ts): a room tells the console its counts, and its summary while followed. */
+  ADMIN_MONITOR?: DurableObjectNamespace;
 }
 
 interface Identity {
@@ -277,6 +282,11 @@ const BOT_SYNC_WAIT_MS = 2_000;
 /** A member's time bank is kept this long after they leave their seat (and for at most this many members per room). */
 const BANK_KEEP_MS = 6 * 60 * 60_000;
 const BANK_KEEP_MAX = 100;
+/** While the control center follows a room, its summary goes to the console at most this often (as the lobby's counts). */
+const MONITOR_PUSH_MS = 1_000;
+/** The longest one rooms read follows a room for: the console asks again while the table stays open on screen. */
+const MONITOR_FOLLOW_MAX_MS = 120_000;
+const MONITOR_UNTIL_KEY = 'monitor-until';
 
 /** A finished hand kept in room storage until its D1 record is written. */
 interface UnrecordedHand {
@@ -326,7 +336,7 @@ export class TableRoom extends DurableObject<Env> {
   private publishStats = oneAtATime(() => this.writeStats());
   /** The written counts to every lobby (lobby-feed.ts); never who. */
   private lobbyFeed = new LobbyFeed((p) =>
-    this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.changed', resourceId: p.id, revision: p.rev, payload: p })),
+    this.published(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.changed', resourceId: p.id, revision: p.rev, payload: p })),
   );
   /** Each member's place here as last written (placesOf): who to tell that theirs moved. */
   private lobbyPlaces = new Map<string, string>();
@@ -354,20 +364,30 @@ export class TableRoom extends DurableObject<Env> {
   private oppRead = false;
   /** When the seated bots' settings were last read from D1 (`syncBotProfiles`); 0 after a wake-up or a failed read. */
   private botSyncAt = 0;
+  /**
+   * Until when the control center follows this room (a rooms read asked it to, `followFor`): its summary is pushed to
+   * the console after changes meanwhile. Stored too, so a room evicted mid-hand and woken again still pushes.
+   */
+  private monitorUntil = 0;
+  /** The next summary push (at most one a MONITOR_PUSH_MS), and when the last one went. Memory only. */
+  private monitorTimer: ReturnType<typeof setTimeout> | null = null;
+  private monitorSentAt = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // Keep-alive pings are answered by the runtime: they neither wake a hibernating room nor wait behind its work.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
     ctx.blockConcurrencyWhile(async () => {
-      const [room, hand, chat, tableId, unrecorded] = await Promise.all([
+      const [room, hand, chat, tableId, unrecorded, monitorUntil] = await Promise.all([
         ctx.storage.get<RoomState>('room'),
         ctx.storage.get<PersistedHand>('hand'),
         ctx.storage.get<ChatMessage[]>('chat'),
         ctx.storage.get<string>('tableId'),
         ctx.storage.list({ prefix: UNRECORDED_PREFIX }),
+        ctx.storage.get<number>(MONITOR_UNTIL_KEY),
       ]);
       this.tableId = tableId ?? null;
+      this.monitorUntil = monitorUntil ?? 0;
       this.room = room ?? emptyRoom(9);
       // A room saved before automatic top-up kept an automatic rebuy on its own (an older build writes only that).
       for (const s of this.room.seats) {
@@ -565,6 +585,34 @@ export class TableRoom extends DurableObject<Env> {
       this.send(ws, { t: 'state', state: this.view(a, connected), cues });
     }
     void this.publishStats();
+    this.toMonitor();
+  }
+
+  /**
+   * While the control center follows this room: its summary to the console after a change, the first at once and then
+   * at most one a MONITOR_PUSH_MS with the state as it is then (a burst of changes is one push). Read in the room's
+   * queue like any other, sent in the background; a push that fails is lost (the console reads the room again).
+   */
+  private toMonitor() {
+    if (this.monitorTimer || Date.now() >= this.monitorUntil || !this.env.ADMIN_MONITOR) return;
+    this.monitorTimer = setTimeout(() => {
+      this.monitorTimer = null;
+      if (Date.now() >= this.monitorUntil) return;
+      this.monitorSentAt = Date.now();
+      void this.run(() => this.monitorSummary()).then(
+        (room) => this.published(publishToAdmins(this.env, { type: 'admin.monitor.room', resourceId: room.tableId, revision: room.version, room })),
+        (e: unknown) => console.warn('admin monitor summary', e instanceof Error ? e.message : String(e)),
+      );
+    }, Math.max(0, this.monitorSentAt + MONITOR_PUSH_MS - Date.now()));
+  }
+
+  /** A rooms read asked to follow this room for `ms` more (capped at MONITOR_FOLLOW_MAX_MS from now; never shortened). */
+  private async followFor(ms: number) {
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    const until = Date.now() + Math.min(ms, MONITOR_FOLLOW_MAX_MS);
+    if (until <= this.monitorUntil) return;
+    this.monitorUntil = until;
+    await this.ctx.storage.put(MONITOR_UNTIL_KEY, until);
   }
 
   /**
@@ -604,7 +652,11 @@ export class TableRoom extends DurableObject<Env> {
     try {
       const { maintenance: m, live } = await publishLiveStats(this.env.DB, this.tableId, stats, issue, ops, now);
       if (this.takeMaint(m, read)) void this.run(() => this.maintenanceChanged());
-      if (live) this.toLobby(stats, live, taken.filter((s) => !s.bot).map((s) => s.userId));
+      if (live) {
+        this.toLobby(stats, live, taken.filter((s) => !s.bot).map((s) => s.userId));
+        // A write that carried only counters changed nothing the grid shows (the lobby feed drops the same counts itself).
+        if (changed || issue !== null) this.countsToMonitor(stats, live, issue);
+      }
     } catch (e) {
       this.ops.restore(ops);
       this.pendingIssue ??= issue;
@@ -627,13 +679,46 @@ export class TableRoom extends DurableObject<Env> {
     const places = placesOf(seated, s.waitlistUsers);
     const moved = placesMoved(this.lobbyPlaces, places);
     this.lobbyPlaces = places;
-    if (moved.length) this.ctx.waitUntil(publishToUsers(this.env, moved, { scope: 'user', type: 'lobby.mine.changed', resourceId: id }));
+    if (moved.length) this.published(publishToUsers(this.env, moved, { scope: 'user', type: 'lobby.mine.changed', resourceId: id }));
   }
 
-  /** After D1 has the table closed: the lobbies drop it. */
+  /**
+   * After an occupancy write committed: the counts it wrote to the control center (every table, a tournament's too), as
+   * the grid reads them from D1 — never who waits. Never awaited.
+   */
+  private countsToMonitor(s: LiveStats, live: LiveWritten, issue: string | null) {
+    const status = live.status === 'open' || live.status === 'closing' ? live.status : 'closed';
+    const counts = { seated: s.seated, bots: s.bots, playing: s.playing, waitlist: s.waitlist, spectators: s.spectators, connections: s.connections, status, issue } as const;
+    this.published(publishToAdmins(this.env, { type: 'admin.monitor.counts', resourceId: this.tableId!, revision: live.rev, counts }));
+  }
+
+  /** After D1 has the table closed: the lobbies drop it, and the control center's grid shows it closed. */
   private tableGone() {
+    this.published(
+      publishToAdmins(this.env, {
+        type: 'admin.monitor.counts',
+        resourceId: this.tableId!,
+        revision: Date.now(),
+        counts: { seated: 0, bots: 0, playing: false, waitlist: 0, spectators: 0, connections: 0, status: 'closed', issue: null },
+      }),
+    );
     if (!this.table || this.table.roomType === 'tournament') return;
-    this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.removed', resourceId: this.tableId! }));
+    this.published(publishToAll(this.env, { scope: 'lobby', type: 'lobby.table.removed', resourceId: this.tableId! }));
+  }
+
+  /**
+   * A publish in the background. The hubs that missed it are counted (rt_undelivered) and written like any counter,
+   * within OPS_FLUSH_MS. That write publishes nothing itself (writeStats sends no unchanged counts), so a hub that stays
+   * down is not asked again and again for the count of its own misses.
+   */
+  private published(p: Promise<number>) {
+    this.ctx.waitUntil(
+      p.then((n) => {
+        if (!n) return;
+        this.ops.add('rt_undelivered', n);
+        this.flushOpsIn(OPS_FLUSH_MS);
+      }),
+    );
   }
 
   private flushOpsIn(ms: number) {
@@ -709,6 +794,10 @@ export class TableRoom extends DurableObject<Env> {
         switch (action) {
           case 'status':
             return Response.json(await this.adminStatus());
+          case 'monitor':
+            // A read for a page that follows the room asks for its changes too (`toMonitor`), for a while.
+            await this.followFor(Number(url.searchParams.get('follow')));
+            return Response.json(await this.monitorSummary());
           case 'timer-recover':
             return Response.json(await this.recoverTimer());
           case 'reload': {
@@ -1264,7 +1353,7 @@ export class TableRoom extends DurableObject<Env> {
    */
   private walletMoved(seat: SeatState) {
     if (seat.bot) return;
-    this.ctx.waitUntil(publishToUsers(this.env, [seat.userId], { scope: 'user', type: 'wallet.changed' }));
+    this.published(publishToUsers(this.env, [seat.userId], { scope: 'user', type: 'wallet.changed' }));
   }
 
   private handHasPlayer(userId: string) {
@@ -2121,7 +2210,7 @@ export class TableRoom extends DurableObject<Env> {
     tn.dirty = false;
     tn.confirmed = tn.places.length;
     // A bust or the finish, now in D1, for the tournament pages; stacks and the level clock they read on their own.
-    if (r.standings) this.ctx.waitUntil(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
+    if (r.standings) this.published(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
     if (this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
     if (tn.status === 'running') tn.pauseRequested = r.pauseRequested;
     const aborted = r.status === 'aborted' && tn.status !== 'aborted';
@@ -2934,23 +3023,8 @@ export class TableRoom extends DurableObject<Env> {
     const now = Date.now();
     const deadline = live ? h!.deadline() : null;
     const alarmAt = await this.ctx.storage.getAlarm();
-    const issues: string[] = [];
-    if (live && h!.isStalled()) issues.push('stalled_hand');
-    if (deadline && deadline + OVERDUE_MS < now) issues.push('turn_overdue');
-    // (No hand is due while the table is paused or the service is in maintenance.)
-    const dealing = this.dealsNow();
-    if (!live && dealing && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
-    if (!live && dealing && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
-    if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
-    if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.waitsForHand(s))) issues.push('cashing_seat');
-    if (this.room.seats.some((s) => s?.topUp?.state === 'debiting')) issues.push('topup_debiting');
-    if (this.unrecorded.size > 0) issues.push('unrecorded_hands');
-    if (this.room.closing && !this.room.closed && !live) issues.push('close_unfinished');
-    if (this.unfinishedWork() && !alarmAt) issues.push('no_retry_alarm');
-    // A running turn whose alarm is missing or set past its deadline: nothing would time it out.
-    if (live && deadline && !h!.isStalled() && (!alarmAt || alarmAt > Math.max(deadline, now) + 1_000)) issues.push('timer_unarmed');
+    const issues = this.issuesAt(now, alarmAt);
     const tn = this.room.tourney;
-    if (tn?.dirty) issues.push('tournament_unsynced');
     const nextRules = this.nextBankRules();
     return {
       tableId: this.tableId,
@@ -3045,6 +3119,137 @@ export class TableRoom extends DurableObject<Env> {
       issues,
       at: now,
     };
+  }
+
+  /**
+   * The control center's summary of this room (docs/CONTROL_CENTER.md): what a spectator at the table sees, at any
+   * table, with the room's `issues`. Never a card a player holds, a card shown after the hand, the showdown or the deck,
+   * and no one's waitlist place. Reading it changes nothing: no socket, no spectator, no write.
+   */
+  private async monitorSummary(): Promise<MonitorRoom> {
+    const t = this.table!;
+    const h = this.hand;
+    const live = !!h && !h.isSettled;
+    const now = Date.now();
+    const connected = this.connectedUsers();
+    const muck = h ? this.muckOf(h) : undefined;
+    const info = h ? h.seatInfo(null, muck) : null;
+    const hv = h ? h.handView(muck) : null;
+    const deadline = live ? h!.deadline() : null;
+    const seats = this.room.seats.map((s, i): MonitorSeat => {
+      if (!s) {
+        const held = this.handHolds(i);
+        return {
+          seatIndex: i,
+          state: 'empty',
+          ...(held ? { held: true } : {}),
+          stack: 0,
+          streetBet: held ? (info?.get(i)?.streetBet ?? 0) : 0,
+          connected: false,
+          lastAction: null,
+          hasCards: false,
+          leaving: false,
+          timeouts: 0,
+          sitOutSince: null,
+          phase: null,
+          topUp: null,
+        };
+      }
+      // As in `view`: the hand's word on a seat is about the player it dealt there.
+      const hi = h?.startingSeats.some((p) => p.seatIndex === i && p.playerId === s.userId) ? info?.get(i) : undefined;
+      let state: MonitorSeat['state'] = s.sittingOut ? 'sittingOut' : 'waiting';
+      if (hi?.inHand) state = hi.folded ? 'folded' : hi.allIn ? 'allin' : 'active';
+      return {
+        seatIndex: i,
+        state,
+        userId: s.userId,
+        nickname: s.nickname,
+        ...(s.bot ? { bot: s.bot, botStyle: s.botStyle ?? styleFor(s.userId) } : {}),
+        stack: hi && !h!.isSettled ? hi.stack : s.stack,
+        streetBet: hi?.streetBet ?? 0,
+        connected: !!s.bot || connected.has(s.userId),
+        lastAction: hi?.lastAction ?? null,
+        hasCards: !!hi?.inHand && !hi.folded,
+        leaving: s.leaveAfterHand,
+        timeouts: s.timeouts,
+        sitOutSince: s.sitOutSince,
+        phase: s.phase === 'seated' ? null : s.phase,
+        topUp: s.topUp?.state ?? null,
+      };
+    });
+    const tn = t.roomType === 'tournament' ? this.room.tourney : undefined;
+    const blinds = tn ? blindsAt(tn.levels, tn.level) : null;
+    const res = this.room.reservation;
+    return {
+      tableId: t.id,
+      version: this.room.version,
+      status: this.room.closed ? 'closed' : this.room.closing ? 'closing' : live ? 'playing' : 'waiting',
+      handNumber: this.room.handNumber,
+      // The board and the pot are what every player at the table sees; a result's cards are left out.
+      hand: hv
+        ? {
+            stage: hv.stage,
+            buttonSeat: hv.buttonSeat,
+            sbSeat: hv.sbSeat,
+            bbSeat: hv.bbSeat,
+            board: hv.board,
+            potTotal: hv.potTotal,
+            actorSeat: hv.actorSeat,
+            turn: live && deadline ? { startedAt: h!.turnStartedAt, baseMs: h!.rules.turnMs, extraMs: h!.turnExtraMs, deadline } : null,
+          }
+        : null,
+      nextHandAt: t.handsPaused || tn?.pauseRequested || (this.room.nextHandAt && this.inMaintenance(this.room.nextHandAt)) ? null : this.room.nextHandAt,
+      paused: t.handsPaused,
+      maintenance: this.inMaintenance(now),
+      entryBlocked: t.entryBlocked,
+      waitlist: this.room.waitlist.length,
+      spectators: this.spectatorsOf(connected),
+      connections: this.sockets().length,
+      reservation: res && res.until > now ? { seatIndex: res.seatIndex, until: res.until } : null,
+      tournament:
+        tn && blinds
+          ? {
+              id: tn.id,
+              status: tn.status,
+              level: tn.level,
+              levelCount: tn.levels.length,
+              smallBlind: blinds.sb,
+              bigBlind: blinds.bb,
+              levelEndsAt: tn.levelEndsAt,
+              paused: tn.pauseRequested,
+              playersLeft: playersLeft(tn),
+              entrants: Object.keys(tn.players).length,
+            }
+          : null,
+      seats,
+      issues: this.issuesAt(now, await this.ctx.storage.getAlarm()),
+      at: now,
+    };
+  }
+
+  /** What looks wrong in this room now: the admin table page's and the control center's `issues`. */
+  private issuesAt(now: number, alarmAt: number | null): string[] {
+    const t = this.table!;
+    const h = this.hand;
+    const live = !!h && !h.isSettled;
+    const deadline = live ? h!.deadline() : null;
+    const issues: string[] = [];
+    if (live && h!.isStalled()) issues.push('stalled_hand');
+    if (deadline && deadline + OVERDUE_MS < now) issues.push('turn_overdue');
+    // (No hand is due while the table is paused or the service is in maintenance.)
+    const dealing = this.dealsNow();
+    if (!live && dealing && this.room.nextHandAt && this.room.nextHandAt + OVERDUE_MS < now) issues.push('next_hand_overdue');
+    if (!live && dealing && !this.room.nextHandAt && !this.room.closing && t.status === 'open' && this.eligibleSeats().length >= 2) issues.push('no_hand_scheduled');
+    if (this.room.seats.some((s) => s?.phase === 'pending')) issues.push('pending_seat');
+    if (this.room.seats.some((s) => s?.phase === 'cashing' && !this.waitsForHand(s))) issues.push('cashing_seat');
+    if (this.room.seats.some((s) => s?.topUp?.state === 'debiting')) issues.push('topup_debiting');
+    if (this.unrecorded.size > 0) issues.push('unrecorded_hands');
+    if (this.room.closing && !this.room.closed && !live) issues.push('close_unfinished');
+    if (this.unfinishedWork() && !alarmAt) issues.push('no_retry_alarm');
+    // A running turn whose alarm is missing or set past its deadline: nothing would time it out.
+    if (live && deadline && !h!.isStalled() && (!alarmAt || alarmAt > Math.max(deadline, now) + 1_000)) issues.push('timer_unarmed');
+    if (this.room.tourney?.dirty) issues.push('tournament_unsynced');
+    return issues;
   }
 
   // ------------------------------------------------------------------ projection

@@ -12,6 +12,7 @@ import { rollup } from './lib/stats';
 import { HttpError, csrfGuard, securityHeaders } from './lib/http';
 import { academyRoutes } from './routes/academy';
 import { adminRoutes } from './routes/admin';
+import { adminMonitorSocket } from './routes/admin-monitor-socket';
 import { authRoutes } from './routes/auth';
 import { boardRoutes, myCommunityRoutes } from './routes/board';
 import { meRoutes } from './routes/me';
@@ -79,6 +80,8 @@ app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);
 app.get('/ws/tables/:id', tableSocket);
 app.get('/ws/realtime', realtimeSocket);
+// The control center's socket: only through the admin console's host, on its sign-in (never a member's).
+app.get('/ws/admin/monitor', adminMonitorSocket);
 
 /**
  * Shareable pages (wrangler.jsonc run_worker_first): the app's index.html with the page's own link preview, so a
