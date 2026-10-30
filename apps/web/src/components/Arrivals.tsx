@@ -13,11 +13,25 @@ const KIND: Record<UnreadKind, { icon: LucideIcon; to: string; title: MsgKey; co
   friendRequests: { icon: UserPlusIcon, to: '/friends', title: 'arrival.request', count: 'arrival.requestCount', open: 'arrival.openFriends' },
 };
 
-/** Whether the page open now already lists that kind (no notice for what is on screen). */
-export function listedHere(kind: UnreadKind, path: string): boolean {
+/** The friend whose conversation `path` opens (`/friends/:userId`), if it opens one. */
+const conversationOf = (path: string) => {
+  const m = /^\/friends\/([^/]+)$/.exec(path);
+  return m && m[1] !== 'settings' ? decodeURIComponent(m[1]!) : null;
+};
+
+/**
+ * Whether the page open now already shows what arrived (no notice for what is on screen). For 1:1 messages, `from` is
+ * whose they may be (onUnreadRise): an open conversation shows only its friend's, so a message from anyone else, or
+ * one from no one known, is still news there.
+ */
+export function listedHere(kind: UnreadKind, path: string, from: readonly string[] = []): boolean {
   if (kind === 'unread') return path === '/messages' || path.startsWith('/messages/');
-  // The friends page lists requests and conversations; an open conversation shows what its friend sends.
-  if (kind === 'dmUnread') return path === '/friends' || (path.startsWith('/friends/') && path !== '/friends/settings');
+  if (kind === 'dmUnread') {
+    // The friends page lists the conversations.
+    if (path === '/friends') return true;
+    const open = conversationOf(path);
+    return open !== null && from.length > 0 && from.every((p) => p === open);
+  }
   return path === '/friends';
 }
 
@@ -26,12 +40,20 @@ interface Arrival {
   n: number;
   /** Raised by each arrival of its kind: restarts its clock. */
   seq: number;
+  /** For 1:1 messages: whose they may be, over every arrival the notice told of; null once one was from no one known. */
+  from: string[] | null;
 }
+
+/** Who a notice told of is from, now that it tells of one more (from `dmFrom`; none known makes it no one known). */
+const fromOf = (before: Arrival | undefined, dmFrom: readonly string[]): string[] | null => {
+  if (!dmFrom.length || (before && before.from === null)) return null;
+  return [...new Set([...(before?.from ?? []), ...dmFrom])];
+};
 
 /**
  * Says that something new arrived (an inbox message, a 1:1 message, a friend request) when the header's counters go up,
  * with a link to where it is. One notice per kind (a newer arrival updates it); each goes after ARRIVAL_MS, and stays
- * while pointed at or focused. Nothing for what the page open lists already, and never at a table (the table pages are
+ * while pointed at or focused. Nothing for what the page open shows already, and never at a table (the table pages are
  * outside the app shell this lives in). The counters are the server's (lib/unread.ts); this keeps nothing of its own.
  */
 export function Arrivals() {
@@ -44,19 +66,25 @@ export function Arrivals() {
 
   useEffect(
     () =>
-      onUnreadRise((kinds, counts) => {
-        const fresh = kinds.filter((k) => !listedHere(k, path.current));
+      onUnreadRise((kinds, counts, dmFrom) => {
+        const fresh = kinds.filter((k) => !listedHere(k, path.current, k === 'dmUnread' ? dmFrom : []));
         if (!fresh.length) return;
         setList((cur) => {
           const next = cur.filter((a) => !fresh.includes(a.kind));
-          for (const k of fresh) next.push({ kind: k, n: counts[k], seq: (cur.find((a) => a.kind === k)?.seq ?? 0) + 1 });
+          for (const k of fresh) {
+            const before = cur.find((a) => a.kind === k);
+            next.push({ kind: k, n: counts[k], seq: (before?.seq ?? 0) + 1, from: k === 'dmUnread' ? fromOf(before, dmFrom) : null });
+          }
           return next;
         });
       }),
     [],
   );
-  // Opening the page that lists it is having seen it.
-  useEffect(() => setList((cur) => (cur.some((a) => listedHere(a.kind, pathname)) ? cur.filter((a) => !listedHere(a.kind, pathname)) : cur)), [pathname]);
+  // Opening the page that shows it is having seen it.
+  useEffect(() => {
+    const seen = (a: Arrival) => listedHere(a.kind, pathname, a.from ?? []);
+    setList((cur) => (cur.some(seen) ? cur.filter((a) => !seen(a)) : cur));
+  }, [pathname]);
   // The last one gone under the pointer or with the focus (a removed button never blurs): the next starts its clock.
   useEffect(() => {
     if (!list.length) setHeld(false);

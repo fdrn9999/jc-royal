@@ -1,9 +1,9 @@
 // The header's unread counters (src/lib/unread.ts): another account's are never shown, a late answer about the account
 // before is dropped, and a sign-in that is gone shows none. And the arrival notice (src/components/Arrivals.tsx): only a
-// counter going up after the first read is news, and nothing is said about what the page open lists.
+// counter going up after the first read is news, and nothing is said about what the page open shows.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listedHere } from '../src/components/Arrivals';
-import { onUnreadRise, refreshUnread, risen, unreadOf, watchUnread, type UnreadKind } from '../src/lib/unread';
+import { heardDm, onUnreadRise, refreshUnread, risen, unreadOf, watchUnread, type UnreadKind } from '../src/lib/unread';
 
 const NONE = { unread: 0, dmUnread: 0, friendRequests: 0 };
 let pending: ((r: Response | Error) => void)[];
@@ -116,13 +116,54 @@ describe('arrivals', () => {
     }
   });
 
-  it('says nothing about what the page open lists already', () => {
+  it('a rise of 1:1 messages names whose the socket told of, until a read begun after it ends; a poll alone names no one', async () => {
+    const from: (readonly string[])[] = [];
+    const off = onUnreadRise((kinds, _c, dmFrom) => {
+      if (kinds.includes('dmUnread')) from.push(dmFrom);
+    });
+    try {
+      stop = watchUnread('F', 30_000);
+      await answer(counts(0, 0));
+      heardDm('u1');
+      void refreshUnread();
+      await answer(counts(0, 1));
+      expect(from).toEqual([['u1']]);
+      // That read held it: the next rise is not put on u1.
+      void refreshUnread();
+      await answer(counts(0, 2));
+      expect(from.at(-1)).toEqual([]);
+      // Told of while a read was out, which may not hold it: the read after names it too.
+      void refreshUnread();
+      heardDm('u2');
+      await answer(counts(0, 2));
+      void refreshUnread();
+      await answer(counts(0, 3));
+      expect(from.at(-1)).toEqual(['u2']);
+      // Another account hears nothing the one before was told of.
+      heardDm('u3');
+      stop();
+      stop = watchUnread('G', 30_000);
+      await answer(counts(0, 1));
+      void refreshUnread();
+      await answer(counts(0, 2));
+      expect(from.at(-1)).toEqual([]);
+    } finally {
+      off();
+    }
+  });
+
+  it('says nothing about what the page open shows already', () => {
     expect(listedHere('unread', '/messages')).toBe(true);
     expect(listedHere('unread', '/friends')).toBe(false);
     expect(listedHere('unread', '/')).toBe(false);
     expect(listedHere('dmUnread', '/friends')).toBe(true);
-    expect(listedHere('dmUnread', '/friends/u9')).toBe(true);
-    expect(listedHere('dmUnread', '/friends/settings')).toBe(false);
+    expect(listedHere('dmUnread', '/friends', ['u2'])).toBe(true);
+    // An open conversation shows its friend's messages only: anyone else's, or no one known's, is news there.
+    expect(listedHere('dmUnread', '/friends/u9', ['u9'])).toBe(true);
+    expect(listedHere('dmUnread', '/friends/u9', ['u2'])).toBe(false);
+    expect(listedHere('dmUnread', '/friends/u9', ['u9', 'u2'])).toBe(false);
+    expect(listedHere('dmUnread', '/friends/u9')).toBe(false);
+    expect(listedHere('dmUnread', '/friends/settings', ['settings'])).toBe(false);
     expect(listedHere('dmUnread', '/messages')).toBe(false);
     expect(listedHere('friendRequests', '/friends')).toBe(true);
     expect(listedHere('friendRequests', '/friends/u9')).toBe(false);

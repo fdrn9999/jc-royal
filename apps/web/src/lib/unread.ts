@@ -19,14 +19,28 @@ export type UnreadKind = 'unread' | 'dmUnread' | 'friendRequests';
 const KINDS: UnreadKind[] = ['unread', 'dmUnread', 'friendRequests'];
 /** The counters that went up from `prev` to `next` (something new arrived), in a fixed order. */
 export const risen = (prev: UnreadCountsDto, next: UnreadCountsDto): UnreadKind[] => KINDS.filter((k) => next[k] > prev[k]);
-const rises = new Set<(kinds: UnreadKind[], counts: UnreadCountsDto) => void>();
+const rises = new Set<(kinds: UnreadKind[], counts: UnreadCountsDto, dmFrom: readonly string[]) => void>();
 /**
- * `f` hears of each counter going up for the account it counts for, with the counters now (the arrival notice). The
- * first read after signing in, loading the page or a sign-in that was gone is where they start, and is never news.
+ * `f` hears of each counter going up for the account it counts for, with the counters now and whose 1:1 messages the
+ * socket told of meanwhile (`dmFrom`: who a rise of `dmUnread` may be from; none when a poll alone found it) — the
+ * arrival notice. The first read after signing in, loading the page or a sign-in that was gone is where they start, and
+ * is never news.
  */
-export function onUnreadRise(f: (kinds: UnreadKind[], counts: UnreadCountsDto) => void): () => void {
+export function onUnreadRise(f: (kinds: UnreadKind[], counts: UnreadCountsDto, dmFrom: readonly string[]) => void): () => void {
   rises.add(f);
   return () => rises.delete(f);
+}
+
+/**
+ * The other members of the conversations the socket told of a 1:1 message in (from them, or to them from another of
+ * my devices), each until a read of the counters begun after it ends: that read holds the message, while one already
+ * out may not.
+ */
+const heard = new Map<string, number>();
+let heardTick = 0;
+/** The socket told of a 1:1 message in the conversation with `peer`. */
+export function heardDm(peer: string) {
+  heard.set(peer, ++heardTick);
 }
 
 function set(next: UnreadCountsDto) {
@@ -40,25 +54,30 @@ function own(account: string) {
   owner = account;
   gen++;
   known = false;
+  heard.clear();
   set(NONE);
 }
 
 export async function refreshUnread() {
   const asked = gen;
+  const upTo = heardTick;
   try {
     const r = await api<UnreadCountsDto>('/api/messages/unread-count');
     if (r.serviceRev !== undefined) refreshService(r.serviceRev);
     // Asked for the account before this one (signed out and in as someone else meanwhile).
     if (asked !== gen) return;
+    const dmFrom = [...heard.keys()];
+    for (const [peer, at] of heard) if (at <= upTo) heard.delete(peer);
     const news = known ? risen(counts, r) : [];
     known = true;
     if (r.unread === counts.unread && r.dmUnread === counts.dmUnread && r.friendRequests === counts.friendRequests) return;
     set(r);
-    if (news.length) rises.forEach((f) => f(news, r));
+    if (news.length) rises.forEach((f) => f(news, r, dmFrom));
   } catch (e) {
     // Signed out (here or on every device): nothing unread is shown for a sign-in that is gone. Offline: kept.
     if (asked === gen && e instanceof ApiError && e.status === 401) {
       known = false;
+      heard.clear();
       if (counts !== NONE) set(NONE);
     }
   }
@@ -112,7 +131,10 @@ export function watchUnread(account: string, pollMs: number): () => void {
     onRealtime('inbox.broadcast', (e) => spread(e.payload.spreadMs)),
     onRealtime('service.changed', (e) => later(e.payload.spreadMs, () => service(e.payload.rev))),
     onRealtime('social.friend.changed', shown),
-    onRealtime('social.dm.created', shown),
+    onRealtime('social.dm.created', (e) => {
+      heardDm(e.payload.peerId);
+      shown();
+    }),
     onRealtime('social.dm.read', shown),
     onRealtimeResync(shown),
   ];
