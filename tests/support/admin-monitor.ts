@@ -6,8 +6,9 @@ export const ADMIN_ORIGIN = 'http://localhost:5174';
 const PATH = '/ws/admin/monitor';
 
 /**
- * A control center page's socket (GET /ws/admin/monitor) for tests: the client's console cookie, every event it got,
- * and every frame as it came (to check the text itself for anything private).
+ * A control center page's socket (GET /ws/admin/monitor) for tests: the client's console cookie (and its worker, when
+ * the client has one of its own), every event it got, and every frame as it came (to check the text itself for anything
+ * private).
  */
 export class AdminMonitorSocket {
   ws!: WebSocket;
@@ -24,7 +25,7 @@ export class AdminMonitorSocket {
    */
   static async open(client: Client, opts: { origin?: string; refused?: boolean; headers?: Record<string, string> } = {}) {
     const s = new AdminMonitorSocket();
-    const url = `${BASE().replace(/^http/, 'ws')}${PATH}`;
+    const url = `${(client.base ?? BASE()).replace(/^http/, 'ws')}${PATH}`;
     s.ws = new (WebSocket as unknown as new (u: string, init: unknown) => WebSocket)(url, { headers: { ...opts.headers, Cookie: client.cookieHeader(), Origin: opts.origin ?? ADMIN_ORIGIN } });
     s.ws.addEventListener('message', (ev) => {
       const raw = String(ev.data);
@@ -102,7 +103,7 @@ export class AdminMonitorSocket {
 
 /** The status the api answers a console socket handshake with, 101 when it opens (fetch() forbids the Upgrade header). */
 export function monitorHandshake(client: Client, origin: string | null = ADMIN_ORIGIN): Promise<number> {
-  const u = new URL(`${BASE()}${PATH}`);
+  const u = new URL(`${client.base ?? BASE()}${PATH}`);
   const headers: Record<string, string> = { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==' };
   if (origin) headers.Origin = origin;
   if (client.cookies.size) headers.Cookie = client.cookieHeader();

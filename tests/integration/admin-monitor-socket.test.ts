@@ -1,13 +1,16 @@
 // The control center's socket (GET /ws/admin/monitor, docs/CONTROL_CENTER.md): only a console sign-in of an
 // administrator with table duty, from the console's origin, opens one; it carries the grid's counts and rows and, for
 // the rooms a page follows, their summaries, with no card anyone holds and no waiting member; a page's frames change
-// nothing; and every way a console sign-in or its duty ends closes it, at once or at the hub's next check.
-import { afterEach, describe, expect, it } from 'vitest';
+// nothing; and every way a console sign-in or its duty ends closes it, at once or at the hub's next check (the hub's
+// period, never one a page asks for).
+import { resolve } from 'node:path';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { MONITOR_PRIVATE_KEYS, type TournamentStructure } from '@jc/types';
 import { ADMIN_ORIGIN, AdminMonitorSocket, monitorHandshake } from '../support/admin-monitor';
-import { Client, newUser, PASSWORD, sharedAdmin, uniq } from '../support/client';
+import { Client, newUser, PASSWORD, sharedAdmin, signupBody, uniq, WEB_ORIGIN } from '../support/client';
 import { d1 } from '../support/d1';
 import { ALL_GRANTS, promoteSql } from '../support/grants';
+import { prepareState, root, startWorker, TABLES, type RunningWorker } from '../support/worker';
 import { TableSocket } from '../support/ws';
 
 const TABLE = 'it-mon-ws';
@@ -283,19 +286,6 @@ describe('when a console sign-in or its duty ends', () => {
     expect(await monitorHandshake(staff.c)).toBe(401);
   });
 
-  it('a suspension, or a disconnect by a super admin, ends the console sign-in and its page at once', async () => {
-    const [suspended, disconnected] = await Promise.all([staffWith(['tables']), staffWith(['tables'])]);
-    const [a, b] = [await monitor(suspended.c), await monitor(disconnected.c)];
-    await reauth();
-    const s = await admin.post(`/api/admin/users/${suspended.me.id}/suspend`, { reason: uniq('관제 정지 확인') });
-    expect(s.status, JSON.stringify(s.body)).toBe(200);
-    const d = await admin.post(`/api/admin/users/${disconnected.me.id}/disconnect`, { reason: uniq('관제 접속 종료 확인'), removeFromTable: false });
-    expect(d.status, JSON.stringify(d.body)).toBe(200);
-    expect(await Promise.all([a.waitClose(), b.waitClose()])).toEqual([4401, 4401]);
-    expect(await monitorHandshake(suspended.c)).toBe(401);
-    expect(await monitorHandshake(disconnected.c)).toBe(401);
-  });
-
   it('ending the other sessions keeps the page that asked', async () => {
     const staff = await staffWith(['tables']);
     const here = await monitor(staff.c);
@@ -307,14 +297,15 @@ describe('when a console sign-in or its duty ends', () => {
     expect(here.closed).toBeNull();
   });
 
-  it('a sign-in or a duty gone from D1 without a revoke is found by the hub’s check', async () => {
+  it('a sign-in or a duty gone from D1 without a revoke is found by the hub’s check, which a page cannot slow down', async () => {
     const staff = [];
-    for (let i = 0; i < 5; i++) staff.push(await staffWith(['tables']));
-    const [gone, offDuty, moreDuty, expired, suspended] = staff.map((s) => s.me.id);
+    for (let i = 0; i < 6; i++) staff.push(await staffWith(['tables']));
+    const [gone, offDuty, moreDuty, expired, suspended, later] = staff.map((s) => s.me.id);
     const pages = [];
-    // Each page asks the hub to check far less often (5 min): the api replaces what a page says of it, so the test's
-    // 15 s stays, and the closes below arrive in time only so.
+    // Each page asks the hub to check far less often (5 min): the api replaces what a page says of it with the test's
+    // 15 s.
     for (const s of staff) pages.push(await monitor(s.c, { 'x-jc-sweep-ms': '300000' }));
+    const last = pages.pop()!;
     await d1(`DELETE FROM sessions WHERE user_id = '${gone}' AND kind = 'admin'`);
     await d1(`UPDATE admin_permissions SET grants = '["vip"]' WHERE user_id = '${offDuty}'`);
     // A permission added the same way changes what the page may hear of: it too is checked again.
@@ -324,5 +315,63 @@ describe('when a console sign-in or its duty ends', () => {
     await d1(`UPDATE users SET status = 'suspended' WHERE id = '${suspended}'`);
     // The hub checks every REALTIME_SWEEP_MS (15 s here); the close reaches the client ten seconds later.
     expect(await Promise.all(pages.map((s) => s.waitClose(50_000)))).toEqual([4401, 4000, 4000, 4401, 4401]);
-  }, 70_000);
+    // A check an alarm set before these pages asked could have found those, whatever period the pages asked for: the
+    // one it set next, after them all, keeps the hub's own. Had it kept the pages' 5 min, the sign-in gone now would be
+    // found minutes later.
+    expect(last.closed).toBeNull();
+    await d1(`DELETE FROM sessions WHERE user_id = '${later}' AND kind = 'admin'`);
+    expect(await last.waitClose(60_000)).toBe(4401);
+  }, 180_000);
+});
+
+/** A console sign-in on `base` with `grants` (a plain administrator), the member's account written to `state`. */
+async function staffAt(base: string, state: string, grants: readonly string[]) {
+  const m = new Client(WEB_ORIGIN, base);
+  const email = `${uniq('e')}@test.dev`;
+  const r = await m.post('/api/auth/register', await signupBody(m, { email, nickname: uniq('p').slice(0, 14) }));
+  expect(r.status, JSON.stringify(r.body)).toBe(201);
+  const id = (r.body as { id: string }).id;
+  await d1(promoteSql(`id = '${id}'`, grants), state);
+  const c = new Client(ADMIN_ORIGIN, base);
+  expect((await c.post('/api/admin/auth/login', { email, password: PASSWORD })).status).toBe(200);
+  return { id, c };
+}
+
+// A worker of its own, started without REALTIME_SWEEP_MS: its hub checks the sign-ins every two minutes
+// (MONITOR_SWEEP_MS), so a page closed within the half minute below was closed by the revoke the route sent, not by
+// that check finding the sign-in gone.
+describe('when a console sign-in ends, without the hub’s quick check of the tests', () => {
+  const state = resolve(root, 'tests/.state/monitor-revoke');
+  const port = 8815;
+  let worker: RunningWorker | undefined;
+  let boss: Client;
+
+  beforeAll(async () => {
+    await prepareState(state, TABLES.slice(0, 1));
+    worker = await startWorker(port, state);
+    const m = new Client(WEB_ORIGIN, worker.url);
+    const email = `${uniq('boss')}@ops.dev`;
+    expect((await m.post('/api/auth/register', await signupBody(m, { email, nickname: uniq('b').slice(0, 14) }))).status).toBe(201);
+    await d1(`UPDATE users SET role = 'super_admin' WHERE id = '${(await m.get('/api/auth/me')).body.id}'`, state);
+    boss = new Client(ADMIN_ORIGIN, worker.url);
+    expect((await boss.post('/api/admin/auth/login', { email, password: PASSWORD })).status).toBe(200);
+  }, 240_000);
+
+  afterAll(async () => {
+    await worker?.stop();
+  });
+
+  it('a suspension, or a disconnect by a super admin, ends the console sign-in and its page at once', async () => {
+    const base = worker!.url;
+    const [suspended, disconnected] = await Promise.all([staffAt(base, state, ['tables']), staffAt(base, state, ['tables'])]);
+    const [a, b] = [await monitor(suspended.c), await monitor(disconnected.c)];
+    await reauth(boss);
+    const s = await boss.post(`/api/admin/users/${suspended.id}/suspend`, { reason: uniq('관제 정지 확인') });
+    expect(s.status, JSON.stringify(s.body)).toBe(200);
+    const d = await boss.post(`/api/admin/users/${disconnected.id}/disconnect`, { reason: uniq('관제 접속 종료 확인'), removeFromTable: false });
+    expect(d.status, JSON.stringify(d.body)).toBe(200);
+    expect(await Promise.all([a.waitClose(), b.waitClose()])).toEqual([4401, 4401]);
+    expect(await monitorHandshake(suspended.c)).toBe(401);
+    expect(await monitorHandshake(disconnected.c)).toBe(401);
+  });
 });
