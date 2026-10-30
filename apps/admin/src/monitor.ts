@@ -411,6 +411,32 @@ export function withCounts(old: MonitorTable, c: MonitorCounts, revision: number
   };
 }
 
+/**
+ * Whether an event may change which tables a search the server ran lists (applyEvent adds nothing to such a list): for
+ * `q`, a table named so that the page does not have, or a listed one renamed; for `member`, a table whose seats changed
+ * (a counts event names no one, so any change of seats may be the member sitting down or leaving). A yes reads the list
+ * again (see searchReadIn); a wrong yes costs that read, and what no event shows the poll still finds (POLL_MS).
+ */
+export function searchMoved(old: MonitorTable | undefined, e: AdminMonitorEvent, search: { q: string; member: string }, scope: 'active' | 'closed'): boolean {
+  const fits = (status: MonitorTable['status']) => (scope === 'closed' ? status === 'closed' : status !== 'closed');
+  if (e.type === 'admin.monitor.table') {
+    if (!search.q) return false;
+    const t = e.table as MonitorTable;
+    if (old) return old.name !== t.name;
+    // The server's LIKE folds only ASCII case; folding more here reads once too often, never once too few.
+    return fits(t.status) && (t.id === search.q || t.name.toLowerCase().includes(search.q.toLowerCase()));
+  }
+  if (e.type !== 'admin.monitor.counts' || !search.member) return false;
+  if (old) return (old.liveAt === null || e.revision > old.liveAt) && old.seated !== e.counts.seated;
+  return e.counts.seated > 0 && fits(e.counts.status);
+}
+
+/** A search is read again for events at most this often, and this long after the first that moved it (its room's other changes of the moment come with that read). */
+export const SEARCH_REREAD_MS = 10_000;
+export const SEARCH_SETTLE_MS = 1_500;
+/** How long from `now` to read a search again for an event, the last such read having been at `lastAt`. */
+export const searchReadIn = (lastAt: number, now: number) => Math.max(SEARCH_SETTLE_MS, lastAt + SEARCH_REREAD_MS - now);
+
 const sameTable = (a: MonitorTable, b: MonitorTable) => JSON.stringify(a) === JSON.stringify(b);
 
 /**

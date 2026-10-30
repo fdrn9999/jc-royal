@@ -32,6 +32,10 @@ import {
   RESOLVED_MAX,
   ROOMS_CHANGED_EVERY_MS,
   roomsToRead,
+  SEARCH_REREAD_MS,
+  SEARCH_SETTLE_MS,
+  searchMoved,
+  searchReadIn,
   seatPoint,
   SeenEvents,
   skewOf,
@@ -322,6 +326,44 @@ describe('snapshot and events', () => {
     expect(same.tables).toBe(prev);
     // Another administrator's change to a member or a tournament is for the pages that show those, not the grid.
     expect(applyEvent(prev, ev({ type: 'admin.monitor.changed', kind: 'vip', resourceId: 't1', revision: 3 }), 'active')).toEqual({ tables: prev, unknown: false });
+  });
+
+  it('a search the server ran is read again for an event that may change what it lists: a table named so, a listed one renamed, seats that changed', () => {
+    const byName = { q: 'gold', member: '' };
+    const byMember = { q: '', member: 'kim' };
+    const named = (t: MonitorTable) => ev({ type: 'admin.monitor.table', resourceId: t.id, revision: 1, table: t });
+    // A table the page does not have, named like the search (any case) or by its id: it may now be listed.
+    expect(searchMoved(undefined, named(table({ id: 't2', name: 'The GOLD Room' })), byName, 'active')).toBe(true);
+    expect(searchMoved(undefined, named(table({ id: 'gold', name: 'x' })), byName, 'active')).toBe(true);
+    expect(searchMoved(undefined, named(table({ id: 't2', name: 'Silver' })), byName, 'active')).toBe(false);
+    expect(searchMoved(undefined, named(table({ id: 't2', name: 'Gold', status: 'closed' })), byName, 'active')).toBe(false);
+    expect(searchMoved(undefined, named(table({ id: 't2', name: 'Gold', status: 'closed' })), byName, 'closed')).toBe(true);
+    // A listed table renamed (maybe out of the search); its other changes come as events to the table itself.
+    expect(searchMoved(table({ name: 'Gold' }), named(table({ name: 'Silver' })), byName, 'active')).toBe(true);
+    expect(searchMoved(table({ name: 'Gold' }), named(table({ name: 'Gold', handsPaused: true })), byName, 'active')).toBe(false);
+    expect(searchMoved(undefined, named(table({ id: 't2', name: 'Gold' })), byMember, 'active')).toBe(false);
+
+    const counts = { seated: 1, bots: 0, playing: false, waitlist: 0, spectators: 0, connections: 1, status: 'open' as const, issue: null };
+    const seats = (c: typeof counts, revision = 5, id = 't1') => ev({ type: 'admin.monitor.counts', resourceId: id, revision, counts: c });
+    // Someone sat down at a table the page does not have: maybe the member.
+    expect(searchMoved(undefined, seats(counts, 5, 't2'), byMember, 'active')).toBe(true);
+    expect(searchMoved(undefined, seats({ ...counts, seated: 0 }, 5, 't2'), byMember, 'active')).toBe(false);
+    expect(searchMoved(undefined, seats({ ...counts, status: 'closed' }, 5, 't2'), byMember, 'active')).toBe(false);
+    // A listed table whose seats changed (maybe the member left); a newer count of the same seats, or an old one, is not.
+    const listed = table({ seated: 2, liveAt: 4 });
+    expect(searchMoved(listed, seats(counts), byMember, 'active')).toBe(true);
+    expect(searchMoved(listed, seats({ ...counts, seated: 2, spectators: 3 }), byMember, 'active')).toBe(false);
+    expect(searchMoved(listed, seats(counts, 4), byMember, 'active')).toBe(false);
+    expect(searchMoved(table({ seated: 2, liveAt: null }), seats(counts, 1), byMember, 'active')).toBe(true);
+    expect(searchMoved(listed, seats(counts), byName, 'active')).toBe(false);
+    // What says nothing of a table's name or seats.
+    expect(searchMoved(listed, ev({ type: 'admin.monitor.changed', kind: 'vip', resourceId: 'u1', revision: 3 }), { q: 'gold', member: 'kim' }, 'active')).toBe(false);
+  });
+
+  it('reads a search again a moment after the event, and at most every ten seconds', () => {
+    expect(searchReadIn(0, 100_000)).toBe(SEARCH_SETTLE_MS);
+    expect(searchReadIn(100_000, 100_000 + SEARCH_SETTLE_MS)).toBe(SEARCH_REREAD_MS - SEARCH_SETTLE_MS);
+    expect(searchReadIn(100_000, 100_000 + SEARCH_REREAD_MS - 1)).toBe(SEARCH_SETTLE_MS);
   });
 
   it('a room summary is kept only when it is not older', () => {

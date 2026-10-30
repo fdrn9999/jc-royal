@@ -1,7 +1,7 @@
 import { hasPrivateKey } from '@jc/types';
 import { expect, type Page } from '@playwright/test';
 import { ADMIN, adminLogin, sql } from './analytics-helpers';
-import { balanceOf, PASSWORD, signUp, sitWith, test, uid } from './helpers';
+import { balanceOf, PASSWORD, signUp, sitWith, standUp, test, uid } from './helpers';
 import { ALL_GRANTS, promoteSql } from '../support/grants';
 
 /** A table of its own for a test (a 6-max 5/10 with no bots), so what it shows is only what the test did there. */
@@ -175,6 +175,27 @@ test('control center: filter, sort, size and the open table stay in the address 
   await expect(page).not.toHaveURL(/focus=/);
   await card(page, id).getByRole('button', { name: /^(고정 해제|Unpin): / }).click();
   await expect(page.getByTestId('cc-empty')).toBeVisible();
+});
+
+test('control center: a search by a member follows them without a reload: their table comes into the results when they sit down and leaves them when they stand up', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const id = newTable('E2E Control Search');
+  const a = await signUp(browser);
+  const op = await signUp(browser);
+  sql(promoteSql(`email = '${op.email}'`));
+  const page = await adminLogin(browser, op.email);
+  await page.goto(`${ADMIN}/control-center?member=${encodeURIComponent(a.nickname)}`);
+  // Live means the list was read: the member sits nowhere yet.
+  await expect(page.getByTestId('cc-link')).toHaveAttribute('data-state', 'live');
+  await expect(page.getByTestId('cc-card')).toHaveCount(0);
+
+  // Quicker than the list's poll (every 30 seconds while a search is open): it is the seats' event that reads it again.
+  await sitWith(a.page, id, 500);
+  await expect(card(page, id)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('cc-card')).toHaveCount(1);
+  await standUp(a.page);
+  await expect(page.getByTestId('cc-card')).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId('cc-link')).toHaveAttribute('data-state', 'live');
 });
 
 test('control center: an administrator without table access has no menu entry for it, and the page shows the refusal instead of tables', async ({ browser }) => {

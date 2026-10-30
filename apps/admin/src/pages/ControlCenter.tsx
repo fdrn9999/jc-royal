@@ -91,6 +91,8 @@ import {
   pushCapped,
   roomsToRead,
   savePins,
+  searchMoved,
+  searchReadIn,
   seatPoint,
   skewOf,
   tableChanges,
@@ -351,10 +353,11 @@ export function ControlCenterPage() {
 
   const listPath = tablesPath(view);
   const scope: 'active' | 'closed' = view.state === 'closed' ? 'closed' : 'active';
-  // A list the server narrowed (a search) gains no table from an event: it would not know whether one matches.
+  // A list the server narrowed (a search) gains no table from an event: it would not know whether one matches. An
+  // event that may change what the search lists reads it again instead (searchMoved).
   const eventScope: typeof scope | null = view.q || view.member ? null : scope;
-  const latest = useRef({ listPath, scope, eventScope, focus: view.focus, pins, watching, t, api, sortedIds: [] as string[], truncated: false });
-  Object.assign(latest.current, { listPath, scope, eventScope, focus: view.focus, pins, watching, t, api, truncated: meta?.truncated ?? false });
+  const latest = useRef({ listPath, scope, eventScope, q: view.q, member: view.member, focus: view.focus, pins, watching, t, api, sortedIds: [] as string[], truncated: false });
+  Object.assign(latest.current, { listPath, scope, eventScope, q: view.q, member: view.member, focus: view.focus, pins, watching, t, api, truncated: meta?.truncated ?? false });
 
   /** Reads the list (one at a time; a read asked for meanwhile runs once after it). A late answer for an old filter is dropped. */
   const readList = useMemo(() => {
@@ -447,7 +450,16 @@ export function ControlCenterPage() {
 
   const helloSeen = useRef(false);
   const unknownTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(unknownTimer.current), []);
+  // A search's read again for an event: one pending at a time, never pushed back by later events (see searchMoved).
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchReadAt = useRef(0);
+  useEffect(
+    () => () => {
+      clearTimeout(unknownTimer.current);
+      clearTimeout(searchTimer.current);
+    },
+    [],
+  );
 
   const socket = useMonitorSocket({
     watch: view.focus,
@@ -475,6 +487,14 @@ export function ControlCenterPage() {
         addLines(tableChanges(before, r.tables.get(e.resourceId), Date.now()));
       }
       if (e.type === 'admin.monitor.counts' && roomsRef.current.has(e.resourceId)) changed.current.add(e.resourceId);
+      const l = latest.current;
+      if (l.eventScope === null && !searchTimer.current && searchMoved(before, e, l, l.scope)) {
+        searchTimer.current = setTimeout(() => {
+          searchTimer.current = undefined;
+          searchReadAt.current = Date.now();
+          void readList();
+        }, searchReadIn(searchReadAt.current, Date.now()));
+      }
       if (r.unknown && !latest.current.truncated) {
         clearTimeout(unknownTimer.current);
         unknownTimer.current = setTimeout(() => void readList(), 1500);
@@ -499,14 +519,18 @@ export function ControlCenterPage() {
     }
     putTables(new Map());
     setMeta(null);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = undefined;
     void readList();
   }, [listPath, putTables, readList]);
-  // The socket down: read the list every POLL_MS while the page is watched.
+  // The socket down, or a search the server ran (no event says for certain what it now lists): read the list every
+  // POLL_MS while the page is watched.
+  const narrowed = eventScope === null;
   useEffect(() => {
-    if (socket.status === 'open' || !watching) return;
+    if ((socket.status === 'open' && !narrowed) || !watching) return;
     const id = setInterval(() => void readList(), POLL_MS);
     return () => clearInterval(id);
-  }, [socket.status, watching, readList]);
+  }, [socket.status, narrowed, watching, readList]);
   useEffect(() => {
     if (!watching) return;
     void readRooms();
