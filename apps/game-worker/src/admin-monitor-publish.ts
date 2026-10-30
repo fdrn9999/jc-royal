@@ -17,6 +17,9 @@ export async function publishToAdmins(env: Env, e: AdminMonitorEventInput): Prom
       headers: { 'x-jc-internal': env.INTERNAL_SECRET, 'content-type': 'application/json' },
       body: JSON.stringify({ event }),
     });
+    // Its reply is not needed. Left unread it keeps the request open on the hub, which then stays busy: under the
+    // local runtime, a socket the hub closed is not ended for the page until the hub has been idle for ten seconds.
+    await res.body?.cancel().catch(() => {});
     if (res.ok) return 0;
     console.warn(`admin monitor ${e.type} refused: ${res.status}`);
   } catch (err) {
