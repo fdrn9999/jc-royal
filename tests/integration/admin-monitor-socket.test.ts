@@ -3,18 +3,40 @@
 // the rooms a page follows, their summaries, with no card anyone holds and no waiting member; a page's frames change
 // nothing; and every way a console sign-in or its duty ends closes it, at once or at the hub's next check (the hub's
 // period, never one a page asks for).
+//
+// Its own worker and state, not the shared one: every table room of a worker publishes to its one hub, and the rooms
+// other files leave playing on the shared worker keep waking that hub. A page hears of a close the hub made only once
+// the hub has been idle for about ten seconds (tests/support/admin-monitor.ts), so there it could take any time.
 import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { MONITOR_PRIVATE_KEYS, type TournamentStructure } from '@jc/types';
 import { ADMIN_ORIGIN, AdminMonitorSocket, monitorHandshake } from '../support/admin-monitor';
-import { Client, newUser, PASSWORD, sharedAdmin, signupBody, uniq, WEB_ORIGIN } from '../support/client';
+import { Client, PASSWORD, signupBody, uniq, WEB_ORIGIN } from '../support/client';
 import { d1 } from '../support/d1';
 import { ALL_GRANTS, promoteSql } from '../support/grants';
 import { prepareState, root, startWorker, TABLES, type RunningWorker } from '../support/worker';
 import { TableSocket } from '../support/ws';
 
 const TABLE = 'it-mon-ws';
-const admin = sharedAdmin();
+/** A worker and the local D1 it writes. */
+type Where = { base: string; state: string };
+let own: RunningWorker | undefined;
+let here: Where;
+let admin: Client;
+
+beforeAll(async () => {
+  const state = resolve(root, 'tests/.state/monitor');
+  await prepareState(state, TABLES.filter((t) => t.id === TABLE || t.id === 'it-mon-priv'));
+  // The hub checks the sign-ins every 15 s, as on the shared worker (tests/support/global-setup.ts).
+  own = await startWorker(8816, state, { REALTIME_SWEEP_MS: '15000' });
+  here = { base: own.url, state };
+  admin = await bossAt(here);
+}, 240_000);
+
+afterAll(async () => {
+  await own?.stop();
+});
+
 const open: AdminMonitorSocket[] = [];
 const seats: TableSocket[] = [];
 afterEach(() => {
@@ -29,22 +51,43 @@ async function monitor(c: Client, headers?: Record<string, string>) {
 }
 
 async function sock(c: Client, tableId: string) {
-  const s = await TableSocket.open(c, tableId);
+  const s = await TableSocket.open(c, tableId, { base: here.base });
   seats.push(s);
   return s;
 }
 
-async function signIn(email: string) {
-  const c = new Client(ADMIN_ORIGIN);
-  expect((await c.post('/api/admin/auth/login', { email, password: PASSWORD })).status).toBe(200);
+/** A new member of the worker at `w`, signed in on the member site. */
+async function newMember(w: Where = here) {
+  const client = new Client(WEB_ORIGIN, w.base);
+  const email = `${uniq('e')}@test.dev`;
+  const r = await client.post('/api/auth/register', await signupBody(client, { email, nickname: uniq('p').slice(0, 14) }));
+  expect(r.status, JSON.stringify(r.body)).toBe(201);
+  return { client, me: r.body as { id: string; nickname: string }, email };
+}
+
+async function signIn(email: string, w: Where = here) {
+  const c = new Client(ADMIN_ORIGIN, w.base);
+  const r = await c.post('/api/admin/auth/login', { email, password: PASSWORD });
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
   return c;
 }
 
-/** A new member made a plain administrator with `grants`, signed in to the console. */
-async function staffWith(grants: readonly string[]) {
-  const u = await newUser();
-  await d1(promoteSql(`id = '${u.me.id}'`, grants));
-  return { ...u, c: await signIn(u.email) };
+/** A super admin's console sign-in at `w`. */
+async function bossAt(w: Where) {
+  const m = await newMember(w);
+  await d1(`UPDATE users SET role = 'super_admin' WHERE id = '${m.me.id}'`, w.state);
+  return signIn(m.email, w);
+}
+
+/**
+ * A new member made a plain administrator with `grants`, signed in to the console. Made one at a time: the D1 write
+ * runs in a second process (tests/support/d1.ts), and a request of the worker it overlaps can fail with SQLITE_BUSY
+ * (a console sign-in did, with a 500).
+ */
+async function staffWith(grants: readonly string[], w: Where = here) {
+  const u = await newMember(w);
+  await d1(promoteSql(`id = '${u.me.id}'`, grants), w.state);
+  return { ...u, c: await signIn(u.email, w) };
 }
 
 async function reauth(c: Client = admin) {
@@ -66,15 +109,15 @@ const scan = (s: AdminMonitorSocket) => s.frames.join('\n');
 describe('who may open the control center socket', () => {
   it('a console sign-in with table duty, from the console origin, and nothing else', async () => {
     // No sign-in; a plain request; another site or no origin at all with the administrator's cookie.
-    expect(await monitorHandshake(new Client(ADMIN_ORIGIN))).toBe(401);
+    expect(await monitorHandshake(new Client(ADMIN_ORIGIN, here.base))).toBe(401);
     expect((await admin.get('/ws/admin/monitor')).status).toBe(426);
     expect(await monitorHandshake(admin, 'https://evil.example')).toBe(403);
     expect(await monitorHandshake(admin, 'http://localhost:5173')).toBe(403);
     expect(await monitorHandshake(admin, null)).toBe(403);
     // A member's own sign-in is not a console one, from either origin.
-    const member = await newUser();
+    const member = await newMember();
     expect(await monitorHandshake(member.client, 'http://localhost:5173')).toBe(403);
-    const asConsole = new Client(ADMIN_ORIGIN);
+    const asConsole = new Client(ADMIN_ORIGIN, here.base);
     asConsole.cookies = new Map(member.client.cookies);
     expect(await monitorHandshake(asConsole)).toBe(401);
     // Every feature but table duty is not enough; table duty alone is.
@@ -98,9 +141,9 @@ describe('what the socket carries', () => {
   it('the counts a room writes and a followed room’s summaries, with nobody’s cards and no waiting member', async () => {
     const watching = await monitor(admin);
     const grid = await monitor((await staffWith(['tables'])).c);
-    const a = await newUser();
-    const b = await newUser();
-    const w = await newUser();
+    const a = await newMember();
+    const b = await newMember();
+    const w = await newMember();
     const wa = await sock(a.client, TABLE);
     expect(await wa.request({ t: 'sit', seatIndex: 0, buyIn: 300 })).toMatchObject({ t: 'ack' });
     // Every console page has the grid's counts as the room wrote them to D1.
@@ -139,7 +182,7 @@ describe('what the socket carries', () => {
       expect(raw).not.toContain(w.me.nickname);
     }
     // Watching is not spectating: the room counted no one (the waiting member is not a spectator either).
-    expect((await d1<{ n: number }>(`SELECT live_spectators AS n FROM tables WHERE id = '${TABLE}'`))[0]!.n).toBe(0);
+    expect((await d1<{ n: number }>(`SELECT live_spectators AS n FROM tables WHERE id = '${TABLE}'`, here.state))[0]!.n).toBe(0);
     expect(wa.state!.spectatorCount).toBe(0);
 
     // A table switch from the existing control route reaches every page as the row D1 now has.
@@ -154,8 +197,8 @@ describe('what the socket carries', () => {
     expect((await admin.post(`/api/admin/tables/${TABLE}/control`, { action: 'unblock', reason: '관제 소켓 확인 끝' })).status).toBe(200);
     await grid.event('admin.monitor.table', 15_000, (x) => x.resourceId === TABLE && !x.table.entryBlocked);
 
-    // The table left empty: a room still playing keeps publishing, and the local runtime sends the hub's closes (the
-    // tests below) only once the hub has been idle for about ten seconds.
+    // The table left empty: a room still playing keeps publishing, and a page hears of a close the hub made (the tests
+    // below) only once the hub has been idle for about ten seconds.
     expect(await ww.request({ t: 'waitlist', join: false })).toMatchObject({ t: 'ack' });
     for (const s of [wa, wb]) expect(await s.request({ t: 'leave' })).toMatchObject({ t: 'ack' });
     await grid.event('admin.monitor.counts', 30_000, (x) => x.resourceId === TABLE && x.counts.seated === 0 && x.counts.waitlist === 0);
@@ -164,7 +207,7 @@ describe('what the socket carries', () => {
   it('a page’s frames change nothing: no control, no event to other pages, no room it may not follow', async () => {
     const s = await monitor(admin);
     const other = await monitor(admin);
-    const before = await d1(`SELECT hands_paused, entry_blocked, status FROM tables WHERE id = 'it-mon-priv'`);
+    const before = await d1(`SELECT hands_paused, entry_blocked, status FROM tables WHERE id = 'it-mon-priv'`, here.state);
     s.send({ t: 'control', action: 'pause', tables: ['it-mon-priv'] });
     s.send({ t: 'event', e: { type: 'admin.monitor.table', resourceId: 'it-mon-priv', table: { id: 'it-mon-priv', status: 'closed' } } });
     s.send('not json');
@@ -172,7 +215,7 @@ describe('what the socket carries', () => {
     await s.ping();
     await quiet(other, 'admin.monitor.table');
     expect(s.closed).toBeNull();
-    expect(await d1(`SELECT hands_paused, entry_blocked, status FROM tables WHERE id = 'it-mon-priv'`)).toEqual(before);
+    expect(await d1(`SELECT hands_paused, entry_blocked, status FROM tables WHERE id = 'it-mon-priv'`, here.state)).toEqual(before);
   });
 });
 
@@ -204,7 +247,7 @@ const TOURNAMENT: TournamentStructure = {
 
 describe('what a page hears of other administrators’ changes', () => {
   it('a VIP change reaches the pages with the VIP permission, as the version alone; a page cannot ask for more itself', async () => {
-    const [vip, tablesOnly, m] = await Promise.all([staffWith(['tables', 'vip']), staffWith(['tables']), newUser()]);
+    const [vip, tablesOnly, m] = [await staffWith(['tables', 'vip']), await staffWith(['tables']), await newMember()];
     const [hears, deaf] = [await monitor(vip.c), await monitor(tablesOnly.c)];
     // The list of what a page hears of is the api's, from the grants: one a client sends itself is replaced.
     const forged = await AdminMonitorSocket.open(tablesOnly.c, { headers: { 'x-jc-monitor-kinds': '["vip","tournament"]' } });
@@ -224,7 +267,7 @@ describe('what a page hears of other administrators’ changes', () => {
   });
 
   it('a tournament change reaches the pages with the tournament permission, at each version', async () => {
-    const [tn, tablesOnly] = await Promise.all([staffWith(['tables', 'tournaments']), staffWith(['tables'])]);
+    const [tn, tablesOnly] = [await staffWith(['tables', 'tournaments']), await staffWith(['tables'])];
     const [hears, deaf] = [await monitor(tn.c), await monitor(tablesOnly.c)];
     await reauth();
     const tpl = await admin.post('/api/admin/tournament-templates', { ...TOURNAMENT, name: uniq('mon tpl'), reason: '관제 동기화 확인' });
@@ -250,7 +293,7 @@ describe('what a page hears of other administrators’ changes', () => {
     expect(put.status, JSON.stringify(put.body)).toBe(200);
     expect(await s.waitClose()).toBe(4000);
     const again = await monitor(staff.c);
-    const m = await newUser();
+    const m = await newMember();
     const v = await setVip(m.me.id, '권한 추가 뒤 확인');
     expect((await again.event('admin.monitor.changed', 15_000, (x) => x.resourceId === m.me.id)).revision).toBe(v);
   });
@@ -288,13 +331,13 @@ describe('when a console sign-in or its duty ends', () => {
 
   it('ending the other sessions keeps the page that asked', async () => {
     const staff = await staffWith(['tables']);
-    const here = await monitor(staff.c);
+    const asked = await monitor(staff.c);
     const there = await monitor(await signIn(staff.email));
     const ended = await staff.c.post('/api/admin/security/sessions/end-others');
     expect(ended.body).toEqual({ ok: true, ended: 1 });
     expect(await there.waitClose()).toBe(4401);
-    await here.ping();
-    expect(here.closed).toBeNull();
+    await asked.ping();
+    expect(asked.closed).toBeNull();
   });
 
   it('a sign-in or a duty gone from D1 without a revoke is found by the hub’s check, which a page cannot slow down', async () => {
@@ -306,36 +349,23 @@ describe('when a console sign-in or its duty ends', () => {
     // 15 s.
     for (const s of staff) pages.push(await monitor(s.c, { 'x-jc-sweep-ms': '300000' }));
     const last = pages.pop()!;
-    await d1(`DELETE FROM sessions WHERE user_id = '${gone}' AND kind = 'admin'`);
-    await d1(`UPDATE admin_permissions SET grants = '["vip"]' WHERE user_id = '${offDuty}'`);
+    await d1(`DELETE FROM sessions WHERE user_id = '${gone}' AND kind = 'admin'`, here.state);
+    await d1(`UPDATE admin_permissions SET grants = '["vip"]' WHERE user_id = '${offDuty}'`, here.state);
     // A permission added the same way changes what the page may hear of: it too is checked again.
-    await d1(`UPDATE admin_permissions SET grants = '["tables","vip"]' WHERE user_id = '${moreDuty}'`);
+    await d1(`UPDATE admin_permissions SET grants = '["tables","vip"]' WHERE user_id = '${moreDuty}'`, here.state);
     // A sign-in run out, and an account no longer active, are not live sign-ins either.
-    await d1(`UPDATE sessions SET expires_at = ${Date.now() - 1000} WHERE user_id = '${expired}' AND kind = 'admin'`);
-    await d1(`UPDATE users SET status = 'suspended' WHERE id = '${suspended}'`);
+    await d1(`UPDATE sessions SET expires_at = ${Date.now() - 1000} WHERE user_id = '${expired}' AND kind = 'admin'`, here.state);
+    await d1(`UPDATE users SET status = 'suspended' WHERE id = '${suspended}'`, here.state);
     // The hub checks every REALTIME_SWEEP_MS (15 s here); the close reaches the client ten seconds later.
     expect(await Promise.all(pages.map((s) => s.waitClose(50_000)))).toEqual([4401, 4000, 4000, 4401, 4401]);
     // A check an alarm set before these pages asked could have found those, whatever period the pages asked for: the
     // one it set next, after them all, keeps the hub's own. Had it kept the pages' 5 min, the sign-in gone now would be
     // found minutes later.
     expect(last.closed).toBeNull();
-    await d1(`DELETE FROM sessions WHERE user_id = '${later}' AND kind = 'admin'`);
+    await d1(`DELETE FROM sessions WHERE user_id = '${later}' AND kind = 'admin'`, here.state);
     expect(await last.waitClose(60_000)).toBe(4401);
   }, 180_000);
 });
-
-/** A console sign-in on `base` with `grants` (a plain administrator), the member's account written to `state`. */
-async function staffAt(base: string, state: string, grants: readonly string[]) {
-  const m = new Client(WEB_ORIGIN, base);
-  const email = `${uniq('e')}@test.dev`;
-  const r = await m.post('/api/auth/register', await signupBody(m, { email, nickname: uniq('p').slice(0, 14) }));
-  expect(r.status, JSON.stringify(r.body)).toBe(201);
-  const id = (r.body as { id: string }).id;
-  await d1(promoteSql(`id = '${id}'`, grants), state);
-  const c = new Client(ADMIN_ORIGIN, base);
-  expect((await c.post('/api/admin/auth/login', { email, password: PASSWORD })).status).toBe(200);
-  return { id, c };
-}
 
 // A worker of its own, started without REALTIME_SWEEP_MS: its hub checks the sign-ins every two minutes
 // (MONITOR_SWEEP_MS), so a page closed within the half minute below was closed by the revoke the route sent, not by
@@ -344,17 +374,14 @@ describe('when a console sign-in ends, without the hub’s quick check of the te
   const state = resolve(root, 'tests/.state/monitor-revoke');
   const port = 8815;
   let worker: RunningWorker | undefined;
+  let there: Where;
   let boss: Client;
 
   beforeAll(async () => {
     await prepareState(state, TABLES.slice(0, 1));
     worker = await startWorker(port, state);
-    const m = new Client(WEB_ORIGIN, worker.url);
-    const email = `${uniq('boss')}@ops.dev`;
-    expect((await m.post('/api/auth/register', await signupBody(m, { email, nickname: uniq('b').slice(0, 14) }))).status).toBe(201);
-    await d1(`UPDATE users SET role = 'super_admin' WHERE id = '${(await m.get('/api/auth/me')).body.id}'`, state);
-    boss = new Client(ADMIN_ORIGIN, worker.url);
-    expect((await boss.post('/api/admin/auth/login', { email, password: PASSWORD })).status).toBe(200);
+    there = { base: worker.url, state };
+    boss = await bossAt(there);
   }, 240_000);
 
   afterAll(async () => {
@@ -362,13 +389,12 @@ describe('when a console sign-in ends, without the hub’s quick check of the te
   });
 
   it('a suspension, or a disconnect by a super admin, ends the console sign-in and its page at once', async () => {
-    const base = worker!.url;
-    const [suspended, disconnected] = await Promise.all([staffAt(base, state, ['tables']), staffAt(base, state, ['tables'])]);
+    const [suspended, disconnected] = [await staffWith(['tables'], there), await staffWith(['tables'], there)];
     const [a, b] = [await monitor(suspended.c), await monitor(disconnected.c)];
     await reauth(boss);
-    const s = await boss.post(`/api/admin/users/${suspended.id}/suspend`, { reason: uniq('관제 정지 확인') });
+    const s = await boss.post(`/api/admin/users/${suspended.me.id}/suspend`, { reason: uniq('관제 정지 확인') });
     expect(s.status, JSON.stringify(s.body)).toBe(200);
-    const d = await boss.post(`/api/admin/users/${disconnected.id}/disconnect`, { reason: uniq('관제 접속 종료 확인'), removeFromTable: false });
+    const d = await boss.post(`/api/admin/users/${disconnected.me.id}/disconnect`, { reason: uniq('관제 접속 종료 확인'), removeFromTable: false });
     expect(d.status, JSON.stringify(d.body)).toBe(200);
     expect(await Promise.all([a.waitClose(), b.waitClose()])).toEqual([4401, 4401]);
     expect(await monitorHandshake(suspended.c)).toBe(401);
