@@ -19,8 +19,8 @@ afterEach(() => {
   for (const s of seats.splice(0)) s.close();
 });
 
-async function monitor(c: Client) {
-  const s = await AdminMonitorSocket.open(c);
+async function monitor(c: Client, headers?: Record<string, string>) {
+  const s = await AdminMonitorSocket.open(c, { headers });
   open.push(s);
   return s;
 }
@@ -283,6 +283,19 @@ describe('when a console sign-in or its duty ends', () => {
     expect(await monitorHandshake(staff.c)).toBe(401);
   });
 
+  it('a suspension, or a disconnect by a super admin, ends the console sign-in and its page at once', async () => {
+    const [suspended, disconnected] = await Promise.all([staffWith(['tables']), staffWith(['tables'])]);
+    const [a, b] = [await monitor(suspended.c), await monitor(disconnected.c)];
+    await reauth();
+    const s = await admin.post(`/api/admin/users/${suspended.me.id}/suspend`, { reason: uniq('관제 정지 확인') });
+    expect(s.status, JSON.stringify(s.body)).toBe(200);
+    const d = await admin.post(`/api/admin/users/${disconnected.me.id}/disconnect`, { reason: uniq('관제 접속 종료 확인'), removeFromTable: false });
+    expect(d.status, JSON.stringify(d.body)).toBe(200);
+    expect(await Promise.all([a.waitClose(), b.waitClose()])).toEqual([4401, 4401]);
+    expect(await monitorHandshake(suspended.c)).toBe(401);
+    expect(await monitorHandshake(disconnected.c)).toBe(401);
+  });
+
   it('ending the other sessions keeps the page that asked', async () => {
     const staff = await staffWith(['tables']);
     const here = await monitor(staff.c);
@@ -295,15 +308,21 @@ describe('when a console sign-in or its duty ends', () => {
   });
 
   it('a sign-in or a duty gone from D1 without a revoke is found by the hub’s check', async () => {
-    const gone = await staffWith(['tables']);
-    const offDuty = await staffWith(['tables']);
-    const moreDuty = await staffWith(['tables']);
-    const [a, b, c] = [await monitor(gone.c), await monitor(offDuty.c), await monitor(moreDuty.c)];
-    await d1(`DELETE FROM sessions WHERE user_id = '${gone.me.id}' AND kind = 'admin'`);
-    await d1(`UPDATE admin_permissions SET grants = '["vip"]' WHERE user_id = '${offDuty.me.id}'`);
+    const staff = [];
+    for (let i = 0; i < 5; i++) staff.push(await staffWith(['tables']));
+    const [gone, offDuty, moreDuty, expired, suspended] = staff.map((s) => s.me.id);
+    const pages = [];
+    // Each page asks the hub to check far less often (5 min): the api replaces what a page says of it, so the test's
+    // 15 s stays, and the closes below arrive in time only so.
+    for (const s of staff) pages.push(await monitor(s.c, { 'x-jc-sweep-ms': '300000' }));
+    await d1(`DELETE FROM sessions WHERE user_id = '${gone}' AND kind = 'admin'`);
+    await d1(`UPDATE admin_permissions SET grants = '["vip"]' WHERE user_id = '${offDuty}'`);
     // A permission added the same way changes what the page may hear of: it too is checked again.
-    await d1(`UPDATE admin_permissions SET grants = '["tables","vip"]' WHERE user_id = '${moreDuty.me.id}'`);
+    await d1(`UPDATE admin_permissions SET grants = '["tables","vip"]' WHERE user_id = '${moreDuty}'`);
+    // A sign-in run out, and an account no longer active, are not live sign-ins either.
+    await d1(`UPDATE sessions SET expires_at = ${Date.now() - 1000} WHERE user_id = '${expired}' AND kind = 'admin'`);
+    await d1(`UPDATE users SET status = 'suspended' WHERE id = '${suspended}'`);
     // The hub checks every REALTIME_SWEEP_MS (15 s here); the close reaches the client ten seconds later.
-    expect(await Promise.all([a.waitClose(50_000), b.waitClose(50_000), c.waitClose(50_000)])).toEqual([4401, 4000, 4000]);
+    expect(await Promise.all(pages.map((s) => s.waitClose(50_000)))).toEqual([4401, 4000, 4000, 4401, 4401]);
   }, 70_000);
 });

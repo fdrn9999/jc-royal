@@ -1,6 +1,6 @@
 import { ADMIN_CHANGE_GRANT, ADMIN_CHANGE_KINDS, ADMIN_MONITOR_HUB } from '@jc/types';
 import type { Handler } from 'hono';
-import type { AppEnv } from '../env';
+import type { AppEnv, Env } from '../env';
 import { fail } from '../lib/http';
 import { grantsOf, hasGrant } from '../lib/permissions';
 import { clientIp, rateLimit } from '../lib/rate-limit';
@@ -30,17 +30,26 @@ export const adminMonitorSocket: Handler<AppEnv> = async (c) => {
   const authAt = Date.now();
   await rateLimit(c, `adm-ws:${resolved.user.id}:${clientIp(c)}`, 30, 60 * 1000);
   const identity = { userId: resolved.user.id, sessionId: resolved.session.id, authAt, expiresAt: resolved.session.expiresAt };
-  const headers = new Headers(c.req.raw.headers);
-  headers.set(INTERNAL_HEADER, c.env.INTERNAL_SECRET);
-  headers.set(IDENTITY_HEADER, encodeURIComponent(JSON.stringify(identity)));
-  const grants: readonly string[] = await grantsOf(c);
-  headers.set('x-jc-monitor-kinds', JSON.stringify(ADMIN_CHANGE_KINDS.filter((k) => grants.includes(ADMIN_CHANGE_GRANT[k]))));
-  // Local tests only (as /ws/realtime): the hub's sign-in sweep runs this often instead of every few minutes.
-  if (c.env.REALTIME_SWEEP_MS) headers.set('x-jc-sweep-ms', c.env.REALTIME_SWEEP_MS);
-  else headers.delete('x-jc-sweep-ms');
+  const headers = hubHeaders(c.req.raw.headers, c.env, identity, await grantsOf(c));
   const stub = c.env.ADMIN_MONITOR.get(c.env.ADMIN_MONITOR.idFromName(ADMIN_MONITOR_HUB));
   const url = new URL(c.req.url);
   url.pathname = '/connect';
   url.search = '';
   return stub.fetch(new Request(url.toString(), { headers, method: 'GET' }));
 };
+
+/**
+ * The handshake as the hub gets it: the page's own headers, with every one the hub reads set by the api (a page sending
+ * one of these names itself is overruled): the internal secret, who this is, which other administrators' changes the
+ * page hears of (from `grants`), and the sweep's period, only in local tests (REALTIME_SWEEP_MS) and gone otherwise.
+ */
+export function hubHeaders(raw: Headers, env: Pick<Env, 'INTERNAL_SECRET' | 'REALTIME_SWEEP_MS'>, identity: { userId: string; sessionId: string; authAt: number; expiresAt: number }, grants: readonly string[]): Headers {
+  const headers = new Headers(raw);
+  headers.set(INTERNAL_HEADER, env.INTERNAL_SECRET);
+  headers.set(IDENTITY_HEADER, encodeURIComponent(JSON.stringify(identity)));
+  headers.set('x-jc-monitor-kinds', JSON.stringify(ADMIN_CHANGE_KINDS.filter((k) => grants.includes(ADMIN_CHANGE_GRANT[k]))));
+  // Local tests only (as /ws/realtime): the hub's sign-in sweep runs this often instead of every few minutes.
+  if (env.REALTIME_SWEEP_MS) headers.set('x-jc-sweep-ms', env.REALTIME_SWEEP_MS);
+  else headers.delete('x-jc-sweep-ms');
+  return headers;
+}
