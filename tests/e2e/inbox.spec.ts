@@ -88,6 +88,22 @@ test('the bell counts a friend request beside the mail icon, lists it with its s
   await b.page.getByTestId('inbox-unread-only').check();
   await expect(b.page.getByText('읽지 않은 알림이 없습니다.')).toBeVisible();
   await b.page.screenshot({ path: 'test-results/inbox-page-desktop.png', animations: 'disabled' });
+
+  // Another tab drops the list shown until its own comes (held here): more of the old list would be appended to it.
+  await b.page.getByTestId('inbox-unread-only').uncheck();
+  await expect(list.getByTestId('inbox-item').filter({ hasText: a.nickname })).toBeVisible();
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const listRead = (u: URL) => u.pathname === '/api/notifications';
+  await b.page.route(listRead, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await b.page.getByTestId('inbox-tab-game').click();
+  await expect(b.page.getByTestId('inbox-list')).toHaveCount(0);
+  release();
+  await expect(b.page.getByText('알림이 없습니다.')).toBeVisible();
+  await b.page.unroute(listRead);
 });
 
 test('read in one tab, the other tab\'s bell follows; "mark all read" in the panel empties the count', async ({ browser }) => {

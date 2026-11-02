@@ -705,7 +705,8 @@ export function TournamentPage() {
           </ol>
         </Panel>
       </div>
-      <InviteFriends id={id} open={inviting} onClose={() => setInviting(false)} />
+      {/* Keyed by the tournament: who was invited here is not who was invited to another one opened from this page. */}
+      <InviteFriends key={id} id={id} open={inviting} onClose={() => setInviting(false)} />
     </div>
   );
 }

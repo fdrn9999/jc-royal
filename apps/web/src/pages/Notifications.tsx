@@ -63,10 +63,22 @@ export function NotificationsPage() {
     }
   }
 
+  // The page as it is when an answer comes: a tab changed meanwhile is read, not the one the button was pressed on.
+  const latestLoad = useRef(load);
+  latestLoad.current = load;
   async function readAll() {
     setItems((l) => l?.map((i) => (i.readAt ? i : { ...i, readAt: Date.now() })) ?? null);
     await markInboxRead(filter ? { all: true, filter } : { all: true }).catch(() => undefined);
-    void load();
+    void latestLoad.current();
+  }
+
+  // Another tab or the toggle: the list and its cursor go with it (more of the old list would be appended to the new).
+  function choose(nextTab: Tab, nextUnread: boolean) {
+    if (nextTab === tab && nextUnread === unreadOnly) return;
+    setTab(nextTab);
+    setUnreadOnly(nextUnread);
+    setItems(null);
+    setNext(null);
   }
 
   const open = useOpenInboxItem();
@@ -95,7 +107,7 @@ export function NotificationsPage() {
               key={k}
               role="tab"
               aria-selected={tab === k}
-              onClick={() => setTab(k)}
+              onClick={() => choose(k, unreadOnly)}
               data-testid={`inbox-tab-${k}`}
               className={cx('shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition', tab === k ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory')}
             >
@@ -104,7 +116,7 @@ export function NotificationsPage() {
           ))}
         </div>
         <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-ink-300">
-          <input type="checkbox" className="accent-gold-500" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} data-testid="inbox-unread-only" />
+          <input type="checkbox" className="accent-gold-500" checked={unreadOnly} onChange={(e) => choose(tab, e.target.checked)} data-testid="inbox-unread-only" />
           {tr('unreadOnly')}
         </label>
       </div>
