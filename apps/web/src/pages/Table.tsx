@@ -37,6 +37,7 @@ import { TimeBankButton } from '../game/TimeBank';
 import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { legacyMuckStep } from '../game/olderRooms';
 import { ReactionButton, ReactionTray, useReactionSender, useReactionTray } from '../game/Reactions';
+import { recoveryText } from '../game/recoveryText';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useBoxSize, useTableLayout, useTableStatus } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
@@ -460,7 +461,9 @@ export function TablePage() {
           ? t('table.replaced')
           : sock.status === 'closed'
             ? t('table.closed')
-            : sock.status === 'reconnecting'
+            : sock.recovery
+              ? recoveryText(locale)(sock.recovery)
+              : sock.status === 'reconnecting'
               ? t('table.reconnecting')
               : sock.status === 'connecting' || !s
                 ? t('table.connecting')
@@ -743,7 +746,7 @@ export function TablePage() {
       </div>
 
       {banner && (
-        <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status">
+        <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status" data-testid="table-banner" data-recovery={sock.recovery ?? undefined}>
           {banner}
           {sock.status === 'reconnecting' && (
             <button className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" onClick={sock.reconnect}>
@@ -900,14 +903,14 @@ export function TablePage() {
                   <>
                     {/* The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen. */}
                     <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
-                    <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column />
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column />
                   </>
                 ) : (
                   // The label is in my seat. A phone stacks the time bank over the bar, the help open too (a beginner's band
                   // holds both), and puts it in the presets' line while the raise panel is open (ActionBar's `bank`); wider,
                   // it is beside the bar.
                   <div className="pointer-events-none flex w-full shrink-0 flex-col items-center gap-1.5 sm:w-auto sm:flex-row sm:items-end sm:justify-end sm:gap-2">
-                    <ActionBar state={s} onAct={onAct} busy={sock.acting} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} chip={chip} />} />
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} chip={chip} />} />
                   </div>
                 )}
               </>

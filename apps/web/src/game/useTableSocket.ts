@@ -4,6 +4,7 @@ import { keepSeats } from './keepSeats';
 import { Heartbeat, Outbox, type Outgoing } from './link';
 import { preActionSpot } from './preAction';
 import { REACTION_SHOW_MS, type SeatReaction } from './Reactions';
+import { RESTORED_MS, recoveryOf, type Recovery } from './recovery';
 
 /** `locked`: a private table that needs the join code first (the room closed the socket with 4003). */
 export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'closed' | 'unauthorized' | 'locked' | 'kicked';
@@ -69,6 +70,13 @@ export interface TableSocketApi {
   acting: boolean;
   /** Skip the backoff wait and reconnect now (no-op while connected). */
   reconnect: () => void;
+  /**
+   * The current connection delivered the room's state. Until then the view is the one from before (a drop, a restart of
+   * the room) and actions on it are not sent: `act` and `preAct` refuse, and the table shows its buttons busy.
+   */
+  synced: boolean;
+  /** The step of a recovery to show (game/recovery.ts), or null. */
+  recovery: Recovery | null;
   /** Open a fresh connection even while connected: after a join code ticket, which only a new connection carries. */
   reopen: () => void;
 }
@@ -111,6 +119,11 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const [lastError, setLastError] = useState<TableSocketApi['lastError']>(null);
   const [lastNotice, setLastNotice] = useState<TableSocketApi['lastNotice']>(null);
   const [acting, setActing] = useState(false);
+  const [synced, setSynced] = useState(false);
+  const syncedRef = useRef(false);
+  const [failures, setFailures] = useState(0);
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
+  const [back, setBack] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   /** Commands waiting for their answer (see link.ts). */
   const [box] = useState(() => new Outbox<ClientMessage, Waiting>());
@@ -129,6 +142,11 @@ export function useTableSocket(tableId: string): TableSocketApi {
     stop.current = false;
     let attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let backTimer: ReturnType<typeof setTimeout> | undefined;
+    const sync = (v: boolean) => {
+      syncedRef.current = v;
+      setSynced(v);
+    };
     /** Gives up on the current connection without waiting for the browser to notice it is gone. */
     let drop = () => {};
 
@@ -166,9 +184,11 @@ export function useTableSocket(tableId: string): TableSocketApi {
       const ws = new WebSocket(url);
       wsRef.current = ws;
       let opened = false;
+      sync(false);
       ws.onopen = () => {
         opened = true;
         attempt = 0;
+        setFailures(0);
         setStatus('open');
         const now = Date.now();
         beat.reset(now);
@@ -187,8 +207,18 @@ export function useTableSocket(tableId: string): TableSocketApi {
         switch (m.t) {
           case 'state': {
             const prev = stateRef.current;
-            // Ignore out-of-order snapshots (version is monotonic per room).
-            if (prev && m.state.version < prev.version) return;
+            const first = !syncedRef.current;
+            // Ignore out-of-order snapshots (version is monotonic per room). The first of a connection is the room as it
+            // is now, whatever was shown before: it is taken, and actions are sent again from it.
+            if (prev && m.state.version < prev.version && !first) return;
+            if (first) {
+              sync(true);
+              if (prev && retry) {
+                setBack(true);
+                clearTimeout(backTimer);
+                backTimer = setTimeout(() => setBack(false), RESTORED_MS);
+              }
+            }
             const view = keepSeats(prev, m.state);
             stateRef.current = view;
             setState(view);
@@ -258,6 +288,8 @@ export function useTableSocket(tableId: string): TableSocketApi {
       };
       const closed = (code: number) => {
         box.detach();
+        // What shows is the room as it was: nothing is sent from it until the next connection brings the state.
+        sync(false);
         if (code === 4003) {
           // Private table without a valid join code: wait for the code rather than retrying. What was shown before
           // (the code may have changed while connected) is dropped.
@@ -292,6 +324,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
           });
         }
         setStatus('reconnecting');
+        setFailures(opened ? 0 : attempt);
         // Spread a quarter either way: when a room restarts (a deploy), everyone at it would otherwise call back at the
         // same instants. The same waits on average.
         const delay = Math.min(10_000, 800 * 2 ** attempt++ * (0.75 + Math.random() * 0.5));
@@ -343,6 +376,14 @@ export function useTableSocket(tableId: string): TableSocketApi {
       if (b === 'ping') ws.send(PING);
       else if (b === 'dead') drop();
     }, TICK_MS);
+    // Back online: the table says so at once and tries now instead of waiting out its backoff.
+    const onOnline = () => {
+      setOnline(true);
+      kick.current();
+    };
+    const onOffline = () => setOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
     // Mobile browsers drop sockets in the background: resync, or reconnect at once on return.
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
@@ -357,7 +398,10 @@ export function useTableSocket(tableId: string): TableSocketApi {
     return () => {
       stop.current = true;
       clearTimeout(timer);
+      clearTimeout(backTimer);
       clearInterval(tick);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
       document.removeEventListener('visibilitychange', onVisible);
       failAll();
       wsRef.current?.close();
@@ -398,7 +442,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const act = useCallback(
     (type: ActionType, amount?: number) => {
       const s = stateRef.current;
-      if (!s?.hand) return false;
+      if (!s?.hand || !syncedRef.current) return false;
       // A second press (or key) before the server answers carries the same seq and would only come back as an error toast.
       const turn = `${s.hand.id}:${s.hand.seq}`;
       if (sentFor.current === turn) return false;
@@ -417,7 +461,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const preAct = useCallback(
     (kind: PreActionKind | null) => {
       const s = stateRef.current;
-      const spot = s && preActionSpot(s);
+      const spot = s && syncedRef.current && preActionSpot(s);
       if (!spot) return;
       const reqId = rid();
       const msg: ClientMessage = { t: 'preAction', reqId, handId: spot.handId, stage: spot.stage, toCall: spot.toCall, kind };
@@ -433,6 +477,15 @@ export function useTableSocket(tableId: string): TableSocketApi {
   }, []);
   const reconnect = useCallback(() => kick.current(), []);
   const reopen = useCallback(() => fresh.current(), []);
+  const recovery = recoveryOf({
+    status,
+    shown: !!state,
+    inHand: !!state?.hand && state.you.seatIndex !== null,
+    synced,
+    online,
+    failures,
+    back,
+  });
 
-  return { status, state, chat, cues, consumeCues, reactions, lastError, lastNotice, request, send, act, preAct, acting, reconnect, reopen };
+  return { status, state, chat, cues, consumeCues, reactions, lastError, lastNotice, request, send, act, preAct, acting, reconnect, reopen, synced, recovery };
 }
