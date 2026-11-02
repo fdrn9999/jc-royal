@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildReplay, type ReplayInput } from '../src/game/replay';
-import { decisionsOf, educationalFor, handClass, SOLVER_PROVIDERS, solverFor, type StrategyProvider } from '../src/game/strategy';
+import { beforeOnStreet, callPrice, decisionsOf, educationalFor, handClass, SOLVER_PROVIDERS, solverFor, sprOf, type StrategyProvider } from '../src/game/strategy';
 
 const a = (seatIndex: number, stage: string, type: string, amount = 0) => ({ seatIndex, stage, type, amount });
 const player = (seatIndex: number, stackStart: number, holeCards: string[] | null = null) => ({
@@ -205,5 +205,41 @@ describe('educationalFor: plain arithmetic, and the academy’s example range on
     weak.players[0] = player(0, 10_000, ['7h', '2c']);
     weak.actions = [a(4, 'preflop', 'post-sb', 50), a(5, 'preflop', 'post-bb', 100), a(0, 'preflop', 'fold')];
     expect(range(weak)).toEqual([{ kind: 'openRange', seat: 'UTG', hand: '72o', inRange: false, opened: false }]);
+  });
+});
+
+describe('the figures of the moment: what a call cost, the SPR, what came before on the street', () => {
+  it('prices a call wherever there was one to make in full, raised or not, and the SPR from the flop on', () => {
+    const h = hand();
+    const [open, check, call, , fold] = decisions(h);
+    // Raising the big blind: what calling it cost then. Nothing to call on a check.
+    expect(callPrice(open!)).toEqual({ toCall: 100, pot: 150, need: 40 });
+    expect(callPrice(check!)).toBeNull();
+    // A call or a fold: the hand page's certain pot odds, the same numbers.
+    expect(callPrice(call!)).toEqual(call!.odds);
+    expect(callPrice(fold!)).toEqual({ toCall: 1125, pot: 2625, need: 30 });
+    expect(sprOf(open!)).toBeNull();
+    expect(sprOf(check!)).toBe(9700 / 750);
+    expect(sprOf(fold!)).toBe(9325 / 1500);
+
+    // A three-bet over an open: the open's price, as calling it would have cost.
+    const three = hand({ actions: [a(4, 'preflop', 'post-sb', 50), a(5, 'preflop', 'post-bb', 100), a(0, 'preflop', 'raise', 300), a(1, 'preflop', 'fold'), a(2, 'preflop', 'fold'), a(3, 'preflop', 'raise', 900), a(4, 'preflop', 'fold'), a(5, 'preflop', 'fold'), a(0, 'preflop', 'fold')] });
+    expect(callPrice(decisions(three, 3)[0]!)).toEqual({ toCall: 300, pot: 450, need: 40 });
+  });
+
+  it('prices nothing the record leaves uncertain: a bet bigger than the stack, folded to', () => {
+    const short = hand({ stack: 2000, actions: [a(4, 'preflop', 'post-sb', 50), a(5, 'preflop', 'post-bb', 100), a(1, 'preflop', 'fold'), a(2, 'preflop', 'fold'), a(3, 'preflop', 'raise', 5000), a(4, 'preflop', 'fold'), a(5, 'preflop', 'fold'), a(0, 'preflop', 'fold')] });
+    const [d] = decisions(short);
+    expect(d!.toCall).toBe(2000);
+    expect(callPrice(d!)).toBeNull();
+  });
+
+  it('lists the street’s actions before each decision, the blinds included preflop, and none from another street', () => {
+    const h = hand();
+    const [open, check, call, , fold] = decisions(h);
+    expect(beforeOnStreet(h, open!)).toEqual([0, 1]);
+    expect(beforeOnStreet(h, check!)).toEqual([]);
+    expect(beforeOnStreet(h, call!)).toEqual([8, 9]);
+    expect(beforeOnStreet(h, fold!)).toEqual([11, 12]);
   });
 });

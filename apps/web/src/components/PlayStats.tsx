@@ -1,5 +1,5 @@
-import { TREND_DAYS, type PositionStatsDto, type StatRatio, type StatsTrendDto } from '@jc/types';
-import { ChevronDownIcon, cx, Empty, Figure, formatChips, Stat } from '@jc/ui';
+import { TREND_DAYS, type PositionStatsDto, type StatRatio, type StatsDto, type StatsTrendDto } from '@jc/types';
+import { ChevronDownIcon, createTranslator, cx, Empty, Figure, formatChips, Stat } from '@jc/ui';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -76,11 +76,83 @@ export function PositionTable({ positions }: { positions: PositionStatsDto[] }) 
   );
 }
 
+// The page's later figures keep their words here, in the page's own chunk, rather than in the dictionaries every page
+// loads first.
+const ko = {
+  threeBet: '3-Bet',
+  threeBetHint: '오픈 레이즈를 받고 다시 레이즈한 핸드',
+  foldTo3Bet: '3-Bet에 폴드',
+  foldTo3BetHint: '내 오픈이 3-Bet을 받고 폴드한 핸드',
+  cbet: 'C-Bet',
+  cbetHint: '프리플롭 레이저로 플롭에서 먼저 베팅한 핸드',
+  foldToCbet: 'C-Bet에 폴드',
+  foldToCbetHint: '상대의 C-Bet을 받고 폴드한 핸드',
+  af: 'AF',
+  afSub: '플롭 이후 베팅·레이즈 {bets} / 콜 {calls}',
+  bb100: 'BB/100',
+  bb100Sub: '100핸드당 딴 빅블라인드 · {n}핸드',
+  counted: '아래 수치는 이 통계가 생긴 뒤 기록된 {n}핸드에서 셉니다.',
+  'defs.detail':
+    '3-Bet·C-Bet·AF·BB/100: 봇이 상대를 읽을 때 쓰는 엔진의 셈을 그대로 씁니다. 각 비율의 분모는 그럴 기회가 있었던 핸드입니다(레이즈할 칩이 있었을 때만 3-Bet 기회). 이 통계가 생기기 전에 기록된 핸드는 들어가지 않으며, 기회가 없었으면 0%가 아니라 —로 보입니다.',
+  'defs.af': 'AF: 플롭 이후 베팅과 레이즈 수를 콜 수로 나눈 값입니다. 콜이 없으면 —입니다. BB/100: 순손익을 그 핸드의 빅블라인드로 나눠 더하고 100핸드당으로 바꾼 값입니다.',
+};
+const en: Record<keyof typeof ko, string> = {
+  threeBet: '3-Bet',
+  threeBetHint: 'Re-raised an open raise',
+  foldTo3Bet: 'Fold to 3-Bet',
+  foldTo3BetHint: 'Folded your open to a 3-bet',
+  cbet: 'C-Bet',
+  cbetHint: 'Bet the flop first as the preflop raiser',
+  foldToCbet: 'Fold to C-Bet',
+  foldToCbetHint: 'Folded to a c-bet',
+  af: 'AF',
+  afSub: 'After the flop: bets and raises {bets} / calls {calls}',
+  bb100: 'BB/100',
+  bb100Sub: 'Big blinds won per 100 hands · {n} hands',
+  counted: 'These count the {n} hands recorded since they were added.',
+  'defs.detail':
+    'The 3-bet, c-bet, AF and BB/100 figures use the engine’s own counting, the one the bots read opponents with. Each ratio is over the hands where you had the chance (a 3-bet chance only with chips to raise). Hands recorded before these figures existed are not in them, and no chance shows as —, not 0%.',
+  'defs.af': 'AF: bets and raises after the flop divided by calls; — without a call. BB/100: net chips over each hand’s big blind, summed and scaled to 100 hands.',
+};
+const more = createTranslator({ ko, en });
+
+/** Aggression factor to one decimal, or a dash without a call to divide by. */
+export function aggressionFactor(a: StatsDto['aggression']) {
+  return a.calls > 0 ? (Math.round((a.bets / a.calls) * 10) / 10).toFixed(1) : '—';
+}
+
+/** The figures counted with the engine's opponent counters: 3-bet, c-bet and their folds, AF and BB/100. */
+export function MoreStats({ st }: { st: StatsDto }) {
+  const { locale } = useI18n();
+  const m = more(locale);
+  return (
+    <>
+      <div className="col-span-2 text-xs text-ink-400 md:col-span-3" data-testid="stats-counted">
+        {m('counted', { n: formatChips(st.counted) })}
+      </div>
+      <RatioStat label={m('threeBet')} ratio={st.threeBet} hint={m('threeBetHint')} testid="stats-3bet" />
+      <RatioStat label={m('foldTo3Bet')} ratio={st.foldTo3Bet} hint={m('foldTo3BetHint')} testid="stats-fold-3bet" />
+      <RatioStat label={m('cbet')} ratio={st.cbet} hint={m('cbetHint')} testid="stats-cbet" />
+      <RatioStat label={m('foldToCbet')} ratio={st.foldToCbet} hint={m('foldToCbetHint')} testid="stats-fold-cbet" />
+      <div data-testid="stats-af">
+        <Stat label={m('af')} value={aggressionFactor(st.aggression)} sub={m('afSub', { bets: formatChips(st.aggression.bets), calls: formatChips(st.aggression.calls) })} />
+      </div>
+      <div data-testid="stats-bb100">
+        <Stat
+          label={m('bb100')}
+          value={st.bb100 === null ? '—' : <span className={st.bb100 >= 0 ? POS : NEG}>{`${st.bb100 > 0 ? '+' : ''}${st.bb100.toFixed(2)}`}</span>}
+          sub={m('bb100Sub', { n: formatChips(st.counted) })}
+        />
+      </div>
+    </>
+  );
+}
+
 const DEFINITIONS = ['scope', 'won', 'vpip', 'pfr', 'showdown', 'position', 'pot', 'missing', 'trend'] as const;
 
 /** How every figure is counted, folded away by default. */
 export function StatDefinitions() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   return (
     <details className="group rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3" data-testid="stats-definitions">
       <summary className="jc-tap flex min-h-8 cursor-pointer list-none items-center justify-between text-sm font-semibold text-ink-300 hover:text-ivory">
@@ -91,6 +163,8 @@ export function StatDefinitions() {
         {DEFINITIONS.map((k) => (
           <li key={k}>{t(`me.defs.${k}`)}</li>
         ))}
+        <li>{more(locale)('defs.detail')}</li>
+        <li>{more(locale)('defs.af')}</li>
       </ul>
     </details>
   );

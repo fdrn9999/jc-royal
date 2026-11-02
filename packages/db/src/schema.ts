@@ -273,6 +273,20 @@ export const handPlayers = sqliteTable(
      * before the column existed, which read as `went_to_showdown` (nobody could muck then).
      */
     shown: integer('shown', { mode: 'boolean' }),
+    // More statistics, counted by the game worker after it records the hand with the engine's `handCounters` (the one
+    // the bots read their opponents with), from the hand's public actions only. NULL on rows recorded before migration
+    // 0040 or when the step failed: such rows are in no sample. The four flags are NULL as well when the player had no
+    // chance at it in the hand (no open to 3-bet, no 3-bet against their open, not the flop's first bettor after
+    // raising preflop, no c-bet to answer), 1 when they took it, 0 when not.
+    threeBet: integer('three_bet'),
+    foldTo3Bet: integer('fold_3bet'),
+    cbet: integer('cbet'),
+    foldToCbet: integer('fold_cbet'),
+    /** Bets and raises, and calls, after the flop (aggression factor). */
+    postBets: integer('post_bets'),
+    postCalls: integer('post_calls'),
+    /** The hand's big blind, for BB/100; set together with the counts above, so it marks a row as counted. */
+    bigBlind: integer('big_blind'),
   },
   (t) => [
     primaryKey({ columns: [t.handId, t.userId] }),

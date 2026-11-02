@@ -475,6 +475,24 @@ export interface StatsDto {
   wtsd: StatRatio;
   /** Won part of a pot at showdown, over showdowns. */
   wsd: StatRatio;
+  /**
+   * The figures below come from the engine's own counting (the one the bots read opponents with) and only from hands
+   * recorded since they were added: `counted` is how many of the hands played that is. Each ratio's `of` is the hands
+   * where the player had the chance.
+   */
+  counted: number;
+  /** Re-raised an open preflop, over the hands they faced one and could raise. */
+  threeBet: StatRatio;
+  /** Folded their open to a 3-bet, over the hands they opened and faced one. */
+  foldTo3Bet: StatRatio;
+  /** Bet the flop as the preflop raiser when first to bet, over the flops where they could. */
+  cbet: StatRatio;
+  /** Folded to that c-bet, over the c-bets faced. */
+  foldToCbet: StatRatio;
+  /** Bets and raises after the flop, and calls: the aggression factor is bets / calls. */
+  aggression: { bets: number; calls: number };
+  /** Big blinds won per 100 hands over the `counted` hands (two decimals); null before any. */
+  bb100: number | null;
   /** Every position, in POSITIONS order, zeros included. */
   positions: PositionStatsDto[];
 }

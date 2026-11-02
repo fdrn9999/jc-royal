@@ -42,7 +42,8 @@ async function play(stacks: number[], steps: Step[], cards?: { holes: string[]; 
 const q = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 /**
- * Stores a finished hand the way the game worker does (settlement.recordHand), with `p${i}` mapped to real users.
+ * Stores a finished hand the way the game worker does (settlement.recordHand), with `p${i}` mapped to real users, up to
+ * HAND_STATS_SQL: the later counting (detail-stats.ts) is checked in hand-stats.test.ts and by the real table below.
  * `log` replaces the stored event log (to store one that can't be read).
  */
 async function store(rec: HandRecord, users: string[], opts: { log?: string } = {}) {
@@ -128,6 +129,15 @@ describe('play statistics', () => {
       raiseShare: { n: 3, of: 3 },
       wtsd: { n: 2, of: 2 },
       wsd: { n: 2, of: 2 },
+      // Stored without the later counting (detail-stats.ts), like hands recorded before migration 0040: no sample, so
+      // 0 of 0 and no BB/100 rather than a made-up 0%.
+      counted: 0,
+      threeBet: { n: 0, of: 0 },
+      foldTo3Bet: { n: 0, of: 0 },
+      cbet: { n: 0, of: 0 },
+      foldToCbet: { n: 0, of: 0 },
+      aggression: { bets: 0, calls: 0 },
+      bb100: null,
       positions: positions({ BTN: [4, 3, 3, 215] }),
     });
     expect(await stats(u1)).toMatchObject({
@@ -335,7 +345,8 @@ describe('play statistics from a real table', () => {
     let sb: StatsDto | undefined;
     for (const end = Date.now() + 20_000; Date.now() < end; await new Promise((r) => setTimeout(r, 250))) {
       sb = await stats(btn);
-      if (sb.vpip.of > 0) break;
+      // The later figures are written right after, in one batch for every player of the hand.
+      if (sb.vpip.of > 0 && sb.counted > 0) break;
     }
     expect(sb).toMatchObject({ handsPlayed: 1, vpip: { n: 1, of: 1 }, pfr: { n: 0, of: 1 }, wtsd: { n: 1, of: 1 }, wsd: { of: 1 }, positions: positions({ BTN: [1, 1, 0, sb!.netChips] }) });
     const sbb = await stats(bb);
@@ -344,7 +355,13 @@ describe('play statistics from a real table', () => {
     expect(sb!.totalWon + sbb.totalWon).toBe(20);
     expect(sb!.handsWon + sbb.handsWon).toBeGreaterThanOrEqual(1);
     expect(sb!.netChips + sbb.netChips).toBe(0);
+    // The later figures counted it too: a limped pot has no 3-bet or c-bet chance (no chance is 0 of 0, never 0%), and
+    // checking it down makes no bet or call after the flop. BB/100 is the net over a big blind of 10, per 100 hands.
+    for (const st of [sb!, sbb]) {
+      expect(st).toMatchObject({ counted: 1, threeBet: { n: 0, of: 0 }, foldTo3Bet: { n: 0, of: 0 }, cbet: { n: 0, of: 0 }, foldToCbet: { n: 0, of: 0 }, aggression: { bets: 0, calls: 0 } });
+      expect(st.bb100).toBe((st.netChips / 10) * 100);
+    }
     // Watching the whole hand counts for nothing.
-    expect(await stats(watcher)).toMatchObject({ handsPlayed: 0, handsWon: 0, totalWon: 0, avgPot: null, vpip: { n: 0, of: 0 }, positions: positions({}) });
+    expect(await stats(watcher)).toMatchObject({ handsPlayed: 0, handsWon: 0, totalWon: 0, avgPot: null, vpip: { n: 0, of: 0 }, counted: 0, threeBet: { n: 0, of: 0 }, bb100: null, positions: positions({}) });
   });
 });

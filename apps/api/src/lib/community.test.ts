@@ -123,6 +123,13 @@ describe('replayPlayer', () => {
     pfr: null,
     sawFlop: null,
     potWon: null,
+    threeBet: null,
+    foldTo3Bet: null,
+    cbet: null,
+    foldToCbet: null,
+    postBets: null,
+    postCalls: null,
+    bigBlind: null,
     ...o,
   });
   const user = { nickname: 'x', role: 'user', status: 'active', isBot: false, vipColor: null };

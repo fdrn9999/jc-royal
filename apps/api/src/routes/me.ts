@@ -68,8 +68,9 @@ export const meRoutes = new Hono<AppEnv>()
   })
   /**
    * Only the user's own hand_players rows: a seat dealt into a hand, never a hand watched. vpip, pfr, saw_flop,
-   * position and pot_won come from HAND_STATS_SQL (packages/db/src/handStats.ts); rows it hasn't filled yet are left
-   * out of the figures that need them, so nothing is estimated.
+   * position and pot_won come from HAND_STATS_SQL (packages/db/src/handStats.ts), the 3-bet, c-bet, aggression and big
+   * blind columns from the game worker's detail-stats.ts; rows not filled yet are left out of the figures that
+   * need them, so nothing is estimated.
    */
   .get('/stats', async (c) => {
     const uid = c.var.user!.id;
@@ -87,7 +88,14 @@ export const meRoutes = new Hono<AppEnv>()
                 COALESCE(SUM(saw_flop), 0) AS sawFlop,
                 COALESCE(SUM(saw_flop AND went_to_showdown), 0) AS wtsd,
                 COALESCE(SUM(went_to_showdown AND pot_won IS NOT NULL), 0) AS showdowns,
-                COALESCE(SUM(went_to_showdown AND pot_won > 0), 0) AS wsd
+                COALESCE(SUM(went_to_showdown AND pot_won > 0), 0) AS wsd,
+                COUNT(big_blind) AS counted,
+                COUNT(three_bet) AS threeBetOf, COALESCE(SUM(three_bet), 0) AS threeBet,
+                COUNT(fold_3bet) AS foldTo3BetOf, COALESCE(SUM(fold_3bet), 0) AS foldTo3Bet,
+                COUNT(cbet) AS cbetOf, COALESCE(SUM(cbet), 0) AS cbet,
+                COUNT(fold_cbet) AS foldToCbetOf, COALESCE(SUM(fold_cbet), 0) AS foldToCbet,
+                COALESCE(SUM(post_bets), 0) AS postBets, COALESCE(SUM(post_calls), 0) AS postCalls,
+                TOTAL(CASE WHEN big_blind > 0 THEN net * 1.0 / big_blind END) AS bbWon
          FROM hand_players WHERE user_id = ?1`,
       ).bind(uid),
       // Chips a player put in are won - net (payouts include uncalled chips handed back). The contested pot is all chips
@@ -114,7 +122,11 @@ export const meRoutes = new Hono<AppEnv>()
          FROM hand_players WHERE user_id = ?1 AND position IS NOT NULL GROUP BY position`,
       ).bind(uid),
     ]);
-    type Agg = Record<'played' | 'measured' | 'won' | 'totalWon' | 'net' | 'biggestWin' | 'dealt' | 'vpip' | 'pfr' | 'sawFlop' | 'wtsd' | 'showdowns' | 'wsd', number>;
+    type Agg = Record<
+      | 'played' | 'measured' | 'won' | 'totalWon' | 'net' | 'biggestWin' | 'dealt' | 'vpip' | 'pfr' | 'sawFlop' | 'wtsd' | 'showdowns' | 'wsd'
+      | 'counted' | 'threeBetOf' | 'threeBet' | 'foldTo3BetOf' | 'foldTo3Bet' | 'cbetOf' | 'cbet' | 'foldToCbetOf' | 'foldToCbet' | 'postBets' | 'postCalls' | 'bbWon',
+      number
+    >;
     const agg = (aggR!.results as Agg[])[0]!;
     const pot = (potR!.results as { largest: number; avg: number | null }[])[0];
     const best = (bestR!.results as { rankClass: string; rankValue: number; bestFive: string | null }[])[0];
@@ -137,6 +149,13 @@ export const meRoutes = new Hono<AppEnv>()
       raiseShare: { n: agg.pfr, of: agg.vpip },
       wtsd: { n: agg.wtsd, of: agg.sawFlop },
       wsd: { n: agg.wsd, of: agg.showdowns },
+      counted: agg.counted,
+      threeBet: { n: agg.threeBet, of: agg.threeBetOf },
+      foldTo3Bet: { n: agg.foldTo3Bet, of: agg.foldTo3BetOf },
+      cbet: { n: agg.cbet, of: agg.cbetOf },
+      foldToCbet: { n: agg.foldToCbet, of: agg.foldToCbetOf },
+      aggression: { bets: agg.postBets, calls: agg.postCalls },
+      bb100: agg.counted > 0 ? Math.round((agg.bbWon / agg.counted) * 100 * 100) / 100 : null,
       positions: POSITIONS.map((position) => {
         const r = byPos.get(position);
         return { position, hands: r?.hands ?? 0, vpip: r?.vpip ?? 0, pfr: r?.pfr ?? 0, net: r?.net ?? 0 };

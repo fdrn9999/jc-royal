@@ -104,7 +104,7 @@
 
 **관리자 권한**: 요청마다 역할 권한 표와 그 관리자의 기능 스위치(`admin_permissions`, 기본 거부)를 함께 검사한다. 최고관리자는 스위치를 읽지 않는다. 경제 정책·대회 구조처럼 위임하지 않는 작업은 최고관리자 전용이다(`docs/ADMIN_SECURITY.md`).
 
-**플레이 통계**: `hand_players`의 `position`·`vpip`·`pfr`·`saw_flop`·`pot_won`은 핸드 이벤트 로그(`hands.event_log`)에서 계산한 값이다. 계산은 `packages/db/src/handStats.ts`의 SQL 하나(`HAND_STATS_SQL`)뿐이며, 게임 워커가 핸드 기록 직후 실행하고 마이그레이션 `0010`이 같은 SQL로 기존 핸드를 채운다. `pot_won`이 비어 있는 행만 처리하므로 몇 번을 돌려도 결과가 같고, 실행이 실패해도 다음 핸드 기록 때 다시 채운다. 로그에서 행동을 읽을 수 없는 핸드는 `vpip`·`pfr`·`saw_flop`을 NULL로 두어 해당 지표의 분모에서 뺀다(추정하지 않음). 마이페이지 통계 API는 이 열을 모아 본인 것만 돌려준다.
+**플레이 통계**: `hand_players`의 `position`·`vpip`·`pfr`·`saw_flop`·`pot_won`은 핸드 이벤트 로그(`hands.event_log`)에서 계산한 값이다. 계산은 `packages/db/src/handStats.ts`의 SQL 하나(`HAND_STATS_SQL`)뿐이며, 게임 워커가 핸드 기록 직후 실행하고 마이그레이션 `0010`이 같은 SQL로 기존 핸드를 채운다. `pot_won`이 비어 있는 행만 처리하므로 몇 번을 돌려도 결과가 같고, 실행이 실패해도 다음 핸드 기록 때 다시 채운다. 로그에서 행동을 읽을 수 없는 핸드는 `vpip`·`pfr`·`saw_flop`을 NULL로 두어 해당 지표의 분모에서 뺀다(추정하지 않음). `three_bet`·`fold_3bet`·`cbet`·`fold_cbet`·`post_bets`·`post_calls`·`big_blind`(마이그레이션 `0040`)는 게임 워커가 같은 자리에서 엔진의 `handCounters`(봇이 상대를 읽는 셈과 같은 함수, 공개 행동만 읽음)로 세어 쓴다(`apps/game-worker/src/detail-stats.ts`). 기회가 없었던 지표는 NULL이라 분모에서 빠지고, `big_blind IS NULL`인 행만 쓰므로 다시 돌려도 같다. 실패해도 핸드 기록은 그대로 남는다(그 핸드는 세지 않음). 0040 전에 기록된 핸드는 채우지 않았다(`event_log`로 나중에 채울 수 있다). 마이페이지 통계 API는 이 열을 모아 본인 것만 돌려준다.
 
 ## 원본 저장소에서 가져온 것
 

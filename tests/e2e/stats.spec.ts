@@ -40,6 +40,17 @@ test('my statistics: VPIP, PFR, showdowns, positions and the daily trend from a 
   for (const p of [btn, bb]) await expect(p.getByTestId('stats-wtsd')).toContainText('100%');
   // Raise share has no hands to count for the big blind, who never entered by choice.
   await expect(bb.getByTestId('stats-raise-share')).toContainText('—');
+  // The later figures: a limped pot checked down gives no 3-bet or c-bet chance (a dash, not 0%) and no bet or call after
+  // the flop; BB/100 is the hand's net in big blinds of 10, times 100.
+  for (const p of [btn, bb]) {
+    await expect(p.getByTestId('stats-counted')).toContainText('1핸드');
+    for (const id of ['stats-3bet', 'stats-fold-3bet', 'stats-cbet', 'stats-fold-cbet']) {
+      await expect(p.getByTestId(id)).toContainText('—');
+      await expect(p.getByTestId(id)).toContainText('0 / 0 핸드');
+    }
+    await expect(p.getByTestId('stats-af')).toContainText('—');
+    await expect(p.getByTestId('stats-bb100')).toContainText(/[+-]100\.00|0\.00/);
+  }
 
   // The trend shows today's hand; the 7-day view too.
   const trend = btn.getByTestId('stats-trend');
@@ -66,6 +77,8 @@ test('my statistics: VPIP, PFR, showdowns, positions and the daily trend from a 
   await expect(watcher.page.getByTestId('stats-vpip')).toContainText('—');
   await expect(watcher.page.getByTestId('stats-vpip')).toContainText('0 / 0 핸드');
   await expect(watcher.page.getByTestId('stats-pos-BTN').locator('td').nth(1)).toHaveText('0');
+  await expect(watcher.page.getByTestId('stats-counted')).toContainText('0핸드');
+  await expect(watcher.page.getByTestId('stats-bb100')).toContainText('—');
   await expect(watcher.page.getByTestId('stats-trend')).toContainText('이 기간에 플레이한 핸드가 없습니다.');
   await watcher.page.screenshot({ path: 'test-results/me-stats-empty-desktop.png', fullPage: true });
 });
