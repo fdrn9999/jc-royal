@@ -1,0 +1,169 @@
+/**
+ * Players as other members see them (docs/SOCIAL.md "프로필 카드", "시즌 리더보드"): a member's card and the season
+ * leaderboard. Only what a member chose to show leaves here: name, picture and badge as everywhere, the month they
+ * joined, achievements unless hidden, statistics only when shown (off by default), never chips, email or a hand's cards.
+ */
+import {
+  ACHIEVEMENT_PREFIX,
+  ACHIEVEMENTS,
+  LEADERBOARD,
+  leaderboardScore,
+  SeasonSchema,
+  seasonOf,
+  seasonRange,
+  type AchievementCode,
+  type LeaderboardDto,
+  type LeaderboardRowDto,
+  type PlayerCardDto,
+  type PlayerCardStatsDto,
+} from '@jc/types';
+import { Hono } from 'hono';
+import type { AppEnv } from '../env';
+import { requireUser } from '../lib/auth';
+import { badgesFor } from '../lib/badges';
+import { fail } from '../lib/http';
+import { rateLimit } from '../lib/rate-limit';
+import { notBlocked, toPublic } from './social';
+
+const notFound = (): never => fail(404, 'player_not_found', 'player not found');
+
+interface CardRow {
+  id: string;
+  nickname: string;
+  avatarUrl: string | null;
+  role: string;
+  status: string;
+  isBot: number;
+  vipColor: string | null;
+  joinedMonth: string;
+  showAchievements: number;
+  showStats: number;
+  shareTable: number;
+  showRanking: number;
+  open: number;
+}
+
+export const playerRoutes = new Hono<AppEnv>()
+  .use('*', requireUser)
+  /**
+   * A member's card. Not found, the same way, for no such member, a withdrawn or suspended one, a table bot, and a
+   * member either side blocked (a block against staff is not in force, as everywhere): the answer never tells which.
+   */
+  .get('/:id/card', async (c) => {
+    const me = c.var.user!.id;
+    await rateLimit(c, 'player_card', 120, 60_000);
+    const id = c.req.param('id');
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) notFound();
+    const u = await c.env.DB.prepare(
+      `SELECT id, nickname, avatar_url AS avatarUrl, role, status, is_bot AS isBot, vip_color AS vipColor,
+              strftime('%Y-%m', (created_at + 32400000) / 1000, 'unixepoch') AS joinedMonth,
+              show_achievements AS showAchievements, show_stats AS showStats, share_table AS shareTable, show_ranking AS showRanking,
+              ${notBlocked('?1', '?2')} AS open
+         FROM users WHERE id = ?2`,
+    )
+      .bind(me, id)
+      .first<CardRow>();
+    const self = id === me;
+    if (!u || u.isBot || (!self && (u.status !== 'active' || !u.open))) notFound();
+    const showAchievements = self || u!.showAchievements === 1;
+    const showStats = self || u!.showStats === 1;
+    const [badgesR, statsR] = await c.env.DB.batch([
+      c.env.DB.prepare(`SELECT badge, awarded_at AS at FROM user_badges WHERE user_id = ?1 AND badge LIKE '${ACHIEVEMENT_PREFIX}%' AND ?2 ORDER BY awarded_at`).bind(id, showAchievements ? 1 : 0),
+      c.env.DB.prepare(
+        `SELECT COUNT(*) AS hands, COUNT(vpip) AS dealt, COALESCE(SUM(vpip), 0) AS vpip, COALESCE(SUM(pfr), 0) AS pfr,
+                COALESCE(SUM(saw_flop), 0) AS sawFlop, COALESCE(SUM(saw_flop AND went_to_showdown), 0) AS wtsd,
+                COALESCE(SUM(went_to_showdown AND pot_won IS NOT NULL), 0) AS showdowns, COALESCE(SUM(went_to_showdown AND pot_won > 0), 0) AS wsd,
+                (SELECT COUNT(*) FROM tournament_entries WHERE user_id = ?1 AND status = 'won') AS wins
+           FROM hand_players WHERE user_id = ?1 AND ?2`,
+      ).bind(id, showStats ? 1 : 0),
+    ]);
+    const codes = new Set<string>(ACHIEVEMENTS);
+    const achievements = ((badgesR!.results ?? []) as { badge: string; at: number }[])
+      .map((b) => ({ code: b.badge.slice(ACHIEVEMENT_PREFIX.length) as AchievementCode, at: b.at }))
+      .filter((b) => codes.has(b.code));
+    const s = (statsR!.results as Record<'hands' | 'dealt' | 'vpip' | 'pfr' | 'sawFlop' | 'wtsd' | 'showdowns' | 'wsd' | 'wins', number>[])[0];
+    const stats: PlayerCardStatsDto | null =
+      showStats && s
+        ? {
+            hands: s.hands,
+            vpip: { n: s.vpip, of: s.dealt },
+            pfr: { n: s.pfr, of: s.dealt },
+            wtsd: { n: s.wtsd, of: s.sawFlop },
+            wsd: { n: s.wsd, of: s.showdowns },
+            tournamentWins: s.wins,
+          }
+        : null;
+    const card: PlayerCardDto = {
+      user: toPublic(u!, await badgesFor(c, [u!.role])),
+      joinedMonth: u!.joinedMonth,
+      self,
+      achievements: showAchievements ? achievements : null,
+      stats,
+      ...(self
+        ? { privacy: { showAchievements: u!.showAchievements === 1, showStats: u!.showStats === 1, shareTable: u!.shareTable === 1, showRanking: u!.showRanking === 1 } }
+        : {}),
+    };
+    return c.json(card);
+  });
+
+/** The season leaderboard (see LEADERBOARD in @jc/types): `?season=YYYY-MM`, this month by default. */
+export const leaderboardRoutes = new Hono<AppEnv>().use('*', requireUser).get('/', async (c) => {
+  const me = c.var.user!.id;
+  await rateLimit(c, 'leaderboard', 60, 60_000);
+  const q = c.req.query('season');
+  const season = q === undefined ? seasonOf(Date.now()) : SeasonSchema.safeParse(q).success ? q : fail(400, 'invalid_season', 'season is YYYY-MM');
+  const { from, to } = seasonRange(season);
+  const { results } = await c.env.DB.prepare(
+    `WITH t AS (
+       SELECT tn.id, COUNT(*) AS n
+         FROM tournaments tn JOIN tournament_entries e ON e.tournament_id = tn.id JOIN users u ON u.id = e.user_id
+        WHERE tn.status = 'finished' AND tn.finished_at >= ?1 AND tn.finished_at < ?2 AND e.status IN ('eliminated', 'won') AND e.place IS NOT NULL
+        GROUP BY tn.id HAVING SUM(u.is_bot = 0) >= ?3
+     ), r AS (
+       SELECT e.user_id, COUNT(*) AS played, SUM(e.status = 'won') AS wins, SUM(t.n - e.place) AS beaten, SUM(t.n - 1) AS possible
+         FROM t JOIN tournament_entries e ON e.tournament_id = t.id
+        WHERE e.status IN ('eliminated', 'won') AND e.place IS NOT NULL
+        GROUP BY e.user_id
+     )
+     SELECT r.user_id AS id, r.played, r.wins, r.beaten, r.possible, u.nickname, u.avatar_url AS avatarUrl, u.role, u.vip_color AS vipColor,
+            u.show_ranking AS showRanking
+       FROM r JOIN users u ON u.id = r.user_id
+      WHERE u.is_bot = 0 AND u.status = 'active'`,
+  )
+    .bind(from, to, LEADERBOARD.minHumans)
+    .all<{ id: string; played: number; wins: number; beaten: number; possible: number; nickname: string; avatarUrl: string | null; role: string; vipColor: string | null; showRanking: number }>();
+  const badge = await badgesFor(c, results.map((r) => r.role));
+  const scored = results
+    .filter((r) => r.showRanking === 1)
+    .map((r) => ({ r, score: leaderboardScore(r.beaten, r.possible) }))
+    .sort((a, b) => b.score - a.score || b.r.played - a.r.played || b.r.wins - a.r.wins || (a.r.id < b.r.id ? -1 : 1));
+  const row = (x: { r: (typeof results)[number]; score: number }, rank: number | null): LeaderboardRowDto => ({
+    rank,
+    user: toPublic(x.r, badge),
+    tournaments: x.r.played,
+    wins: x.r.wins,
+    score: x.score,
+  });
+  const ranked: LeaderboardRowDto[] = [];
+  for (const x of scored) {
+    if (x.r.played < LEADERBOARD.minTournaments) continue;
+    // Equal scores, equal tournaments and wins share a rank.
+    const prev = ranked[ranked.length - 1];
+    const same = prev && prev.score === x.score && prev.tournaments === x.r.played && prev.wins === x.r.wins;
+    ranked.push(row(x, same ? prev.rank : ranked.length + 1));
+  }
+  const mine = await c.env.DB.prepare('SELECT show_ranking AS showRanking FROM users WHERE id = ?1').bind(me).first<{ showRanking: number }>();
+  const hidden = mine?.showRanking === 0;
+  const myRanked = ranked.find((r) => r.user.id === me);
+  const myScored = scored.find((x) => x.r.id === me);
+  const dto: LeaderboardDto = {
+    season,
+    from,
+    to,
+    rows: ranked.slice(0, LEADERBOARD.top),
+    ranked: ranked.length,
+    me: myRanked ?? (myScored ? row(myScored, null) : null),
+    hidden,
+  };
+  return c.json(dto);
+});

@@ -159,6 +159,7 @@ export function MePage() {
           <div className="text-sm text-ink-300">{me.email}</div>
           <div className="text-xs text-ink-400">{t('me.memberSince', { date: formatDate(me.createdAt, locale) })}</div>
           {mine && <PresenceLabel state={mine.state} className="mt-1" />}
+          <Link to={`/players/${me.id}`} className="mt-1 inline-block text-xs font-semibold text-gold-300 hover:underline" data-testid="me-card">{t('social.myCard')}</Link>
         </div>
         <div className="sm:ml-auto">
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-400">{t('common.balance')}</div>

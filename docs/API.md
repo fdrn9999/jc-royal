@@ -149,7 +149,7 @@
 | GET | `/` | `?filter=social\|game\|account\|service`, `?unread=1`, `?before=<at>:<id>`(앞 페이지의 `next`), `?limit=1..30`. `{items, next, unread}`. 최신순 |
 | POST | `/read` | `{ids: string[]}`(1–30개) 또는 `{all: true, filter?}`(한 번에 500개까지). 내 것이 아니거나 이미 읽은 항목은 건너뛴다. `{read: n}` |
 
-- 항목: `{id, kind, count, at, readAt, actor, params, state, href}`. `kind`는 `friend_request`·`friend_accepted`·`dm`·`invite`·`message`·`tournament_start`·`tournament_cancel`·`tournament_result`·`vip`·`security`·`notice`·`maintenance`. `actor`는 상대(닉네임은 읽을 때 붙인다). `state`는 처리하거나 끝날 수 있는 것만: 친구 요청(`open` 대기·`done` 수락·`expired` 거절·취소), 초대(30분 안이고 테이블이 열려 있으면 `open`), 토너먼트 시작(진행 중이면 `open`), 점검(`open` 예정·진행, `done` 끝, `expired` 취소).
+- 항목: `{id, kind, count, at, readAt, actor, params, state, href}`. `kind`는 `friend_request`·`friend_accepted`·`dm`·`invite`·`friend_table`·`message`·`tournament_start`·`tournament_cancel`·`tournament_result`·`vip`·`security`·`notice`·`maintenance`. `actor`는 상대(닉네임은 읽을 때 붙인다). `state`는 처리하거나 끝날 수 있는 것만: 친구 요청(`open` 대기·`done` 수락·`expired` 거절·취소), 초대(30분 안이고 테이블이 열려 있으면 `open`), 친구 테이블(30분 안이고, 친구가 아직 그 공개 테이블에 앉아 있고 열려 있으며 여전히 친구면 `open`, `docs/SOCIAL.md` 2절), 토너먼트 시작(진행 중이면 `open`), 점검(`open` 예정·진행, `done` 끝, `expired` 취소).
 - 같은 상대의 같은 일은 하나로 묶고 읽기 전까지 센다(`count`). 읽은 뒤 다시 오면 1부터.
 - 1:1 메시지 본문, 이메일, IP, 세션은 항목에 없다. 로그인 알림은 대략의 브라우저 이름("Firefox · Linux")만 있다.
 - 숨김: 탈퇴한 상대, 차단한(된) 상대, 1:1 메시지를 끈 상대의 항목, 만료된 항목.
@@ -172,13 +172,22 @@
 |---|---|---|
 | GET | `/` | `{friends, incoming, outgoing}`. 친구마다 안 읽은 1:1 수와 마지막 메시지(최근 대화 순). 탈퇴한 회원은 빠짐 |
 | POST | `/requests` | `{nickname}` 또는 `{userId}` 중 하나 → 201 `{status:'pending', user}`. 상대가 이미 요청했으면 200 `{status:'accepted'}`로 바로 친구. 400 `friend_self`, 404 `user_not_found`, 409 `already_friends`·`already_requested`·`blocked_user`(내가 차단함)·`friend_limit`(200명), 403 `request_unavailable`(상대가 차단했거나 요청을 받지 않음: 둘을 구분하지 않음). 시간당 30회 |
-| GET / PATCH | `/settings` | `{friendRequests:'everyone'\|'nobody', dmNotifications:boolean}` |
+| GET / PATCH | `/settings` | `{friendRequests:'everyone'\|'nobody', dmNotifications, showAchievements, showStats, shareTable, showRanking}`(뒤의 다섯은 boolean). PATCH는 바꿀 것만 보내고 하나도 없으면 400. 공개 설정 4개는 `docs/SOCIAL.md` |
 | GET | `/:userId/relation` | `{relation:'none'\|'friend'\|'incoming'\|'outgoing'\|'blocked'}` — 내 쪽에서 본 관계(나를 차단한 상대는 `none`) |
 | POST | `/:userId/accept` | 받은 요청 수락. 없으면 404 |
 | POST | `/:userId/invite` | `{tableId}` → 201 DirectMessageDto(`kind:'invite'`). 친구에게 열린 테이블 초대 카드를 1:1로 보냄. 참가 코드는 담지 않고 아무 권한도 주지 않음(좌석·코드·관전은 테이블이 똑같이 검사). 403 `not_friends`, 409 `table_unavailable`(닫힘·입장 차단). 10분당 20회 |
 | DELETE | `/:userId` | 받은 요청 거절, 보낸 요청 취소, 친구 삭제 |
 
 친구 요청은 두 사람 사이에 차단이 없을 때만 저장하는 한 문장으로 기록합니다. 그래서 요청과 차단이 동시에 와도 차단이 이깁니다(차단이 먼저 쓴 요청도 지움).
+
+## 프로필 카드·시즌 리더보드 `/api/players`, `/api/leaderboard` (로그인 필요)
+
+설계와 공개 규칙은 `docs/SOCIAL.md`(`packages/types/src/players.ts`, `apps/api/src/routes/players.ts`).
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/players/:id/card` | PlayerCardDto `{user, joinedMonth('YYYY-MM', 한국 시간), self, achievements, stats, privacy?}`. `achievements`는 `[{code, at}]`, 회원이 숨겼으면 `null`. `stats`는 `{hands, vpip, pfr, wtsd, wsd, tournamentWins}`(비율은 `{n, of}` 표본과 함께), 회원이 켜지 않았으면 `null`(기본). 내 카드는 둘 다 늘 있고 `privacy`(공개 설정 4개)가 붙는다. 없는 회원·탈퇴·정지·테이블 봇·어느 쪽이든 차단한 사이는 모두 같은 404 `player_not_found`. 칩·이메일·핸드의 카드는 없다. 분당 120회 |
+| GET | `/api/leaderboard` | `?season=YYYY-MM`(기본은 이번 달, 한국 시간). LeaderboardDto `{season, from, to, rows, ranked, me, hidden}`. `rows`는 상위 50명 `{rank, user, tournaments, wins, score}`, `me`는 내 줄(토너먼트가 3개 미만이면 `rank: null`, 리더보드 표시를 껐으면 `null`), `hidden`은 내가 표시를 껐는지. 형식이 틀리면 400 `invalid_season`. 분당 60회 |
 
 ## 접속 상태 `/api/me/presence`, `/api/friends/presence` (로그인 필요)
 

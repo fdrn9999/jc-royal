@@ -139,6 +139,12 @@ export const TABLES: TestTable[] = [
   { id: 'it-mon-close', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000 },
   // the control center's socket (admin-monitor-socket.test.ts): counts and a followed room's summaries
   { id: 'it-mon-ws', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Players (players.test.ts): friend table alerts at public tables and a private one, and a heads-up hand for achievements.
+  { id: 'it-player-0', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  { id: 'it-player-1', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  { id: 'it-player-2', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  { id: 'it-player-priv', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, isPrivate: true, joinCode: 'player-77' },
+  { id: 'it-player-hu', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {

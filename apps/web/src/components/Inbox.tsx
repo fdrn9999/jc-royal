@@ -19,6 +19,7 @@ import {
   TriangleAlertIcon,
   TrophyIcon,
   UserPlusIcon,
+  UsersIcon,
   type LucideIcon,
 } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -56,6 +57,7 @@ const ko = {
   'k.dm': '{name}님이 메시지를 보냈습니다',
   'k.dmN': '{name}님이 메시지 {n}개를 보냈습니다',
   'k.invite': '{name}님이 {table} 테이블로 초대했습니다',
+  'k.friend_table': '{name}님이 {table} 테이블에 앉았습니다',
   'k.message': '새 쪽지 {n}통이 도착했습니다',
   'k.messageRead': '쪽지함의 쪽지를 모두 확인했습니다',
   'k.tournament_start': '{name} 토너먼트가 시작되었습니다',
@@ -111,6 +113,7 @@ const en: Record<keyof typeof ko, string> = {
   'k.dm': '{name} sent you a message',
   'k.dmN': '{name} sent you {n} messages',
   'k.invite': '{name} invited you to table {table}',
+  'k.friend_table': '{name} sat down at table {table}',
   'k.message': '{n} new inbox messages',
   'k.messageRead': 'All inbox messages read',
   'k.tournament_start': '{name} has started',
@@ -149,6 +152,7 @@ type Texts = ReturnType<typeof useInboxText>;
 const ICON: Record<InboxItemDto['kind'], LucideIcon> = {
   friend_request: UserPlusIcon,
   friend_accepted: UserPlusIcon,
+  friend_table: UsersIcon,
   dm: MessageCircleIcon,
   invite: DicesIcon,
   message: MailIcon,
@@ -191,6 +195,12 @@ export function inboxText({ t, tr, locale }: Texts, i: InboxItemDto, now: number
       return {
         text: tr('k.invite', { name, table: str(p.table) ?? '' }),
         state: tr(i.state === 'open' ? 's.joinable' : 's.expired'),
+        done: i.state !== 'open',
+      };
+    case 'friend_table':
+      return {
+        text: tr('k.friend_table', { name, table: str(p.name) ?? '' }),
+        state: tr(i.state === 'open' ? 's.joinable' : 's.closed'),
         done: i.state !== 'open',
       };
     case 'message':

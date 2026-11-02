@@ -1,4 +1,4 @@
-import { ACTIVE_DAYS_MAX_RETENTION, ACTIVE_DAYS_RETENTION, OPS_RETENTION_MS, REALTIME_OUTBOX_RETENTION_MS, statsDay } from '@jc/db';
+import { ACTIVE_DAYS_MAX_RETENTION, ACTIVE_DAYS_RETENTION, OPS_RETENTION_MS, REALTIME_OUTBOX_RETENTION_MS, STATS_DAY, STATS_TZ_OFFSET_MS, statsDay, streakAchievements } from '@jc/db';
 import { OPS_LOG_RETENTION_MS } from '@jc/types';
 
 /** Push outbox rows (sent, skipped, failed or expired; never what a push said) are kept this long, for the dedupe keys and the hourly cap. */
@@ -15,7 +15,9 @@ export const HOUSEKEEPING_GRACE_MS = 24 * 60 * 60_000;
 export async function housekeeping(db: D1Database, now = Date.now()) {
   const before = now - HOUSEKEEPING_GRACE_MS;
   const today = statsDay(now);
-  const [sessions, passwordResets, emailVerifications, rateLimits, opsMetrics, activeDays, pushEvents, pushDevices, realtimeEvents, inbox, opsEvents, opsAlerts] = await db.batch([
+  const [achievements, sessions, passwordResets, emailVerifications, rateLimits, opsMetrics, activeDays, pushEvents, pushDevices, realtimeEvents, inbox, opsEvents, opsAlerts] = await db.batch([
+    // Not a clean-up: the seven-days-in-a-row achievement (docs/SOCIAL.md), read from active_days before any are deleted.
+    streakAchievements(db, STATS_DAY, STATS_TZ_OFFSET_MS),
     // Signed-out, idle-expired and remember-me sessions that ran out: their IP and User-Agent go with them.
     db.prepare('DELETE FROM sessions WHERE expires_at < ?1').bind(before),
     // Reset links last 30 minutes, used or not.
@@ -51,6 +53,7 @@ export async function housekeeping(db: D1Database, now = Date.now()) {
     db.prepare('DELETE FROM ops_alerts WHERE resolved_at < ?1 OR (confirmed_at IS NULL AND first_seen_at < ?2)').bind(now - OPS_LOG_RETENTION_MS, now - 24 * 60 * 60_000),
   ]);
   return {
+    achievements: achievements!.meta.changes,
     sessions: sessions!.meta.changes,
     passwordResets: passwordResets!.meta.changes,
     emailVerifications: emailVerifications!.meta.changes,

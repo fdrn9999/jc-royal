@@ -47,11 +47,12 @@ describe('notification inbox', () => {
     expect((await u.client.post('/api/notifications/read', {})).status).toBe(400);
     expect((await u.client.post('/api/notifications/read', { all: false })).status).toBe(400);
     expect((await u.client.post('/api/notifications/read', { ids: [] })).status).toBe(400);
-    // A new member's sign-up is its own device: nothing unread to start with.
+    // A new member's sign-up is its own device: the only unread item is the welcome 쪽지 (routes/auth.ts).
     const first = await inbox(u.client);
-    expect(first.unread).toBe(0);
+    expect(first.items.filter((i) => i.readAt === null).map((i) => i.kind)).toEqual(['message']);
+    expect(first.unread).toBe(1);
     expect(of(first, 'security').every((i) => i.readAt !== null)).toBe(true);
-    expect(await counted(u.client)).toBe(0);
+    expect(await counted(u.client)).toBe(1);
   });
 
   it('a friend request, then its answer: one item each, the request showing what became of it, read on accepting', async () => {
@@ -147,7 +148,8 @@ describe('notification inbox', () => {
     await u.client.post('/api/notifications/read', { ids: [fresh!.id] });
     // The same browser and system again, while it is signed in there: nothing new.
     await signInAs(u, FIREFOX_LINUX);
-    expect((await inbox(u.client, '?unread=1&filter=account')).items).toHaveLength(0);
+    // (The account filter also lists the 쪽지 item, unread here with the welcome 쪽지.)
+    expect(of(await inbox(u.client, '?unread=1&filter=account'), 'security')).toHaveLength(0);
 
     // The session that changed it stays signed in (the others end).
     expect((await u.client.post('/api/auth/me/password', { currentPassword: PASSWORD, newPassword: 'changed123!' })).status).toBe(200);

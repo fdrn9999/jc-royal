@@ -77,6 +77,11 @@ const STATE_SQL = `CASE x.kind
         WHERE f.user_a = MIN(?1, x.actorId) AND f.user_b = MAX(?1, x.actorId) AND (f.status = 'accepted' OR f.requester_id = x.actorId)), 'expired')
     WHEN 'invite' THEN CASE WHEN x.at > ?2 - ${INBOX_INVITE_TTL_MS} AND EXISTS (SELECT 1 FROM tables t WHERE t.id = x.ref AND t.status = 'open' AND t.entry_blocked = 0) THEN 'open' ELSE 'expired' END
     WHEN 'tournament_start' THEN COALESCE((SELECT CASE status WHEN 'running' THEN 'open' ELSE 'done' END FROM tournaments WHERE id = x.ref), 'expired')
+    WHEN 'friend_table' THEN CASE WHEN x.at > ?2 - ${INBOX_INVITE_TTL_MS}
+      AND EXISTS (SELECT 1 FROM tables t WHERE t.id = x.ref AND t.status = 'open' AND t.entry_blocked = 0 AND t.is_private = 0)
+      AND EXISTS (SELECT 1 FROM table_sessions s WHERE s.table_id = x.ref AND s.user_id = x.actorId AND s.status = 'seated')
+      AND EXISTS (SELECT 1 FROM friendships f WHERE f.user_a = MIN(?1, x.actorId) AND f.user_b = MAX(?1, x.actorId) AND f.status = 'accepted')
+      THEN 'open' ELSE 'expired' END
   END`;
 
 export interface InboxRowOut {
@@ -134,6 +139,8 @@ function hrefOf(r: InboxRowOut, params: InboxItemDto['params']): string | null {
     case 'dm':
     case 'invite':
       return r.actorId ? `/friends/${r.actorId}` : '/friends';
+    case 'friend_table':
+      return r.ref ? `/table/${r.ref}` : null;
     case 'message':
       return '/messages';
     case 'tournament_start':

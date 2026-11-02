@@ -6,6 +6,7 @@ import {
   isKstNight,
   MAX_BLOCKS,
   MAX_FRIENDS,
+  PRIVACY_DEFAULTS,
   publicRole,
   shownVip,
   SocialSettingsSchema,
@@ -51,7 +52,7 @@ async function relation(c: Context<AppEnv>, me: string, other: string) {
  * A member as other players see them, with the staff role (see PublicRole) drawn from `users.role` when the social
  * policy shows that role's badge (`badge`, from badgesFor), and the VIP color (shownVip) read in the same query.
  */
-const toPublic = (
+export const toPublic = (
   u: { id: string; nickname: string; avatarUrl: string | null; role: string; status?: string; isBot?: boolean | number; vipColor?: string | null },
   badge: Badge = publicRole,
 ): PublicUserDto => {
@@ -79,8 +80,18 @@ async function publicUser(c: Context<AppEnv>, where: { id?: string; nickname?: s
 const IN_FORCE = `JOIN users bu ON bu.id = ub.blocked_id AND bu.role = 'user'`;
 
 /** SQL condition: neither of the two placeholders has blocked the other. */
-const notBlocked = (a: string, b: string) =>
+export const notBlocked = (a: string, b: string) =>
   `NOT EXISTS (SELECT 1 FROM user_blocks ub ${IN_FORCE} WHERE (ub.blocker_id = ${a} AND ub.blocked_id = ${b}) OR (ub.blocker_id = ${b} AND ub.blocked_id = ${a}))`;
+
+/** What GET and PATCH /settings answer with (SocialSettingsDto). */
+const SETTINGS = {
+  friendRequests: schema.users.friendRequests,
+  dmNotifications: schema.users.dmNotifications,
+  showAchievements: schema.users.showAchievements,
+  showStats: schema.users.showStats,
+  shareTable: schema.users.shareTable,
+  showRanking: schema.users.showRanking,
+};
 
 /** 'mine' when I blocked them, 'theirs' when they blocked me (which is never shown to me as such). */
 async function blockState(c: Context<AppEnv>, me: string, other: string): Promise<'none' | 'mine' | 'theirs'> {
@@ -293,8 +304,8 @@ export const friendRoutes = new Hono<AppEnv>()
     return c.json({ status: row.status, user } satisfies FriendRequestResultDto, 201);
   })
   .get('/settings', async (c) => {
-    const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, c.var.user!.id), columns: { friendRequests: true, dmNotifications: true } });
-    return c.json({ friendRequests: u?.friendRequests ?? 'everyone', dmNotifications: u?.dmNotifications ?? true } satisfies SocialSettingsDto);
+    const [u] = await c.var.db.select(SETTINGS).from(schema.users).where(eq(schema.users.id, c.var.user!.id));
+    return c.json((u ?? { friendRequests: 'everyone', dmNotifications: true, ...PRIVACY_DEFAULTS }) satisfies SocialSettingsDto);
   })
   .patch('/settings', async (c) => {
     const body = await parseBody(c, SocialSettingsSchema);
@@ -302,7 +313,7 @@ export const friendRoutes = new Hono<AppEnv>()
       .update(schema.users)
       .set({ ...body, updatedAt: Date.now() })
       .where(eq(schema.users.id, c.var.user!.id))
-      .returning({ friendRequests: schema.users.friendRequests, dmNotifications: schema.users.dmNotifications });
+      .returning(SETTINGS);
     return c.json(r! satisfies SocialSettingsDto);
   })
   /** My side of the relation only: a player who blocked me reads as 'none'. */

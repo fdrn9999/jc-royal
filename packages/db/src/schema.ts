@@ -28,6 +28,14 @@ export const users = sqliteTable(
     friendRequests: text('friend_requests', { enum: ['everyone', 'nobody'] }).notNull().default('everyone'),
     /** Whether unread 1:1 messages count toward the header badge. */
     dmNotifications: integer('dm_notifications', { mode: 'boolean' }).notNull().default(true),
+    /**
+     * What other members see of this member (docs/SOCIAL.md): achievements on the card, statistics on the card (off
+     * until turned on), friends told when this member sits at a public table, a place on the season leaderboard.
+     */
+    showAchievements: integer('show_achievements', { mode: 'boolean' }).notNull().default(true),
+    showStats: integer('show_stats', { mode: 'boolean' }).notNull().default(false),
+    shareTable: integer('share_table', { mode: 'boolean' }).notNull().default(true),
+    showRanking: integer('show_ranking', { mode: 'boolean' }).notNull().default(true),
     /** Last member sign-in (signup or login), kept after the session itself ends. Null before it was recorded. */
     lastLoginAt: integer('last_login_at'),
     /**
@@ -1342,7 +1350,7 @@ export const notifications = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull(),
     kind: text('kind', {
-      enum: ['friend_request', 'friend_accepted', 'dm', 'invite', 'message', 'tournament_start', 'tournament_cancel', 'tournament_result', 'vip', 'security', 'notice', 'maintenance'],
+      enum: ['friend_request', 'friend_accepted', 'dm', 'invite', 'friend_table', 'message', 'tournament_start', 'tournament_cancel', 'tournament_result', 'vip', 'security', 'notice', 'maintenance'],
     }).notNull(),
     key: text('key').notNull(),
     /** The member who caused it (a friend), if any. */

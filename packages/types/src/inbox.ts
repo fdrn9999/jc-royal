@@ -15,6 +15,7 @@ export const INBOX_KINDS = [
   'friend_accepted',
   'dm',
   'invite',
+  'friend_table',
   'message',
   'tournament_start',
   'tournament_cancel',
@@ -28,7 +29,7 @@ export type InboxKind = (typeof INBOX_KINDS)[number];
 
 /** The filters of the list, each a set of kinds. */
 export const INBOX_FILTERS = {
-  social: ['friend_request', 'friend_accepted', 'dm', 'invite'],
+  social: ['friend_request', 'friend_accepted', 'dm', 'invite', 'friend_table'],
   game: ['tournament_start', 'tournament_cancel', 'tournament_result'],
   account: ['message', 'vip', 'security'],
   service: ['notice', 'maintenance'],

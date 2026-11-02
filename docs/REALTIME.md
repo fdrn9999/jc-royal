@@ -81,7 +81,7 @@
 | `social.friend.changed` | 개인 | 친구 요청·수락·거절·취소·삭제, 차단 | 양쪽 회원 | 없음(무엇이 바뀌었는지 말하지 않는다) | 친구 목록·받은 요청 수 다시 읽기, 열린 대화는 그 `seq` 뒤를 읽어 아직 보낼 수 있는지 | 재연결 때, 60초(대화는 30초) 폴링 |
 | `social.dm.created` | 개인 | 1:1 메시지(테이블 초대 포함) | 받는 사람, 보낸 사람의 다른 기기 | `peerId`, `seq` | 열린 대화면 그 `seq` 뒤를 읽기, 아니면 목록·안 읽은 수 | 재연결 때 `afterSeq`로 이어 읽기, 30초 폴링 |
 | `social.dm.read` | 개인 | 대화 읽음 | 상대, 내 다른 기기 | `peerId`, `readerId`, `seq` | 읽음 표시·안 읽은 수 다시 읽기 | 재연결 때 |
-| `notification.changed` | 개인 | 알림 읽음(`POST /api/notifications/read`, 1:1 대화 읽음으로 그 알림이 읽힐 때), 새 기기 로그인, 비밀번호 변경, 토너먼트 종료(룸, 결과 알림이 쓰였을 때) | 그 회원(종료는 참가한 회원들) | 없음 | 안 읽은 수(`notifications` 포함)를 한 번 읽고, 열린 알림 패널·`/notifications`는 목록을 다시 읽기 | 재연결 때, 120초 폴링 |
+| `notification.changed` | 개인 | 알림 읽음(`POST /api/notifications/read`, 1:1 대화 읽음으로 그 알림이 읽힐 때), 새 기기 로그인, 비밀번호 변경, 토너먼트 종료(룸, 결과 알림이 쓰였을 때), 친구가 공개 테이블에 앉음(룸, 그 친구 테이블 알림이 쓰였을 때) | 그 회원(종료는 참가한 회원들, 친구 테이블은 알림을 받은 친구들) | 없음 | 안 읽은 수(`notifications` 포함)를 한 번 읽고, 열린 알림 패널·`/notifications`는 목록을 다시 읽기 | 재연결 때, 120초 폴링 |
 | `lobby.mine.changed` | 개인 | 테이블 룸의 점유 기록 뒤, 좌석이나 대기 순번이 바뀐 회원에게만 | 그 회원 | `resourceId`(테이블) | `GET /api/tables/:id` 한 번(그 회원의 `myParticipation`) | 재연결 때 목록 다시 읽기, 60초 폴링 |
 | `lobby.table.changed` | 공개, 토픽 `lobby` | 테이블 룸의 점유 기록 뒤(1초에 한 번까지) | 로비를 보는 페이지 | 인원 수(`seated`, `bots`, `playing`, `waitlist`, `spectators`, `status`)와 `rev` | 그 카드의 숫자만 바꾼다(더 새 `rev`일 때) | 재연결 때 목록, 60초 폴링 |
 | `lobby.table.updated` | 공개, 토픽 `lobby` | 방 만들기, 이름·스테이크·공개 여부·관전·입장 제한 변경(API) | 로비를 보는 페이지 | 그 테이블의 공개 카드 전체(`myParticipation` 없음) | 설정은 더 새 `rev`, 인원은 더 새 `liveRev`를 각각 고른다 | 같음 |
@@ -224,7 +224,7 @@ API 라우트 ── D1 batch [변경 … , realtime_outbox 행] ── 커밋
 
 ## 9. 하지 않은 것
 
-- 토너먼트 초대, 리더보드, 플레이 업적, 9인 토너먼트.
+- 토너먼트 초대. 리더보드·플레이 업적·9인 토너먼트는 뒤에 만들었고 실시간 이벤트를 더하지 않았다(업적은 카드를 다시 열 때, 친구 테이블 알림은 알림함 항목과 `notification.changed`로 보인다. `docs/SOCIAL.md`).
 - 탭 사이 `BroadcastChannel`. 탭마다 소켓을 따로 열고, 회원당 10개로 제한한다.
 - 로비·룸 이벤트의 아웃박스(7절 '실시간 아웃박스').
 - Cloudflare Queues. 매분 크론이 다시 보내므로 쓰지 않았다(유료 설정과 별도 실패 복구가 필요하다).

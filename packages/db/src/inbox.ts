@@ -10,6 +10,7 @@ export type InboxRowKind =
   | 'friend_accepted'
   | 'dm'
   | 'invite'
+  | 'friend_table'
   | 'message'
   | 'tournament_start'
   | 'tournament_cancel'

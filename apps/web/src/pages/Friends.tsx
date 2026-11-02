@@ -431,6 +431,30 @@ export function FriendSettingsPage() {
           </div>
         )}
       </Panel>
+      <Panel title={t('social.privacy')} actions={meId && <Link to={`/players/${meId}`} className="text-xs font-semibold text-gold-300 hover:underline" data-testid="settings-my-card">{t('social.myCard')}</Link>}>
+        {!settings ? (
+          failed.settings ? <LoadFailed className="py-6" onRetry={() => retry('settings')} testId="privacy-failed" /> : <Loading className="py-6" />
+        ) : (
+          <div className="divide-y divide-white/5">
+            <SettingToggle
+              label={t('social.showAchievements')}
+              hint={t('social.showAchievementsHint')}
+              checked={settings.showAchievements}
+              onChange={(v) => void save({ showAchievements: v })}
+              testId="settings-show-achievements"
+            />
+            <SettingToggle label={t('social.showStats')} hint={t('social.showStatsHint')} checked={settings.showStats} onChange={(v) => void save({ showStats: v })} testId="settings-show-stats" />
+            <SettingToggle label={t('social.shareTable')} hint={t('social.shareTableHint')} checked={settings.shareTable} onChange={(v) => void save({ shareTable: v })} testId="settings-share-table" />
+            <SettingToggle
+              label={t('social.showRanking')}
+              hint={t('social.showRankingHint')}
+              checked={settings.showRanking}
+              onChange={(v) => void save({ showRanking: v })}
+              testId="settings-show-ranking"
+            />
+          </div>
+        )}
+      </Panel>
       <Panel title={t('social.blocked', { n: blocks?.length ?? '–' })}>
         {!blocks ? (
           failed.blocks ? <LoadFailed className="py-6" onRetry={() => retry('blocks')} testId="blocks-failed" /> : <Loading className="py-6" />
@@ -817,6 +841,9 @@ export function ConversationPage() {
           </h1>
           {peerState && <PresenceLabel state={peerState} lastOnline={lastOnline?.[userId]} className="-mt-0.5" />}
         </div>
+        {!conv.blocked && (
+          <Link to={`/players/${userId}`} className="inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-xs font-semibold text-ink-200 hover:bg-white/5" data-testid="dm-card">{t('player.card')}</Link>
+        )}
         {conv.isFriend && (
           <Button size="sm" variant="ghost" className="text-ink-300" onClick={unfriend} data-testid="unfriend">{t('friends.remove')}</Button>
         )}

@@ -7,7 +7,7 @@
  * next hand from being dealt, `runClock` starts it again from there when a hand is dealt, and moves past the levels
  * whose time is up. The level is fixed at the deal, so a hand in progress keeps its blinds.
  */
-import { IF_CHANGED, inboxForMembers, outboxForEntries } from '@jc/db';
+import { achievementForTournament, IF_CHANGED, inboxForMembers, outboxForEntries } from '@jc/db';
 import {
   advanceLevel,
   isKstNight,
@@ -396,6 +396,12 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
       }).run();
     } catch (e) {
       console.warn('tournament result push not queued', e instanceof Error ? e.message : String(e));
+    }
+    try {
+      // The winner's achievement (packages/db/src/achievementsSql.ts); idempotent, so a finish written again changes nothing.
+      await achievementForTournament(d1, t.id).run();
+    } catch (e) {
+      console.warn('tournament achievement not written', e instanceof Error ? e.message : String(e));
     }
   }
   return { status, pauseRequested: back?.pauseRequested === 1, maintenance: toMaintenance(res[res.length - 1]?.results[0] as Maintenance | undefined), standings, finished };
