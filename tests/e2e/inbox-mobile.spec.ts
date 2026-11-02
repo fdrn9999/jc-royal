@@ -70,7 +70,16 @@ test('mobile: the bell fits 390, 320 and a phone on its side; a tap on an item o
   await a.page.goto('/notifications');
   await expect(a.page.getByTestId('inbox-list')).toContainText(b.nickname);
   expect(await widerThanDevice(a.page)).toBe(false);
+  // The filter chips and the "unread only" checkbox never cover each other.
+  const apart = async () => {
+    const chips = (await a.page.getByTestId('inbox-tab-all').locator('..').boundingBox())!;
+    const box = (await a.page.getByTestId('inbox-unread-only').locator('..').boundingBox())!;
+    expect(box.y >= chips.y + chips.height || box.x >= chips.x + chips.width).toBe(true);
+  };
+  await apart();
+  await a.page.screenshot({ path: 'test-results/inbox-page-mobile-390.png', animations: 'disabled' });
   await a.page.setViewportSize({ width: 320, height: 568 });
   expect(await widerThanDevice(a.page)).toBe(false);
+  await apart();
   await a.page.screenshot({ path: 'test-results/inbox-page-mobile-320.png', animations: 'disabled', fullPage: true });
 });

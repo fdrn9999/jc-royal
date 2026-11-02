@@ -87,7 +87,9 @@ export function NotificationsPage() {
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="-mx-4 flex min-w-0 flex-1 gap-2 overflow-x-auto px-4 sm:mx-0 sm:px-0" role="tablist" aria-label={tr('filter')}>
+        {/* A phone gives the scrolling chips a line of their own, edge to edge, and the checkbox the next one: beside it, the
+            row's bleed into the page margin ran under the checkbox and cut a chip there. */}
+        <div className="-mx-4 flex min-w-0 grow basis-[calc(100%+2rem)] gap-2 overflow-x-auto px-4 sm:mx-0 sm:basis-0 sm:px-0" role="tablist" aria-label={tr('filter')}>
           {TABS.map((k) => (
             <button
               key={k}
