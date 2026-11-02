@@ -27,7 +27,7 @@
 | `packages/audio` | 카드·칩 녹음 효과음(Pixabay), 그 밖의 소리와 불러오기 전·실패 시에는 Web Audio 합성음 |
 | `apps/api` | REST, 인증, WS 진입, 정적 사이트 |
 | `apps/game-worker` | TableRoom DO, 플랫폼 실시간 `RealtimeHub`·접속 상태 `PresenceHub`·관리자 관제 `AdminMonitorHub` DO |
-| `apps/web` / `apps/admin` | 사용자 / 관리자 SPA |
+| `apps/web` / `apps/admin` | 사용자 / 관리자 SPA. 관리 콘솔은 로그인 화면만 처음 번들에 두고 나머지 화면은 경로별로 늦게 불러온다(`React.lazy`, 셸의 `Suspense`) |
 
 ## 게임 흐름
 

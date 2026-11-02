@@ -147,7 +147,7 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/` | `?filter=social\|game\|account\|service`, `?unread=1`, `?before=<at>:<id>`(앞 페이지의 `next`), `?limit=1..30`. `{items, next, unread}`. 최신순 |
-| POST | `/read` | `{ids: string[]}`(1–30개) 또는 `{all: true, filter?}`(한 번에 500개까지). 내 것이 아니거나 이미 읽은 항목은 건너뛴다. `{read: n}` |
+| POST | `/read` | `{ids: string[]}`(1–30개) 또는 `{all: true, filter?}`(한 번에 500개까지). 내 것이 아니거나 이미 읽은 항목은 건너뛴다. 알림은 서버가 다시 읽은 그대로일 때만 읽음이 된다: 그 사이 다시 세어진 알림(같은 친구가 다시 보낸 요청 등)은 회원이 보지 못한 것이므로 안 읽음으로 남는다. 알림의 `at`은 쓸 때마다 1 ms 이상 앞으로 가므로, 같은 밀리초에 다시 세어지거나 다른 탭이 읽은 뒤 다시 온 알림도 구별된다. `{read: n}` |
 
 - 항목: `{id, kind, count, at, readAt, actor, params, state, href}`. `kind`는 `friend_request`·`friend_accepted`·`dm`·`invite`·`friend_table`·`message`·`tournament_start`·`tournament_cancel`·`tournament_result`·`vip`·`security`·`notice`·`maintenance`. `actor`는 상대(닉네임은 읽을 때 붙인다). `state`는 처리하거나 끝날 수 있는 것만: 친구 요청(`open` 대기·`done` 수락·`expired` 거절·취소), 초대(30분 안이고 테이블이 열려 있으면 `open`), 친구 테이블(30분 안이고, 친구가 아직 그 공개 테이블에 앉아 있고 열려 있으며 여전히 친구면 `open`, `docs/SOCIAL.md` 2절), 토너먼트 시작(진행 중이면 `open`), 점검(`open` 예정·진행, `done` 끝, `expired` 취소).
 - 같은 상대의 같은 일은 하나로 묶고 읽기 전까지 센다(`count`). 읽은 뒤 다시 오면 1부터.
