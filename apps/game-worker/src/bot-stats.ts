@@ -32,7 +32,28 @@ export interface BotStatsFlush {
 }
 
 /** The hand counters reported, out of the 33 `handCounters` keeps. */
-const FROM_HAND = ['hands', 'vpipOpp', 'vpip', 'pfr', 'threeBetOpp', 'threeBet', 'bbStealOpp', 'bbFoldToSteal', 'foldToOverbetOpp', 'foldToOverbet'] as const satisfies readonly BotStatKey[];
+const FROM_HAND = [
+  'hands',
+  'vpipOpp',
+  'vpip',
+  'pfr',
+  'threeBetOpp',
+  'threeBet',
+  'bbStealOpp',
+  'bbFoldToSteal',
+  'foldToOverbetOpp',
+  'foldToOverbet',
+  'foldTo3BetOpp',
+  'foldTo3Bet',
+  'cbetOpp',
+  'cbet',
+  'foldToCbetOpp',
+  'foldToCbet',
+  'sawFlop',
+  'showdowns',
+  'postBets',
+  'postCalls',
+] as const satisfies readonly BotStatKey[];
 
 function add(acc: BotStatsAcc, level: string, key: BotStatKey, by: number) {
   if (!(by > 0)) return;

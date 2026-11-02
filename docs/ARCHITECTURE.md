@@ -26,8 +26,8 @@
 | `packages/ui` | 디자인 토큰, 4개 테마, 공통 컴포넌트, 카드·칩 |
 | `packages/audio` | 카드·칩 녹음 효과음(Pixabay), 그 밖의 소리와 불러오기 전·실패 시에는 Web Audio 합성음 |
 | `apps/api` | REST, 인증, WS 진입, 정적 사이트 |
-| `apps/game-worker` | TableRoom DO |
-| `apps/web` / `apps/admin` | 사용자 / 관리자 SPA |
+| `apps/game-worker` | TableRoom DO, 플랫폼 실시간 `RealtimeHub`·접속 상태 `PresenceHub`·관리자 관제 `AdminMonitorHub` DO |
+| `apps/web` / `apps/admin` | 사용자 / 관리자 SPA. 관리 콘솔은 로그인 화면만 처음 번들에 두고 나머지 화면은 경로별로 늦게 불러온다(`React.lazy`, 셸의 `Suspense`) |
 
 ## 게임 흐름
 
@@ -89,7 +89,7 @@
 
 ## 데이터 모델 (D1)
 
-정의는 `packages/db/src/schema.ts`, 마이그레이션은 `packages/db/migrations/`(`0000`–`0028`, 배포 순서는 `docs/DEPLOYMENT.md` 3절).
+정의는 `packages/db/src/schema.ts`, 마이그레이션은 `packages/db/migrations/`(`0000`–`0042`, 배포 순서는 `docs/DEPLOYMENT.md` 3절).
 
 | 영역 | 테이블 |
 |---|---|
@@ -99,12 +99,19 @@
 | 무료 칩·봇·추천 | `refill_claims`, `bot_fund`, `bot_events`, `referral_codes`, `referrals` |
 | 토너먼트 | `tournament_templates`, `tournaments`, `tournament_entries` |
 | 커뮤니티·소셜 | `posts`, `post_hands`, `comments`, `messages`, `friendships`, `user_blocks`, `direct_messages`, `reports`, `report_events` |
-| 아카데미 | `academy_progress`, `academy_gto_progress`(고급 GTO 진도), `user_badges`, `academy_stats` |
-| 운영 | `admin_audit_log`, `admin_permissions`, `admin_notes`, `service_notices`, `maintenance_windows`, `ops_metrics`, `active_days`, `daily_stats`, `rate_limits` |
+| 아카데미·업적 | `academy_progress`, `academy_gto_progress`(고급 GTO 진도), `user_badges`(아카데미 배지와 `play:` 업적), `academy_stats` |
+| 알림·실시간 | `notifications`(알림함), `realtime_outbox`(놓치면 안 되는 실시간 이벤트) |
+| 운영 | `admin_audit_log`, `admin_permissions`, `admin_notes`, `service_notices`, `maintenance_windows`, `ops_metrics`, `ops_alerts`·`ops_events`·`ops_watch`(지속 운영 경고·기록·매분 점검), `active_days`, `daily_stats`, `rate_limits` |
 
 **관리자 권한**: 요청마다 역할 권한 표와 그 관리자의 기능 스위치(`admin_permissions`, 기본 거부)를 함께 검사한다. 최고관리자는 스위치를 읽지 않는다. 경제 정책·대회 구조처럼 위임하지 않는 작업은 최고관리자 전용이다(`docs/ADMIN_SECURITY.md`).
 
-**플레이 통계**: `hand_players`의 `position`·`vpip`·`pfr`·`saw_flop`·`pot_won`은 핸드 이벤트 로그(`hands.event_log`)에서 계산한 값이다. 계산은 `packages/db/src/handStats.ts`의 SQL 하나(`HAND_STATS_SQL`)뿐이며, 게임 워커가 핸드 기록 직후 실행하고 마이그레이션 `0010`이 같은 SQL로 기존 핸드를 채운다. `pot_won`이 비어 있는 행만 처리하므로 몇 번을 돌려도 결과가 같고, 실행이 실패해도 다음 핸드 기록 때 다시 채운다. 로그에서 행동을 읽을 수 없는 핸드는 `vpip`·`pfr`·`saw_flop`을 NULL로 두어 해당 지표의 분모에서 뺀다(추정하지 않음). 마이페이지 통계 API는 이 열을 모아 본인 것만 돌려준다.
+**플레이 통계**: `hand_players`의 `position`·`vpip`·`pfr`·`saw_flop`·`pot_won`은 핸드 이벤트 로그(`hands.event_log`)에서 계산한 값이다. 계산은 `packages/db/src/handStats.ts`의 SQL 하나(`HAND_STATS_SQL`)뿐이며, 게임 워커가 핸드 기록 직후 실행하고 마이그레이션 `0010`이 같은 SQL로 기존 핸드를 채운다. `pot_won`이 비어 있는 행만 처리하므로 몇 번을 돌려도 결과가 같고, 실행이 실패해도 다음 핸드 기록 때 다시 채운다. 로그에서 행동을 읽을 수 없는 핸드는 `vpip`·`pfr`·`saw_flop`을 NULL로 두어 해당 지표의 분모에서 뺀다(추정하지 않음). `three_bet`·`fold_3bet`·`cbet`·`fold_cbet`·`post_bets`·`post_calls`·`big_blind`(마이그레이션 `0040`)는 게임 워커가 같은 자리에서 엔진의 `handCounters`(봇이 상대를 읽는 셈과 같은 함수, 공개 행동만 읽음)로 세어 쓴다(`apps/game-worker/src/detail-stats.ts`). 기회가 없었던 지표는 NULL이라 분모에서 빠지고, `big_blind IS NULL`인 행만 쓰므로 다시 돌려도 같다. 실패해도 핸드 기록은 그대로 남는다(그 핸드는 세지 않음). 0040 전에 기록된 핸드는 채우지 않았다(`event_log`로 나중에 채울 수 있다). 마이페이지 통계 API는 이 열을 모아 본인 것만 돌려준다.
+
+**놓치면 안 되는 이벤트와 알림함**: 칩·VIP·계정 상태·친구·1:1·쪽지·토너먼트·공지·점검의 실시간 이벤트는 그 변경과 같은 D1 batch에 `realtime_outbox` 행으로 쓰고, 커밋 뒤 `RealtimeHub`로 보내며, 못 보낸 것은 매분 크론이 다시 보낸다(최소 한 번 전달, 페이지는 이벤트 id로 중복을 버리고 영역별 버전으로 늦게 온 응답을 버린다. `docs/REALTIME.md` 7절). 알림함(`notifications`)은 회원이 나중에 다시 보는 기록으로, 같은 batch에 쓰고 읽음은 탭 사이에 `notification.changed`로 맞춘다(`docs/API.md` 알림함).
+
+**지속 운영 경고**: 매분 크론이 열린 테이블 룸에 상태를 묻고(`ops_watch`), 규칙에 맞는 상황을 `ops_alerts`(같은 상황은 `dedupe_key`로 한 행, 정상이 되면 해소)와 `ops_events`(발생·해소·관리자 조치의 기록)에 쓴다. 회원 개인정보와 비공개 카드는 쓰지 않는다. 자동 조치는 없다(`docs/CONTROL_CENTER.md`).
+
+**업적·친구 테이블 알림**: 플레이 업적은 게임 워커가 핸드·토너먼트 기록 직후, 연속 접속은 매일 정리 작업이 `packages/db/src/achievementsSql.ts`의 SQL로 `user_badges`에 `INSERT OR IGNORE`한다(기록된 결과만 읽고, 머크한 패는 세지 않는다). 실패해도 핸드 기록은 그대로다. 공개 테이블에 앉으면 룸이 바이인 커밋 뒤 친구에게 알림함 항목을 쓴다(`apps/game-worker/src/friend-table.ts`, 비공개·토너먼트 테이블은 쓰지 않음). 공개 범위는 `docs/SOCIAL.md`.
 
 ## 원본 저장소에서 가져온 것
 

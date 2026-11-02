@@ -280,6 +280,11 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   // The control center's reads (routes/admin-monitor.ts): table duty sees them; its buttons are the routes above.
   'GET /monitor/tables': r('tables', 'monitor.tables'),
   'POST /monitor/rooms': r('tables', 'monitor.rooms'),
+  // Its persistent alerts and operations log (routes/admin-ops.ts): the note on an alert is no table action (no password).
+  'GET /monitor/alerts': r('tables', 'monitor.alerts'),
+  'GET /monitor/alerts/:id': r('tables', 'monitor.alert'),
+  'POST /monitor/alerts/:id/handling': r('tables', 'monitor.alert_handling'),
+  'GET /monitor/events': r('tables', 'monitor.events'),
 
   // Time bank (routes/admin-timebank.ts): anyone on table duty reads it; the policy is a super admin's.
   'GET /time-bank': r('tables', 'timebank.view'),

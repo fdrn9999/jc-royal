@@ -7,7 +7,7 @@
  * next hand from being dealt, `runClock` starts it again from there when a hand is dealt, and moves past the levels
  * whose time is up. The level is fixed at the deal, so a hand in progress keeps its blinds.
  */
-import { outboxForEntries } from '@jc/db';
+import { achievementForTournament, IF_CHANGED, inboxForMembers, outboxForEntries } from '@jc/db';
 import {
   advanceLevel,
   isKstNight,
@@ -303,6 +303,8 @@ export interface TourneySyncResult {
   maintenance: Maintenance | null;
   /** This write took a new elimination or the finish: what the tournament pages list changed (a stack alone is not). */
   standings: boolean;
+  /** This write took the finish: the members' notification inboxes have the result. */
+  finished: boolean;
 }
 
 /**
@@ -343,6 +345,7 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
         .bind(t.id, t.winnerId, total, now),
     );
   }
+  const tourneyAt = stmts.length;
   stmts.push(
     d1
       .prepare(
@@ -355,12 +358,28 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
         ...[t.id, t.hands, t.level, t.levelEndsAt, t.levelLeftMs, t.stoppedAt, playersLeft(t), now, ...(finish ? [t.winnerId, t.finishedAt ?? now] : [])],
       ),
   );
+  if (finish) {
+    // The result in every member entry's notification inbox, with the finish and only when this write made it (the
+    // place is read with the list, from the entry).
+    stmts.push(
+      inboxForMembers(
+        d1,
+        { kind: 'tournament_result', key: `tournament_result:${t.id}`, ref: t.id, now },
+        {
+          sql: `SELECT e.user_id FROM tournament_entries e JOIN users u ON u.id = e.user_id
+                 WHERE e.tournament_id = ? AND e.status IN ('eliminated', 'won') AND u.is_bot = 0 AND u.status != 'deleted' AND ${IF_CHANGED.sql}`,
+          params: [t.id],
+        },
+      ),
+    );
+  }
   stmts.push(d1.prepare(`SELECT status, pause_requested AS pauseRequested FROM tournaments WHERE id = ?1`).bind(t.id));
   stmts.push(maintenanceQuery(d1, now));
   const res = await d1.batch(stmts);
   const back = res[res.length - 2]?.results[0] as { status?: string; pauseRequested?: number } | undefined;
   const status = back && STATUSES.includes(back.status as TournamentStatus) ? (back.status as TournamentStatus) : null;
-  const standings = res.slice(0, busts).some((x) => (x.meta?.changes ?? 0) > 0) || (finish && (res[res.length - 3]?.meta?.changes ?? 0) > 0);
+  const finished = finish && (res[tourneyAt]?.meta?.changes ?? 0) > 0;
+  const standings = finished || res.slice(0, busts).some((x) => (x.meta?.changes ?? 0) > 0);
   if (finish && status === 'finished') {
     // The result's push (apps/api/src/lib/notify.ts sends it, the minute cron), after the finish is saved and never with
     // it: once per member however often this is written, and only for a finish of the last hour.
@@ -378,6 +397,12 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
     } catch (e) {
       console.warn('tournament result push not queued', e instanceof Error ? e.message : String(e));
     }
+    try {
+      // The winner's achievement (packages/db/src/achievementsSql.ts); idempotent, so a finish written again changes nothing.
+      await achievementForTournament(d1, t.id).run();
+    } catch (e) {
+      console.warn('tournament achievement not written', e instanceof Error ? e.message : String(e));
+    }
   }
-  return { status, pauseRequested: back?.pauseRequested === 1, maintenance: toMaintenance(res[res.length - 1]?.results[0] as Maintenance | undefined), standings };
+  return { status, pauseRequested: back?.pauseRequested === 1, maintenance: toMaintenance(res[res.length - 1]?.results[0] as Maintenance | undefined), standings, finished };
 }

@@ -4,9 +4,9 @@ import { api, ApiError } from './api';
 import { coalesced, onRealtime, onRealtimeResync, realtimeUp } from './realtime';
 import { refreshService } from './service';
 
-const NONE: UnreadCountsDto = { unread: 0, dmUnread: 0, friendRequests: 0 };
+const NONE: UnreadCountsDto = { unread: 0, dmUnread: 0, friendRequests: 0, notifications: 0 };
 
-/** Unread counters (inbox, 1:1 messages, friend requests) shared by the header badges and the pages. */
+/** Unread counters (inbox, 1:1 messages, friend requests, the notification bell) shared by the header badges and the pages. */
 let counts: UnreadCountsDto = NONE;
 /** The account the counters are about; another account's are never shown, and their late answers are dropped. */
 let owner: string | null = null;
@@ -24,7 +24,11 @@ const subs = new Set<() => void>();
 
 export type UnreadKind = 'unread' | 'dmUnread' | 'friendRequests';
 const KINDS: UnreadKind[] = ['unread', 'dmUnread', 'friendRequests'];
-/** The counters that went up from `prev` to `next` (something new arrived), in a fixed order. */
+/**
+ * The counters that went up from `prev` to `next` (something new arrived), in a fixed order. The bell's is not one: what
+ * it counts is already told of by these (a request, a message) or is quiet news (a notice, a result), so it never makes
+ * a second arrival notice.
+ */
 export const risen = (prev: UnreadCountsDto, next: UnreadCountsDto): UnreadKind[] => KINDS.filter((k) => next[k] > prev[k]);
 const rises = new Set<(kinds: UnreadKind[], counts: UnreadCountsDto, dmFrom: readonly string[]) => void>();
 /**
@@ -80,7 +84,7 @@ export async function refreshUnread() {
     for (const [peer, at] of heard) if (at <= upTo) heard.delete(peer);
     const news = known ? risen(counts, r) : [];
     known = true;
-    if (r.unread === counts.unread && r.dmUnread === counts.dmUnread && r.friendRequests === counts.friendRequests) return;
+    if (r.unread === counts.unread && r.dmUnread === counts.dmUnread && r.friendRequests === counts.friendRequests && r.notifications === counts.notifications) return;
     set(r);
     if (news.length) rises.forEach((f) => f(news, r, dmFrom));
   } catch (e) {
@@ -107,7 +111,8 @@ const SLOW_TICKS = 4;
  * and at once when it becomes visible again (a hidden tab does not poll). A message, friend or 1:1 event reads them at
  * once in a visible tab (a hidden one reads when it is shown), one announcement to many after its random wait, and the
  * poll slows down while those events arrive; a socket back after being down reads them once. A notice or maintenance
- * change has the banners read the service status after its random wait too.
+ * change has the banners read the service status after its random wait too. The bell's items changing (one read on
+ * another page, a new one, a tournament's result) or the account's (VIP) read them too.
  */
 export function watchUnread(account: string, pollMs: number): () => void {
   own(account);
@@ -147,6 +152,8 @@ export function watchUnread(account: string, pollMs: number): () => void {
       shown();
     }),
     onRealtime('social.dm.read', shown),
+    onRealtime('notification.changed', shown),
+    onRealtime('account.changed', shown),
     onRealtimeResync(shown),
   ];
   return () => {

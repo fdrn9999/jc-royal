@@ -1,4 +1,4 @@
-import { schema } from '@jc/db';
+import { IF_CHANGED, realtimeOutboxForMembers, realtimeOutboxStatement, schema } from '@jc/db';
 import {
   PLAYER_REPORT_WINDOW_MS,
   REPORT_REASONS,
@@ -28,7 +28,7 @@ import { fail, isPreview, parseBody } from '../lib/http';
 import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
 import { clientIp, rateLimit } from '../lib/rate-limit';
-import { realtimeToUsers } from '../lib/realtime';
+import { outboxToUsers, realtimeOutboxSend } from '../lib/realtime';
 import { audit } from './admin-auth';
 import { isUniqueViolation } from './auth';
 import { INTERNAL_HEADER } from './tables';
@@ -596,6 +596,8 @@ export const adminReportRoutes = new Hono<AppEnv>()
       ) - 1;
     const ko = notices('ko');
     const en = notices('en');
+    const reportersTold = outboxToUsers([], { scope: 'user', type: 'message.changed' }, at);
+    const targetTold = outboxToUsers(r.targetUserId ? [r.targetUserId] : [], { scope: 'user', type: 'message.changed' }, at);
     let reportersAt = -1;
     if (body.notifyReporter) {
       const k = ko.reportOutcome(r.targetType, body.status === 'resolved');
@@ -612,6 +614,14 @@ export const adminReportRoutes = new Hono<AppEnv>()
              RETURNING user_id AS userId`,
           ).bind(claim, id, me, at, e.title, k.title, e.body, k.body, r.targetType, r.targetId),
         ) - 1;
+      // Their pages read their unread count, from a row written with the notices (the members they went to).
+      stmts.push(
+        realtimeOutboxForMembers(DB, reportersTold, {
+          sql: `SELECT u.id AS user_id FROM users u
+                 WHERE u.id IN (SELECT reporter_id FROM reports WHERE target_type = ? AND target_id = ? AND handled_by = ? AND handled_at = ?) AND u.status != 'deleted'`,
+          params: [r.targetType, r.targetId, me, at],
+        }),
+      );
     }
     let targetAt = -1;
     if (body.notifyTarget) {
@@ -627,6 +637,7 @@ export const adminReportRoutes = new Hono<AppEnv>()
              RETURNING user_id AS userId`,
           ).bind(claim, id, me, at, e.title, k.title, e.body, k.body, r.targetUserId),
         ) - 1;
+      stmts.push(realtimeOutboxStatement(DB, targetTold, IF_CHANGED));
     }
     stmts.push(
       DB.prepare(
@@ -641,7 +652,13 @@ export const adminReportRoutes = new Hono<AppEnv>()
     if (!results[0]!.meta.changes) fail(409, 'report_closed', 'report already handled');
     const changes = (i: number) => (i < 0 ? 0 : results[i]!.meta.changes);
     // The members just told: their pages read their unread count.
-    const told = [reportersAt, targetAt].flatMap((i) => (i < 0 ? [] : (results[i]!.results as { userId: string }[]).map((r) => r.userId)));
-    realtimeToUsers(c, told, { scope: 'user', type: 'message.changed' });
+    const toldBy = (i: number) => (i < 0 ? [] : (results[i]!.results as { userId: string }[]).map((x) => x.userId));
+    realtimeOutboxSend(
+      c,
+      [
+        { ...reportersTold, users: toldBy(reportersAt) },
+        { ...targetTold, users: toldBy(targetAt) },
+      ].filter((x) => x.users.length > 0),
+    );
     return c.json({ ok: true, closed: changes(closeAt), notified: { reporters: changes(reportersAt), target: changes(targetAt) } });
   });

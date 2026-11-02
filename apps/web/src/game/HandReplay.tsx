@@ -638,7 +638,7 @@ export function HandReplay({ hand, heroSeat, review = false }: { hand: ReplayInp
           </Button>
           {studying && (
             <Suspense fallback={<Loading className="py-6" />}>
-              <StrategyPanel hand={hand} steps={steps} heroSeat={heroSeat} index={i} onGo={go} amounts={a} onShown={() => studyRef.current && onScreen(studyRef.current)} />
+              <StrategyPanel hand={hand} steps={steps} heroSeat={heroSeat} index={i} onGo={go} amounts={a} say={said} onShown={() => studyRef.current && onScreen(studyRef.current)} />
             </Suspense>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { applyLedger, schema } from '@jc/db';
+import { applyLedger, inboxValues, schema } from '@jc/db';
 import {
   ageOn,
   ChangePasswordSchema,
@@ -26,10 +26,11 @@ import { sendMessages } from '../lib/community';
 import { DUMMY_HASH, hashPassword, randomToken, sha256, verifyPassword } from '../lib/crypto';
 import { fail, parseBody } from '../lib/http';
 import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '../lib/mail';
+import { inboxSignIn } from '../lib/inbox';
 import { notices } from '../lib/notices';
 import { saveSignupConsent } from '../lib/notification-settings';
 import { clientIp, rateLimit } from '../lib/rate-limit';
-import { realtimeToUsers } from '../lib/realtime';
+import { realtimeOutboxSend, realtimeToUsers } from '../lib/realtime';
 import { checkReferralCode, findReferrer, recordReferral, settleReferral } from '../lib/referral';
 import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
@@ -214,7 +215,8 @@ export const authRoutes = new Hono<AppEnv>()
     if (grant > 0) {
       await applyLedger(c.env.DB, { userId: id, type: 'signup_grant', amount: grant, idempotencyKey: `signup:${id}`, memo: 'welcome chips' });
     }
-    await sendMessages(db, { userIds: [id], category: 'system', ...notices(body.locale).welcome(grant) });
+    const welcome = await sendMessages(c.env.DB, { userIds: [id], category: 'system', ...notices(body.locale).welcome(grant) });
+    if (welcome.event) realtimeOutboxSend(c, [welcome.event]);
     // The referral is recorded under the policy in force now and paid if it may be; a failure here never fails the
     // signup (the referral, if recorded, is paid later by the member's card, the daily cron or an operator).
     if (referrer) {
@@ -232,7 +234,9 @@ export const authRoutes = new Hono<AppEnv>()
         console.error('referral at signup', e);
       }
     }
-    await createSession(c, id, 'user');
+    const sid = await createSession(c, id, 'user');
+    // The device signed up on is known from the start: signing in on it later is not news.
+    await inboxSignIn(c, id, sid, { known: true });
     return c.json(await loadMe(c, id), 201);
   })
   /** The signup form's check of a referral code (lib/referral.ts): whose it is and what it gives now. */
@@ -251,7 +255,7 @@ export const authRoutes = new Hono<AppEnv>()
     if (u.status === 'suspended') fail(403, 'suspended', u.suspendedReason ?? 'account suspended');
     // After the password check, so the refusal tells nothing to someone who does not know it.
     await refuseSignInInMaintenance(c, u.role);
-    await createSession(c, u.id, 'user', body.remember);
+    await inboxSignIn(c, u.id, await createSession(c, u.id, 'user', body.remember));
     return c.json(toMe(u));
   })
   .post('/logout', async (c) => {
@@ -296,6 +300,8 @@ export const authRoutes = new Hono<AppEnv>()
       db.update(schema.passwordResets).set({ usedAt: Date.now() }).where(eq(schema.passwordResets.tokenHash, hash)),
       db.update(schema.users).set({ passwordHash: newHash, updatedAt: Date.now() }).where(eq(schema.users.id, row.userId)),
       db.delete(schema.sessions).where(eq(schema.sessions.userId, row.userId)),
+      // The member's bell keeps it (an account security item: 90 days, not removable).
+      db.insert(schema.notifications).values(inboxValues(row.userId, { kind: 'security', key: `security:password:${crypto.randomUUID()}`, params: { event: 'password_reset' }, now: Date.now() })),
     ]);
     signedOut(c, { user: row.userId });
     return c.json({ ok: true });
@@ -351,8 +357,10 @@ export const authRoutes = new Hono<AppEnv>()
       db.update(schema.users).set({ passwordHash: hash, updatedAt: Date.now() }).where(eq(schema.users.id, me.id)),
       // Sign out every other device.
       db.delete(schema.sessions).where(and(eq(schema.sessions.userId, me.id), ne(schema.sessions.id, c.var.session!.id))),
+      db.insert(schema.notifications).values(inboxValues(me.id, { kind: 'security', key: `security:password:${crypto.randomUUID()}`, params: { event: 'password_change' }, now: Date.now() })),
     ]);
     signedOut(c, { user: me.id, except: c.var.session!.id });
+    realtimeToUsers(c, [me.id], { scope: 'user', type: 'notification.changed' });
     return c.json({ ok: true });
   })
   .get('/me/sessions', requireUser, async (c) => {
@@ -414,6 +422,8 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.notificationSettings).where(eq(schema.notificationSettings.userId, me.id)),
       db.delete(schema.pushSubscriptions).where(eq(schema.pushSubscriptions.userId, me.id)),
       db.delete(schema.notificationEvents).where(eq(schema.notificationEvents.userId, me.id)),
+      // The notification inbox: the account's items, and other members' items about it (a request, a message).
+      db.delete(schema.notifications).where(or(eq(schema.notifications.userId, me.id), eq(schema.notifications.actorId, me.id))),
       db
         .update(schema.referrals)
         .set({

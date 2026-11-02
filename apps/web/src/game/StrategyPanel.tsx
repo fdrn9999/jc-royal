@@ -11,8 +11,22 @@ import { Link } from 'react-router';
 import type { Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { oddsRatio } from './potOdds';
-import type { ReplayInput, ReplayStep } from './replay';
-import { decisionsOf, educationalFor, handClass, OPEN_SPOT, SOLVER_PROVIDERS, solverFor, type Choice, type Decision, type EducationalNote, type SolverAnswer } from './strategy';
+import { spokenAmounts, type ReplayInput, type ReplayLinePart, type ReplayStep } from './replay';
+import {
+  beforeOnStreet,
+  callPrice,
+  decisionsOf,
+  educationalFor,
+  handClass,
+  OPEN_SPOT,
+  SOLVER_PROVIDERS,
+  solverFor,
+  sprOf,
+  type Choice,
+  type Decision,
+  type EducationalNote,
+  type SolverAnswer,
+} from './strategy';
 
 interface Props {
   hand: ReplayInput;
@@ -22,13 +36,15 @@ interface Props {
   index: number;
   onGo: (step: number) => void;
   amounts: Amounts;
+  /** An action as the replay's line says it (the same names and amounts). */
+  say: (x: ReplayLinePart) => string;
   /** Called once it has drawn, to bring it on screen. */
   onShown?: () => void;
 }
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
-export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amounts: a, onShown }: Props) {
+export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amounts: a, say, onShown }: Props) {
   const { t, locale } = useI18n();
   const tr = (ko: string, en: string) => (locale === 'en' ? en : ko);
   const decisions = useMemo(() => decisionsOf(hand, steps, heroSeat), [hand, steps, heroSeat]);
@@ -98,7 +114,7 @@ export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amou
               })}
             </div>
             {current ? (
-              <Spot d={current} hand={hand} a={a} tr={tr} choice={choice} stage={stage(current)} />
+              <Spot d={current} hand={hand} a={a} tr={tr} choice={choice} stage={stage(current)} say={say} />
             ) : (
               <p className="text-sm text-ink-200" data-testid="replay-strategy-pick">
                 {tr('위에서 내 결정을 고르거나 리플레이를 내 차례로 옮기면, 그 순간의 상황과 전략 정보가 나옵니다.', 'Pick one of your decisions above, or step the replay to your turn, to see that moment and what can be said about it.')}
@@ -122,7 +138,7 @@ export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amou
 type Tr = (ko: string, en: string) => string;
 
 /** One decision: the situation, the choices and the one made, the solver's answer or why there is none, the study figures. */
-function Spot({ d, hand, a, tr, choice, stage }: { d: Decision; hand: ReplayInput; a: Amounts; tr: Tr; choice: (c: Choice) => string; stage: string }) {
+function Spot({ d, hand, a, tr, choice, stage, say }: { d: Decision; hand: ReplayInput; a: Amounts; tr: Tr; choice: (c: Choice) => string; stage: string; say: (x: ReplayLinePart) => string }) {
   const { t } = useI18n();
   const bb = hand.bigBlind ?? 0;
   // Stacks read in big blinds too where the player reads chips, as a strategy is usually put.
@@ -139,6 +155,15 @@ function Spot({ d, hand, a, tr, choice, stage }: { d: Decision; hand: ReplayInpu
     return `${name} ${a.fmt(f.to)}${call}`;
   })();
   const did = [choice(d.did), d.amount > 0 && a.fmt(d.amount), d.allIn && t('action.allin'), d.timedOut && tr('(시간 초과)', '(timed out)')].filter(Boolean).join(' ');
+  // The price of a call, the stack-to-pot ratio and what came before on the street: the plain figures of the moment,
+  // each saying why where there is none.
+  const price = callPrice(d);
+  const ratio = sprOf(d);
+  const spoken = spokenAmounts(hand.actions);
+  const before = beforeOnStreet(hand, d).map((k) => {
+    const x = hand.actions[k]!;
+    return say({ kind: 'act', seat: x.seatIndex, type: x.type, amount: spoken[k]! });
+  });
   const row = 'contents [&>dt]:text-ink-400 [&>dd]:min-w-0 [&>dd]:break-words [&>dd]:text-ink-100';
   return (
     <div className="flex flex-col gap-3" data-testid="replay-strategy-spot">
@@ -176,6 +201,24 @@ function Spot({ d, hand, a, tr, choice, stage }: { d: Decision; hand: ReplayInpu
         <div className={row}>
           <dt>{tr('상대 베팅', 'Facing')}</dt>
           <dd>{facing}</dd>
+        </div>
+        <div className={row}>
+          <dt>{tr('팟 오즈', 'Pot odds')}</dt>
+          <dd data-testid="replay-strategy-odds">
+            {price
+              ? tr(`${oddsRatio(price)} · 필요 승률 ${price.need}%`, `${oddsRatio(price)} · equity needed ${price.need}%`)
+              : d.toCall === 0
+                ? tr('콜할 금액 없음', 'Nothing to call')
+                : tr('기록으로 확정할 수 없어 셈하지 않음(베팅보다 적은 콜 등)', 'Not counted: the record leaves it uncertain (a call short of the bet, say)')}
+          </dd>
+        </div>
+        <div className={row}>
+          <dt>SPR</dt>
+          <dd data-testid="replay-strategy-spr">{ratio !== null ? tr(`${ratio.toFixed(1)} (스트리트 시작)`, `${ratio.toFixed(1)} (as the street began)`) : tr('플랍부터 셉니다', 'Counted from the flop')}</dd>
+        </div>
+        <div className={row}>
+          <dt>{tr('앞선 액션', 'Before you')}</dt>
+          <dd data-testid="replay-strategy-before">{before.length > 0 ? before.join(' · ') : tr('이 스트리트의 첫 액션', 'First to act on this street')}</dd>
         </div>
       </dl>
 

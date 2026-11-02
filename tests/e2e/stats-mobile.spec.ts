@@ -36,7 +36,9 @@ test('mobile: my statistics, positions and the daily trend fit the phone in Kore
   await expect(trend.getByTestId('stats-days-90')).toHaveAttribute('aria-checked', 'true');
   await expect(trend.getByTestId('stats-trend-summary')).toContainText('1핸드');
   await m.page.getByTestId('stats-definitions').locator('summary').tap();
-  await expect(m.page.getByTestId('stats-definitions').locator('li')).toHaveCount(9);
+  // The nine definitions and the two of the later figures (3-bet, c-bet, AF, BB/100).
+  await expect(m.page.getByTestId('stats-definitions').locator('li')).toHaveCount(11);
+  await expect(m.page.getByTestId('stats-bb100')).toContainText(/BB\/100\s*(?:[+-]100\.00|0\.00)\s*100핸드당/);
   expect(await widerThanDevice(m.page)).toBe(false);
   await trend.scrollIntoViewIfNeeded();
   await m.page.screenshot({ path: 'test-results/me-stats-trend-mobile.png', animations: 'disabled' });
@@ -52,6 +54,8 @@ test('mobile: my statistics, positions and the daily trend fit the phone in Kore
   await expect(m.page.getByTestId('stats-trend-summary')).toContainText('Hands 1');
   await m.page.getByTestId('stats-definitions').locator('summary').tap();
   await expect(m.page.getByTestId('stats-definitions')).toContainText('Hands you watched don’t');
+  await expect(m.page.getByTestId('stats-definitions')).toContainText('the one the bots read opponents with');
+  await expect(m.page.getByTestId('stats-fold-cbet')).toContainText('Fold to C-Bet');
   expect(await widerThanDevice(m.page)).toBe(false);
   await m.page.getByTestId('stats').scrollIntoViewIfNeeded();
   await m.page.screenshot({ path: 'test-results/me-stats-mobile-en.png', fullPage: true, animations: 'disabled' });

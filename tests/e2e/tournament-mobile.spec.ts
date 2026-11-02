@@ -177,3 +177,74 @@ test('mobile: a heads-up Sit & Go from the template to the stop, for the operato
   await expect(page.getByTestId('tn-history')).toContainText('대회 진행 중 중단');
   await shot(page, 'tn-admin-aborted.png', true);
 });
+
+/** Same-origin JSON call with the page's session. */
+async function call<T = any>(page: Page, path: string, body?: unknown): Promise<T> {
+  return page.evaluate(
+    async ([p, b]) => {
+      const r = await fetch(p, b === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      return (await r.json()) as T;
+    },
+    [path, body] as const,
+  );
+}
+
+test('mobile: inviting a friend to a nine-player Sit & Go, from the tournament page to the friend\'s bell and back', async ({ browser }) => {
+  test.setTimeout(120_000);
+  // A tournament of nine seats taking registrations (made in the database: the operator's screens are the test above).
+  const id = Array.from({ length: 12 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
+  const name = `E2E 9인 ${id.slice(0, 5)}`;
+  sql(
+    `INSERT INTO tournaments (id, name, status, capacity, min_players, start_stack, levels, level_ms, turn_seconds, tb_enabled, tb_initial_ms, tb_max_ms,
+                              tb_unit_ms, tb_refill_hands, tb_refill_ms, min_hands, require_verified, auto_start)
+     VALUES ('${id}', '${name}', 'registering', 9, 2, 1500, '[{"sb":10,"bb":20},{"sb":15,"bb":30}]', 300000, 20, 1, 30000, 60000, 10000, 10, 5000, 0, 0, 0)`,
+  );
+  const a = await signUp(browser, { mobile: true });
+  const b = await signUp(browser, { mobile: true });
+  const bId = (await call<{ id: string }>(b.page, '/api/auth/me')).id;
+  const aId = (await call<{ id: string }>(a.page, '/api/auth/me')).id;
+  await call(a.page, '/api/friends/requests', { userId: bId });
+  await call(b.page, `/api/friends/${aId}/accept`, {});
+  // Nothing in b's bell yet but what is already read.
+  await call(b.page, '/api/messages/read-all', {});
+  await call(b.page, '/api/notifications/read', { all: true });
+
+  await a.page.goto(`/tournaments/${id}`);
+  await expect(a.page.getByTestId('tn-detail')).toBeVisible();
+  await expect(a.page.getByTestId('tn-detail')).toContainText('0/9명');
+  await a.page.getByTestId('tn-invite').tap();
+  const picker = a.page.getByTestId('tn-invite-picker');
+  const row = picker.getByTestId('tn-invite-friend').filter({ hasText: b.nickname });
+  await expect(row).toBeVisible();
+  expect(await widerThanDevice(a.page)).toBe(false);
+  await shot(a.page, 'tn-invite-picker-390.png');
+  await row.getByTestId('tn-invite-send').tap();
+  await expect(row.getByTestId('tn-invite-state')).toHaveAttribute('data-state', 'sent');
+  await a.page.setViewportSize({ width: 320, height: 568 });
+  expect(await widerThanDevice(a.page)).toBe(false);
+  await shot(a.page, 'tn-invite-picker-320.png');
+
+  // The friend's bell has it at once: who, which tournament, open; a tap opens the tournament.
+  await b.page.goto('/');
+  await expect(b.page.getByTestId('bell-badge')).toHaveText('1', { timeout: 40_000 });
+  await b.page.getByTestId('bell').tap();
+  const item = b.page.getByTestId('bell-panel').getByTestId('inbox-item').first();
+  await expect(item).toContainText(`${a.nickname}님이 ${name} 토너먼트에 초대했습니다`);
+  await expect(item).toContainText('참여 가능');
+  expect(await widerThanDevice(b.page)).toBe(false);
+  await shot(b.page, 'tn-invite-bell.png');
+  await item.tap();
+  await expect(b.page).toHaveURL(new RegExp(`/tournaments/${id}$`));
+  await b.page.getByTestId('tn-register').tap();
+  await expect(b.page.getByTestId('tn-registered')).toBeVisible();
+
+  // Registered: the item says so, and inviting again is answered as already in.
+  await b.page.goto('/notifications');
+  await expect(b.page.getByTestId('inbox-list').getByTestId('inbox-item').first()).toContainText('등록함');
+  await shot(b.page, 'tn-invite-done.png', true);
+  await a.page.reload();
+  await a.page.getByTestId('tn-invite').tap();
+  await picker.getByTestId('tn-invite-friend').filter({ hasText: b.nickname }).getByTestId('tn-invite-send').tap();
+  await expect(picker.getByTestId('tn-invite-friend').filter({ hasText: b.nickname }).getByTestId('tn-invite-state')).toHaveAttribute('data-state', 'joined');
+  sql(`UPDATE tournaments SET status = 'cancelled', cancelled_at = unixepoch() * 1000 WHERE id = '${id}'`);
+});

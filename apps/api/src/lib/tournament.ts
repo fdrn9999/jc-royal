@@ -17,15 +17,16 @@ import {
   type TournamentTimeBank,
   isKstNight,
   shownVip,
+  tournamentSeats,
   TOURNAMENT_STATUSES,
 } from '@jc/types';
-import { outboxForEntries } from '@jc/db';
+import { outboxForEntries, realtimeOutboxForMembers } from '@jc/db';
 import type { Env } from '../env';
 import { adminTournamentChanged } from './admin-monitor';
 import { fail } from './http';
 import { notices } from './notices';
 import { queuePush } from './notify';
-import { sendToAll } from './realtime';
+import { outboxAfterCommit, outboxToAll, outboxToUsers, sendOutboxNow } from './realtime';
 import { roomCallEnv } from './room';
 import { currentMaintenance } from './service';
 
@@ -171,9 +172,27 @@ export function tournamentNotice(
               CASE WHEN u.locale = 'en' THEN ?5 ELSE ?6 END, NULL, ?7
          FROM tournament_entries e JOIN users u ON u.id = e.user_id
         WHERE e.tournament_id = ?1 AND e.status IN (${entries.map((s) => `'${s}'`).join(', ')}) AND u.status != 'deleted' AND u.is_bot = 0
-          AND EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND ${guard})`,
+          AND EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND ${guard})
+       RETURNING user_id AS userId`,
     )
     .bind(t.id, kind, en.title, ko.title, en.body, ko.body, now);
+}
+
+/**
+ * The entries a tournamentNotice wrote to read their unread count: `statement` goes in the same batch, after the notice
+ * (a row of the realtime outbox, for the members the notice was written to), and `send` sends it once the batch
+ * committed, to the members the notice returned (without `ctx` the minute cron sends it).
+ */
+export function tournamentNoticeTold(db: D1Database, tournamentId: string, kind: 'started' | 'cancelled' | 'aborted', now: number) {
+  const row = outboxToUsers([], { scope: 'user', type: 'message.changed' }, now);
+  const prefix = `tn:${tournamentId}:${kind}`;
+  return {
+    statement: realtimeOutboxForMembers(db, row, { sql: 'SELECT user_id FROM messages WHERE id > ? AND id < ? AND created_at = ?', params: [`${prefix}:`, `${prefix};`, now] }),
+    send(env: Env, ctx: Pick<ExecutionContext, 'waitUntil'> | undefined, notice: D1Result | undefined) {
+      const users = ((notice?.results ?? []) as { userId: string }[]).map((r) => r.userId);
+      if (users.length) ctx?.waitUntil(sendOutboxNow(env, [{ ...row, users }]).catch((err) => console.warn('realtime tournament notice not sent', String(err))));
+    },
+  };
 }
 
 /** Asks the tournament's room to read D1 again (twice when it does not answer). Null: it did not answer. */
@@ -207,11 +226,14 @@ export interface StartResult {
 
 /**
  * A tournament changed in D1 (opened, registration, a start, a cancel, a pause): the tournament pages read it again.
- * Public and carries only the id; in the background, never failing the change (without `ctx` the pages' poll finds it).
- * The console's tournament pages hear of it too, with its version (admin.monitor.changed).
+ * Public and carries only the id; in the background, never failing the change (without `ctx` the pages' poll finds it),
+ * through the realtime outbox (written after the change), so a hub that misses it is sent it again. The console's
+ * tournament pages hear of it too, with its version (admin.monitor.changed).
  */
 export function tournamentChanged(env: Env, id: string, ctx: Pick<ExecutionContext, 'waitUntil'> | undefined) {
-  ctx?.waitUntil(sendToAll(env, { scope: 'lobby', type: 'tournament.changed', resourceId: id }).catch((err) => console.warn('realtime tournament change not sent', String(err))));
+  ctx?.waitUntil(
+    outboxAfterCommit(env, [outboxToAll({ scope: 'lobby', type: 'tournament.changed', resourceId: id })]).catch((err) => console.warn('realtime tournament change not sent', String(err))),
+  );
   ctx?.waitUntil(adminTournamentChanged(env, id).catch((err) => console.warn('admin monitor tournament publish failed', String(err))));
 }
 
@@ -233,9 +255,9 @@ interface StartRow {
   roster: number;
 }
 
-/** Seat numbers 0–5 in a random order (crypto). */
-function shuffledSeats(): number[] {
-  const seats = [0, 1, 2, 3, 4, 5];
+/** Seat numbers 0 to `n` - 1 in a random order (crypto). */
+function shuffledSeats(n: number): number[] {
+  const seats = Array.from({ length: n }, (_, i) => i);
   const r = new Uint32Array(seats.length);
   crypto.getRandomValues(r);
   for (let i = seats.length - 1; i > 0; i--) {
@@ -315,7 +337,8 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
       if (opts.auto) return no('ineligible');
       continue;
     }
-    const players = results.slice(0, Math.min(t.capacity, 6));
+    const seatCount = tournamentSeats(t.capacity);
+    const players = results.slice(0, Math.min(t.capacity, seatCount));
     if (opts.auto ? players.length < t.capacity : players.length < t.minPlayers) {
       if (opts.auto) return no('not_full');
       fail(409, 'tournament_not_ready', 'not enough eligible players', { eligible: players.length, minPlayers: t.minPlayers, dropped });
@@ -324,9 +347,10 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     const first = levels[0];
     if (!first) fail(500, 'tournament_structure_invalid', 'the tournament has no blind levels');
     const tableId = `sng-${id}`;
-    const seats = shuffledSeats();
+    const seats = shuffledSeats(seatCount);
     const started = `tn.status = 'running' AND tn.table_id = '${tableId}' AND tn.started_at = ${now}`;
     const mine = `EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND ${started})`;
+    const told = tournamentNoticeTold(db, id, 'started', now);
     // The players qualify when the batch commits, not only when they were read above: a suspension (or a seat taken in
     // another tournament, a verification taken back) in between changes neither the version nor the roster, so the
     // start is conditional on it too and looks again (dropping that player) when it no longer holds. Hands played only
@@ -347,9 +371,9 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
         .prepare(
           `INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, allow_spectators,
                   entry_blocked, room_type, bots_enabled, created_by, created_at, updated_at)
-           SELECT ?2, ?3, 6, ?4, ?5, ?6, ?6, ?7, 0, 1, 1, 'tournament', 0, ?8, ?9, ?9 WHERE ${mine}`,
+           SELECT ?2, ?3, ?10, ?4, ?5, ?6, ?6, ?7, 0, 1, 1, 'tournament', 0, ?8, ?9, ?9 WHERE ${mine}`,
         )
-        .bind(id, tableId, t.name, first.sb, first.bb, t.startStack, t.turnSeconds, opts.actorId, now),
+        .bind(id, tableId, t.name, first.sb, first.bb, t.startStack, t.turnSeconds, opts.actorId, now, seatCount),
       ...players.map((p, i) =>
         db
           .prepare(`UPDATE tournament_entries SET status = 'playing', seat_index = ?3, stack = ?4, updated_at = ?5 WHERE tournament_id = ?1 AND user_id = ?2 AND status = 'registered' AND ${mine}`)
@@ -358,10 +382,12 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
       // Nobody else can be registered (the roster did not change); never leave a registration behind a started tournament.
       db.prepare(`UPDATE tournament_entries SET status = 'dropped', updated_at = ?2 WHERE tournament_id = ?1 AND status = 'registered' AND ${mine}`).bind(id, now),
       tournamentNotice(db, t, 'started', ['playing'], started, now),
+      told.statement,
     ]);
     // The tournament changed (another start, a cancel, a registration closed or opened) or a registration came or went:
     // look again (a start that already happened is refused at the top).
     if (!res[0]?.meta.changes) continue;
+    told.send(env, opts.ctx, res[res.length - 2]);
     tournamentChanged(env, id, opts.ctx);
     const live = await reloadRoom(env, tableId);
     // After the start is saved, never with it: a push that can't be queued leaves the start as it is.

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { PrivacySettingsDto } from './players';
 import { DEFAULT_REACTION_RULES, type ReactionRules } from './protocol';
 import type { VipColor } from './vip';
 
@@ -140,7 +141,8 @@ export interface BlockedUserDto extends PublicUserDto {
 export const FRIEND_REQUEST_POLICIES = ['everyone', 'nobody'] as const;
 export type FriendRequestPolicy = (typeof FRIEND_REQUEST_POLICIES)[number];
 
-export interface SocialSettingsDto {
+/** With what other members see of me (PrivacySettingsDto, docs/SOCIAL.md). */
+export interface SocialSettingsDto extends PrivacySettingsDto {
   /** Who can send me friend requests. */
   friendRequests: FriendRequestPolicy;
   /** Count 1:1 messages in the header badge. */
@@ -148,8 +150,15 @@ export interface SocialSettingsDto {
 }
 
 export const SocialSettingsSchema = z
-  .object({ friendRequests: z.enum(FRIEND_REQUEST_POLICIES).optional(), dmNotifications: z.boolean().optional() })
-  .refine((v) => v.friendRequests !== undefined || v.dmNotifications !== undefined, 'nothing to change');
+  .object({
+    friendRequests: z.enum(FRIEND_REQUEST_POLICIES).optional(),
+    dmNotifications: z.boolean().optional(),
+    showAchievements: z.boolean().optional(),
+    showStats: z.boolean().optional(),
+    shareTable: z.boolean().optional(),
+    showRanking: z.boolean().optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), 'nothing to change');
 
 // ------------------------------------------------------------------ 1:1 messages
 
@@ -197,6 +206,8 @@ export interface UnreadCountsDto {
   friendRequests: number;
   /** ServiceStatusDto.rev: a change means the banner should be fetched again. */
   serviceRev?: number;
+  /** Unread items of the notification inbox (InboxPageDto.unread), for the bell. */
+  notifications?: number;
 }
 
 // ------------------------------------------------------------------ reports

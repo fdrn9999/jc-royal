@@ -9,7 +9,7 @@ import { useBadges } from '../academy/sync';
 import { HandNotePanel, HandRow } from '../components/HandNotes';
 import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
-import { PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
+import { MoreStats, PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
 import { NotificationSettings } from '../components/NotificationSettings';
 import { PresenceLabel, PresenceModePicker } from '../components/Presence';
 import { ReferralCard } from '../components/Referral';
@@ -159,6 +159,7 @@ export function MePage() {
           <div className="text-sm text-ink-300">{me.email}</div>
           <div className="text-xs text-ink-400">{t('me.memberSince', { date: formatDate(me.createdAt, locale) })}</div>
           {mine && <PresenceLabel state={mine.state} className="mt-1" />}
+          <Link to={`/players/${me.id}`} className="mt-1 inline-block text-xs font-semibold text-gold-300 hover:underline" data-testid="me-card">{t('social.myCard')}</Link>
         </div>
         <div className="sm:ml-auto">
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-400">{t('common.balance')}</div>
@@ -195,6 +196,7 @@ export function MePage() {
             <RatioStat label={t('me.raiseShare')} ratio={st.raiseShare} hint={t('me.raiseShareHint')} testid="stats-raise-share" />
             <RatioStat label={t('me.wtsd')} ratio={st.wtsd} hint={t('me.wtsdHint')} testid="stats-wtsd" />
             <RatioStat label={t('me.wsd')} ratio={st.wsd} hint={t('me.wsdHint')} testid="stats-wsd" />
+            <MoreStats st={st} />
             <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{t('me.bestHand')}</div>
               {st.bestHand ? (

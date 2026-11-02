@@ -4,6 +4,8 @@ import type { AppEnv, Env } from './env';
 import { countingD1, type D1Counts } from './lib/d1-stats';
 import { housekeeping } from './lib/housekeeping';
 import { flushPush } from './lib/notify';
+import { watchOps } from './lib/ops-watch';
+import { flushRealtimeOutbox } from './lib/realtime';
 import { sharePageResponse } from './lib/og';
 import { countOps } from './lib/ops';
 import { sweepReferrals } from './lib/referral';
@@ -17,17 +19,19 @@ import { authRoutes } from './routes/auth';
 import { boardRoutes, myCommunityRoutes } from './routes/board';
 import { meRoutes } from './routes/me';
 import { messageRoutes } from './routes/messages';
+import { inboxRoutes } from './routes/inbox';
 import { reportRoutes } from './routes/reports';
 import { roomRoutes } from './routes/rooms';
 import { serviceRoutes } from './routes/service';
 import { notificationRoutes } from './routes/notifications';
+import { leaderboardRoutes, playerRoutes } from './routes/players';
 import { presenceRoutes } from './routes/presence';
 import { realtimeSocket } from './routes/realtime';
 import { blockRoutes, dmRoutes, friendPresenceRoutes, friendRoutes } from './routes/social';
 import { tableRoutes, tableSocket } from './routes/tables';
 import { tournamentRoutes } from './routes/tournaments';
 
-/** wrangler.jsonc `triggers`: every minute, the push outbox; any other run is the daily one. */
+/** wrangler.jsonc `triggers`: every minute, the realtime and push outboxes; any other run is the daily one. */
 const PUSH_CRON = '* * * * *';
 
 const app = new Hono<AppEnv>();
@@ -68,6 +72,7 @@ app.route('/api/me', meRoutes);
 app.route('/api/me', myCommunityRoutes);
 app.route('/api/board', boardRoutes);
 app.route('/api/messages', messageRoutes);
+app.route('/api/notifications', inboxRoutes);
 app.route('/api/friends', friendRoutes);
 app.route('/api/dm', dmRoutes);
 app.route('/api/blocks', blockRoutes);
@@ -75,6 +80,8 @@ app.route('/api/reports', reportRoutes);
 app.route('/api/tables', tableRoutes);
 app.route('/api/rooms', roomRoutes);
 app.route('/api/tournaments', tournamentRoutes);
+app.route('/api/players', playerRoutes);
+app.route('/api/leaderboard', leaderboardRoutes);
 app.route('/api/academy', academyRoutes);
 app.route('/api/service', serviceRoutes);
 app.route('/api/admin', adminRoutes);
@@ -121,13 +128,27 @@ export default {
    * Cron trigger (wrangler.jsonc `triggers`): rolls up the day that ended into the operations statistics (before the
    * housekeeping deletes old activity markers), deletes expired short-lived rows, then wakes rooms whose close or idle
    * close stalled, and settles referrals waiting for a payout (lib/referral.ts). Awaited, so a failure shows as a failed
-   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest. The minute trigger only sends
-   * the push outbox (lib/notify.ts), and without the push keys returns before touching D1.
+   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest. The minute trigger sends
+   * again the realtime outbox's events no hub took yet (lib/realtime.ts), one call a hub, then the push outbox
+   * (lib/notify.ts), which without the push keys returns before touching D1, then checks the service for the control
+   * center's persistent alerts (lib/ops-watch.ts), last so a slow room never holds up a delivery.
    */
   async scheduled(event, env) {
     if (event.cron === PUSH_CRON) {
+      try {
+        const rt = await flushRealtimeOutbox(env, { limit: 50 });
+        if (rt.claimed || rt.dropped) console.log('realtime outbox', JSON.stringify(rt));
+      } catch (e) {
+        console.error('realtime outbox failed', e instanceof Error ? e.message : String(e));
+      }
       const sent = await flushPush(env, { limit: 50 });
       if (sent.claimed) console.log('push outbox', JSON.stringify(sent));
+      try {
+        const ops = await watchOps(env);
+        if (ops.changes) console.log('ops watch', JSON.stringify(ops));
+      } catch (e) {
+        console.error('ops watch failed', e instanceof Error ? e.message : String(e));
+      }
       return;
     }
     let failed: unknown = null;

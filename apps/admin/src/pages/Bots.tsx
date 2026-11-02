@@ -12,6 +12,7 @@ import { BOT_BUY_IN_BB, BOT_LEVELS, BOT_STYLES, type BotLevel, type BotPlay, typ
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { REASONS } from '../adminTemplates';
+import { BOT_EXPECT, BOT_EXPECT_SOURCE, judge, TENDENCIES, TENDENCY_AF_SHARE, TENDENCY_MIN, TENDENCY_PP, TENDENCY_Z, type Judged, type Tendency } from '../botExpect';
 import { useT, type Key } from '../i18n';
 import { botEventCodeLabel, botEventKindLabel, botLevelLabel, botStyleLabel, userStatusLabel } from '../labels';
 import { ApiError, errText, useAdmin, useData } from '../lib';
@@ -75,6 +76,17 @@ interface LevelPlay {
   failures: number;
   lagMs: number;
   slow: number;
+  /** For the advanced comparison; absent from an API older than this page (shown as no chances). */
+  foldTo3BetOpp?: number;
+  foldTo3Bet?: number;
+  cbetOpp?: number;
+  cbet?: number;
+  foldToCbetOpp?: number;
+  foldToCbet?: number;
+  sawFlop?: number;
+  showdowns?: number;
+  postBets?: number;
+  postCalls?: number;
 }
 interface RoomsReached { tables: number; reached: number; unreached: string[] }
 interface BotEvent { id: string; tableId: string; tableName: string | null; botId: string | null; nickname: string | null; kind: string; code: string | null; createdAt: number }
@@ -461,6 +473,7 @@ function PlayPanel({ o, days, setDays, loading }: { o: Overview; days: number; s
           </Table>
         )}
         <LevelPlayTable rows={o.play ?? []} />
+        <TendencyCompare rows={o.play ?? []} />
         <figure>
           <div role="img" aria-label={t('botsChart')} className="flex h-24 items-end gap-px border-b border-white/10" data-testid="bots-chart">
             {o.series.map((s) => (
@@ -545,6 +558,108 @@ function LevelPlayTable({ rows }: { rows: LevelPlay[] }) {
         </Table>
       )}
     </div>
+  );
+}
+
+const TENDENCY_COL: Record<Tendency, Key> = {
+  vpip: 'botsColVpip',
+  pfr: 'botsColPfr',
+  threeBet: 'botsCol3Bet',
+  foldTo3Bet: 'botsColFoldTo3Bet',
+  cbet: 'botsColCbet',
+  foldToCbet: 'botsColFoldToCbet',
+  wtsd: 'botsColWtsd',
+  af: 'botsColAf',
+};
+const JUDGED: Record<Judged, { key: Key; tone: 'neutral' | 'gold' }> = {
+  few: { key: 'botsTendencyFew', tone: 'neutral' },
+  near: { key: 'botsTendencyNear', tone: 'neutral' },
+  high: { key: 'botsTendencyHigh', tone: 'gold' },
+  low: { key: 'botsTendencyLow', tone: 'gold' },
+};
+
+/** A level's counters for one tendency: what happened over its chances (AF: bets and raises, and calls). */
+function tendencyOf(r: LevelPlay, k: Tendency): { n: number; of: number; calls?: number } {
+  switch (k) {
+    case 'vpip':
+      return { n: r.vpip, of: r.vpipOpp };
+    case 'pfr':
+      return { n: r.pfr, of: r.vpipOpp };
+    case 'threeBet':
+      return { n: r.threeBet, of: r.threeBetOpp };
+    case 'foldTo3Bet':
+      return { n: r.foldTo3Bet ?? 0, of: r.foldTo3BetOpp ?? 0 };
+    case 'cbet':
+      return { n: r.cbet ?? 0, of: r.cbetOpp ?? 0 };
+    case 'foldToCbet':
+      return { n: r.foldToCbet ?? 0, of: r.foldToCbetOpp ?? 0 };
+    case 'wtsd':
+      return { n: r.showdowns ?? 0, of: r.sawFlop ?? 0 };
+    case 'af':
+      return { n: r.postBets ?? 0, of: (r.postBets ?? 0) + (r.postCalls ?? 0), calls: r.postCalls ?? 0 };
+  }
+}
+
+/**
+ * Advanced, apart from the table above: each level's live tendencies beside what the balance simulation measured for it
+ * (botExpect.ts), marked only where the difference is large and beyond chance. A place to look, not a verdict.
+ */
+function TendencyCompare({ rows }: { rows: LevelPlay[] }) {
+  const { t } = useT();
+  const shown = rows.filter((r) => r.hands > 0);
+  return (
+    <details className="rounded-lg border border-white/10 px-3 py-2" data-testid="bots-tendency">
+      <summary className="cursor-pointer text-sm font-bold">{t('botsTendency')}</summary>
+      <div className="mt-2 flex flex-col gap-2">
+        <p className="text-xs text-ink-400">
+          {t('botsTendencyHint', {
+            date: BOT_EXPECT_SOURCE.date,
+            hands: formatChips(BOT_EXPECT_SOURCE.hands),
+            version: BOT_EXPECT_SOURCE.strategy,
+            min: TENDENCY_MIN,
+            pp: TENDENCY_PP,
+            z: TENDENCY_Z,
+            af: Math.round(TENDENCY_AF_SHARE * 100),
+          })}
+        </p>
+        {shown.length === 0 ? (
+          <p className="text-xs text-ink-400">{t('botsLevelPlayEmpty')}</p>
+        ) : (
+          <Table head={[t('botsLevel'), ...TENDENCIES.map((k) => t(TENDENCY_COL[k]))]}>
+            {shown.map((r) => {
+              const level = r.level as BotLevel;
+              const expect = BOT_EXPECT[level];
+              return (
+                <tr key={r.level} data-level={r.level}>
+                  <td className={td}>{botLevelLabel(t, r.level)}</td>
+                  {TENDENCIES.map((k) => {
+                    const { n, of, calls } = tendencyOf(r, k);
+                    const e = expect?.[k];
+                    const j = e === undefined ? 'few' : judge(k, n, of, e, calls);
+                    const mark = JUDGED[j];
+                    return (
+                      <td key={k} className={`${td} align-top`} data-k={k} data-judged={j}>
+                        <div className="whitespace-nowrap font-mono">
+                          {k === 'af' ? (
+                            calls ? <>{(n / calls).toFixed(2)} <span className="text-ink-400">({formatChips(n)}/{formatChips(calls)})</span></> : <span className="text-ink-400">—</span>
+                          ) : (
+                            <Rate n={n} of={of} />
+                          )}
+                        </div>
+                        {e !== undefined && (
+                          <div className="whitespace-nowrap text-[11px] text-ink-400">{t('botsTendencySim', { v: k === 'af' ? e.toFixed(2) : `${(e * 100).toFixed(1)}%` })}</div>
+                        )}
+                        <Badge tone={mark.tone}>{t(mark.key)}</Badge>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </Table>
+        )}
+      </div>
+    </details>
   );
 }
 

@@ -34,6 +34,7 @@ const M = {
   vpip: { label: 'VPIP', num: c('vpip'), den: c('vpipOpp'), fmt: 'pct' },
   pfr: { label: 'PFR', num: c('pfr'), den: c('vpipOpp'), fmt: 'pct' },
   threeBet: { label: '3-Bet', num: c('threeBet'), den: c('threeBetOpp'), fmt: 'pct' },
+  fold3: { label: 'Fold to 3-Bet', num: c('foldTo3Bet'), den: c('foldTo3BetOpp'), fmt: 'pct' },
   af: { label: 'AF', num: c('postBets'), den: c('postCalls'), fmt: 'ratio' },
   cbet: { label: 'C-Bet', num: c('cbet'), den: c('cbetOpp'), fmt: 'pct' },
   foldCbet: { label: 'Fold to C-Bet', num: c('foldToCbet'), den: c('foldToCbetOpp'), fmt: 'pct' },
@@ -190,7 +191,7 @@ export function report(outs: BalanceOutput[]): string {
   p();
 
   // Levels: overall and per opponent type.
-  const levelKeys: MetricKey[] = ['bb100', 'won', 'vpip', 'pfr', 'threeBet', 'af', 'cbet', 'foldCbet', 'wtsd', 'wsd', 'earlyBluff', 'semiBluff', 'riverBluff', 'badCall', 'weakBig'];
+  const levelKeys: MetricKey[] = ['bb100', 'won', 'vpip', 'pfr', 'threeBet', 'fold3', 'af', 'cbet', 'foldCbet', 'wtsd', 'wsd', 'earlyBluff', 'semiBluff', 'riverBluff', 'badCall', 'weakBig'];
   p('## 1. 난이도별 (모든 상대 유형·스타일 합계)');
   p();
   p(`| 난이도 | 핸드 | ${levelKeys.map((k) => M[k].label).join(' | ')} |`);
@@ -230,7 +231,7 @@ export function report(outs: BalanceOutput[]): string {
   p();
   p(`## 3. 상대 유형 × 난이도: 플레이 지표 (스타일 ${BOT_STYLES.length}종 합계)`);
   p();
-  const fk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'af', 'cbet', 'foldCbet', 'wtsd', 'wsd', 'riverBluff', 'badCall'];
+  const fk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'fold3', 'af', 'cbet', 'foldCbet', 'wtsd', 'wsd', 'riverBluff', 'badCall'];
   p(`| 상대 유형 | 난이도 | ${fk.map((k) => M[k].label).join(' | ')} |`);
   p(`|---|---|${fk.map(() => '---:').join('|')}|`);
   for (const f of FIELDS)
@@ -255,7 +256,7 @@ export function report(outs: BalanceOutput[]): string {
   p();
 
   // Styles.
-  const sk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'af', 'cbet', 'wtsd', 'earlyBluff', 'riverBluff', 'size', 'overbet', 'jam', 'wildJam', 'bb100'];
+  const sk: MetricKey[] = ['vpip', 'pfr', 'threeBet', 'fold3', 'af', 'cbet', 'foldCbet', 'wtsd', 'earlyBluff', 'riverBluff', 'size', 'overbet', 'jam', 'wildJam', 'bb100'];
   p('## 5. 스타일별 (모든 상대 유형·난이도 합계)');
   p();
   p(`| 스타일 | ${sk.map((k) => M[k].label).join(' | ')} |`);

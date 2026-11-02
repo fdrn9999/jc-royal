@@ -37,7 +37,7 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/ledger?limit&before` | 칩 변동 내역 |
-| GET | `/stats` | 본인 것만. 카드를 받은 핸드만 세고 관전은 빠진다. 플레이 핸드, 승리 핸드(`pot_won > 0`: 팟 일부라도 획득, 스플릿 포함, 콜 안 된 베팅만 돌려받은 핸드 제외)와 승률, 총 획득(`pot_won` 합), 순손익, 참여한 최대·평균 팟(`largestPot`, `avgPot`: 내 칩이 들어간 핸드에서 실제로 다툰 팟, 콜 안 된 베팅 반환분 제외), 한 핸드 최대 순이익(`biggestWin`), 최고 핸드, `vpip`·`pfr`(분모: 행동 기록을 읽은 핸드), `raiseShare`(PFR ÷ VPIP 핸드), `wtsd`(쇼다운 ÷ 플랍을 본 핸드), `wsd`(팟 획득 ÷ 쇼다운), `positions`(EP·MP·CO·BTN·SB·BB 순서, 핸드·VPIP·PFR·손익). 비율은 `{ n, of }`이며 `of = 0`이면 화면에 —. 계산 정의는 `packages/db/src/handStats.ts` |
+| GET | `/stats` | 본인 것만. 카드를 받은 핸드만 세고 관전은 빠진다. 플레이 핸드, 승리 핸드(`pot_won > 0`: 팟 일부라도 획득, 스플릿 포함, 콜 안 된 베팅만 돌려받은 핸드 제외)와 승률, 총 획득(`pot_won` 합), 순손익, 참여한 최대·평균 팟(`largestPot`, `avgPot`: 내 칩이 들어간 핸드에서 실제로 다툰 팟, 콜 안 된 베팅 반환분 제외), 한 핸드 최대 순이익(`biggestWin`), 최고 핸드, `vpip`·`pfr`(분모: 행동 기록을 읽은 핸드), `raiseShare`(PFR ÷ VPIP 핸드), `wtsd`(쇼다운 ÷ 플랍을 본 핸드), `wsd`(팟 획득 ÷ 쇼다운), `positions`(EP·MP·CO·BTN·SB·BB 순서, 핸드·VPIP·PFR·손익). 그 뒤 지표는 마이그레이션 0040 뒤 기록된 핸드만 센다: `counted`(그 핸드 수), `threeBet`·`foldTo3Bet`·`cbet`·`foldToCbet`(분모: 그럴 기회가 있었던 핸드), `aggression`(`{ bets, calls }`: 플롭 이후 베팅·레이즈와 콜 수, AF = bets ÷ calls), `bb100`(순손익을 그 핸드의 빅블라인드로 나눈 합을 100핸드당으로, 셀 핸드가 없으면 `null`). 비율은 `{ n, of }`이며 `of = 0`이면 화면에 —. 계산 정의는 `packages/db/src/handStats.ts`와 `apps/game-worker/src/detail-stats.ts` |
 | GET | `/stats/trend?days=7\|30\|90&tz=<분>` | 기간별 일 순손익. `tz`는 UTC 기준 동쪽으로의 분(−720~840, 한국 540). 그 시간대 날짜로 나눈 `{ day: 'YYYY-MM-DD', hands, net }`를 오래된 순으로 주고, 핸드가 없는 날은 뺀다. 잘못된 값은 400 `bad_request` |
 | GET | `/hands?limit&before&beforeId&from&to&position&result&minPot&tag&bookmarked` | 내 핸드, 최근 순(끝난 시각, 같으면 ID 역순). `limit` 기본 20(1–100). 다음 쪽은 마지막 행의 `before=endedAt&beforeId=id`(`beforeId` 없이 `before`만 주면 같은 시각에 끝난 핸드를 건너뛸 수 있는 이전 방식). 필터는 모두 서버에서 본인 행에만: `from`·`to`(ms, `to`는 제외), `position`(EP·MP·CO·BTN·SB·BB), `result`(`up`·`down`·`even`: 순손익 부호), `minPot`(20·50·100, 팟이 그 테이블의 **지금** 빅 블라인드의 몇 배 이상), `tag`(`review`·`bluff`·`hardCall`·`bigPot`), `bookmarked=1`. 잘못된 필터는 400 `bad_request`. 필터를 하나라도 쓰면 회원당 60초에 60회(429). 행마다 `position`·`bigBlind`·`bookmarked`·`tags[]`·`hasMemo`(메모 내용은 목록에 없음) |
 | GET | `/hands/:id` | 핸드 상세(본인 카드와 쇼다운에서 공개된 카드만). 쇼다운에서 머크된(공개되지 않은) 다른 사람의 패는 `holeCards`·`rankClass`가 null(`hand_players.shown = 0`). `shown`이 없는 이전 기록은 쇼다운에 간 패를 공개된 것으로 봄. 커뮤니티 핸드 리뷰도 같은 규칙. 단계별 재생에 쓰는 필드는 아래. `note`는 내 노트 `{bookmarked, tags[], memo, rev, updatedAt}`(없으면 `rev` 0, `updatedAt` null) |
@@ -136,9 +136,25 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/` | 받은 쪽지(최근 100개) |
-| GET | `/unread-count` | `{unread, dmUnread, friendRequests}`(상단 배지 한 번에) |
+| GET | `/unread-count` | `{unread, dmUnread, friendRequests, notifications}`(상단 배지 한 번에. `notifications`는 알림함의 읽지 않은 항목 수) |
 | POST | `/:id/read` · `/read-all` | 읽음 처리 |
 | DELETE | `/:id` | 삭제(본인 것만) |
+
+## 알림함 `/api/notifications` (로그인 필요)
+
+헤더의 종 모양 아이콘과 `/notifications` 화면(`packages/types/src/inbox.ts`, `apps/api/src/lib/inbox.ts`). 쪽지함(메일 아이콘)은 그대로 있고, 알림함은 쪽지·친구·1:1 메시지·초대·토너먼트·VIP·계정 보안·공지·점검을 한 목록에 모은다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/` | `?filter=social\|game\|account\|service`, `?unread=1`, `?before=<at>:<id>`(앞 페이지의 `next`), `?limit=1..30`. `{items, next, unread}`. 최신순 |
+| POST | `/read` | `{ids: string[]}`(1–30개) 또는 `{all: true, filter?}`(한 번에 500개까지). 내 것이 아니거나 이미 읽은 항목은 건너뛴다. 알림은 서버가 다시 읽은 그대로일 때만 읽음이 된다: 그 사이 다시 세어진 알림(같은 친구가 다시 보낸 요청 등)은 회원이 보지 못한 것이므로 안 읽음으로 남는다. 알림의 `at`은 쓸 때마다 1 ms 이상 앞으로 가므로, 같은 밀리초에 다시 세어지거나 다른 탭이 읽은 뒤 다시 온 알림도 구별된다. `{read: n}` |
+
+- 항목: `{id, kind, count, at, readAt, actor, params, state, href}`. `kind`는 `friend_request`·`friend_accepted`·`dm`·`invite`·`friend_table`·`message`·`tournament_start`·`tournament_cancel`·`tournament_result`·`vip`·`security`·`notice`·`maintenance`. `actor`는 상대(닉네임은 읽을 때 붙인다). `state`는 처리하거나 끝날 수 있는 것만: 친구 요청(`open` 대기·`done` 수락·`expired` 거절·취소), 초대(30분 안이고 테이블이 열려 있으면 `open`), 친구 테이블(30분 안이고, 친구가 아직 그 공개 테이블에 앉아 있고 열려 있으며 여전히 친구면 `open`, `docs/SOCIAL.md` 2절), 토너먼트 시작(진행 중이면 `open`), 점검(`open` 예정·진행, `done` 끝, `expired` 취소).
+- 같은 상대의 같은 일은 하나로 묶고 읽기 전까지 센다(`count`). 읽은 뒤 다시 오면 1부터.
+- 1:1 메시지 본문, 이메일, IP, 세션은 항목에 없다. 로그인 알림은 대략의 브라우저 이름("Firefox · Linux")만 있다.
+- 숨김: 탈퇴한 상대, 차단한(된) 상대, 1:1 메시지를 끈 상대의 항목, 만료된 항목.
+- 공지·점검은 가입 전에 마지막으로 바뀐 것이면 읽은 것으로 보인다(가입 전에 취소된 점검은 그 회원에게 새 소식이 아니다). 가입 뒤에 바뀌면 다시 안 읽음.
+- 보관: 30일, 계정 보안 90일. 탈퇴하면 그 회원이 받은 것과 그 회원이 상대인 것을 지운다(`docs/PRIVACY_OPERATIONS.md`).
 
 ## 1:1 대화 `/api/dm` (로그인 필요)
 
@@ -156,13 +172,22 @@
 |---|---|---|
 | GET | `/` | `{friends, incoming, outgoing}`. 친구마다 안 읽은 1:1 수와 마지막 메시지(최근 대화 순). 탈퇴한 회원은 빠짐 |
 | POST | `/requests` | `{nickname}` 또는 `{userId}` 중 하나 → 201 `{status:'pending', user}`. 상대가 이미 요청했으면 200 `{status:'accepted'}`로 바로 친구. 400 `friend_self`, 404 `user_not_found`, 409 `already_friends`·`already_requested`·`blocked_user`(내가 차단함)·`friend_limit`(200명), 403 `request_unavailable`(상대가 차단했거나 요청을 받지 않음: 둘을 구분하지 않음). 시간당 30회 |
-| GET / PATCH | `/settings` | `{friendRequests:'everyone'\|'nobody', dmNotifications:boolean}` |
+| GET / PATCH | `/settings` | `{friendRequests:'everyone'\|'nobody', dmNotifications, showAchievements, showStats, shareTable, showRanking}`(뒤의 다섯은 boolean). PATCH는 바꿀 것만 보내고 하나도 없으면 400. 공개 설정 4개는 `docs/SOCIAL.md` |
 | GET | `/:userId/relation` | `{relation:'none'\|'friend'\|'incoming'\|'outgoing'\|'blocked'}` — 내 쪽에서 본 관계(나를 차단한 상대는 `none`) |
 | POST | `/:userId/accept` | 받은 요청 수락. 없으면 404 |
 | POST | `/:userId/invite` | `{tableId}` → 201 DirectMessageDto(`kind:'invite'`). 친구에게 열린 테이블 초대 카드를 1:1로 보냄. 참가 코드는 담지 않고 아무 권한도 주지 않음(좌석·코드·관전은 테이블이 똑같이 검사). 403 `not_friends`, 409 `table_unavailable`(닫힘·입장 차단). 10분당 20회 |
 | DELETE | `/:userId` | 받은 요청 거절, 보낸 요청 취소, 친구 삭제 |
 
 친구 요청은 두 사람 사이에 차단이 없을 때만 저장하는 한 문장으로 기록합니다. 그래서 요청과 차단이 동시에 와도 차단이 이깁니다(차단이 먼저 쓴 요청도 지움).
+
+## 프로필 카드·시즌 리더보드 `/api/players`, `/api/leaderboard` (로그인 필요)
+
+설계와 공개 규칙은 `docs/SOCIAL.md`(`packages/types/src/players.ts`, `apps/api/src/routes/players.ts`).
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/players/:id/card` | PlayerCardDto `{user, joinedMonth('YYYY-MM', 한국 시간), self, achievements, stats, privacy?}`. `achievements`는 `[{code, at}]`, 회원이 숨겼으면 `null`. `stats`는 `{hands, vpip, pfr, wtsd, wsd, tournamentWins}`(비율은 `{n, of}` 표본과 함께), 회원이 켜지 않았으면 `null`(기본). 내 카드는 둘 다 늘 있고 `privacy`(공개 설정 4개)가 붙는다. 없는 회원·탈퇴·정지·테이블 봇·어느 쪽이든 차단한 사이는 모두 같은 404 `player_not_found`. 칩·이메일·핸드의 카드는 없다. 분당 120회 |
+| GET | `/api/leaderboard` | `?season=YYYY-MM`(기본은 이번 달, 한국 시간). LeaderboardDto `{season, from, to, rows, ranked, me, hidden}`. `rows`는 상위 50명 `{rank, user, tournaments, wins, score}`, `me`는 내 줄(토너먼트가 3개 미만이면 `rank: null`, 리더보드 표시를 껐으면 `null`), `hidden`은 내가 표시를 껐는지. 형식이 틀리면 400 `invalid_season`. 분당 60회 |
 
 ## 접속 상태 `/api/me/presence`, `/api/friends/presence` (로그인 필요)
 
@@ -263,6 +288,12 @@
 | POST | `/tables/:id/control` 🔒 | 긴급 제어 `{action:'pause'\|'resume'\|'block'\|'unblock', reason(2–200자)}` → `{ok, paused, handInProgress}`. `pause`는 진행 중 핸드를 정상 종료한 뒤 새 핸드를 시작하지 않음(`tables.hands_paused`), `block`은 새 착석·대기 등록만 막음(앉은 플레이어는 유지). D1에 저장한 뒤 룸에 반영을 확인하고, 룸이 답하지 않으면 503 `room_unavailable`(저장은 됨, 다시 보내도 안전). 감사 로그 `table.control`(사유, `roomConfirmed`, `handInProgress`) |
 | POST | `/tables/:id/close` 🔒👁 | 진행 중 핸드가 끝나면 전원 환급 후 종료. 미리보기 `{table{id,name,status,roomType}, seats[{userId,nickname,seatIndex,buyIn,stack,inHand}], chipsOnTable, handInProgress, waitlist, roomAnswered}`(룸이 답하지 않으면 `stack`·`inHand`·`chipsOnTable`·`handInProgress`·`waitlist`가 null이고 D1 착석만). 이미 닫힌 테이블은 404. 본문 `reason`(선택, 2–200자)은 감사 기록에 함께 남는다(관제센터는 요구, 콘솔은 보내지 않음). 감사 로그 `table.close` |
 | POST | `/tables/:id/timer-recover` 🔒 | 타이머 복구(기능 `tableControl`) `{reason(2–200자)}` → `{ok, result, handId, deadline, lateMs, alarmBefore, alarmAfter}`. 룸이 자기 규칙을 지금 적용한다: 마감이 지난 차례는 알람이 했을 처리(회원은 체크·폴드 타임아웃, 봇은 행동, `result` `timed_out`·`bot_moved`), 아니면 저장된 상태로 알람을 다시 건다(`rearmed`, 다음 핸드 알람 포함), 걸 알람이 없으면 `none`. 누구의 시간·스택·카드도 바꾸지 않으며 다시 보내도 안전하다. 닫힌·없는 테이블 404, 룸이 답하지 않으면 503 `room_unavailable`(그것도 감사). 감사 로그 `table.timer_recover`(사유, `roomConfirmed`, 결과, 핸드, 마감), 운영 통계 `tb_recover` +1 |
+| GET | `/monitor/alerts?state&severity&code&table&before&beforeId&limit` | 서버 점검이 남긴 지속 경고(`tables` 권한, `docs/CONTROL_CENTER.md` '지속 경고와 운영 기록'). `state` `open`(기본)·`resolved`·`all`, `severity` `info`·`warning`·`error`·`critical`, `code`는 경고 코드, `table`은 테이블 ID. 모르는 값은 무시하지 않고 400 `bad_request`. → `{items[{id, code, severity, tableId, table{name, status}\|null, summary, detail{issue?, metric?, n?, threshold?, windowMs?, sinceMs?}, openedAt, lastSeenAt, seen, resolvedAt, handling, handledAt}], nextBefore, nextBeforeId, watch{checkedAt, tookMs, rooms, unanswered, skipped}\|null, at}`. 열린 경고는 한 번에 전부(최대 200, 심각한 순 → 최신 순), 해소·전체는 최신 순 `limit`(1–100, 기본 50)개씩, 다음 쪽은 `before`·`beforeId`. 확인 전 첫 목격은 나오지 않는다. 회원 ID·닉네임·카드 없음. 감사 로그 없음 |
+| GET | `/monitor/events?kind&severity&table&alert&code&from&to&before&beforeId&limit` | 운영 기록 줄(최신 순). `kind` `alert_opened`·`alert_raised`·`alert_resolved`·`alert_handled`·`admin_control`, `alert`는 경고 ID, `code`는 경고 코드나 조치 이름(`[a-z_.]` 40자까지, 아니면 400), `from`·`to` ms(`to` 미포함). → `{items[{id, at, kind, code, severity, tableId, tableName, summary, alertId, correlationId}], nextBefore, nextBeforeId, at}`. `tableName`은 지금의 테이블 이름(없어진 테이블·서비스 전체 줄은 null), `correlationId`는 조치와 처리 메모의 감사 로그 행 ID. 요약에 사람과 사유는 없다 |
+| GET | `/monitor/alerts/:id` | 사고 화면 한 번에: `{alert, table(관제 목록과 같은 모양, D1 기준)\|null, events(그 경고의 줄과 그 테이블의 줄, 열리기 1시간 전부터 해소까지, 200개), related(같은 테이블이나 같은 서버 범위에서 그 시간에 열려 있던 다른 경고, 50개), metrics[{bucket, metric, n}](카운터 경고만, 분당 값), watch, at}`. 방의 지금 상태는 관제센터의 방 읽기(`POST /monitor/rooms`)로 따로 읽는다. 없거나 확인 전인 경고 404 |
+| POST | `/monitor/alerts/:id/handling` | 처리 메모 `{handling: 'new'\|'ack'\|'investigating'\|'dismissed'}` → `{ok, changed}`. 경고와 함께 저장되어 모든 콘솔에 같게 보이고 관리자 소켓에 `admin.monitor.changed`(`kind: 'ops'`)를 보낸다. 경고를 닫지 않는다(해소는 점검만). 같은 값이면 `changed: false`이고 아무것도 쓰지 않는다. 모르는 값 400, 없는 경고 404. 감사 로그 `monitor.alert_handling`(`{alert, code, table, from, to}`)과 기록 줄 `alert_handled`(상관관계 ID = 감사 행) |
+
+관리자의 테이블 조치(`table.control`·`table.timer_recover`·`table.close`, 실패 포함)는 감사 로그와 함께 운영 기록에 한 줄(`admin_control`)을 남긴다. 그 줄을 쓰지 못해도 조치와 감사는 그대로다.
 
 `kick`(정지·강제 연결 종료 응답): `{tables, reached, unreached[], truncated, sockets, seats[{tableId, seat}]}`. 회원이 앉은 테이블 전부와 연결이 있는 열린 테이블(연결 많은 순, 최대 60곳)의 룸에 물어 그 회원의 소켓을 `error suspended|disconnected` 후 4004로 닫는다. `seat`: `left`(바로 정산), `after_hand`(진행 중 핸드에 아직 남음: 차례가 오면 폴드되고 그때 바로 정산, 올인이면 핸드 정산 뒤 정산), `kept`(자리 유지), `retrying`(정산 재시도 중). 답하지 않은 룸은 `unreached`로 알린다(재시도하지 않음). 카드·결과를 바꾸는 조치는 없다.
 | GET | `/hands?paged=1&tableId&member&cursor&limit(≤200, 기본 50)` | 종료된 핸드 목록(카드 없음). `paged=1`이면 최신 순 `{items[{seq, id, tableId, tableName, handNumber, startedAt, endedAt, board[], potTotal}], next, member{id,nickname}\|null}`. `member`(또는 `userId`)는 회원 ID·이메일·닉네임(대소문자 무시)이 정확히 맞는 한 명이고, 맞는 회원이 없으면 빈 쪽과 `member: null`. 다음 쪽은 `next`를 `cursor`로 보낸다: 회원·테이블로 좁힌 목록은 `<종료 ms>.<seq>`, 전체 목록은 `<seq>`(기록된 순서). 모양이 다른 커서는 400 `invalid cursor`. 전체 수는 세지 않는다. 회원으로 좁힌 조회는 감사 로그 `hand.list`(`{q, found, tableId, page: first\|next, count}`, 찾으면 대상 회원)에 남고, 테이블만·전체 조회는 남지 않는다. `paged=1`이 없으면 예전 배열(`tableId`·`userId`·`limit`·`offset`) |
@@ -340,4 +371,4 @@
 
 ## 토너먼트(6인 SNG)
 
-회원 `GET /api/tournaments`, `GET /api/tournaments/:id`, `POST /api/tournaments/:id/register`, `POST /api/tournaments/:id/unregister`와 관리자 `/api/admin/tournaments*`, `/api/admin/tournament-templates*`. 요청·응답·오류 코드·권한은 `docs/TOURNAMENT.md` "API"에 있다. 대회 테이블(`roomType: 'tournament'`)은 로비 목록과 빠른 참가에 나오지 않고, 착석·충전·리바이는 룸이 `tournament_table`로 거절하며, 관리자 테이블 종료·긴급 제어·설정 변경은 409 `tournament_table`이다. 관리자 테이블 상세(`GET /api/admin/tables/:id`)는 대회 테이블이면 `tournament: {id, name, status}`를 더한다.
+회원 `GET /api/tournaments`, `GET /api/tournaments/:id`, `POST /api/tournaments/:id/register`, `POST /api/tournaments/:id/unregister`, `POST /api/tournaments/:id/invite`(친구 초대, 알림함 `tournament_invite`)와 관리자 `/api/admin/tournaments*`, `/api/admin/tournament-templates*`. 요청·응답·오류 코드·권한은 `docs/TOURNAMENT.md` "API"에 있다. 대회 테이블(`roomType: 'tournament'`)은 로비 목록과 빠른 참가에 나오지 않고, 착석·충전·리바이는 룸이 `tournament_table`로 거절하며, 관리자 테이블 종료·긴급 제어·설정 변경은 409 `tournament_table`이다. 관리자 테이블 상세(`GET /api/admin/tables/:id`)는 대회 테이블이면 `tournament: {id, name, status}`를 더한다.

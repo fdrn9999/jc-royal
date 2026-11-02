@@ -7,12 +7,14 @@
  * again is the same one row. The registration that takes the last seat of a tournament that starts by itself starts it
  * (lib/tournament.ts startTournament, which an operator's start shares).
  */
-import { shownVip, type EntryStatus, type TournamentDetailDto, type TournamentEntryView } from '@jc/types';
+import { IF_CHANGED, inboxStatement, realtimeOutboxStatement } from '@jc/db';
+import { shownVip, TournamentInviteSchema, type EntryStatus, type TournamentDetailDto, type TournamentEntryView } from '@jc/types';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
-import { fail } from '../lib/http';
+import { fail, parseBody } from '../lib/http';
 import { rateLimit } from '../lib/rate-limit';
+import { outboxToUsers, realtimeOutboxSend } from '../lib/realtime';
 import { refuseNewGamesInMaintenance } from '../lib/service';
 import {
   ACTIVE_TOURNAMENT,
@@ -30,6 +32,7 @@ import {
   tournamentChanged,
   type StartResult,
 } from '../lib/tournament';
+import { notBlocked, pairOf } from './social';
 
 const ENDED = `('finished', 'cancelled', 'aborted')`;
 /** Who a tournament shows: the registered before it starts (and when cancelled), those who played after. */
@@ -246,4 +249,52 @@ export const tournamentRoutes = new Hono<AppEnv>()
       }
     } else tournamentChanged(c.env, id, c.executionCtx);
     return c.json({ ok: true });
+  })
+  /**
+   * Asks a friend to register (docs/TOURNAMENT.md "친구 초대"): an item in their notification inbox, one per friend who
+   * invites (their newest tournament), as a table invite is. It grants nothing: registering checks everything as for
+   * anyone. One statement holds every condition (registration open with a seat left, friends with neither blocking the
+   * other, the friend an active member not in it yet), and the event that tells their pages is in the same batch.
+   */
+  .post('/:id/invite', async (c) => {
+    const id = tournamentId(c);
+    const me = c.var.user!.id;
+    const { userId: other } = await parseBody(c, TournamentInviteSchema);
+    if (other === me) fail(400, 'invite_self', 'you cannot invite yourself');
+    await rateLimit(c, `tournament-invite:${me}`, 20, 10 * 60_000);
+    const db = c.env.DB;
+    const t = await db.prepare(`SELECT name FROM tournaments WHERE id = ?1`).bind(id).first<{ name: string }>();
+    if (!t) fail(404, 'tournament_not_found', 'tournament not found');
+    const now = Date.now();
+    const [a, b] = pairOf(me, other);
+    const told = outboxToUsers([other], { scope: 'user', type: 'notification.changed' }, now);
+    const [r] = await db.batch([
+      // ?8 is the friend (the item's member); the guard's values follow.
+      inboxStatement(db, other, { kind: 'tournament_invite', key: `tournament_invite:${me}`, actorId: me, ref: id, params: { name: t.name }, now }, {
+        sql: `EXISTS (SELECT 1 FROM tournaments t WHERE t.id = ?9 AND t.status = 'registering'
+                AND (SELECT COUNT(*) FROM tournament_entries x WHERE x.tournament_id = ?9 AND x.status = 'registered') < t.capacity)
+              AND EXISTS (SELECT 1 FROM friendships WHERE user_a = ?10 AND user_b = ?11 AND status = 'accepted') AND ${notBlocked('?12', '?8')}
+              AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?8 AND u.status = 'active' AND u.is_bot = 0)
+              AND NOT EXISTS (SELECT 1 FROM tournament_entries e WHERE e.tournament_id = ?9 AND e.user_id = ?8 AND e.status IN ('registered', 'playing'))`,
+        params: [id, a, b, me],
+      }),
+      realtimeOutboxStatement(db, told, IF_CHANGED),
+    ]);
+    if (!r?.meta.changes) {
+      const why = await db
+        .prepare(
+          `SELECT t.status, (SELECT COUNT(*) FROM tournament_entries x WHERE x.tournament_id = t.id AND x.status = 'registered') >= t.capacity AS full,
+                  EXISTS (SELECT 1 FROM tournament_entries e WHERE e.tournament_id = t.id AND e.user_id = ?2 AND e.status IN ('registered', 'playing')) AS joined
+             FROM tournaments t WHERE t.id = ?1`,
+        )
+        .bind(id, other)
+        .first<{ status: string; full: number; joined: number }>();
+      if (why?.status !== 'registering') fail(409, 'tournament_not_open', 'registration is not open', { status: why?.status });
+      if (why.joined) fail(409, 'tournament_invite_joined', 'this friend is already registered');
+      if (why.full) fail(409, 'tournament_full', 'every seat is taken');
+      // Not friends, a block either way, or a member who cannot play: the same answer, as for a 1:1 message.
+      fail(403, 'not_friends', 'you can only invite friends');
+    }
+    realtimeOutboxSend(c, [told]);
+    return c.json({ ok: true }, 201);
   });

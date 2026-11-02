@@ -223,6 +223,32 @@ export function solverFor(d: Decision, hand: ReplayInput, providers: readonly St
   return { kind: 'unsupported', reason: 'noData' };
 }
 
+/**
+ * What a call cost at the decision, as pot odds: where the viewer called or folded, the certain ones the hand page shows
+ * (potOddsFor); where they raised a bet they could have called in full, what that call would have cost. Null with
+ * nothing to call, and where the record leaves it uncertain (a call short of the bet plays for part of the pot only).
+ */
+export function callPrice(d: Decision): PotOdds | null {
+  if (d.toCall <= 0) return null;
+  if (d.did !== 'raise') return d.odds;
+  if (d.toCall >= d.stack) return null;
+  return { toCall: d.toCall, pot: d.pot, need: Math.round((d.toCall / (d.pot + d.toCall)) * 100) };
+}
+
+/** The stack-to-pot ratio as the street began, from the flop on (null preflop, where it is not yet counted). */
+export function sprOf(d: Decision): number | null {
+  return d.stage !== 'preflop' && d.streetPot > 0 ? spr(d.streetPot, d.effective) : null;
+}
+
+/** Indexes of the actions on the decision's street before it, the blinds included preflop: what the viewer had seen. */
+export function beforeOnStreet(hand: ReplayInput, d: Decision): number[] {
+  const out: number[] = [];
+  hand.actions.forEach((a, k) => {
+    if (k < d.action && a.stage === d.stage) out.push(k);
+  });
+  return out;
+}
+
 /** The academy's picture the opening ranges were drawn for (math.ts OPEN_RANGES): six dealt in, about 100 big blinds deep. */
 export const OPEN_SPOT = { players: 6, minBb: 80, maxBb: 125 } as const;
 const OPEN_SETS = new Map(Object.entries(OPEN_RANGES).map(([seat, text]) => [seat, parseRange(text)]));
@@ -240,7 +266,8 @@ export function educationalFor(d: Decision, bigBlind: number | null): Educationa
   if (d.stage !== 'preflop' && d.facing?.kind === 'bet' && d.facing.potBefore > 0) {
     out.push({ kind: 'betSize', to: d.facing.to, potBefore: d.facing.potBefore, share: d.facing.to / d.facing.potBefore });
   }
-  if (d.stage !== 'preflop' && d.streetPot > 0) out.push({ kind: 'spr', ratio: spr(d.streetPot, d.effective), effective: d.effective, pot: d.streetPot });
+  const ratio = sprOf(d);
+  if (ratio !== null) out.push({ kind: 'spr', ratio, effective: d.effective, pot: d.streetPot });
   const cls = handClass(d.cards);
   const range = d.position ? OPEN_SETS.get(d.position) : undefined;
   const deep = bigBlind && bigBlind > 0 ? d.effective / bigBlind : 0;

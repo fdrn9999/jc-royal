@@ -14,6 +14,7 @@
  * - The member is told in their language, once per reset or restore (the message is written in the same batch, only
  *   if the change was); it doesn't carry the administrator's reason, which stays in the audit log.
  */
+import { IF_CHANGED, realtimeOutboxStatement } from '@jc/db';
 import { SETTINGS_RESTORE_MS, SETTINGS_SCHEMA_VERSION, type AdminSettingsDiagDto } from '@jc/types';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -22,7 +23,7 @@ import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
 import { notices } from '../lib/notices';
 import { can } from '../lib/permissions';
-import { realtimeToUsers } from '../lib/realtime';
+import { outboxToUsers, realtimeOutboxSend } from '../lib/realtime';
 import { countSettings, diagnose, favList, parseFav, parsePrefs, resetInfo, toState, type SettingsRow } from '../lib/settings';
 
 const ReasonSchema = z.string().trim().min(2).max(200);
@@ -105,6 +106,9 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     const s = toState(row);
     const kept = Object.keys(s.prefs).length || Object.keys(s.fav).length ? JSON.stringify({ prefs: s.prefs, fav: s.fav }) : null;
     const db = c.env.DB;
+    // The notice written with it: the member's pages read their unread count (the settings themselves on their next read),
+    // from an outbox row written only with the notice.
+    const told = outboxToUsers([id], { scope: 'user', type: 'message.changed' }, now);
     const [up] = await db.batch([
       db
         .prepare(
@@ -119,11 +123,11 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
         )
         .bind(id, s.rev, s.epoch, now, admin, kept, SETTINGS_SCHEMA_VERSION),
       noticeStatement(db, id, 'settingsReset', admin, now, `rev = ${s.rev + 1} AND reset_at = ?7 AND reset_by = ?2`),
+      realtimeOutboxStatement(db, told, IF_CHANGED),
     ]);
     const done = (up!.results as { rev: number; epoch: number }[])[0];
     if (!done) fail(409, 'settings_changed', 'the settings changed while resetting', { settings: (await load(c, id)).diag });
-    // The notice written with it: the member's pages read their unread count (the settings themselves on their next read).
-    realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });
+    realtimeOutboxSend(c, [told]);
     await countSettings(db, { ss_reset: 1 }, now);
     await audit(c, 'settings.reset', { type: 'user', id }, {
       reason,
@@ -154,6 +158,7 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
     const { reason } = ActionSchema.parse(body);
     const admin = c.var.user!.id;
     const db = c.env.DB;
+    const told = outboxToUsers([id], { scope: 'user', type: 'message.changed' }, now);
     const [up] = await db.batch([
       db
         .prepare(
@@ -164,10 +169,11 @@ export const adminSettingsRoutes = new Hono<AppEnv>()
         )
         .bind(id, JSON.stringify(prefs), JSON.stringify(fav), now, row.rev, row.epoch),
       noticeStatement(db, id, 'settingsRestored', admin, now, `rev = ${row.rev + 1} AND restored_at = ?7`),
+      realtimeOutboxStatement(db, told, IF_CHANGED),
     ]);
     const done = (up!.results as { rev: number; epoch: number }[])[0];
     if (!done) fail(409, 'settings_changed', 'the settings changed while restoring', { settings: (await load(c, id)).diag });
-    realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });
+    realtimeOutboxSend(c, [told]);
     await countSettings(db, { ss_restore: 1 }, now);
     await audit(c, 'settings.restore', { type: 'user', id }, {
       reason,

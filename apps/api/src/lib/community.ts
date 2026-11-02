@@ -1,7 +1,8 @@
-import { schema, type Db } from '@jc/db';
+import { realtimeOutboxStatement, schema, type Db, type RealtimeOutboxRow } from '@jc/db';
 import { publicRole, shownVip, type HandPotDto, type HandReplayFields, type HandReplayPlayer, type HandReviewDto, type MessageCategory } from '@jc/types';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { Badge } from './badges';
+import { outboxToUsers, spreadFor } from './realtime';
 
 /**
  * Whether a player's hole cards were face up for the table: shown down, not mucked. Rows recorded before muck existed
@@ -179,22 +180,31 @@ export async function handReviews(
     });
 }
 
-/** Writes a one-way message (automatic system notices or admin sends). */
+/**
+ * Writes a one-way message (automatic system notices or admin sends) to each member and, in the same batch, the event
+ * telling their open pages (message.changed, in the realtime outbox): all of it or nothing. Gives back how many were
+ * written and that event, to send once this returns (realtimeOutboxSend; sendOutboxNow outside a request).
+ */
 export async function sendMessages(
-  db: Db,
+  d1: D1Database,
   p: { userIds: string[]; category: MessageCategory; title: string; body: string; senderId?: string | null; batchId?: string | null },
-): Promise<number> {
-  if (p.userIds.length === 0) return 0;
-  const rows = p.userIds.map((userId) => ({
-    id: crypto.randomUUID(),
-    userId,
-    category: p.category,
-    title: p.title,
-    body: p.body,
-    senderId: p.senderId ?? null,
-    batchId: p.batchId ?? null,
-  }));
-  // D1 limits bound parameters per statement; insert in chunks.
-  for (let i = 0; i < rows.length; i += 10) await db.insert(schema.messages).values(rows.slice(i, i + 10));
-  return rows.length;
+): Promise<{ sent: number; event: RealtimeOutboxRow | null }> {
+  const ids = [...new Set(p.userIds)];
+  if (ids.length === 0) return { sent: 0, event: null };
+  const now = Date.now();
+  const statements: D1PreparedStatement[] = [];
+  // D1 binds at most 100 values a statement: 12 messages (8 values each) per INSERT.
+  for (let i = 0; i < ids.length; i += 12) {
+    const part = ids.slice(i, i + 12);
+    statements.push(
+      d1
+        .prepare(`INSERT INTO messages (id, user_id, category, title, body, sender_id, batch_id, created_at) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`)
+        .bind(...part.flatMap((u) => [crypto.randomUUID(), u, p.category, p.title, p.body, p.senderId ?? null, p.batchId ?? null, now])),
+    );
+  }
+  // Each page reads its own unread count, never the message from the event; a send to many spreads those reads.
+  const event = outboxToUsers(ids, { scope: 'user', type: 'message.changed', payload: { spreadMs: spreadFor(ids.length) } }, now);
+  statements.push(realtimeOutboxStatement(d1, event));
+  await d1.batch(statements);
+  return { sent: ids.length, event };
 }

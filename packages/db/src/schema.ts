@@ -28,6 +28,14 @@ export const users = sqliteTable(
     friendRequests: text('friend_requests', { enum: ['everyone', 'nobody'] }).notNull().default('everyone'),
     /** Whether unread 1:1 messages count toward the header badge. */
     dmNotifications: integer('dm_notifications', { mode: 'boolean' }).notNull().default(true),
+    /**
+     * What other members see of this member (docs/SOCIAL.md): achievements on the card, statistics on the card (off
+     * until turned on), friends told when this member sits at a public table, a place on the season leaderboard.
+     */
+    showAchievements: integer('show_achievements', { mode: 'boolean' }).notNull().default(true),
+    showStats: integer('show_stats', { mode: 'boolean' }).notNull().default(false),
+    shareTable: integer('share_table', { mode: 'boolean' }).notNull().default(true),
+    showRanking: integer('show_ranking', { mode: 'boolean' }).notNull().default(true),
     /** Last member sign-in (signup or login), kept after the session itself ends. Null before it was recorded. */
     lastLoginAt: integer('last_login_at'),
     /**
@@ -273,6 +281,20 @@ export const handPlayers = sqliteTable(
      * before the column existed, which read as `went_to_showdown` (nobody could muck then).
      */
     shown: integer('shown', { mode: 'boolean' }),
+    // More statistics, counted by the game worker after it records the hand with the engine's `handCounters` (the one
+    // the bots read their opponents with), from the hand's public actions only. NULL on rows recorded before migration
+    // 0040 or when the step failed: such rows are in no sample. The four flags are NULL as well when the player had no
+    // chance at it in the hand (no open to 3-bet, no 3-bet against their open, not the flop's first bettor after
+    // raising preflop, no c-bet to answer), 1 when they took it, 0 when not.
+    threeBet: integer('three_bet'),
+    foldTo3Bet: integer('fold_3bet'),
+    cbet: integer('cbet'),
+    foldToCbet: integer('fold_cbet'),
+    /** Bets and raises, and calls, after the flop (aggression factor). */
+    postBets: integer('post_bets'),
+    postCalls: integer('post_calls'),
+    /** The hand's big blind, for BB/100; set together with the counts above, so it marks a row as counted. */
+    bigBlind: integer('big_blind'),
   },
   (t) => [
     primaryKey({ columns: [t.handId, t.userId] }),
@@ -676,6 +698,115 @@ export const opsMetrics = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.bucket, t.metric] })],
 );
+
+/**
+ * The realtime outbox (realtime-outbox.ts, apps/api/src/lib/realtime.ts): one row per platform event for the members'
+ * pages, written in the same D1 batch as the change it reports, so a committed change always has its event and an
+ * event never tells of a change that was rolled back. The api sends it at once after the commit; the minute cron sends
+ * again what that could not deliver, until `expires_at`. `id` is the event's eventId: a page that gets it twice (a send
+ * repeated after a lost answer) handles it once. Only what the event already says is kept here (types, ids, counters),
+ * never a message's text. Kept REALTIME_OUTBOX_RETENTION_MS after it is done.
+ */
+export const realtimeOutbox = sqliteTable(
+  'realtime_outbox',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull(),
+    /** JSON array of member ids (a personal event), or NULL: every hub (a public event). */
+    recipients: text('recipients'),
+    /** The event as the pages get it (RealtimeEvent JSON). */
+    event: text('event').notNull(),
+    status: text('status', { enum: ['pending', 'sent', 'failed', 'expired'] }).notNull().default('pending'),
+    /** Sends tried (the first one after the commit included). */
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    /** While the cron's sender holds it. */
+    leaseUntil: integer('lease_until'),
+    expiresAt: integer('expires_at').notNull(),
+    /** Why the last send failed (an error code or status, never a payload). */
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    /** When a hub took it everywhere it goes (status sent), or when it was given up (failed, expired). */
+    doneAt: integer('done_at'),
+  },
+  (t) => [index('realtime_outbox_due_idx').on(t.status, t.nextAttemptAt), index('realtime_outbox_done_idx').on(t.doneAt)],
+);
+
+/**
+ * The control center's alerts that outlive a page (apps/api/src/lib/ops-watch.ts, docs/CONTROL_CENTER.md): what the
+ * minute cron found wrong, one row per problem from when it was first confirmed until it was gone. `dedupe_key` is the
+ * problem (its code and table, or `-` for one of the whole service): a problem seen again while open is the same row,
+ * counted. A row with `confirmed_at` NULL is a sighting not yet counted as an alert (a transient state is counted only
+ * once seen twice in a row); it is deleted when the next check does not see it. Only codes, ids, counts and times are
+ * kept here: never a player's name, a card or a request's payload. Kept OPS_LOG_RETENTION_MS after it was resolved.
+ */
+export const opsAlerts = sqliteTable(
+  'ops_alerts',
+  {
+    id: text('id').primaryKey(),
+    dedupeKey: text('dedupe_key').notNull(),
+    code: text('code').notNull(),
+    severity: text('severity', { enum: ['info', 'warning', 'error', 'critical'] }).notNull(),
+    tableId: text('table_id'),
+    /** A short English line from the code and the numbers (the console words it from `code` and `detail`). */
+    summary: text('summary').notNull(),
+    /** JSON of numbers and codes (a metric's count, the room's issue), never free text. */
+    detail: text('detail'),
+    firstSeenAt: integer('first_seen_at').notNull(),
+    confirmedAt: integer('confirmed_at'),
+    lastSeenAt: integer('last_seen_at').notNull(),
+    seen: integer('seen').notNull().default(1),
+    resolvedAt: integer('resolved_at'),
+    /** An administrator's note on it: new, acknowledged, being looked into, or set aside. It changes nothing else. */
+    handling: text('handling', { enum: ['new', 'ack', 'investigating', 'dismissed'] }).notNull().default('new'),
+    handledAt: integer('handled_at'),
+  },
+  (t) => [
+    // One unresolved row per problem: the cron's insert of a new one meets this if another run got there first.
+    uniqueIndex('ops_alerts_open_uq').on(t.dedupeKey).where(sql`resolved_at IS NULL`),
+    index('ops_alerts_resolved_idx').on(t.resolvedAt),
+    index('ops_alerts_table_idx').on(t.tableId, t.firstSeenAt),
+    index('ops_alerts_seen_idx').on(t.firstSeenAt),
+  ],
+);
+
+/**
+ * The persistent operations log the control center searches (docs/CONTROL_CENTER.md): an alert opened, raised,
+ * resolved or noted by an administrator, and an administrator's table control. Append only. `alert_id` ties a line to
+ * its alert, `correlation_id` an administrator's control to its admin_audit_log row (which names who did it and why;
+ * this log does not). Never a card, a player's name, a reason's text or a request's payload; not every action of a hand
+ * (those are the hand records). Kept OPS_LOG_RETENTION_MS.
+ */
+export const opsEvents = sqliteTable(
+  'ops_events',
+  {
+    id: text('id').primaryKey(),
+    at: integer('at').notNull(),
+    kind: text('kind', { enum: ['alert_opened', 'alert_raised', 'alert_resolved', 'alert_handled', 'admin_control'] }).notNull(),
+    code: text('code').notNull(),
+    severity: text('severity', { enum: ['info', 'warning', 'error', 'critical'] }).notNull(),
+    tableId: text('table_id'),
+    summary: text('summary').notNull(),
+    alertId: text('alert_id'),
+    correlationId: text('correlation_id'),
+  },
+  (t) => [index('ops_events_at_idx').on(t.at), index('ops_events_table_idx').on(t.tableId, t.at), index('ops_events_alert_idx').on(t.alertId)],
+);
+
+/**
+ * The minute check's last run (one row, id 1): when it finished and what it could see, so the console tells a quiet
+ * service from a check that stopped running (no alert is not "all well" when nothing looked).
+ */
+export const opsWatch = sqliteTable('ops_watch', {
+  id: integer('id').primaryKey(),
+  checkedAt: integer('checked_at').notNull(),
+  tookMs: integer('took_ms').notNull(),
+  /** Rooms asked, and how many of those did not answer. */
+  rooms: integer('rooms').notNull(),
+  unanswered: integer('unanswered').notNull(),
+  /** Tables in play left unasked this time (more than OPS_WATCH_ROOMS_MAX). */
+  skipped: integer('skipped').notNull(),
+});
 
 /**
  * Days on which a member used the service (see stats.ts): the day and the member, nothing else. Kept for
@@ -1203,5 +1334,55 @@ export const notificationEvents = sqliteTable(
     index('notification_events_user_idx').on(t.userId, t.createdAt),
     // A member's pushes of the last hour, by when they went out (the hourly cap and the cooldown).
     index('notification_events_sent_idx').on(t.userId, t.status, t.sentAt),
+  ],
+);
+
+/**
+ * The notification inbox (packages/types/src/inbox.ts): one member's item, written in the batch of the change it reports
+ * (packages/db/src/inbox.ts). `key` is the item's identity for the member: the same thing again (another message from
+ * one friend) updates that item (count + 1, unread again, newest time) instead of adding one. Everyone's notices are not
+ * copied here: a row with `kind` notice/maintenance and `key` `notice:<id>` only records that the member read it.
+ * Kept until `expires_at` (30 days after its last update, security 90), and deleted with the account.
+ */
+export const notifications = sqliteTable(
+  'notifications',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    kind: text('kind', {
+      enum: [
+        'friend_request',
+        'friend_accepted',
+        'dm',
+        'invite',
+        'friend_table',
+        'message',
+        'tournament_start',
+        'tournament_cancel',
+        'tournament_result',
+        'tournament_invite',
+        'vip',
+        'security',
+        'notice',
+        'maintenance',
+      ],
+    }).notNull(),
+    key: text('key').notNull(),
+    /** The member who caused it (a friend), if any. */
+    actorId: text('actor_id'),
+    /** What it is about (a table, a tournament, a notice), if anything. */
+    ref: text('ref'),
+    /** JSON object of small public facts (InboxItemDto.params), never a message's text. */
+    params: text('params'),
+    count: integer('count').notNull().default(1),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    readAt: integer('read_at'),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('notifications_key_uq').on(t.userId, t.key),
+    index('notifications_user_idx').on(t.userId, t.updatedAt),
+    index('notifications_expires_idx').on(t.expiresAt),
   ],
 );

@@ -18,6 +18,15 @@ const SCREENS = [
 // HAND_6's steps where the viewer (seat 0, UTG) decided: the open, the call of the all-in, the flop call, the turn bet,
 // the river check.
 const DECISIONS = [2, 8, 11, 15, 19];
+// What each one's figures of the moment read: the price of a call (the blind, the all-in, the flop bet; nothing to call
+// after), the SPR from the flop on (the flop began 3,250 in the pot, 99,199 behind), and who acted before on the street.
+const FIGURES = [
+  { odds: { ko: '필요 승률 40%', en: 'equity needed 40%' }, spr: { ko: '플랍부터', en: 'from the flop' }, before: 'abcdefghijklmnop' },
+  { odds: { ko: '필요 승률 15%', en: 'equity needed 15%' }, spr: { ko: '플랍부터', en: 'from the flop' }, before: 'JC봇_Hard_00003' },
+  { odds: { ko: '필요 승률 28%', en: 'equity needed 28%' }, spr: { ko: '30.5', en: '30.5' }, before: 'ZZZZZZZZZZZZZZZZ' },
+  { odds: { ko: '콜할 금액 없음', en: 'Nothing to call' }, spr: { ko: '(스트리트 시작)', en: '(as the street began)' }, before: 'ZZZZZZZZZZZZZZZZ' },
+  { odds: { ko: '콜할 금액 없음', en: 'Nothing to call' }, spr: { ko: '(스트리트 시작)', en: '(as the street began)' }, before: { ko: '이 스트리트의 첫 액션', en: 'First to act on this street' } },
+] as const;
 
 /** The step line, the table and the controls, where they sit on the page (not the screen) and how big they are. */
 const areas = (page: Page) =>
@@ -112,6 +121,10 @@ test('replay decision review: opened under the controls at every size, it moves 
       await expect(p.getByTestId('replay-strategy-solver')).toHaveAttribute('data-kind', 'unsupported');
       await expect(p.locator('[data-testid=replay-strategy-options] [data-played]')).toHaveCount(1);
       await expect(p.getByTestId('replay-strategy-position')).toContainText('UTG');
+      const want = FIGURES[k]!;
+      await expect(p.getByTestId('replay-strategy-odds')).toContainText(want.odds[locale]);
+      await expect(p.getByTestId('replay-strategy-spr')).toContainText(want.spr[locale]);
+      await expect(p.getByTestId('replay-strategy-before')).toContainText(typeof want.before === 'string' ? want.before : want.before[locale]);
       const at = await review(p);
       expect(at.past, `${where} · step ${step}: running past its sides`).toEqual([]);
       expect(at.overflow, `${where} · step ${step}`).toBeLessThanOrEqual(0);

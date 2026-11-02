@@ -267,6 +267,41 @@
       "when": 1793309074488,
       "tag": "0037_seated_user_index",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1793594400061,
+      "tag": "0038_realtime_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1793596841059,
+      "tag": "0039_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1793600226097,
+      "tag": "0040_detail_stats",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1793602096124,
+      "tag": "0041_ops_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1793609983991,
+      "tag": "0042_social_privacy_achievements",
+      "breakpoints": true
     }
   ]
 }

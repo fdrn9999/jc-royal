@@ -244,10 +244,13 @@ export type MonitorCounts = z.infer<typeof MonitorCountsSchema>;
  * (resourceId: the member, revision: the VIP version) or a tournament (resourceId: the tournament, revision: its
  * version). A table's own changes are admin.monitor.table.
  */
-export const ADMIN_CHANGE_KINDS = ['vip', 'tournament'] as const;
+export const ADMIN_CHANGE_KINDS = ['vip', 'tournament', 'ops'] as const;
 export type AdminChangeKind = (typeof ADMIN_CHANGE_KINDS)[number];
-/** The console permission (apps/api/src/lib/permissions.ts GRANTS) whose pages show each: only those hear of it. */
-export const ADMIN_CHANGE_GRANT: Record<AdminChangeKind, string> = { vip: 'vip', tournament: 'tournaments' };
+/**
+ * The console permission (apps/api/src/lib/permissions.ts GRANTS) whose pages show each: only those hear of it. `ops`:
+ * the persistent alerts changed (resourceId `alerts`, revision: the check's time; ops-log.ts).
+ */
+export const ADMIN_CHANGE_GRANT: Record<AdminChangeKind, string> = { vip: 'vip', tournament: 'tournaments', ops: 'tables' };
 
 export const AdminMonitorEventSchema = z.discriminatedUnion('type', [
   /** A table's row as the grid lists it, after its settings, its switches or its status changed (revision: updatedAt). */

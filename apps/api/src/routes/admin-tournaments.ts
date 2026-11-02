@@ -46,6 +46,7 @@ import {
   TOURNAMENT_ID,
   tournamentChanged,
   tournamentNotice,
+  tournamentNoticeTold,
 } from '../lib/tournament';
 
 const ReasonSchema = z.string().trim().min(2).max(200);
@@ -459,6 +460,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     const before = await loadRow(db, id);
     if (!before) fail(404, 'tournament_not_found', 'tournament not found');
     const now = Date.now();
+    const told = tournamentNoticeTold(db, id, 'cancelled', now);
     const [r, sent] = await db.batch([
       db
         .prepare(
@@ -467,8 +469,10 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
         )
         .bind(id, now, reason, c.var.user!.id, baseVersion),
       tournamentNotice(db, before, 'cancelled', ['registered'], `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`, now),
+      told.statement,
     ]);
     if (!r?.meta.changes) await refused(db, id, baseVersion);
+    told.send(c.env, c.executionCtx, sent);
     tournamentChanged(c.env, id, c.executionCtx);
     await queuePush(
       c.env,
@@ -499,6 +503,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     if (confirmName !== before.name.trim()) fail(400, 'tournament_name_mismatch', 'the name typed is not the tournament name');
     const now = Date.now();
     const mine = `EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND tn.status = 'aborted' AND tn.aborted_at = ?2)`;
+    const told = tournamentNoticeTold(db, id, 'aborted', now);
     const [r, stopped, , sent] = await db.batch([
       db
         .prepare(
@@ -511,8 +516,10 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
         .prepare(`UPDATE tables SET status = 'closing', entry_blocked = 1, updated_at = ?2 WHERE id = (SELECT table_id FROM tournaments WHERE id = ?1) AND status = 'open' AND ${mine}`)
         .bind(id, now),
       tournamentNotice(db, before, 'aborted', ['stopped', 'eliminated'], `tn.status = 'aborted' AND tn.aborted_at = ${now}`, now),
+      told.statement,
     ]);
     if (!r?.meta.changes) await refused(db, id, baseVersion);
+    told.send(c.env, c.executionCtx, sent);
     tournamentChanged(c.env, id, c.executionCtx);
     const live = await reloadRoom(c.env, before.tableId);
     // Stopped is told as called off (the same switch as a cancel).

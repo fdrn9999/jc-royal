@@ -179,3 +179,24 @@ test('a list that cannot load says so with a retry, and the console says when th
   await page.context().setOffline(false);
   await expect(page.getByTestId('conn-banner')).toHaveCount(0);
 });
+
+test("a page whose code will not load: the console loads again once, then says so under its menu and reloads when asked", async ({ browser }) => {
+  const op = await signUp(browser);
+  sql(promoteSql(`email = '${op.email}'`));
+  const page = await adminLogin(browser, op.email);
+  // Each page's code is its own file, fetched when the page is first opened (as after a deploy that removed it).
+  const opsCode = (u: URL) => /^\/assets\/Ops-[\w-]+\.js$/.test(u.pathname);
+  let refused = 0;
+  await page.route(opsCode, (r) => {
+    refused += 1;
+    return r.abort('failed');
+  });
+  await page.goto(`${ADMIN}/ops`);
+  await expect(page.getByTestId('page-error')).toContainText('이 화면을 불러오지 못했습니다');
+  expect(refused).toBe(2); // the first try, then the one reload; no loop
+  await expect(page.getByRole('navigation').getByRole('link', { name: '운영 기록' })).toBeVisible();
+  await page.unroute(opsCode);
+  await page.getByTestId('page-error').getByRole('button', { name: '다시 불러오기' }).click();
+  await expect(page.getByTestId('ops-page')).toBeVisible();
+  await expect(page.getByTestId('page-error')).toHaveCount(0);
+});

@@ -24,6 +24,7 @@ const SCREENS: Screen[] = [
   { name: '1366x768', viewport: { width: 1366, height: 768 } },
   { name: '1920x1080', viewport: { width: 1920, height: 1080 } },
   { name: '844x390-side', viewport: { width: 844, height: 390 }, ...PHONE },
+  { name: '812x375-side', viewport: { width: 812, height: 375 }, ...PHONE },
   { name: '667x375-side', viewport: { width: 667, height: 375 }, ...PHONE },
 ];
 const pick = (...names: string[]) => SCREENS.filter((s) => names.includes(s.name));
@@ -141,7 +142,7 @@ function hold(...found: { off: string[]; out: string[] }[]) {
   expect(found.flatMap((x) => x.out), "the board inside the felt's line").toEqual([]);
 }
 
-test('6인 테이블, 휴대폰부터 FHD까지 11개 화면: 보드는 펠트 가운데, 펠트 안쪽 선 안에 놓인다', async ({ browser }) => {
+test('6인 테이블, 휴대폰부터 FHD까지 12개 화면: 보드는 펠트 가운데, 펠트 안쪽 선 안에 놓인다', async ({ browser }) => {
   test.setTimeout(900_000);
   hold(await report('six', await walk(browser, 'e2e-bd6', 6, SCREENS)));
 });
@@ -149,6 +150,7 @@ test('6인 테이블, 휴대폰부터 FHD까지 11개 화면: 보드는 펠트 �
 test('2인과 9인 테이블: 보드는 펠트 가운데, 펠트 안쪽 선 안에 놓인다', async ({ browser }) => {
   test.setTimeout(900_000);
   const two = await walk(browser, 'e2e-bd2', 2, pick('320x568', '390x844', '768x1024', '1366x768', '1920x1080', '667x375-side'));
-  const nine = await walk(browser, 'e2e-bd9', 9, pick('320x568', '375x667', '430x932', '1024x768', '1920x1080', '844x390-side'));
+  // Nine seats on every phone, upright and on its side.
+  const nine = await walk(browser, 'e2e-bd9', 9, pick('320x568', '360x640', '375x667', '390x844', '430x932', '1024x768', '1920x1080', '844x390-side', '812x375-side', '667x375-side'));
   hold(await report('two', two), await report('nine', nine));
 });

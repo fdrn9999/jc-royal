@@ -59,7 +59,8 @@ describe("the bots' play for the admin console", () => {
     expect(one.acc).toEqual({
       day: statsDay(NOW),
       hands: 1,
-      n: { bt_hard_hands: 1, bt_hard_vpipOpp: 1, bt_hard_vpip: 1, bt_hard_foldToOverbetOpp: 1 },
+      // It saw the flop, called the river and showed down: no continuation bet was there to make or meet.
+      n: { bt_hard_hands: 1, bt_hard_vpipOpp: 1, bt_hard_vpip: 1, bt_hard_foldToOverbetOpp: 1, bt_hard_sawFlop: 1, bt_hard_showdowns: 1, bt_hard_postCalls: 1 },
     });
     const two = countHand(one.acc, await steal(), BB, levelOf, NOW, false);
     expect(two.acc!.hands).toBe(2);
@@ -68,6 +69,9 @@ describe("the bots' play for the admin console", () => {
       bt_hard_vpipOpp: 2,
       bt_hard_vpip: 1,
       bt_hard_foldToOverbetOpp: 1,
+      bt_hard_sawFlop: 1,
+      bt_hard_showdowns: 1,
+      bt_hard_postCalls: 1,
       bt_hard_threeBetOpp: 1,
       bt_hard_bbStealOpp: 1,
       bt_hard_bbFoldToSteal: 1,

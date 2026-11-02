@@ -1,5 +1,5 @@
 /**
- * 6-seat Sit & Go tournaments: free entry, no prize (docs/TOURNAMENT.md). The api keeps templates, tournaments and
+ * Sit & Go tournaments at one table of up to nine: free entry, no prize (docs/TOURNAMENT.md). The api keeps templates, tournaments and
  * entries in D1; the tournament's table room plays it with tournament chips that never touch a wallet or the ledger.
  *
  * - Blinds rise with a level clock that runs only while the table can deal (a pause or a maintenance stops it); a level
@@ -54,7 +54,7 @@ export interface TournamentStructure {
 
 export const TOURNAMENT_LIMITS = {
   name: { min: 2, max: 40 },
-  capacity: { min: 2, max: 6 },
+  capacity: { min: 2, max: 9 },
   startStack: { min: 100, max: 1_000_000 },
   levels: { min: 1, max: 30 },
   blind: { max: 1_000_000 },
@@ -62,6 +62,14 @@ export const TOURNAMENT_LIMITS = {
   turnSeconds: { min: 10, max: 120 },
   minHands: { min: 0, max: 1_000 },
 } as const;
+
+/** The seats of a tournament's table: six up to six players (the table as it always was), nine above. */
+export function tournamentSeats(capacity: number): 6 | 9 {
+  return capacity > 6 ? 9 : 6;
+}
+
+/** POST /api/tournaments/:id/invite: the friend asked to register. */
+export const TournamentInviteSchema = z.object({ userId: z.string().min(1).max(64) }).strict();
 
 /** A starting stack is at least this many big blinds of the first level. */
 export const TOURNAMENT_MIN_START_BB = 10;

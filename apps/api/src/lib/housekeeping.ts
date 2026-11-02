@@ -1,4 +1,5 @@
-import { ACTIVE_DAYS_MAX_RETENTION, ACTIVE_DAYS_RETENTION, OPS_RETENTION_MS, statsDay } from '@jc/db';
+import { ACTIVE_DAYS_MAX_RETENTION, ACTIVE_DAYS_RETENTION, OPS_RETENTION_MS, REALTIME_OUTBOX_RETENTION_MS, STATS_DAY, STATS_TZ_OFFSET_MS, statsDay, streakAchievements } from '@jc/db';
+import { OPS_LOG_RETENTION_MS } from '@jc/types';
 
 /** Push outbox rows (sent, skipped, failed or expired; never what a push said) are kept this long, for the dedupe keys and the hourly cap. */
 export const PUSH_EVENT_RETENTION_MS = 7 * 24 * 60 * 60_000;
@@ -14,7 +15,9 @@ export const HOUSEKEEPING_GRACE_MS = 24 * 60 * 60_000;
 export async function housekeeping(db: D1Database, now = Date.now()) {
   const before = now - HOUSEKEEPING_GRACE_MS;
   const today = statsDay(now);
-  const [sessions, passwordResets, emailVerifications, rateLimits, opsMetrics, activeDays, pushEvents, pushDevices] = await db.batch([
+  const [achievements, sessions, passwordResets, emailVerifications, rateLimits, opsMetrics, activeDays, pushEvents, pushDevices, realtimeEvents, inbox, opsEvents, opsAlerts] = await db.batch([
+    // Not a clean-up: the seven-days-in-a-row achievement (docs/SOCIAL.md), read from active_days before any are deleted.
+    streakAchievements(db, STATS_DAY, STATS_TZ_OFFSET_MS),
     // Signed-out, idle-expired and remember-me sessions that ran out: their IP and User-Agent go with them.
     db.prepare('DELETE FROM sessions WHERE expires_at < ?1').bind(before),
     // Reset links last 30 minutes, used or not.
@@ -37,8 +40,21 @@ export async function housekeeping(db: D1Database, now = Date.now()) {
     db.prepare('DELETE FROM notification_events WHERE created_at < ?1').bind(now - PUSH_EVENT_RETENTION_MS),
     // Browsers registered in a sign-in that no longer exists (the sessions deleted above included): their endpoint and keys go.
     db.prepare('DELETE FROM push_subscriptions WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = push_subscriptions.session_id)'),
+    // The realtime outbox (member ids and event types, never a message's text): a few days after it was done; a row
+    // still pending that long after it was written expired long ago (the minute cron gives those up after 30 minutes).
+    // Every row but a pending one has its done_at, so each half reads an index (`OR created_at` alone read every row).
+    db.prepare(`DELETE FROM realtime_outbox WHERE done_at < ?1 OR (status = 'pending' AND created_at < ?1)`).bind(now - REALTIME_OUTBOX_RETENTION_MS),
+    // The notification inbox: an item past its time (30 days after it last happened, account security 90), read or
+    // not, and the read markers of notices (kept as long as a notice can be listed).
+    db.prepare('DELETE FROM notifications WHERE expires_at < ?1').bind(now),
+    // The control center's operations log (codes, table ids, counts; never a member's data or a reason's text) and the
+    // alerts resolved: OPS_LOG_RETENTION_MS. A sighting the next check never confirmed is gone by then anyway; one left
+    // by a check that stopped running goes after a day.
+    db.prepare('DELETE FROM ops_events WHERE at < ?1').bind(now - OPS_LOG_RETENTION_MS),
+    db.prepare('DELETE FROM ops_alerts WHERE resolved_at < ?1 OR (confirmed_at IS NULL AND first_seen_at < ?2)').bind(now - OPS_LOG_RETENTION_MS, now - 24 * 60 * 60_000),
   ]);
   return {
+    achievements: achievements!.meta.changes,
     sessions: sessions!.meta.changes,
     passwordResets: passwordResets!.meta.changes,
     emailVerifications: emailVerifications!.meta.changes,
@@ -47,5 +63,9 @@ export async function housekeeping(db: D1Database, now = Date.now()) {
     activeDays: activeDays!.meta.changes,
     pushEvents: pushEvents!.meta.changes,
     pushDevices: pushDevices!.meta.changes,
+    realtimeEvents: realtimeEvents!.meta.changes,
+    inbox: inbox!.meta.changes,
+    opsEvents: opsEvents!.meta.changes,
+    opsAlerts: opsAlerts!.meta.changes,
   };
 }

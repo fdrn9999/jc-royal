@@ -5,9 +5,10 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { applyLedger, botStatsIncrement, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
+import { achievementsForHand, applyLedger, botStatsIncrement, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
 import { BOT_LEVELS, BOT_TABLE_STYLES, toSocialPolicy, type BotLevel, type BotTableStyle, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
+import { DETAIL_STATS_SQL, detailStatsBinds } from './detail-stats';
 import { TOURNAMENT_JSON, toTournamentRow, type TournamentRow } from './tournament';
 
 export interface TableRow {
@@ -344,6 +345,19 @@ export async function recordHand(
     await d1.prepare(HAND_STATS_SQL).run();
   } catch (e) {
     console.error('hand stats failed', tableId, rec.handId, e);
+  }
+  try {
+    // More statistics (detail-stats.ts), also never in the way of the hand's record.
+    const detail = detailStatsBinds(rec).map((b) => d1.prepare(DETAIL_STATS_SQL).bind(...b));
+    if (detail.length) await d1.batch(detail);
+  } catch (e) {
+    console.error('detail stats failed', tableId, rec.handId, e);
+  }
+  try {
+    // Achievements (packages/db/src/achievementsSql.ts), from the hand's record and the statistics above; idempotent.
+    await d1.batch(achievementsForHand(d1, rec.handId));
+  } catch (e) {
+    console.error('achievements failed', tableId, rec.handId, e);
   }
   const policies = results[1 + policy.length]?.results[0] as { timeBank?: unknown; social?: unknown } | undefined;
   return {

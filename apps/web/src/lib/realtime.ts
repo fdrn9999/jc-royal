@@ -14,6 +14,8 @@ export type RealtimeStatus = 'off' | 'connecting' | 'open' | 'down';
 const PING_MS = 45_000;
 const PONG_WAIT_MS = 10_000;
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000];
+/** A socket refused before it opened has the account read at most this often. */
+const SIGN_IN_CHECK_MS = 60_000;
 
 type Handler = (e: never) => void;
 const handlers = new Map<RealtimeEventType, Set<Handler>>();
@@ -33,9 +35,12 @@ let attempt = 0;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let ping: ReturnType<typeof setInterval> | undefined;
 let pongWait: ReturnType<typeof setTimeout> | undefined;
+/** Asks the open socket for a pong, and replaces it when none comes within PONG_WAIT_MS. */
+let probe = () => {};
 /** Closed for too many pages: waits until this page is used again. */
 let parked = false;
 let onSignedOut: (() => void) | null = null;
+let checkedAt = 0;
 
 const setStatus = (s: RealtimeStatus) => {
   if (status === s) return;
@@ -57,6 +62,7 @@ function connect(g: number) {
     return;
   }
   ws = s;
+  let opened = false;
   s.onmessage = (ev) => {
     if (g !== gen) return;
     clearTimeout(pongWait);
@@ -67,6 +73,7 @@ function connect(g: number) {
       return;
     }
     if (frame.t === 'hello') {
+      opened = true;
       attempt = 0;
       setStatus('open');
       sendTopics();
@@ -92,28 +99,45 @@ function connect(g: number) {
       }
     }
   };
-  s.onclose = (ev) => {
+  const closed = (code: number) => {
     if (g !== gen) return;
     stopTimers();
     ws = null;
     setStatus('down');
-    if (ev.code === REALTIME_CLOSE.signedOut) {
+    if (code === REALTIME_CLOSE.signedOut) {
       // The sign-in ended (here or elsewhere): the account is read again, which signs this page out if so.
       onSignedOut?.();
       later(g, BACKOFF_MS[BACKOFF_MS.length - 1]);
-    } else if (ev.code === REALTIME_CLOSE.tooMany) parked = true;
-    else if (ev.code === REALTIME_CLOSE.reauth) later(g, Math.random() * 1_000);
-    else later(g);
+    } else if (code === REALTIME_CLOSE.tooMany) parked = true;
+    else if (code === REALTIME_CLOSE.reauth) later(g, Math.random() * 1_000);
+    else {
+      // Refused before it opened: the API answers an expired sign-in's upgrade with 401, which a page sees only as a
+      // socket that closed (1006). The account is read again (at most once a minute), which signs this page out if so,
+      // rather than trying on with a sign-in that is gone.
+      if (!opened && Date.now() - checkedAt >= SIGN_IN_CHECK_MS) {
+        checkedAt = Date.now();
+        onSignedOut?.();
+      }
+      later(g);
+    }
   };
-  stopTimers();
-  ping = setInterval(() => {
+  s.onclose = (ev) => closed(ev.code);
+  probe = () => {
     if (g !== gen || s.readyState !== WebSocket.OPEN) return;
     s.send('{"t":"ping"}');
     clearTimeout(pongWait);
     pongWait = setTimeout(() => {
-      if (g === gen) s.close();
+      if (g !== gen) return;
+      // No answer: the connection is gone (a sleep often ends one without a close). It is let go at once, without
+      // waiting for a closing handshake it may never finish, and a new one opens.
+      s.onclose = null;
+      s.onmessage = null;
+      s.close();
+      closed(1006);
     }, PONG_WAIT_MS);
-  }, PING_MS);
+  };
+  stopTimers();
+  ping = setInterval(() => probe(), PING_MS);
 }
 
 function later(g: number, ms?: number) {
@@ -135,14 +159,18 @@ function sendTopics() {
   ws.send(JSON.stringify({ t: 'sub', topics }));
 }
 
-/** Back on the page, or back online: a socket that is down tries at once instead of waiting out its backoff. */
+/**
+ * Back on the page, or back online: a socket that is down tries at once instead of waiting out its backoff, and one
+ * thought open is asked for a pong at once (after a sleep it is often gone without a close), so a dead one is replaced
+ * within PONG_WAIT_MS rather than at the next ping.
+ */
 function wake() {
   if (!account || document.visibilityState !== 'visible') return;
   if (status === 'down' || parked) {
     parked = false;
     attempt = 0;
     connect(gen);
-  }
+  } else if (status === 'open') probe();
 }
 
 /** Opens the socket for this member (AuthProvider, once signed in); another member's socket closes first. */
@@ -151,6 +179,7 @@ export function startRealtime(accountId: string, signedOut: () => void) {
   if (account === accountId && status !== 'off') return;
   stopRealtime();
   account = accountId;
+  checkedAt = 0;
   const g = ++gen;
   if (typeof WebSocket === 'undefined') return;
   document.addEventListener('visibilitychange', wake);
@@ -166,6 +195,7 @@ export function stopRealtime() {
   attempt = 0;
   clearTimeout(retry);
   stopTimers();
+  probe = () => {};
   document.removeEventListener('visibilitychange', wake);
   window.removeEventListener('online', wake);
   const s = ws;

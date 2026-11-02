@@ -7,6 +7,7 @@ import { useI18n } from '../lib/i18n';
 import { useTopOnNewPage } from '../lib/scroll';
 import { useUnread } from '../lib/unread';
 import { Arrivals } from './Arrivals';
+import { NotificationBell } from './NotificationBell';
 import { PresenceMenu } from './Presence';
 import { ServiceBanner } from './ServiceBanner';
 
@@ -44,7 +45,7 @@ export function LangToggle() {
 
 export function BalancePill({ amount }: { amount: number }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 font-mono text-sm font-semibold text-gold-300 tabular-nums" data-testid="balance">
+    <span className="inline-flex items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 font-mono text-sm font-semibold text-gold-300 tabular-nums max-[374px]:gap-1.5 max-[374px]:px-2.5 max-[374px]:text-[13px]" data-testid="balance">
       <span className="jc-chip" style={{ ['--chip-size' as string]: '0.9rem', ['--chip-base' as string]: '#9c7414', ['--chip-face' as string]: '#c9a227' }} />
       {formatChips(amount)}
     </span>
@@ -65,7 +66,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const { t } = useI18n();
   const nav = useNavigate();
-  const { unread, dmUnread, friendRequests } = useUnread(me?.id ?? '');
+  const { unread, dmUnread, friendRequests, notifications = 0 } = useUnread(me?.id ?? '');
   const [settings, setSettings] = useState(false);
   const social = dmUnread + friendRequests;
   useTopOnNewPage();
@@ -86,7 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh" style={{ background: 'var(--t-bg)' }}>
       <header className="sticky top-0 z-40 border-b border-gold-500/10 bg-ink-950/80 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
+        <div className="relative mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 max-[374px]:gap-2">
           <Link to="/" className="shrink-0" aria-label="JC ROYAL">
             <Logo size={38} withWordmark className="[&>span]:hidden lg:[&>span]:inline" />
           </Link>
@@ -119,21 +120,24 @@ export function AppShell({ children }: { children: ReactNode }) {
               {t('nav.me')}
             </NavLink>
           </nav>
-          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+          {/* Below 375 px a ten-digit wallet, the mail, the bell and the settings fit only drawn a little closer together
+              (the buttons stay 32 px, the wallet whole). */}
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3 max-[374px]:gap-1">
             {me && <BalancePill amount={me.balance} />}
             {me && (
-              <Link to="/messages" className="relative rounded-full p-2 text-ink-200 hover:text-ivory" aria-label={`${t('nav.messages')}${unread ? ` (${unread})` : ''}`} data-testid="inbox-link">
+              <Link to="/messages" className="relative rounded-full p-2 text-ink-200 hover:text-ivory max-[374px]:p-1.5" aria-label={`${t('nav.messages')}${unread ? ` (${unread})` : ''}`} data-testid="inbox-link">
                 <MailIcon className="size-5" />
                 <CountBadge n={unread} testId="unread-badge" className="absolute -right-0.5 -top-0.5" />
               </Link>
             )}
+            {me && <NotificationBell count={notifications} badge={<CountBadge n={notifications} testId="bell-badge" className="absolute -right-0.5 -top-0.5" />} />}
             {me && (
               <span className="hidden lg:inline">
                 <PresenceMenu />
               </span>
             )}
             <span className="hidden xl:inline"><LangToggle /></span>
-            <button type="button" className="rounded-full p-2 text-ink-200 hover:text-ivory" onClick={() => setSettings(true)} aria-label={t('settings.title')} data-testid="settings-open">
+            <button type="button" className="rounded-full p-2 text-ink-200 hover:text-ivory max-[374px]:p-1.5" onClick={() => setSettings(true)} aria-label={t('settings.title')} data-testid="settings-open">
               <SettingsIcon className="size-5" />
             </button>
             {me && (

@@ -1,4 +1,4 @@
-import { outboxOne, schema, type OutboxOne } from '@jc/db';
+import { IF_CHANGED, inboxReadStatement, inboxStatement, outboxOne, realtimeOutboxStatement, schema, type OutboxOne } from '@jc/db';
 import {
   DirectMessageSchema,
   DmReadSchema,
@@ -6,6 +6,7 @@ import {
   isKstNight,
   MAX_BLOCKS,
   MAX_FRIENDS,
+  PRIVACY_DEFAULTS,
   publicRole,
   shownVip,
   SocialSettingsSchema,
@@ -34,7 +35,7 @@ import { fail, parseBody } from '../lib/http';
 import { queuePush } from '../lib/notify';
 import { applyMode, hubCall, type HubQuery } from '../lib/presence';
 import { rateLimit } from '../lib/rate-limit';
-import { realtimeToUsers } from '../lib/realtime';
+import { outboxToUsers, realtimeOutboxSend, realtimeToUsers } from '../lib/realtime';
 
 const DM_PAGE = 50;
 
@@ -51,7 +52,7 @@ async function relation(c: Context<AppEnv>, me: string, other: string) {
  * A member as other players see them, with the staff role (see PublicRole) drawn from `users.role` when the social
  * policy shows that role's badge (`badge`, from badgesFor), and the VIP color (shownVip) read in the same query.
  */
-const toPublic = (
+export const toPublic = (
   u: { id: string; nickname: string; avatarUrl: string | null; role: string; status?: string; isBot?: boolean | number; vipColor?: string | null },
   badge: Badge = publicRole,
 ): PublicUserDto => {
@@ -79,8 +80,18 @@ async function publicUser(c: Context<AppEnv>, where: { id?: string; nickname?: s
 const IN_FORCE = `JOIN users bu ON bu.id = ub.blocked_id AND bu.role = 'user'`;
 
 /** SQL condition: neither of the two placeholders has blocked the other. */
-const notBlocked = (a: string, b: string) =>
+export const notBlocked = (a: string, b: string) =>
   `NOT EXISTS (SELECT 1 FROM user_blocks ub ${IN_FORCE} WHERE (ub.blocker_id = ${a} AND ub.blocked_id = ${b}) OR (ub.blocker_id = ${b} AND ub.blocked_id = ${a}))`;
+
+/** What GET and PATCH /settings answer with (SocialSettingsDto). */
+const SETTINGS = {
+  friendRequests: schema.users.friendRequests,
+  dmNotifications: schema.users.dmNotifications,
+  showAchievements: schema.users.showAchievements,
+  showStats: schema.users.showStats,
+  shareTable: schema.users.shareTable,
+  showRanking: schema.users.showRanking,
+};
 
 /** 'mine' when I blocked them, 'theirs' when they blocked me (which is never shown to me as such). */
 async function blockState(c: Context<AppEnv>, me: string, other: string): Promise<'none' | 'mine' | 'theirs'> {
@@ -120,21 +131,24 @@ function pushTo(c: Context<AppEnv>, to: string, e: Omit<OutboxOne, 'userId' | 'n
  */
 const friendsChanged = (c: Context<AppEnv>, ...ids: string[]) => realtimeToUsers(c, ids, { scope: 'user', type: 'social.friend.changed' });
 
-/** A 1:1 message from `from` to `to` was saved as `seq`: the recipient's pages, and the sender's other ones. */
-function dmCreated(c: Context<AppEnv>, from: string, to: string, seq: number) {
-  realtimeToUsers(c, [to], { scope: 'user', type: 'social.dm.created', payload: { peerId: from, seq } });
-  realtimeToUsers(c, [from], { scope: 'user', type: 'social.dm.created', payload: { peerId: to, seq } });
-}
+/** The same event for a request made or accepted, as a realtime outbox row written in the batch that does it. */
+const friendsChangedRow = (now: number, ...ids: string[]) => outboxToUsers(ids, { scope: 'user', type: 'social.friend.changed' }, now);
 
 /** Turns the pending request between the two into a friendship (the one who asked is told). False when there was none to accept. */
 async function accept(c: Context<AppEnv>, me: string, other: string): Promise<boolean> {
   if ((await friendCount(c, me)) >= MAX_FRIENDS || (await friendCount(c, other)) >= MAX_FRIENDS) fail(409, 'friend_limit', `at most ${MAX_FRIENDS} friends`);
   const [a, b] = pairOf(me, other);
-  const r = await c.env.DB.prepare(`UPDATE friendships SET status = 'accepted', accepted_at = ?3 WHERE user_a = ?1 AND user_b = ?2 AND status = 'pending' AND ${notBlocked('?1', '?2')}`)
-    .bind(a, b, Date.now())
-    .run();
-  if (!r.meta.changes) return false;
-  friendsChanged(c, me, other);
+  const now = Date.now();
+  const told = friendsChangedRow(now, me, other);
+  const [r] = await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE friendships SET status = 'accepted', accepted_at = ?3 WHERE user_a = ?1 AND user_b = ?2 AND status = 'pending' AND ${notBlocked('?1', '?2')}`).bind(a, b, now),
+    realtimeOutboxStatement(c.env.DB, told, IF_CHANGED),
+    // The bell: the one who asked hears of it, and my item of their request is answered.
+    inboxStatement(c.env.DB, other, { kind: 'friend_accepted', key: `friend_accepted:${me}`, actorId: me, now }, IF_CHANGED),
+    inboxReadStatement(c.env.DB, me, [`friend_request:${other}`], now, IF_CHANGED),
+  ]);
+  if (!r!.meta.changes) return false;
+  realtimeOutboxSend(c, [told]);
   await pushTo(c, other, { dedupeKey: `friend_accepted:${me}:${other}`, type: 'friend_accepted', url: `/friends/${me}`, coalesceKey: `fa:${me}` });
   return true;
 }
@@ -264,11 +278,18 @@ export const friendRoutes = new Hono<AppEnv>()
     const [a, b] = pairOf(me, user.id);
     // Inserted only while neither side has blocked the other, in one statement, so a block that lands while this
     // request is in flight still wins (the block itself deletes any row written before it).
-    const made = await c.env.DB.prepare(
-      `INSERT OR IGNORE INTO friendships (user_a, user_b, requester_id, status, created_at) SELECT ?1, ?2, ?3, 'pending', ?4 WHERE ${notBlocked('?1', '?2')}`,
-    )
-      .bind(a, b, me, Date.now())
-      .run();
+    const now = Date.now();
+    const told = friendsChangedRow(now, me, user.id);
+    const [made] = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO friendships (user_a, user_b, requester_id, status, created_at) SELECT ?1, ?2, ?3, 'pending', ?4 WHERE ${notBlocked('?1', '?2')}`,
+      ).bind(a, b, me, now),
+      realtimeOutboxStatement(c.env.DB, told, IF_CHANGED),
+      // The bell of the one asked (one item per player asking).
+      inboxStatement(c.env.DB, user.id, { kind: 'friend_request', key: `friend_request:${me}`, actorId: me, now }, IF_CHANGED),
+    ]);
+    // Both pages read their lists again, from the row written with the request (none when this made nothing).
+    if (made!.meta.changes > 0) realtimeOutboxSend(c, [told]);
     const row = await relation(c, me, user.id);
     if (!row) return requestUnavailable();
     // A crossing request from the other side won the insert race.
@@ -277,15 +298,14 @@ export const friendRoutes = new Hono<AppEnv>()
       return c.json({ status: 'accepted', user } satisfies FriendRequestResultDto);
     }
     // Told only when this made the request (the same request again within the outbox's week is not told twice).
-    if (made.meta.changes > 0 && row.requesterId === me && row.status === 'pending') {
-      friendsChanged(c, me, user.id);
+    if (made!.meta.changes > 0 && row.requesterId === me && row.status === 'pending') {
       await pushTo(c, user.id, { dedupeKey: `friend_request:${me}:${user.id}`, type: 'friend_request', url: '/friends', coalesceKey: `fr:${me}` });
     }
     return c.json({ status: row.status, user } satisfies FriendRequestResultDto, 201);
   })
   .get('/settings', async (c) => {
-    const u = await c.var.db.query.users.findFirst({ where: eq(schema.users.id, c.var.user!.id), columns: { friendRequests: true, dmNotifications: true } });
-    return c.json({ friendRequests: u?.friendRequests ?? 'everyone', dmNotifications: u?.dmNotifications ?? true } satisfies SocialSettingsDto);
+    const [u] = await c.var.db.select(SETTINGS).from(schema.users).where(eq(schema.users.id, c.var.user!.id));
+    return c.json((u ?? { friendRequests: 'everyone', dmNotifications: true, ...PRIVACY_DEFAULTS }) satisfies SocialSettingsDto);
   })
   .patch('/settings', async (c) => {
     const body = await parseBody(c, SocialSettingsSchema);
@@ -293,7 +313,7 @@ export const friendRoutes = new Hono<AppEnv>()
       .update(schema.users)
       .set({ ...body, updatedAt: Date.now() })
       .where(eq(schema.users.id, c.var.user!.id))
-      .returning({ friendRequests: schema.users.friendRequests, dmNotifications: schema.users.dmNotifications });
+      .returning(SETTINGS);
     return c.json(r! satisfies SocialSettingsDto);
   })
   /** My side of the relation only: a player who blocked me reads as 'none'. */
@@ -329,7 +349,6 @@ export const friendRoutes = new Hono<AppEnv>()
       .first<{ id: string; name: string }>();
     if (!t) fail(409, 'table_unavailable', 'this table is not open');
     const row = await insertDm(c, me, other, { body: t.name, kind: 'invite', tableId: t.id });
-    dmCreated(c, me, other, row.seq);
     // The push opens the conversation; joining is checked by the table as always.
     await pushTo(c, other, { dedupeKey: `invite:${row.id}`, type: 'invite', url: `/friends/${me}`, coalesceKey: `invite:${me}` });
     return c.json(toDm(me)(row), 201);
@@ -344,6 +363,10 @@ export const friendRoutes = new Hono<AppEnv>()
       .where(and(eq(schema.friendships.userA, a), eq(schema.friendships.userB, b)))
       .returning({ a: schema.friendships.userA });
     if (!r[0]) fail(404, 'not_found', 'no friendship or request with this player');
+    // A declined request is answered: its item in my bell is read (the friends event tells my other pages).
+    await inboxReadStatement(c.env.DB, me, [`friend_request:${other}`], Date.now())
+      .run()
+      .catch((e: unknown) => console.warn('inbox read not saved', e instanceof Error ? e.message : String(e)));
     friendsChanged(c, me, other);
     return c.json({ ok: true });
   });
@@ -412,16 +435,44 @@ const toDm =
 async function insertDm(c: Context<AppEnv>, me: string, other: string, m: { body: string; kind: DmKind; tableId: string | null }): Promise<DmRow> {
   const row = { id: crypto.randomUUID(), pairKey: pairKey(me, other), senderId: me, recipientId: other, ...m, readAt: null, createdAt: Date.now() };
   const [a, b] = pairOf(me, other);
-  const r = await c.env.DB.prepare(
-    `INSERT INTO direct_messages (id, pair_key, sender_id, recipient_id, body, kind, table_id, created_at, seq)
-     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(seq), 0) + 1 FROM direct_messages WHERE pair_key = ?2)
-      WHERE EXISTS (SELECT 1 FROM friendships WHERE user_a = ?9 AND user_b = ?10 AND status = 'accepted') AND ${notBlocked('?3', '?4')}
-     RETURNING seq`,
-  )
-    .bind(row.id, row.pairKey, me, other, row.body, row.kind, row.tableId, row.createdAt, a, b)
-    .first<{ seq: number }>();
-  if (!r) fail(403, 'not_friends', 'you can only message friends');
-  return { ...row, seq: r.seq };
+  const db = c.env.DB;
+  // The recipient's pages, and the sender's other ones, are told of the message's seq, from rows written with it (the
+  // seq read in the same batch).
+  const peers = [
+    [other, me],
+    [me, other],
+  ] as const;
+  const told = peers.map(([to, peerId]) => outboxToUsers([to], { scope: 'user', type: 'social.dm.created', payload: { peerId, seq: 0 } }, row.createdAt));
+  const saved = { sql: 'EXISTS (SELECT 1 FROM direct_messages WHERE id = ?)', params: [row.id] };
+  const seqOf = { path: '$.payload.seq', sql: 'SELECT seq FROM direct_messages WHERE id = ?', params: [row.id] };
+  const [r] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO direct_messages (id, pair_key, sender_id, recipient_id, body, kind, table_id, created_at, seq)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(seq), 0) + 1 FROM direct_messages WHERE pair_key = ?2)
+          WHERE EXISTS (SELECT 1 FROM friendships WHERE user_a = ?9 AND user_b = ?10 AND status = 'accepted') AND ${notBlocked('?3', '?4')}
+         RETURNING seq`,
+      )
+      .bind(row.id, row.pairKey, me, other, row.body, row.kind, row.tableId, row.createdAt, a, b),
+    ...told.map((e) => realtimeOutboxStatement(db, e, saved, seqOf)),
+    // The recipient's bell: one item per friend for messages, and one for their table invites (the newest table),
+    // counted while unread. Never the message's text; an invite's body is the table's public name.
+    inboxStatement(
+      db,
+      other,
+      m.kind === 'invite'
+        ? { kind: 'invite', key: `invite:${me}`, actorId: me, ref: m.tableId, params: { table: m.body }, now: row.createdAt }
+        : { kind: 'dm', key: `dm:${me}`, actorId: me, now: row.createdAt },
+      saved,
+    ),
+  ]);
+  const seq = (r?.results[0] as { seq: number } | undefined)?.seq;
+  if (seq === undefined) fail(403, 'not_friends', 'you can only message friends');
+  realtimeOutboxSend(
+    c,
+    told.map((e, i) => ({ ...e, event: { ...e.event, payload: { peerId: peers[i]![1], seq } } })),
+  );
+  return { ...row, seq };
 }
 
 /** 1:1 messages. Only friends can send; past messages stay readable after unfriending. */
@@ -499,7 +550,6 @@ export const dmRoutes = new Hono<AppEnv>()
     if (!user) fail(404, 'user_not_found', 'no such player');
     await rateLimit(c, `dm:${me}`, 30, 60_000);
     const row = await insertDm(c, me, other, { body: body.text, kind: 'text', tableId: null });
-    dmCreated(c, me, other, row.seq);
     await pushTo(c, other, { dedupeKey: `dm:${row.id}`, type: 'dm', url: `/friends/${me}`, coalesceKey: `dm:${me}` });
     return c.json(toDm(me)(row), 201);
   })
@@ -520,11 +570,21 @@ export const dmRoutes = new Hono<AppEnv>()
       .set({ readAt: Date.now() })
       .where(and(eq(t.pairKey, pairKey(me, other)), eq(t.recipientId, me), isNull(t.readAt), upTo === undefined ? undefined : lte(t.seq, upTo)))
       .returning({ seq: t.seq });
+    // The bell's items of this conversation are read once nothing from them is left unread in it.
+    const marked = await inboxReadStatement(c.env.DB, me, [`dm:${other}`, `invite:${other}`], Date.now(), {
+      sql: 'NOT EXISTS (SELECT 1 FROM direct_messages WHERE pair_key = ? AND recipient_id = ? AND read_at IS NULL)',
+      params: [pairKey(me, other), me],
+    })
+      .run()
+      .catch((e: unknown) => {
+        console.warn('inbox read not saved', e instanceof Error ? e.message : String(e));
+        return null;
+      });
     // Marked just now: the sender's pages show how far I read (as GET /api/dm/:userId does), mine drop the unread count.
     if (read.length) {
       const seq = Math.max(...read.map((r) => r.seq));
       realtimeToUsers(c, [other], { scope: 'user', type: 'social.dm.read', payload: { peerId: me, readerId: me, seq } });
       realtimeToUsers(c, [me], { scope: 'user', type: 'social.dm.read', payload: { peerId: other, readerId: me, seq } });
-    }
+    } else if (marked?.meta.changes) realtimeToUsers(c, [me], { scope: 'user', type: 'notification.changed' });
     return c.json({ ok: true });
   });

@@ -28,6 +28,7 @@ const SCREENS: Screen[] = [
   { name: '1366x768', viewport: { width: 1366, height: 768 } },
   { name: '1920x1080', viewport: { width: 1920, height: 1080 } },
   { name: '844x390-side', viewport: { width: 844, height: 390 }, ...PHONE },
+  { name: '812x375-side', viewport: { width: 812, height: 375 }, ...PHONE },
   { name: '667x375-side', viewport: { width: 667, height: 375 }, ...PHONE },
 ];
 const pick = (...names: string[]) => SCREENS.filter((s) => names.includes(s.name));
@@ -307,14 +308,15 @@ async function report(name: string, found: Found[]) {
   expect(issues, name).toEqual([]);
 }
 
-test('6인 테이블, 휴대폰부터 FHD까지 11개 화면: 지갑·반응 버튼·트레이·액션바가 내 카드와 좌석, 서로를 가리지 않는다', async ({ browser }) => {
+test('6인 테이블, 휴대폰부터 FHD까지 12개 화면: 지갑·반응 버튼·트레이·액션바가 내 카드와 좌석, 서로를 가리지 않는다', async ({ browser }) => {
   test.setTimeout(1_200_000);
   await report('six', await walk(browser, 'e2e-ov6', 6, SCREENS));
 });
 
 test('9인과 2인 테이블: 이웃 좌석이 가까워도 지갑·반응 버튼·트레이가 겹치지 않는다', async ({ browser }) => {
   test.setTimeout(1_200_000);
-  const nine = await walk(browser, 'e2e-ov9', 9, pick('320x568', '390x844', '768x1024', '1366x768', '844x390-side'));
+  // Nine seats on every phone, upright and on its side, where the seats sit closest.
+  const nine = await walk(browser, 'e2e-ov9', 9, pick('320x568', '360x640', '375x667', '390x844', '430x932', '768x1024', '1366x768', '844x390-side', '812x375-side', '667x375-side'));
   const two = await walk(browser, 'e2e-ov2', 2, pick('360x640', '1024x768', '1920x1080', '667x375-side'));
   await report('nine-two', [...nine, ...two]);
 });

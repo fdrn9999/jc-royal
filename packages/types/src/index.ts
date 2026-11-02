@@ -16,3 +16,6 @@ export * from './presence';
 export * from './notifications';
 export * from './realtime';
 export * from './admin-monitor';
+export * from './inbox';
+export * from './ops-log';
+export * from './players';

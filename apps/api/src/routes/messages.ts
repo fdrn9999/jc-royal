@@ -7,6 +7,7 @@ import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { fail } from '../lib/http';
 import { realtimeToUsers } from '../lib/realtime';
+import { INBOX_UNREAD_SQL } from '../lib/inbox';
 import { SERVICE_REV_SQL } from '../lib/service';
 
 const sender = alias(schema.users, 'sender');
@@ -31,7 +32,8 @@ export const messageRoutes = new Hono<AppEnv>()
   })
   /**
    * Header badges: inbox, 1:1 messages and received friend requests in one poll. 1:1 messages count only while the
-   * member keeps their notifications on, and never from players they blocked (a block on staff has no effect).
+   * member keeps their notifications on, and never from players they blocked (a block on staff has no effect). The
+   * bell's unread items (lib/inbox.ts) come with them.
    */
   .get('/unread-count', async (c) => {
     const r = await c.env.DB.prepare(
@@ -42,11 +44,18 @@ export const messageRoutes = new Hono<AppEnv>()
                   AND (u.role != 'user' OR NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.blocker_id = ?1 AND b.blocked_id = d.sender_id))) AS dmUnread,
               (SELECT COUNT(*) FROM friendships f JOIN users u ON u.id = f.requester_id
                 WHERE (f.user_a = ?1 OR f.user_b = ?1) AND f.status = 'pending' AND f.requester_id != ?1 AND u.status != 'deleted') AS friendRequests,
-              ${SERVICE_REV_SQL} AS serviceRev`,
+              ${SERVICE_REV_SQL} AS serviceRev,
+              ${INBOX_UNREAD_SQL} AS notifications`,
     )
-      .bind(c.var.user!.id)
+      .bind(c.var.user!.id, Date.now())
       .first<UnreadCountsDto>();
-    return c.json({ unread: r?.unread ?? 0, dmUnread: r?.dmUnread ?? 0, friendRequests: r?.friendRequests ?? 0, serviceRev: r?.serviceRev ?? 0 } satisfies UnreadCountsDto);
+    return c.json({
+      unread: r?.unread ?? 0,
+      dmUnread: r?.dmUnread ?? 0,
+      friendRequests: r?.friendRequests ?? 0,
+      serviceRev: r?.serviceRev ?? 0,
+      notifications: r?.notifications ?? 0,
+    } satisfies UnreadCountsDto);
   })
   .post('/read-all', async (c) => {
     const uid = c.var.user!.id;

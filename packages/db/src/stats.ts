@@ -88,7 +88,8 @@ export type TimeBankMetric = (typeof TIME_BANK_METRICS)[number];
  * Table bots' play per level (apps/game-worker/src/bot-stats.ts), metric `bt_<level>_<key>`: from each hand a bot was
  * dealt into, the public counters the bots' statistics of their opponents use (packages/poker-engine ai/profile.ts:
  * hands, chances to put chips in preflop and how often they did or raised, 3-bets, the big blind against a steal, folds
- * to an overbet); per decision, how many there were, how many fell back to a check or fold (the strategy failed or the
+ * to an overbet, folds to a 3-bet, continuation bets and folds to them, flops seen and showdowns reached, bets and raises
+ * and calls after the flop); per decision, how many there were, how many fell back to a check or fold (the strategy failed or the
  * engine refused its choice), how many the engine refused, and how late the room moved (ms after the moment planned,
  * and moves over BOT_SLOW_MS late). Summed in the room over a few hands and written with a hand record (once, also when
  * it is written again), per level only, never per bot or member. Kept by the daily rollup.
@@ -104,6 +105,16 @@ export const BOT_STAT_KEYS = [
   'bbFoldToSteal',
   'foldToOverbetOpp',
   'foldToOverbet',
+  'foldTo3BetOpp',
+  'foldTo3Bet',
+  'cbetOpp',
+  'cbet',
+  'foldToCbetOpp',
+  'foldToCbet',
+  'sawFlop',
+  'showdowns',
+  'postBets',
+  'postCalls',
   'decisions',
   'fallbacks',
   'failures',

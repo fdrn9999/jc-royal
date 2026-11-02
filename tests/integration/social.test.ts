@@ -349,10 +349,12 @@ describe('blocking and receive settings', () => {
     const a = await newUser();
     const b = await newUser();
     const c = await newUser();
-    expect((await a.client.get('/api/friends/settings')).body).toEqual({ friendRequests: 'everyone', dmNotifications: true });
+    // (With the profile card's privacy settings at their defaults, docs/SOCIAL.md.)
+    const shown = { showAchievements: true, showStats: false, shareTable: true, showRanking: true };
+    expect((await a.client.get('/api/friends/settings')).body).toEqual({ friendRequests: 'everyone', dmNotifications: true, ...shown });
     expect((await a.client.patch('/api/friends/settings', {})).status).toBe(400);
     expect((await a.client.patch('/api/friends/settings', { friendRequests: 'friends' })).status).toBe(400);
-    expect((await a.client.patch('/api/friends/settings', { friendRequests: 'nobody' })).body).toEqual({ friendRequests: 'nobody', dmNotifications: true });
+    expect((await a.client.patch('/api/friends/settings', { friendRequests: 'nobody' })).body).toEqual({ friendRequests: 'nobody', dmNotifications: true, ...shown });
     expect((await b.client.post('/api/friends/requests', { userId: a.me.id })).body.error.code).toBe('request_unavailable');
     // The member can still send requests themselves.
     await befriend(a, b);

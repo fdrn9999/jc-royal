@@ -145,6 +145,7 @@ const auditNames = labeler({
   'table.update': 'auditTableUpdate',
   'table.control': 'auditTableControl',
   'table.timer_recover': 'auditTimerRecover',
+  'monitor.alert_handling': 'auditOpsHandling',
   'timebank.policy': 'auditTimeBankPolicy',
   'timebank.view': 'auditTimeBankView',
   'tournament.abort': 'auditTnAbort',

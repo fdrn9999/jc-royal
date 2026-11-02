@@ -4,11 +4,21 @@
  * The server decides everything (eligibility, seats, the start); these pages only show its answers and refresh while
  * the tournament can still change.
  */
-import { blindsAt, type EntryStatus, type TournamentDetailDto, type TournamentStatus, type TournamentSummaryDto, type VipColor } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, Panel, Spinner, TrophyIcon } from '@jc/ui';
+import {
+  blindsAt,
+  type EntryStatus,
+  type FriendDto,
+  type FriendsDto,
+  type TournamentDetailDto,
+  type TournamentStatus,
+  type TournamentSummaryDto,
+  type VipColor,
+} from '@jc/types';
+import { Badge, Button, cx, Empty, formatChips, Modal, Panel, Spinner, TrophyIcon } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { MemberName } from '../components/MemberName';
+import { Avatar } from '../components/Social';
 import { api, ApiError } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { onRealtime, onRealtimeResync, useRealtimeStatus, wantTopic } from '../lib/realtime';
@@ -271,9 +281,15 @@ export function TournamentsPage() {
   const current = data?.current ?? null;
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{tr('title')}</h1>
-        <p className="mt-1 text-sm text-ink-300">{tr('subtitle')}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{tr('title')}</h1>
+          <p className="mt-1 text-sm text-ink-300">{tr('subtitle')}</p>
+        </div>
+        <Link to="/leaderboard" className="jc-tap inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gold-500/40 px-3 py-2 text-xs font-semibold text-gold-300 hover:bg-gold-500/10" data-testid="tn-leaderboard">
+          <TrophyIcon className="size-4" />
+          {t('player.leaderboard')}
+        </Link>
       </div>
 
       {current && (
@@ -355,6 +371,83 @@ function ineligibleText(tr: Tn, t: ReturnType<typeof useI18n>['t'], reason: stri
   return tr(`inel.${reason}` as TnKey);
 }
 
+/**
+ * Asks friends to register: an item in each one's notification inbox. It grants nothing; registering checks the friend
+ * as anyone (and an invite to someone already in says so).
+ */
+function InviteFriends({ id, open, onClose }: { id: string; open: boolean; onClose: () => void }) {
+  const { err } = useI18n();
+  const tr = useTn();
+  const [friends, setFriends] = useState<FriendDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<Record<string, 'busy' | 'sent' | 'joined'>>({});
+  useEffect(() => {
+    if (!open) return;
+    setFriends(null);
+    setError(null);
+    api<FriendsDto>('/api/friends')
+      .then((r) => setFriends(r.friends))
+      .catch((x) => setError(err(x instanceof ApiError ? x.code : null)));
+  }, [open, err]);
+
+  async function invite(f: FriendDto) {
+    setDone((s) => ({ ...s, [f.id]: 'busy' }));
+    setError(null);
+    let to: 'sent' | 'joined' | null = 'sent';
+    try {
+      await api(`/api/tournaments/${encodeURIComponent(id)}/invite`, { body: { userId: f.id } });
+    } catch (x) {
+      const code = x instanceof ApiError ? x.code : null;
+      to = code === 'tournament_invite_joined' ? 'joined' : null;
+      if (!to) setError(code === 'not_friends' ? tr('invite.unavailable') : err(code));
+    }
+    setDone(({ [f.id]: _, ...rest }) => (to ? { ...rest, [f.id]: to } : rest));
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={tr('invite.title')}>
+      <div className="flex flex-col gap-3" data-testid="tn-invite-picker">
+        <p className="text-sm text-ink-300">{tr('invite.hint')}</p>
+        {!friends && !error && (
+          <div className="flex justify-center py-6 text-gold-400">
+            <Spinner />
+          </div>
+        )}
+        {friends && friends.length === 0 && <Empty>{tr('invite.none')}</Empty>}
+        {friends && friends.length > 0 && (
+          <ul className="-mx-2 flex max-h-[50dvh] flex-col overflow-y-auto">
+            {friends.map((f) => {
+              const state = done[f.id];
+              return (
+                <li key={f.id} className="flex min-h-12 items-center gap-3 px-2 py-1.5" data-testid="tn-invite-friend">
+                  <Avatar user={f} />
+                  <span className="flex min-w-0 flex-1">
+                    <MemberName name={f.nickname} role={f.role} vip={f.vip} badge="wide" className="font-semibold text-ivory" />
+                  </span>
+                  {state === 'sent' || state === 'joined' ? (
+                    <span className="shrink-0 text-xs text-ink-300" data-testid="tn-invite-state" data-state={state}>
+                      {tr(state === 'sent' ? 'invite.sent' : 'invite.joined')}
+                    </span>
+                  ) : (
+                    <Button size="sm" variant="outline" className="shrink-0" loading={state === 'busy'} onClick={() => void invite(f)} data-testid="tn-invite-send">
+                      {tr('invite.send')}
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {error && (
+          <p className="text-sm text-danger" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export function TournamentPage() {
   const { id = '' } = useParams();
   const { t, err, locale } = useI18n();
@@ -365,6 +458,7 @@ export function TournamentPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const [inviting, setInviting] = useState(false);
   const seq = useRef(0);
 
   const load = useCallback(
@@ -489,6 +583,11 @@ export function TournamentPage() {
             </Button>
           </>
         )}
+        {d.status === 'registering' && d.registered < d.capacity && (
+          <Button className="self-start" size="sm" variant="outline" onClick={() => setInviting(true)} data-testid="tn-invite">
+            {tr('invite.open')}
+          </Button>
+        )}
         {d.status === 'closed' && <p className="text-sm text-ink-300">{tr('closedNote')}</p>}
         {(d.status === 'registering' || d.status === 'closed') && <p className="text-xs text-ink-400">{tr('leaveNote')}</p>}
         {d.status === 'running' && d.tableId && (
@@ -606,6 +705,8 @@ export function TournamentPage() {
           </ol>
         </Panel>
       </div>
+      {/* Keyed by the tournament: who was invited here is not who was invited to another one opened from this page. */}
+      <InviteFriends key={id} id={id} open={inviting} onClose={() => setInviting(false)} />
     </div>
   );
 }

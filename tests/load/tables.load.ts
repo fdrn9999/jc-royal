@@ -7,12 +7,11 @@
  * placement, network latency, or billing. See docs/LOAD_TEST.md before quoting any number.
  */
 import type { LegalOption, ServerMessage } from '@jc/types';
-import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { afterAll, expect, it } from 'vitest';
 import { Client, newUser, sharedAdmin } from '../support/client';
+import { d1 as readD1 } from '../support/d1';
 import { root } from '../support/worker';
 import { isMyTurn, TableSocket } from '../support/ws';
 import { loadConfig } from './config';
@@ -31,12 +30,11 @@ const origin = performance.now();
 /** The same moment as wall-clock time, to line the timings up with machine counters sampled outside the test. */
 const originEpochMs = Date.now();
 
-/** Reads the local D1 directly (like an operator console); asynchronous so the HTTP keep-alive stays healthy. */
-async function d1<T = Record<string, number>>(sql: string): Promise<T[]> {
-  const wrangler = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
-  const { stdout } = await promisify(execFile)(process.execPath, [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', process.env.LOAD_STATE!, '-c', 'apps/api/wrangler.jsonc', '--json', '--command', sql], { cwd: root, encoding: 'utf8' });
-  return (JSON.parse(stdout.slice(stdout.indexOf('['))) as { results: T[] }[]).flatMap((x) => x.results);
-}
+/**
+ * Reads the local D1 directly (like an operator console), through the shared helper: a read that meets the worker's
+ * write lock (tables still closing) is read again instead of failing the run.
+ */
+const d1 = <T = Record<string, number>>(sql: string) => readD1<T>(sql, process.env.LOAD_STATE!);
 
 const COUNTED = ['hands', 'hand_players', 'chip_ledger', 'table_sessions', 'rate_limits', 'sessions', 'admin_audit_log', 'reconciliation_events'] as const;
 const rowCounts = async () => (await d1(`SELECT ${COUNTED.map((t) => `(SELECT COUNT(*) FROM ${t}) AS ${t}`).join(', ')}`))[0]!;

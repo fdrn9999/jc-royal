@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { HAND_STATS_SQL } from '../../packages/db/src/handStats';
+import { DETAIL_STATS_SQL, detailStatsBinds } from '../../apps/game-worker/src/detail-stats';
 
 // The statistics statement runs on the real migration files in an in-memory SQLite, over hands the real engine played
 // with random seats, buttons, stacks and actions. The expected values are worked out here from the engine itself
@@ -211,5 +212,107 @@ describe('hand statistics (HAND_STATS_SQL, migration 0010)', () => {
     for (const k of ['timeoutFold', 'timeoutCheck', 'allinRaise', 'allinCall', 'blindAllIn'] as const) expect(seen[k], k).toBeGreaterThan(0);
     // Somebody got only uncalled chips back (won > 0, pot won 0).
     expect([...before, ...after].some((h) => h.rec.players.some((p) => p.won > 0 && h.expected.get(p.playerId)!.pot_won === 0))).toBe(true);
+  });
+});
+
+/**
+ * A hand played to its end with the real engine from a script of `[seat, action, to?]`, four players of 1,000 chips at a
+ * six-seat table, blinds 5/10, with the button on seat 0 (SB 1, BB 2, UTG 3).
+ */
+async function scripted(handId: string, script: [number, 'fold' | 'check' | 'call' | 'bet' | 'raise', number?][]): Promise<HandRecord> {
+  const h = HandEngine.start({
+    handId,
+    rules: { maxSeats: 6, smallBlind: 5, bigBlind: 10, turnMs: 20_000 },
+    seats: [0, 1, 2, 3].map((seatIndex) => ({ playerId: `p${seatIndex}`, seatIndex, stack: 1000, displayName: `P${seatIndex}` })),
+    buttonSeat: 0,
+    now: 1_000,
+  });
+  let now = 2_000;
+  for (const [seat, type, amount] of script) {
+    expect(h.actorId(), `${handId}: seat ${seat} to act`).toBe(`p${seat}`);
+    const res = await h.act(`p${seat}`, { type, amount }, `${handId}-${now}`, ++now);
+    expect(res.ok, `${handId}: seat ${seat} ${type}`).toBe(true);
+  }
+  expect(h.isSettled, handId).toBe(true);
+  return h.record(9_000);
+}
+
+describe('more statistics (detail-stats.ts, migration 0040)', () => {
+  // The statement the game worker sends after recording a hand, run on the real migrations.
+  const run = (db: DatabaseSync, rec: HandRecord) => detailStatsBinds(rec).reduce((n, b) => n + Number(db.prepare(DETAIL_STATS_SQL).run(...b).changes), 0);
+  const cols = (db: DatabaseSync, handId: string) =>
+    Object.fromEntries(
+      (db.prepare('SELECT user_id, three_bet, fold_3bet, cbet, fold_cbet, post_bets, post_calls, big_blind FROM hand_players WHERE hand_id = ? ORDER BY user_id').all(handId) as Record<string, unknown>[]).map(
+        ({ user_id, ...rest }) => [user_id, { ...rest }],
+      ),
+    );
+  const row = (three_bet: number | null, fold_3bet: number | null, cbet: number | null, fold_cbet: number | null, post_bets: number, post_calls: number) => ({ three_bet, fold_3bet, cbet, fold_cbet, post_bets, post_calls, big_blind: 10 });
+
+  it('count 3-bets, folds to them, c-bets, folds to them and the bets and calls after the flop, NULL where there was no chance', async () => {
+    const db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
+    for (const f of files) apply(db, f);
+
+    // UTG opens, the button 3-bets, the blinds fold and UTG folds to it.
+    const threeBet = await scripted('3bet', [
+      [3, 'raise', 30],
+      [0, 'raise', 90],
+      [1, 'fold'],
+      [2, 'fold'],
+      [3, 'fold'],
+    ]);
+    // UTG opens, the button and the big blind call; UTG c-bets, the button folds, the big blind calls, then bets the
+    // river into UTG, who calls.
+    const cbet = await scripted('cbet', [
+      [3, 'raise', 30],
+      [0, 'call'],
+      [1, 'fold'],
+      [2, 'call'],
+      [2, 'check'],
+      [3, 'bet', 50],
+      [0, 'fold'],
+      [2, 'call'],
+      [2, 'check'],
+      [3, 'check'],
+      [2, 'bet', 100],
+      [3, 'call'],
+    ]);
+    // Nobody raised preflop: a flop bet is no c-bet, and nothing preflop was a 3-bet chance.
+    const limped = await scripted('limped', [
+      [3, 'call'],
+      [0, 'call'],
+      [1, 'call'],
+      [2, 'check'],
+      [1, 'check'],
+      [2, 'check'],
+      [3, 'bet', 20],
+      [0, 'fold'],
+      [1, 'fold'],
+      [2, 'fold'],
+    ]);
+    // The big blind leads into the preflop raiser on the flop: the raiser had no c-bet chance.
+    const donk = await scripted('donk', [
+      [3, 'raise', 30],
+      [0, 'fold'],
+      [1, 'fold'],
+      [2, 'call'],
+      [2, 'bet', 30],
+      [3, 'call'],
+      [2, 'check'],
+      [3, 'check'],
+      [2, 'check'],
+      [3, 'check'],
+    ]);
+    for (const rec of [threeBet, cbet, limped, donk]) insert(db, rec);
+    for (const rec of [threeBet, cbet, limped, donk]) expect(run(db, rec)).toBe(4);
+
+    expect(cols(db, '3bet')).toEqual({ p0: row(1, null, null, null, 0, 0), p1: row(null, null, null, null, 0, 0), p2: row(null, null, null, null, 0, 0), p3: row(null, 1, null, null, 0, 0) });
+    expect(cols(db, 'cbet')).toEqual({ p0: row(0, null, null, 1, 0, 0), p1: row(0, null, null, null, 0, 0), p2: row(0, null, null, 0, 1, 1), p3: row(null, null, 1, null, 1, 1) });
+    expect(cols(db, 'limped')).toEqual({ p0: row(null, null, null, null, 0, 0), p1: row(null, null, null, null, 0, 0), p2: row(null, null, null, null, 0, 0), p3: row(null, null, null, null, 1, 0) });
+    expect(cols(db, 'donk')).toEqual({ p0: row(0, null, null, null, 0, 0), p1: row(0, null, null, null, 0, 0), p2: row(0, null, null, null, 1, 0), p3: row(null, null, null, null, 0, 1) });
+
+    // Written once: the hand recorded again (a retry) changes no row.
+    for (const rec of [threeBet, cbet]) expect(run(db, rec)).toBe(0);
+    // A record without its blinds (kept from before they were recorded) is left for no sample.
+    expect(detailStatsBinds({ ...threeBet, blinds: undefined } as unknown as HandRecord)).toEqual([]);
   });
 });

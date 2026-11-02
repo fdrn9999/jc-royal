@@ -13,12 +13,11 @@
  * Object (here every hub shares one process), network latency, or billing. See docs/LOAD_TEST.md before quoting.
  */
 import type { RealtimeEvent } from '@jc/types';
-import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { afterAll, expect, it } from 'vitest';
 import { BASE, Client, newUser, PASSWORD, sharedAdmin, uniq, WEB_ORIGIN } from '../support/client';
+import { d1 as readD1 } from '../support/d1';
 import { RealtimeSocket } from '../support/realtime';
 import { root } from '../support/worker';
 import { TableSocket } from '../support/ws';
@@ -38,11 +37,8 @@ afterAll(() => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function d1<T = Record<string, number>>(sql: string): Promise<T[]> {
-  const wrangler = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
-  const { stdout } = await promisify(execFile)(process.execPath, [wrangler, 'd1', 'execute', 'jc-royal-db', '--local', '--persist-to', process.env.LOAD_STATE!, '-c', 'apps/api/wrangler.jsonc', '--json', '--command', sql], { cwd: root, encoding: 'utf8' });
-  return (JSON.parse(stdout.slice(stdout.indexOf('['))) as { results: T[] }[]).flatMap((x) => x.results);
-}
+/** The local D1 read directly, through the shared helper (a read that meets the worker's write lock is read again). */
+const d1 = <T = Record<string, number>>(sql: string) => readD1<T>(sql, process.env.LOAD_STATE!);
 
 async function pool<T>(n: number, limit: number, fn: (i: number) => Promise<T>): Promise<T[]> {
   const out = new Array<T>(n);

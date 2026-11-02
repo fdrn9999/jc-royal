@@ -80,6 +80,7 @@ import { addShown, afterHandMs } from './muck';
 import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
 import { LobbyFeed, placesMoved, placesOf } from './lobby-feed';
+import { tellFriendsSat } from './friend-table';
 import { publishToAll, publishToUsers } from './realtime-publish';
 import { publishToAdmins } from './admin-monitor-publish';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
@@ -1277,6 +1278,17 @@ export class TableRoom extends DurableObject<Env> {
     this.remember(reqId);
     await this.save();
     this.walletMoved(seat);
+    // Friends' inboxes (friend-table.ts): never for a private or tournament table, and never in the way of the seat.
+    if (!t.isPrivate && t.roomType !== 'tournament') {
+      this.ctx.waitUntil(
+        tellFriendsSat(this.env.DB, a.userId, { id: t.id, name: t.name }, Date.now()).then(
+          (told) => {
+            if (told.length) this.published(publishToUsers(this.env, told, { scope: 'user', type: 'notification.changed' }));
+          },
+          (e) => console.warn('friend table alert failed', t.id, e instanceof Error ? e.message : String(e)),
+        ),
+      );
+    }
     this.broadcast([{ kind: 'seat', seatIndex, nickname: a.nickname }]);
     await this.afterChange();
   }
@@ -2211,6 +2223,8 @@ export class TableRoom extends DurableObject<Env> {
     tn.confirmed = tn.places.length;
     // A bust or the finish, now in D1, for the tournament pages; stacks and the level clock they read on their own.
     if (r.standings) this.published(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
+    // The finish: its members' bells have the result (a bot's page there is none).
+    if (r.finished) this.published(publishToUsers(this.env, Object.keys(tn.players), { scope: 'user', type: 'notification.changed' }));
     if (this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
     if (tn.status === 'running') tn.pauseRequested = r.pauseRequested;
     const aborted = r.status === 'aborted' && tn.status !== 'aborted';

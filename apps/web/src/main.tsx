@@ -115,7 +115,9 @@ const loadBoard = () => import('./pages/Board');
 const loadMaintenance = () => import('./pages/Maintenance');
 const loadFriends = () => import('./pages/Friends');
 const loadMessages = () => import('./pages/Messages');
+const loadNotifications = () => import('./pages/Notifications');
 const loadTournaments = () => import('./pages/Tournaments');
+const loadPlayers = () => import('./pages/Players');
 /** Sign-up (its fields, consent and e-mail check) is opened once per member, so it is not in the first screen's code either. */
 const loadRegister = () => import('./pages/Register');
 /** The advanced (GTO) course is its own chunk: the beginner academy never fetches it. */
@@ -287,9 +289,12 @@ const router = createBrowserRouter([
           { path: '/board/:id', element: onDemand(loadBoard, 'PostPage') },
           { path: '/board/:id/edit', element: onDemand(loadBoard, 'PostEditorPage') },
           { path: '/messages', element: onDemand(loadMessages, 'MessagesPage') },
+          { path: '/notifications', element: onDemand(loadNotifications, 'NotificationsPage') },
           { path: '/friends', element: onDemand(loadFriends, 'FriendsPage') },
           { path: '/friends/settings', element: onDemand(loadFriends, 'FriendSettingsPage') },
           { path: '/friends/:userId', element: onDemand(loadFriends, 'ConversationPage') },
+          { path: '/players/:id', element: onDemand(loadPlayers, 'PlayerCardPage') },
+          { path: '/leaderboard', element: onDemand(loadPlayers, 'LeaderboardPage') },
           { path: '/academy', element: <Academy page="AcademyPage" /> },
           { path: '/academy/cards', element: <Academy page="CardsLesson" /> },
           { path: '/academy/hands', element: <Academy page="HandsLesson" /> },

@@ -28,12 +28,13 @@ import {
   type AdminVipResultDto,
   type VipColor,
 } from '@jc/types';
+import { IF_CHANGED, inboxStatement, realtimeOutboxStatement } from '@jc/db';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { adminMonitorPublish } from '../lib/admin-monitor';
 import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
-import { realtimeToAll, realtimeToUsers } from '../lib/realtime';
+import { outboxToAll, outboxToUsers, realtimeOutboxAfter, realtimeOutboxSend } from '../lib/realtime';
 import { refreshVipEverywhere } from '../lib/room';
 
 interface Row {
@@ -111,19 +112,27 @@ export const adminVipRoutes = new Hono<AppEnv>()
       return c.json({ changed: false, vip, tables: 0, reached: 0 } satisfies AdminVipResultDto);
     }
     const now = Date.now();
+    // The member's own pages read their account again (the color shown on their name); nothing else in the event. Its
+    // outbox row is written only if the change was.
+    const own = outboxToUsers([id], { scope: 'user', type: 'account.changed' }, now);
     // Only from the version the request named, and only onto an account that may carry it (ending one always).
-    const done = await db
-      .prepare(
-        `UPDATE users SET vip_color = ?2, vip_version = vip_version + 1, vip_changed_at = ?3, vip_changed_by = ?4, updated_at = ?3
-          WHERE id = ?1 AND vip_version = ?5 AND (?2 IS NULL OR (role = 'user' AND is_bot = 0 AND status != 'deleted'))
-          RETURNING vip_version`,
-      )
-      .bind(id, to, now, c.var.user!.id, vip.version)
-      .first<{ vip_version: number }>();
+    const [saved] = await db.batch([
+      db
+        .prepare(
+          `UPDATE users SET vip_color = ?2, vip_version = vip_version + 1, vip_changed_at = ?3, vip_changed_by = ?4, updated_at = ?3
+            WHERE id = ?1 AND vip_version = ?5 AND (?2 IS NULL OR (role = 'user' AND is_bot = 0 AND status != 'deleted'))
+            RETURNING vip_version`,
+        )
+        .bind(id, to, now, c.var.user!.id, vip.version),
+      realtimeOutboxStatement(db, own, IF_CHANGED),
+      // The member's bell: the color now (null: no longer VIP), never who changed it or why. The account event above
+      // makes their pages read it.
+      inboxStatement(db, id, { kind: 'vip', key: 'vip', params: { color: to }, now }, IF_CHANGED),
+    ]);
+    const done = saved?.results[0] as { vip_version: number } | undefined;
     if (!done) fail(409, 'vip_conflict', 'the VIP state changed while saving', { vip: await load(c, id) });
+    realtimeOutboxSend(c, [own]);
     await audit(c, 'user.vip', target, { from, to, reason, change: from === null ? 'assign' : to === null ? 'remove' : 'color', version: done.vip_version });
-    // The member's own pages read their account again (the color shown on their name); nothing else in the event.
-    realtimeToUsers(c, [id], { scope: 'user', type: 'account.changed' });
     const after = await load(c, id);
     adminMonitorPublish(c, { type: 'admin.monitor.changed', kind: 'vip', resourceId: id, revision: after.version });
     // What other players see (nothing while the member is suspended); the room never reads more than this.
@@ -131,7 +140,7 @@ export const adminVipRoutes = new Hono<AppEnv>()
     // Other members' open pages that show this name: the shown color only, and only when it changed (a suspended
     // member's stays hidden, so a change to theirs says nothing to anyone).
     const before = shownVip({ role: vip.member.role, status: vip.member.status, isBot: vip.member.isBot, vipColor: from }) ?? null;
-    if (shown !== before) realtimeToAll(c, { scope: 'service', type: 'member.vip.changed', resourceId: id, revision: after.version, payload: { vip: shown } });
+    if (shown !== before) realtimeOutboxAfter(c, [outboxToAll({ scope: 'service', type: 'member.vip.changed', resourceId: id, revision: after.version, payload: { vip: shown } })]);
     const rooms = await refreshVipEverywhere(c.env, id, shown);
     return c.json({ changed: true, vip: after, tables: rooms.tables, reached: rooms.reached } satisfies AdminVipResultDto);
   });

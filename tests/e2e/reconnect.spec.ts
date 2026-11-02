@@ -120,3 +120,62 @@ test('game reconnect: after the network drops, the seat, stack and own cards com
   await standUp(b.page);
   await expect.poll(async () => (await balanceOf(a.page)) + (await balanceOf(b.page)), { timeout: 45_000 }).toBe(20_000);
 });
+
+test('game recovery: until the room sends its state on the new connection, the turn kept from before is locked and the banner says so', async ({ browser }) => {
+  const a = await signUp(browser);
+  const b = await signUp(browser);
+  // When `hold` is set, the next connection reaches the room but nothing the room sends gets through until release().
+  let hold = false;
+  let release = () => {};
+  const sockets: WebSocketRoute[] = [];
+  await a.page.routeWebSocket(/\/ws\/tables\//, (ws) => {
+    sockets.push(ws);
+    const server = ws.connectToServer();
+    let held: Promise<void> | null = null;
+    if (hold) {
+      hold = false;
+      held = new Promise((r) => (release = r));
+    }
+    server.onMessage(async (message) => {
+      if (held) await held;
+      ws.send(message);
+    });
+    ws.onMessage((message) => server.send(message));
+  });
+  await a.page.goto('/table/e2e-recover?sit=1');
+  await a.page.getByTestId('buyin-confirm').click();
+  await b.page.goto('/table/e2e-recover?sit=1');
+  await b.page.getByTestId('buyin-confirm').click();
+
+  // Play on until it is A's turn.
+  const bar = a.page.getByTestId('action-bar');
+  await expect(async () => {
+    if (!(await bar.isVisible())) await checkOrCall(b.page);
+    await expect(bar).toBeVisible({ timeout: 500 });
+  }).toPass({ timeout: 45_000 });
+  const buttons = bar.getByRole('button', { name: /^(체크|Check|폴드|Fold)$|^(콜|Call)/ });
+  await expect(buttons.first()).toBeEnabled();
+  const banner = a.page.getByTestId('table-banner');
+
+  // The connection drops on A's turn. The retry reaches the room, whose first state is held back.
+  hold = true;
+  await sockets.at(-1)!.close({ code: 4000, reason: 'network lost' });
+  await expect.poll(() => sockets.length).toBe(2);
+  // Connected again, the page shows the hand it had, but nothing is sent from it: its buttons are locked.
+  await expect(banner).toHaveAttribute('data-recovery', 'restoring');
+  await expect(banner).toContainText(/현재 핸드 복구 중|Restoring the current hand/);
+  await expect(bar).toBeVisible();
+  for (const button of await buttons.all()) await expect(button).toBeDisabled();
+  await a.page.screenshot({ path: 'test-results/recovery-restoring.png' });
+
+  // The room's state arrives: A is told it is back, the buttons open, and the note goes.
+  release();
+  await expect(banner).toHaveAttribute('data-recovery', 'restored');
+  await expect(buttons.first()).toBeEnabled();
+  await expect(banner).toBeHidden({ timeout: 5_000 });
+  expect(await checkOrCall(a.page)).toBe(true);
+
+  await standUp(a.page);
+  await standUp(b.page);
+  await expect.poll(async () => (await balanceOf(a.page)) + (await balanceOf(b.page)), { timeout: 45_000 }).toBe(20_000);
+});
