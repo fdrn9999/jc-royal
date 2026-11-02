@@ -3,9 +3,13 @@ import { ADMIN, adminLogin, sql } from './analytics-helpers';
 import { signUp, sitWith, test, uid } from './helpers';
 import { promoteSql } from '../support/grants';
 
-/** The api's minute cron (the realtime outbox, push, then the operations check): local wrangler dev runs it on request. */
+/**
+ * The api's minute cron (the realtime outbox, push, then the operations check): local wrangler dev runs it on request.
+ * A connection of its own: `sql` blocks the event loop, so a kept-alive one the server closed meanwhile (after ~5 s
+ * idle) is not seen closed and the call is reset.
+ */
 async function check() {
-  const r = await fetch(`http://127.0.0.1:8798/cdn-cgi/local/scheduled?cron=${encodeURIComponent('* * * * *')}`);
+  const r = await fetch(`http://127.0.0.1:8798/cdn-cgi/local/scheduled?cron=${encodeURIComponent('* * * * *')}`, { headers: { connection: 'close' } });
   expect(r.status).toBe(200);
 }
 

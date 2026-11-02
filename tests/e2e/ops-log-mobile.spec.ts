@@ -3,8 +3,9 @@ import { ADMIN, adminLogin, sql } from './analytics-helpers';
 import { signUp, test, uid, widerThanDevice } from './helpers';
 import { promoteSql } from '../support/grants';
 
+/** The minute cron, on a connection of its own (see ops-log.spec.ts). */
 async function check() {
-  const r = await fetch(`http://127.0.0.1:8798/cdn-cgi/local/scheduled?cron=${encodeURIComponent('* * * * *')}`);
+  const r = await fetch(`http://127.0.0.1:8798/cdn-cgi/local/scheduled?cron=${encodeURIComponent('* * * * *')}`, { headers: { connection: 'close' } });
   expect(r.status).toBe(200);
 }
 
