@@ -38,12 +38,14 @@ const expiry = (r: InboxRow) => r.now + (r.kind === 'security' ? INBOX_SECURITY_
 
 /**
  * The same key again: one more of it while unread (1 again once it was read), unread, the newest time, actor and facts.
+ * The time always moves on, by 1 ms at least: a row is marked read only as of the time it was read back at (apps/api
+ * inboxMarkRead), so it is the row's version, and a write in the same millisecond must not keep it.
  * SQLite needs a WHERE in an INSERT … SELECT before ON CONFLICT (else it reads ON as a join's), so there always is one.
  */
 const UPSERT = `ON CONFLICT (user_id, key) DO UPDATE SET
       count = CASE WHEN notifications.read_at IS NULL THEN notifications.count + 1 ELSE 1 END,
       actor_id = excluded.actor_id, ref = excluded.ref, params = excluded.params,
-      updated_at = excluded.updated_at, read_at = NULL, expires_at = excluded.expires_at`;
+      updated_at = MAX(excluded.updated_at, notifications.updated_at + 1), read_at = NULL, expires_at = excluded.expires_at`;
 
 const values = (r: InboxRow) => [r.kind, r.key, r.actorId ?? null, r.ref ?? null, r.params ? JSON.stringify(r.params) : null, r.now, expiry(r)] as const;
 

@@ -64,8 +64,12 @@ export interface Observation {
 /** One problem, wherever it was seen: its code, the room's issue for a room alert, and its table. */
 export const dedupeKeyOf = (o: Pick<Observation, 'code' | 'tableId' | 'detail'>) => `${o.code}${o.detail.issue ? `:${o.detail.issue}` : ''}:${o.tableId ?? '-'}`;
 
-/** What has to have been looked at this check for an open alert of this kind to be resolved by not being seen. */
-export const scopeOf = (code: OpsAlertCode, tableId: string | null) => (code === 'room_issue' || code === 'table_stale' ? `room:${tableId}` : code === 'seated_on_closed' || code === 'close_overdue' ? 'tables' : 'metrics');
+/**
+ * What has to have been looked at this check for an open alert of this kind to be resolved by not being seen. The two
+ * table scans are scopes of their own: one cut at its limit leaves the other's alerts to it.
+ */
+export const scopeOf = (code: OpsAlertCode, tableId: string | null) =>
+  code === 'room_issue' || code === 'table_stale' ? `room:${tableId}` : code === 'seated_on_closed' ? 'tables:seated' : code === 'close_overdue' ? 'tables:closing' : 'metrics';
 
 /** A short English line for the log (the console words it from the code and the detail). Numbers and codes only. */
 export function summaryOf(o: Pick<Observation, 'code' | 'detail'>): string {
@@ -186,10 +190,14 @@ export function reconcile(open: readonly OpenAlert[], seen: readonly Observation
 
 const EVENT_OF: Partial<Record<Change['kind'], OpsEventKind>> = { open: 'alert_opened', confirm: 'alert_opened', raise: 'alert_raised', resolve: 'alert_resolved' };
 
+/** A severity's rank in SQL (OPS_SEVERITY_RANK). */
+const rankSql = (x: string) => `CASE ${x} ${Object.entries(OPS_SEVERITY_RANK).map(([s, n]) => `WHEN '${s}' THEN ${n}`).join(' ')} ELSE 0 END`;
+
 /**
  * The statements for the changes, in one batch. Each log line is written only if its alert's write changed a row
  * (`changes()`), so a check that overlaps another (a slow one) neither opens a problem twice (the unique index on open
- * keys) nor logs what the other already did.
+ * keys) nor logs what the other already did. A raise is logged only while the alert is still below it, and a count
+ * keeps the higher severity of the row and the check: the other may have raised it since this one read it.
  */
 export function changeStatements(d1: D1Database, changes: readonly Change[], now: number, newId: () => string): D1PreparedStatement[] {
   const out: D1PreparedStatement[] = [];
@@ -199,6 +207,13 @@ export function changeStatements(d1: D1Database, changes: readonly Change[], now
     // An ended alert has no observation: a room's issue is the middle of its key (room_issue:<issue>:<table>).
     const ended = c.row && c.row.code === 'room_issue' ? { issue: c.row.dedupe_key.split(':')[1] } : {};
     const summary = o ? summaryOf(o) : `${summaryOf({ code: c.row!.code, detail: ended })}: no longer seen`;
+    const kind = EVENT_OF[c.kind];
+    const tableId = o ? o.tableId : c.row!.table_id;
+    const code = o ? o.code : c.row!.code;
+    const event = (guard: string) =>
+      d1
+        .prepare(`INSERT INTO ops_events (id, at, kind, code, severity, table_id, summary, alert_id) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 WHERE ${guard}`)
+        .bind(newId(), now, kind, code, sev, tableId, summary, c.alertId);
     switch (c.kind) {
       case 'open':
       case 'sight':
@@ -220,9 +235,13 @@ export function changeStatements(d1: D1Database, changes: readonly Change[], now
         break;
       case 'seen':
       case 'raise':
+        if (c.kind === 'raise') out.push(event(`EXISTS (SELECT 1 FROM ops_alerts WHERE id = ?8 AND resolved_at IS NULL AND ${rankSql('severity')} < ${rankSql('?5')})`));
         out.push(
           d1
-            .prepare(`UPDATE ops_alerts SET last_seen_at = ?2, seen = seen + 1, severity = ?3, summary = ?4, detail = ?5 WHERE id = ?1 AND resolved_at IS NULL`)
+            .prepare(
+              `UPDATE ops_alerts SET last_seen_at = ?2, seen = seen + 1, severity = CASE WHEN ${rankSql('?3')} > ${rankSql('severity')} THEN ?3 ELSE severity END,
+               summary = ?4, detail = ?5 WHERE id = ?1 AND resolved_at IS NULL`,
+            )
             .bind(c.alertId, now, sev, summary, JSON.stringify(o!.detail)),
         );
         break;
@@ -233,17 +252,7 @@ export function changeStatements(d1: D1Database, changes: readonly Change[], now
         out.push(d1.prepare(`DELETE FROM ops_alerts WHERE id = ?1 AND confirmed_at IS NULL`).bind(c.alertId));
         break;
     }
-    const kind = EVENT_OF[c.kind];
-    if (!kind) continue;
-    const tableId = o ? o.tableId : c.row!.table_id;
-    const code = o ? o.code : c.row!.code;
-    out.push(
-      d1
-        .prepare(
-          `INSERT INTO ops_events (id, at, kind, code, severity, table_id, summary, alert_id) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 WHERE changes() > 0`,
-        )
-        .bind(newId(), now, kind, code, sev, tableId, summary, c.alertId),
-    );
+    if (kind && c.kind !== 'raise') out.push(event('changes() > 0'));
   }
   return out;
 }
@@ -280,6 +289,9 @@ async function probe(env: Env, id: string): Promise<MonitorRoom | null> {
   }
 }
 
+/** The most closed tables with seated rows, and closing tables, one check reads. */
+export const OPS_TABLE_SCAN_MAX = 50;
+
 /** A table is in play while it is open and a hand runs or a member sits there. */
 const IN_PLAY = `status = 'open' AND (live_playing = 1 OR live_seated > live_bots)`;
 
@@ -300,8 +312,8 @@ export async function watchOps(env: Env, now = Date.now(), ask: (id: string) => 
   const alerted = [...new Set(open.filter((r) => scopeOf(r.code, r.table_id).startsWith('room:') && r.table_id).map((r) => r.table_id!))].slice(0, 90);
   const [stuck, closing, metrics, outbox, candidates, alertedRows, playing] = await d1.batch<Record<string, unknown>>([
     // CROSS JOIN starts from the seated rows (as the console's list does), not from every closed table.
-    d1.prepare(`SELECT DISTINCT s.table_id AS id FROM table_sessions s CROSS JOIN tables t ON t.id = s.table_id WHERE s.status = 'seated' AND t.status = 'closed' LIMIT 50`),
-    d1.prepare(`SELECT id, updated_at AS since FROM tables WHERE status = 'closing' LIMIT 50`),
+    d1.prepare(`SELECT DISTINCT s.table_id AS id FROM table_sessions s CROSS JOIN tables t ON t.id = s.table_id WHERE s.status = 'seated' AND t.status = 'closed' LIMIT ${OPS_TABLE_SCAN_MAX}`),
+    d1.prepare(`SELECT id, updated_at AS since FROM tables WHERE status = 'closing' LIMIT ${OPS_TABLE_SCAN_MAX}`),
     d1.prepare(`SELECT metric, SUM(n) AS n FROM ops_metrics WHERE bucket >= ?1 GROUP BY metric`).bind(opsBucket(now) - OPS_WINDOW_MS + OPS_BUCKET_MS),
     d1.prepare(`SELECT COUNT(*) AS n FROM realtime_outbox WHERE status = 'pending' AND created_at < ?1`).bind(now - OUTBOX_BACKLOG_MS),
     d1.prepare(`SELECT id FROM tables WHERE ${IN_PLAY} ORDER BY live_playing DESC, live_updated_at DESC LIMIT ${OPS_WATCH_ROOMS_MAX}`),
@@ -330,7 +342,10 @@ export async function watchOps(env: Env, now = Date.now(), ask: (id: string) => 
   const staleSince = new Map(open.filter((r) => r.code === 'table_stale' && r.confirmed_at !== null).map((r) => [r.table_id!, r.confirmed_at!]));
   // A room that did not answer hides its problems: only the rooms that answered (and the tables no longer in play) end them.
   const answered = asked.filter((id) => rooms.get(id));
-  const checked = new Set(['tables', 'metrics', ...answered.map((id) => `room:${id}`), ...input.idle.map((id) => `room:${id}`)]);
+  // A table scan cut at its limit did not see every table: the alerts of its kind it did not see are left open.
+  const scans = [['tables:seated', stuck], ['tables:closing', closing]] as const;
+  const full = scans.filter(([, r]) => (r?.results.length ?? 0) < OPS_TABLE_SCAN_MAX).map(([scope]) => scope);
+  const checked = new Set([...full, 'metrics', ...answered.map((id) => `room:${id}`), ...input.idle.map((id) => `room:${id}`)]);
   const changes = reconcile(open, observe(input, staleSince), checked, () => crypto.randomUUID());
   const unanswered = [...rooms.values()].filter((r) => r === null).length;
   const stmts = [

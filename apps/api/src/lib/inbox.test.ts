@@ -226,6 +226,61 @@ describe('the list', () => {
     expect((await one('message'))!.readAt).not.toBeNull();
   });
 
+  it('a row counted again after the items were read back stays unread: the member did not see the second', async () => {
+    const { db, d1, one, unread } = setup();
+    friendship(db, 'fr', 'me', 'pending');
+    const ask = (at: number) => inboxStatement(d1, 'me', { kind: 'friend_request', key: 'friend_request:fr', actorId: 'fr', now: at }).run();
+    await ask(NOW - 3 * MIN);
+    const seen = (await one('friend_request'))!;
+    // Read back at NOW; the same friend asks again a moment later, before the read's batch runs.
+    await ask(NOW + 1_000);
+    await d1.batch(inboxMarkRead(d1, 'me', [seen], NOW));
+    expect(await one('friend_request')).toMatchObject({ count: 2, readAt: null, at: NOW + 1_000 });
+    expect(await unread('me', NOW + 2_000)).toBe(1);
+
+    // Read back after it: read.
+    await d1.batch(inboxMarkRead(d1, 'me', [(await one('friend_request'))!], NOW + 2_000));
+    expect(await one('friend_request')).toMatchObject({ count: 2, readAt: NOW + 2_000 });
+  });
+
+  it('a row counted again by a request that took its time before the read, and wrote after it, stays unread too', async () => {
+    const { db, d1, one, unread } = setup();
+    friendship(db, 'fr', 'me', 'pending');
+    const ask = (at: number) => inboxStatement(d1, 'me', { kind: 'friend_request', key: 'friend_request:fr', actorId: 'fr', now: at }).run();
+    await ask(NOW - 3 * MIN);
+    const seen = (await one('friend_request'))!;
+    // The second request's time is before NOW (the read's), but its write lands after the items were read back.
+    await ask(NOW - 1_000);
+    await d1.batch(inboxMarkRead(d1, 'me', [seen], NOW));
+    expect(await one('friend_request')).toMatchObject({ count: 2, readAt: null });
+    expect(await unread('me', NOW + 2_000)).toBe(1);
+  });
+
+  it('a row counted again in the same millisecond as the one the member saw stays unread: its time moved on', async () => {
+    const { db, d1, one } = setup();
+    friendship(db, 'fr', 'me', 'pending');
+    const ask = (at: number) => inboxStatement(d1, 'me', { kind: 'friend_request', key: 'friend_request:fr', actorId: 'fr', now: at }).run();
+    await ask(NOW - 3 * MIN);
+    const seen = (await one('friend_request'))!;
+    await ask(NOW - 3 * MIN);
+    await d1.batch(inboxMarkRead(d1, 'me', [seen], NOW));
+    expect(await one('friend_request')).toMatchObject({ count: 2, readAt: null, at: NOW - 3 * MIN + 1 });
+  });
+
+  it('a row read in another tab and asked again in the same millisecond stays unread when this tab marks the old one', async () => {
+    const { db, d1, one } = setup();
+    friendship(db, 'fr', 'me', 'pending');
+    const ask = (at: number) => inboxStatement(d1, 'me', { kind: 'friend_request', key: 'friend_request:fr', actorId: 'fr', now: at }).run();
+    await ask(NOW - 3 * MIN);
+    const seen = (await one('friend_request'))!;
+    // Another tab marks it read, a request timed in the same millisecond lands after (count 1 again), and this tab's
+    // marking of what it read comes last.
+    await d1.batch(inboxMarkRead(d1, 'me', [seen], NOW));
+    await ask(NOW - 3 * MIN);
+    await d1.batch(inboxMarkRead(d1, 'me', [seen], NOW + 1_000));
+    expect(await one('friend_request')).toMatchObject({ count: 1, readAt: null });
+  });
+
   it('lists a tournament notice as its message, and reading it reads the message', async () => {
     const { db, d1, list, one } = setup();
     tournament(db, TID, 'running');

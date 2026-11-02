@@ -197,22 +197,30 @@ export const markerExpiry = (now: number) => now + DAYS30;
 /**
  * Marks these items read (ids as the list gave them, already checked to be the member's own by reading them back):
  * rows by id, the 쪽지 item and notices by their marker, a tournament notice by its message. Statements for one batch.
+ * A row only as it was read back (its `at` is `updated_at`, which every write moves on, by 1 ms at least: the row's
+ * version): one written since (another request from the same friend, or one after another tab read it) is newer than
+ * what the member saw and stays unread, as a 쪽지 or a notice after the marker's time does.
  */
 export function inboxMarkRead(d1: D1Database, userId: string, items: readonly Pick<InboxItemDto, 'id' | 'kind' | 'at'>[], now: number): D1PreparedStatement[] {
   const out: D1PreparedStatement[] = [];
-  // D1 caps bound parameters per statement: ids go 90 to a statement.
-  const byIds = (table: 'notifications' | 'messages', ids: string[]) => {
-    for (let s = 0; s < ids.length; s += 90) {
-      const chunk = ids.slice(s, s + 90);
+  // D1 caps bound parameters per statement: 90 to a statement, a row's id and the time it was read back at.
+  const byIds = (table: 'notifications' | 'messages', list: readonly Pick<InboxItemDto, 'id' | 'at'>[]) => {
+    const asRead = table === 'notifications';
+    const per = asRead ? 45 : 90;
+    for (let s = 0; s < list.length; s += per) {
+      const chunk = list.slice(s, s + per);
+      const which = asRead
+        ? `(${chunk.map((_, i) => `(id = ?${2 * i + 3} AND updated_at = ?${2 * i + 4})`).join(' OR ')})`
+        : `id IN (${chunk.map((_, i) => `?${i + 3}`).join(', ')})`;
       out.push(
         d1
-          .prepare(`UPDATE ${table} SET read_at = ?2 WHERE user_id = ?1 AND read_at IS NULL AND id IN (${chunk.map((_, i) => `?${i + 3}`).join(', ')})`)
-          .bind(userId, now, ...chunk),
+          .prepare(`UPDATE ${table} SET read_at = ?2 WHERE user_id = ?1 AND read_at IS NULL AND ${which}`)
+          .bind(userId, now, ...(asRead ? chunk.flatMap((i) => [i.id, i.at]) : chunk.map((i) => i.id))),
       );
     }
   };
-  byIds('notifications', items.filter((i) => !VIRTUAL.has(i.kind)).map((i) => i.id));
-  byIds('messages', items.filter((i) => i.kind === 'tournament_start' || i.kind === 'tournament_cancel').map((i) => i.id));
+  byIds('notifications', items.filter((i) => !VIRTUAL.has(i.kind)));
+  byIds('messages', items.filter((i) => i.kind === 'tournament_start' || i.kind === 'tournament_cancel'));
   for (const i of items) {
     if (i.kind !== 'message' && i.kind !== 'notice' && i.kind !== 'maintenance') continue;
     // The marker's time is now: an item changed later than this is unread again.

@@ -5,7 +5,17 @@ import { opsBucket } from '@jc/db';
 import type { MonitorRoom, OpsSeverity } from '@jc/types';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../env';
-import { changeStatements, controlEvent, OPS_THRESHOLDS, OPS_WATCH_ROOMS_MAX, reconcile, watchOps, type OpenAlert, type Observation } from './ops-watch';
+import {
+  changeStatements,
+  controlEvent,
+  OPS_TABLE_SCAN_MAX,
+  OPS_THRESHOLDS,
+  OPS_WATCH_ROOMS_MAX,
+  reconcile,
+  watchOps,
+  type OpenAlert,
+  type Observation,
+} from './ops-watch';
 import { d1Of, loadSqlite, migratedDb, type SqliteDb } from './test-sqlite';
 
 beforeAll(loadSqlite);
@@ -95,6 +105,49 @@ describe('alerts from D1', () => {
     await check(NOW);
     expect(open()).toMatchObject([{ code: 'close_overdue', severity: 'error', table_id: 'tclosing0002' }]);
     expect(JSON.parse(open()[0]!.detail)).toEqual({ sinceMs: 20 * MIN });
+  });
+
+  it(`a scan cut at ${OPS_TABLE_SCAN_MAX} tables resolves none of the tables' alerts, which it may not have seen`, async () => {
+    const { db, check, open } = setup();
+    const stuck = (n: number) => {
+      const id = `tclosed${String(n).padStart(5, '0')}`;
+      table(db, id, { status: 'closed' });
+      db.prepare(`INSERT INTO table_sessions (id, table_id, user_id, seat_index, buy_in) VALUES (?1, ?2, 'me', 0, 100)`).run(`s${n}`, id);
+    };
+    stuck(0);
+    await check(NOW);
+    expect(open()).toMatchObject([{ code: 'seated_on_closed', table_id: 'tclosed00000' }]);
+
+    // Its seat is gone, and as many other closed tables with a seated row as one check reads are there: whether that
+    // one is still stuck is not known from a scan that stopped at its limit.
+    db.prepare(`UPDATE table_sessions SET status = 'closed' WHERE id = 's0'`).run();
+    for (let n = 1; n <= OPS_TABLE_SCAN_MAX; n++) stuck(n);
+    await check(NOW + MIN);
+    expect(open().filter((a) => a.table_id === 'tclosed00000')).toHaveLength(1);
+    expect(open()).toHaveLength(OPS_TABLE_SCAN_MAX + 1);
+
+    // One fewer than the limit: the scan saw them all, and the two gone are resolved.
+    db.prepare(`UPDATE table_sessions SET status = 'closed' WHERE id = 's1'`).run();
+    await check(NOW + 2 * MIN);
+    expect(open().map((a) => a.table_id)).not.toContain('tclosed00000');
+    expect(open()).toHaveLength(OPS_TABLE_SCAN_MAX - 1);
+  });
+
+  it('a scan cut at its limit keeps only its own kind open: a close that finished is resolved while the seated scan is full', async () => {
+    const { db, check, open } = setup();
+    table(db, 'tclosing0001', { status: 'closing', updatedAt: NOW - 20 * MIN });
+    await check(NOW);
+    expect(open()).toMatchObject([{ code: 'close_overdue', table_id: 'tclosing0001' }]);
+
+    db.prepare(`UPDATE tables SET status = 'closed' WHERE id = 'tclosing0001'`).run();
+    for (let n = 0; n < OPS_TABLE_SCAN_MAX; n++) {
+      const id = `tclosed${String(n).padStart(5, '0')}`;
+      table(db, id, { status: 'closed' });
+      db.prepare(`INSERT INTO table_sessions (id, table_id, user_id, seat_index, buy_in) VALUES (?1, ?2, 'me', 0, 100)`).run(`s${n}`, id);
+    }
+    await check(NOW + MIN);
+    expect(open().filter((a) => a.code === 'close_overdue')).toHaveLength(0);
+    expect(open().filter((a) => a.code === 'seated_on_closed')).toHaveLength(OPS_TABLE_SCAN_MAX);
   });
 });
 
@@ -259,8 +312,8 @@ describe('the log', () => {
     const seen: Observation[] = [{ code: 'seated_on_closed', severity: 'critical', tableId: 't1', detail: {} }];
     let n = 0;
     const id = () => `id${++n}`;
-    const first = reconcile([], seen, new Set(['tables']), id);
-    const second = reconcile([], seen, new Set(['tables']), id);
+    const first = reconcile([], seen, new Set(['tables:seated']), id);
+    const second = reconcile([], seen, new Set(['tables:seated']), id);
     await d1.batch(changeStatements(d1, first, NOW, id));
     await d1.batch(changeStatements(d1, second, NOW, id));
     expect(db.prepare(`SELECT COUNT(*) AS n FROM ops_alerts`).all()).toEqual([{ n: 1 }]);
@@ -268,8 +321,32 @@ describe('the log', () => {
 
     // Two resolving it: one log line.
     const open = db.prepare(`SELECT id, dedupe_key, code, severity, table_id, confirmed_at FROM ops_alerts`).all() as unknown as OpenAlert[];
-    for (let i = 0; i < 2; i++) await d1.batch(changeStatements(d1, reconcile(open, [], new Set(['tables']), id), NOW + MIN, id));
+    for (let i = 0; i < 2; i++) await d1.batch(changeStatements(d1, reconcile(open, [], new Set(['tables:seated']), id), NOW + MIN, id));
     expect(events().map((e) => e.kind)).toEqual(['alert_opened', 'alert_resolved']);
+  });
+
+  it('two checks raising an alert from the same view log the raise once, and a check that read it before never lowers it', async () => {
+    const { d1, db, events } = setup();
+    let n = 0;
+    const id = () => `id${++n}`;
+    const errors = (severity: OpsSeverity): Observation[] => [{ code: 'server_errors', severity, tableId: null, detail: { n: 1 } }];
+    const metrics = new Set(['metrics']);
+    await d1.batch(changeStatements(d1, reconcile([], errors('warning'), metrics, id), NOW, id));
+    const view = db.prepare(`SELECT id, dedupe_key, code, severity, table_id, confirmed_at FROM ops_alerts`).all() as unknown as OpenAlert[];
+
+    // Both read it as a warning, and both see an error now.
+    const raises = [reconcile(view, errors('error'), metrics, id), reconcile(view, errors('error'), metrics, id)];
+    expect(raises.map((r) => r[0]!.kind)).toEqual(['raise', 'raise']);
+    for (const r of raises) await d1.batch(changeStatements(d1, r, NOW + MIN, id));
+    expect(events().map((e) => [e.kind, e.severity])).toEqual([
+      ['alert_opened', 'warning'],
+      ['alert_raised', 'error'],
+    ]);
+
+    // A third read it as a warning too and still sees one: counted, not lowered, not logged.
+    await d1.batch(changeStatements(d1, reconcile(view, errors('warning'), metrics, id), NOW + MIN, id));
+    expect(db.prepare(`SELECT severity, seen FROM ops_alerts`).all()).toEqual([{ severity: 'error', seen: 4 }]);
+    expect(events()).toHaveLength(2);
   });
 
   it('keeps codes, ids and counts only: no nickname, no card, no reason', async () => {
