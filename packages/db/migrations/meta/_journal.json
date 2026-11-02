@@ -274,6 +274,13 @@
       "when": 1793594400061,
       "tag": "0038_realtime_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1793596841059,
+      "tag": "0039_notifications",
+      "breakpoints": true
     }
   ]
 }

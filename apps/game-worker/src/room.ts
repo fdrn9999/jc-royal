@@ -2211,6 +2211,8 @@ export class TableRoom extends DurableObject<Env> {
     tn.confirmed = tn.places.length;
     // A bust or the finish, now in D1, for the tournament pages; stacks and the level clock they read on their own.
     if (r.standings) this.published(publishToAll(this.env, { scope: 'lobby', type: 'tournament.changed', resourceId: tn.id }));
+    // The finish: its members' bells have the result (a bot's page there is none).
+    if (r.finished) this.published(publishToUsers(this.env, Object.keys(tn.players), { scope: 'user', type: 'notification.changed' }));
     if (this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
     if (tn.status === 'running') tn.pauseRequested = r.pauseRequested;
     const aborted = r.status === 'aborted' && tn.status !== 'aborted';

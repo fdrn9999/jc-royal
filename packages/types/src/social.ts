@@ -197,6 +197,8 @@ export interface UnreadCountsDto {
   friendRequests: number;
   /** ServiceStatusDto.rev: a change means the banner should be fetched again. */
   serviceRev?: number;
+  /** Unread items of the notification inbox (InboxPageDto.unread), for the bell. */
+  notifications?: number;
 }
 
 // ------------------------------------------------------------------ reports

@@ -1238,3 +1238,38 @@ export const notificationEvents = sqliteTable(
     index('notification_events_sent_idx').on(t.userId, t.status, t.sentAt),
   ],
 );
+
+/**
+ * The notification inbox (packages/types/src/inbox.ts): one member's item, written in the batch of the change it reports
+ * (packages/db/src/inbox.ts). `key` is the item's identity for the member: the same thing again (another message from
+ * one friend) updates that item (count + 1, unread again, newest time) instead of adding one. Everyone's notices are not
+ * copied here: a row with `kind` notice/maintenance and `key` `notice:<id>` only records that the member read it.
+ * Kept until `expires_at` (30 days after its last update, security 90), and deleted with the account.
+ */
+export const notifications = sqliteTable(
+  'notifications',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    kind: text('kind', {
+      enum: ['friend_request', 'friend_accepted', 'dm', 'invite', 'message', 'tournament_start', 'tournament_cancel', 'tournament_result', 'vip', 'security', 'notice', 'maintenance'],
+    }).notNull(),
+    key: text('key').notNull(),
+    /** The member who caused it (a friend), if any. */
+    actorId: text('actor_id'),
+    /** What it is about (a table, a tournament, a notice), if anything. */
+    ref: text('ref'),
+    /** JSON object of small public facts (InboxItemDto.params), never a message's text. */
+    params: text('params'),
+    count: integer('count').notNull().default(1),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    readAt: integer('read_at'),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('notifications_key_uq').on(t.userId, t.key),
+    index('notifications_user_idx').on(t.userId, t.updatedAt),
+    index('notifications_expires_idx').on(t.expiresAt),
+  ],
+);

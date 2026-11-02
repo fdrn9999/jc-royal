@@ -92,6 +92,12 @@ export const RealtimeEventSchema = z.discriminatedUnion('type', [
    * administrator send to many members carries `spreadMs`: each page reads after a random wait of up to that long.
    */
   z.object({ ...user, type: z.literal('message.changed'), payload: z.object({ spreadMs: count }).optional() }),
+  /**
+   * The notification inbox (GET /api/notifications) changed in a way no other event here tells: an item was read here
+   * or on another device, a sign-in or password change was recorded, a tournament's result reached its members (the
+   * table room). The bell and the list read it again.
+   */
+  z.object({ ...user, type: z.literal('notification.changed') }),
   /** A friend request, an answer to one, a removed friendship or a block changed the friends list (it never says which). */
   z.object({ ...user, type: z.literal('social.friend.changed') }),
   /** A direct message with `peerId` up to `seq`: sent by the peer, or by this member on another device. */

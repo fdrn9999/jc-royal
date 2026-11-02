@@ -15,6 +15,7 @@ export {
   ArrowRightIcon,
   ArrowUpFromLineIcon,
   BanIcon,
+  BellIcon,
   BookmarkIcon,
   BotIcon,
   CheckIcon,

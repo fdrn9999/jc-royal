@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listedHere } from '../src/components/Arrivals';
 import { heardDm, onUnreadRise, refreshUnread, risen, unreadOf, watchUnread, type UnreadKind } from '../src/lib/unread';
 
-const NONE = { unread: 0, dmUnread: 0, friendRequests: 0 };
+const NONE = { unread: 0, dmUnread: 0, friendRequests: 0, notifications: 0 };
 let pending: ((r: Response | Error) => void)[];
 let stop: (() => void) | null = null;
 
@@ -73,6 +73,21 @@ describe('arrivals', () => {
     expect(risen({ unread: 1, dmUnread: 2, friendRequests: 0 }, { unread: 2, dmUnread: 1, friendRequests: 0 })).toEqual(['unread']);
     expect(risen(NONE, { unread: 0, dmUnread: 3, friendRequests: 1 })).toEqual(['dmUnread', 'friendRequests']);
     expect(risen({ unread: 4, dmUnread: 0, friendRequests: 0 }, { unread: 4, dmUnread: 0, friendRequests: 0 })).toEqual([]);
+    // The bell's count is never news of its own: what it counts is told of by the others, or is quiet.
+    expect(risen(NONE, { ...NONE, notifications: 3 })).toEqual([]);
+  });
+
+  it("a change of the bell's count alone is shown, without an arrival notice", async () => {
+    const heard: UnreadKind[][] = [];
+    const off = onUnreadRise((kinds) => heard.push(kinds));
+    stop = watchUnread('N', 30_000);
+    await answer(new Response(JSON.stringify({ ...NONE, notifications: 1 }), { status: 200 }));
+    expect(unreadOf('N').notifications).toBe(1);
+    void refreshUnread();
+    await answer(new Response(JSON.stringify({ ...NONE, notifications: 2 }), { status: 200 }));
+    expect(unreadOf('N').notifications).toBe(2);
+    expect(heard).toEqual([]);
+    off();
   });
 
   it('the first read of an account, and the first after its sign-in was gone, is where the counters start: never news', async () => {

@@ -1,4 +1,4 @@
-import { IF_CHANGED, outboxOne, realtimeOutboxStatement, schema, type OutboxOne } from '@jc/db';
+import { IF_CHANGED, inboxReadStatement, inboxStatement, outboxOne, realtimeOutboxStatement, schema, type OutboxOne } from '@jc/db';
 import {
   DirectMessageSchema,
   DmReadSchema,
@@ -132,6 +132,9 @@ async function accept(c: Context<AppEnv>, me: string, other: string): Promise<bo
   const [r] = await c.env.DB.batch([
     c.env.DB.prepare(`UPDATE friendships SET status = 'accepted', accepted_at = ?3 WHERE user_a = ?1 AND user_b = ?2 AND status = 'pending' AND ${notBlocked('?1', '?2')}`).bind(a, b, now),
     realtimeOutboxStatement(c.env.DB, told, IF_CHANGED),
+    // The bell: the one who asked hears of it, and my item of their request is answered.
+    inboxStatement(c.env.DB, other, { kind: 'friend_accepted', key: `friend_accepted:${me}`, actorId: me, now }, IF_CHANGED),
+    inboxReadStatement(c.env.DB, me, [`friend_request:${other}`], now, IF_CHANGED),
   ]);
   if (!r!.meta.changes) return false;
   realtimeOutboxSend(c, [told]);
@@ -271,6 +274,8 @@ export const friendRoutes = new Hono<AppEnv>()
         `INSERT OR IGNORE INTO friendships (user_a, user_b, requester_id, status, created_at) SELECT ?1, ?2, ?3, 'pending', ?4 WHERE ${notBlocked('?1', '?2')}`,
       ).bind(a, b, me, now),
       realtimeOutboxStatement(c.env.DB, told, IF_CHANGED),
+      // The bell of the one asked (one item per player asking).
+      inboxStatement(c.env.DB, user.id, { kind: 'friend_request', key: `friend_request:${me}`, actorId: me, now }, IF_CHANGED),
     ]);
     // Both pages read their lists again, from the row written with the request (none when this made nothing).
     if (made!.meta.changes > 0) realtimeOutboxSend(c, [told]);
@@ -347,6 +352,10 @@ export const friendRoutes = new Hono<AppEnv>()
       .where(and(eq(schema.friendships.userA, a), eq(schema.friendships.userB, b)))
       .returning({ a: schema.friendships.userA });
     if (!r[0]) fail(404, 'not_found', 'no friendship or request with this player');
+    // A declined request is answered: its item in my bell is read (the friends event tells my other pages).
+    await inboxReadStatement(c.env.DB, me, [`friend_request:${other}`], Date.now())
+      .run()
+      .catch((e: unknown) => console.warn('inbox read not saved', e instanceof Error ? e.message : String(e)));
     friendsChanged(c, me, other);
     return c.json({ ok: true });
   });
@@ -435,6 +444,16 @@ async function insertDm(c: Context<AppEnv>, me: string, other: string, m: { body
       )
       .bind(row.id, row.pairKey, me, other, row.body, row.kind, row.tableId, row.createdAt, a, b),
     ...told.map((e) => realtimeOutboxStatement(db, e, saved, seqOf)),
+    // The recipient's bell: one item per friend for messages, and one for their table invites (the newest table),
+    // counted while unread. Never the message's text; an invite's body is the table's public name.
+    inboxStatement(
+      db,
+      other,
+      m.kind === 'invite'
+        ? { kind: 'invite', key: `invite:${me}`, actorId: me, ref: m.tableId, params: { table: m.body }, now: row.createdAt }
+        : { kind: 'dm', key: `dm:${me}`, actorId: me, now: row.createdAt },
+      saved,
+    ),
   ]);
   const seq = (r?.results[0] as { seq: number } | undefined)?.seq;
   if (seq === undefined) fail(403, 'not_friends', 'you can only message friends');
@@ -540,11 +559,21 @@ export const dmRoutes = new Hono<AppEnv>()
       .set({ readAt: Date.now() })
       .where(and(eq(t.pairKey, pairKey(me, other)), eq(t.recipientId, me), isNull(t.readAt), upTo === undefined ? undefined : lte(t.seq, upTo)))
       .returning({ seq: t.seq });
+    // The bell's items of this conversation are read once nothing from them is left unread in it.
+    const marked = await inboxReadStatement(c.env.DB, me, [`dm:${other}`, `invite:${other}`], Date.now(), {
+      sql: 'NOT EXISTS (SELECT 1 FROM direct_messages WHERE pair_key = ? AND recipient_id = ? AND read_at IS NULL)',
+      params: [pairKey(me, other), me],
+    })
+      .run()
+      .catch((e: unknown) => {
+        console.warn('inbox read not saved', e instanceof Error ? e.message : String(e));
+        return null;
+      });
     // Marked just now: the sender's pages show how far I read (as GET /api/dm/:userId does), mine drop the unread count.
     if (read.length) {
       const seq = Math.max(...read.map((r) => r.seq));
       realtimeToUsers(c, [other], { scope: 'user', type: 'social.dm.read', payload: { peerId: me, readerId: me, seq } });
       realtimeToUsers(c, [me], { scope: 'user', type: 'social.dm.read', payload: { peerId: other, readerId: me, seq } });
-    }
+    } else if (marked?.meta.changes) realtimeToUsers(c, [me], { scope: 'user', type: 'notification.changed' });
     return c.json({ ok: true });
   });

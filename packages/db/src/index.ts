@@ -8,6 +8,7 @@ export * from './stats';
 export * from './social';
 export * from './notify';
 export * from './realtime-outbox';
+export * from './inbox';
 export { HAND_STATS_SQL } from './handStats';
 
 export function createDb(d1: D1Database) {

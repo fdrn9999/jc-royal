@@ -28,7 +28,7 @@ import {
   type AdminVipResultDto,
   type VipColor,
 } from '@jc/types';
-import { IF_CHANGED, realtimeOutboxStatement } from '@jc/db';
+import { IF_CHANGED, inboxStatement, realtimeOutboxStatement } from '@jc/db';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { adminMonitorPublish } from '../lib/admin-monitor';
@@ -125,6 +125,9 @@ export const adminVipRoutes = new Hono<AppEnv>()
         )
         .bind(id, to, now, c.var.user!.id, vip.version),
       realtimeOutboxStatement(db, own, IF_CHANGED),
+      // The member's bell: the color now (null: no longer VIP), never who changed it or why. The account event above
+      // makes their pages read it.
+      inboxStatement(db, id, { kind: 'vip', key: 'vip', params: { color: to }, now }, IF_CHANGED),
     ]);
     const done = saved?.results[0] as { vip_version: number } | undefined;
     if (!done) fail(409, 'vip_conflict', 'the VIP state changed while saving', { vip: await load(c, id) });

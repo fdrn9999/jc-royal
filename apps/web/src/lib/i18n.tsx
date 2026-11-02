@@ -1113,6 +1113,8 @@ const ko = {
   'err.push_consent_required': '서비스 푸시 알림에 먼저 동의해 주세요.',
   'err.push_device_not_found': '해당 기기를 찾을 수 없습니다.',
   'notFound': '페이지를 찾을 수 없습니다.',
+  'inbox.title': '알림',
+  'inbox.bellUnread': '알림 (읽지 않음 {n}개)',
 } as const;
 
 export type Dict = Record<keyof typeof ko, string>;

@@ -1113,4 +1113,6 @@ export const en: Dict = {
   'err.push_consent_required': 'Agree to service push notifications first.',
   'err.push_device_not_found': 'That device was not found.',
   'notFound': 'Page not found.',
+  'inbox.title': 'Notifications',
+  'inbox.bellUnread': 'Notifications ({n} unread)',
 };

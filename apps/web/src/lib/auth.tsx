@@ -1,5 +1,5 @@
 import type { MeDto } from '@jc/types';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError } from './api';
 import { useI18n } from './i18n';
 import { flushSettings } from './prefs';
@@ -32,14 +32,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const meId = me?.id;
   const meLocale = me?.locale;
 
+  /**
+   * Reads of the account in the order they were asked, and the last whose answer shows: an answer to a read asked before
+   * that one, or before the account was set here (signed in, out, saved), is older than what shows and changes nothing
+   * (a read begun before signing out, answered late, would sign the page back in).
+   */
+  const asks = useRef(0);
+  const showing = useRef(0);
+  const put = useCallback((next: MeDto | null) => {
+    showing.current = ++asks.current;
+    setMe(next);
+  }, []);
+
   const refresh = useCallback(async () => {
+    const ask = ++asks.current;
     try {
       const next = await api<MeDto>('/api/auth/me');
+      if (ask < showing.current) return;
+      showing.current = ask;
       // Keep the same object when nothing changed so effects keyed on `me` stay quiet.
       setMe((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setMe(null);
-      else throw e;
+      if (!(e instanceof ApiError && e.status === 401)) throw e;
+      if (ask < showing.current) return;
+      showing.current = ask;
+      setMe(null);
     } finally {
       setLoading(false);
     }
@@ -97,18 +114,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw e;
     });
     await stopPush();
-    setMe(null);
-  }, []);
+    put(null);
+  }, [put]);
 
   const chooseLocale = useCallback(
     (l: MeDto['locale']) => {
       setLocale(l);
       if (!meId || meLocale === l) return;
       api<MeDto>('/api/auth/me', { method: 'PATCH', body: { locale: l } })
-        .then(setMe)
+        .then(put)
         .catch(() => {});
     },
-    [setLocale, meId, meLocale],
+    [setLocale, meId, meLocale, put],
   );
 
   const [kept, setKept] = useState<string | null>(null);
@@ -118,8 +135,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ me, loading, refresh, setMe, logout, chooseLocale, kept, keepSignedOut }),
-    [me, loading, refresh, logout, chooseLocale, kept, keepSignedOut],
+    () => ({ me, loading, refresh, setMe: put, logout, chooseLocale, kept, keepSignedOut }),
+    [me, loading, refresh, put, logout, chooseLocale, kept, keepSignedOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

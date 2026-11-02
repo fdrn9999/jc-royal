@@ -136,9 +136,25 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/` | 받은 쪽지(최근 100개) |
-| GET | `/unread-count` | `{unread, dmUnread, friendRequests}`(상단 배지 한 번에) |
+| GET | `/unread-count` | `{unread, dmUnread, friendRequests, notifications}`(상단 배지 한 번에. `notifications`는 알림함의 읽지 않은 항목 수) |
 | POST | `/:id/read` · `/read-all` | 읽음 처리 |
 | DELETE | `/:id` | 삭제(본인 것만) |
+
+## 알림함 `/api/notifications` (로그인 필요)
+
+헤더의 종 모양 아이콘과 `/notifications` 화면(`packages/types/src/inbox.ts`, `apps/api/src/lib/inbox.ts`). 쪽지함(메일 아이콘)은 그대로 있고, 알림함은 쪽지·친구·1:1 메시지·초대·토너먼트·VIP·계정 보안·공지·점검을 한 목록에 모은다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/` | `?filter=social\|game\|account\|service`, `?unread=1`, `?before=<at>:<id>`(앞 페이지의 `next`), `?limit=1..30`. `{items, next, unread}`. 최신순 |
+| POST | `/read` | `{ids: string[]}`(1–30개) 또는 `{all: true, filter?}`(한 번에 500개까지). 내 것이 아니거나 이미 읽은 항목은 건너뛴다. `{read: n}` |
+
+- 항목: `{id, kind, count, at, readAt, actor, params, state, href}`. `kind`는 `friend_request`·`friend_accepted`·`dm`·`invite`·`message`·`tournament_start`·`tournament_cancel`·`tournament_result`·`vip`·`security`·`notice`·`maintenance`. `actor`는 상대(닉네임은 읽을 때 붙인다). `state`는 처리하거나 끝날 수 있는 것만: 친구 요청(`open` 대기·`done` 수락·`expired` 거절·취소), 초대(30분 안이고 테이블이 열려 있으면 `open`), 토너먼트 시작(진행 중이면 `open`), 점검(`open` 예정·진행, `done` 끝, `expired` 취소).
+- 같은 상대의 같은 일은 하나로 묶고 읽기 전까지 센다(`count`). 읽은 뒤 다시 오면 1부터.
+- 1:1 메시지 본문, 이메일, IP, 세션은 항목에 없다. 로그인 알림은 대략의 브라우저 이름("Firefox · Linux")만 있다.
+- 숨김: 탈퇴한 상대, 차단한(된) 상대, 1:1 메시지를 끈 상대의 항목, 만료된 항목.
+- 공지·점검은 가입 전에 마지막으로 바뀐 것이면 읽은 것으로 보인다(가입 전에 취소된 점검은 그 회원에게 새 소식이 아니다). 가입 뒤에 바뀌면 다시 안 읽음.
+- 보관: 30일, 계정 보안 90일. 탈퇴하면 그 회원이 받은 것과 그 회원이 상대인 것을 지운다(`docs/PRIVACY_OPERATIONS.md`).
 
 ## 1:1 대화 `/api/dm` (로그인 필요)
 
