@@ -42,7 +42,8 @@ export async function housekeeping(db: D1Database, now = Date.now()) {
     db.prepare('DELETE FROM push_subscriptions WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = push_subscriptions.session_id)'),
     // The realtime outbox (member ids and event types, never a message's text): a few days after it was done; a row
     // still pending that long after it was written expired long ago (the minute cron gives those up after 30 minutes).
-    db.prepare('DELETE FROM realtime_outbox WHERE done_at < ?1 OR created_at < ?1').bind(now - REALTIME_OUTBOX_RETENTION_MS),
+    // Every row but a pending one has its done_at, so each half reads an index (`OR created_at` alone read every row).
+    db.prepare(`DELETE FROM realtime_outbox WHERE done_at < ?1 OR (status = 'pending' AND created_at < ?1)`).bind(now - REALTIME_OUTBOX_RETENTION_MS),
     // The notification inbox: an item past its time (30 days after it last happened, account security 90), read or
     // not, and the read markers of notices (kept as long as a notice can be listed).
     db.prepare('DELETE FROM notifications WHERE expires_at < ?1').bind(now),
