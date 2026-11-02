@@ -49,7 +49,8 @@ test('my statistics: VPIP, PFR, showdowns, positions and the daily trend from a 
       await expect(p.getByTestId(id)).toContainText('0 / 0 핸드');
     }
     await expect(p.getByTestId('stats-af')).toContainText('—');
-    await expect(p.getByTestId('stats-bb100')).toContainText(/[+-]100\.00|0\.00/);
+    // The whole figure, between its label and its line (one big blind won, lost, or none).
+    await expect(p.getByTestId('stats-bb100')).toContainText(/BB\/100\s*(?:[+-]100\.00|0\.00)\s*100핸드당/);
   }
 
   // The trend shows today's hand; the 7-day view too.

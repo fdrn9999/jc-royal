@@ -38,7 +38,7 @@ test('mobile: my statistics, positions and the daily trend fit the phone in Kore
   await m.page.getByTestId('stats-definitions').locator('summary').tap();
   // The nine definitions and the two of the later figures (3-bet, c-bet, AF, BB/100).
   await expect(m.page.getByTestId('stats-definitions').locator('li')).toHaveCount(11);
-  await expect(m.page.getByTestId('stats-bb100')).toContainText(/[+-]100\.00|0\.00/);
+  await expect(m.page.getByTestId('stats-bb100')).toContainText(/BB\/100\s*(?:[+-]100\.00|0\.00)\s*100핸드당/);
   expect(await widerThanDevice(m.page)).toBe(false);
   await trend.scrollIntoViewIfNeeded();
   await m.page.screenshot({ path: 'test-results/me-stats-trend-mobile.png', animations: 'disabled' });
