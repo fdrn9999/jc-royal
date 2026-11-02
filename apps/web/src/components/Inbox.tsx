@@ -65,6 +65,7 @@ const ko = {
   'k.tournament_abort': '{name} 토너먼트가 중단되었습니다',
   'k.tournament_result': '{name} 토너먼트가 끝났습니다 · 최종 {place}위',
   'k.tournament_ended': '{name} 토너먼트가 끝났습니다',
+  'k.tournament_invite': '{name}님이 {tournament} 토너먼트에 초대했습니다',
   'k.vip': 'VIP 등급이 {color}(으)로 변경되었습니다',
   'k.vipOff': 'VIP 등급이 해제되었습니다',
   'k.sign_in': '새 기기에서 로그인했습니다 ({device})',
@@ -76,6 +77,7 @@ const ko = {
   's.accepted': '수락됨',
   's.closed': '종료됨',
   's.joinable': '참여 가능',
+  's.registered': '등록함',
   's.expired': '만료됨',
   's.running': '진행 중',
   's.ended': '종료',
@@ -121,6 +123,7 @@ const en: Record<keyof typeof ko, string> = {
   'k.tournament_abort': '{name} was stopped',
   'k.tournament_result': '{name} has ended · you placed #{place}',
   'k.tournament_ended': '{name} has ended',
+  'k.tournament_invite': '{name} invited you to the {tournament} tournament',
   'k.vip': 'Your VIP tier is now {color}',
   'k.vipOff': 'Your VIP tier was removed',
   'k.sign_in': 'New sign-in from {device}',
@@ -132,6 +135,7 @@ const en: Record<keyof typeof ko, string> = {
   's.accepted': 'Accepted',
   's.closed': 'Closed',
   's.joinable': 'Open',
+  's.registered': 'Registered',
   's.expired': 'Expired',
   's.running': 'Running',
   's.ended': 'Ended',
@@ -159,6 +163,7 @@ const ICON: Record<InboxItemDto['kind'], LucideIcon> = {
   tournament_start: TrophyIcon,
   tournament_cancel: TrophyIcon,
   tournament_result: TrophyIcon,
+  tournament_invite: TrophyIcon,
   vip: CrownIcon,
   security: LockIcon,
   notice: InfoIcon,
@@ -213,6 +218,12 @@ export function inboxText({ t, tr, locale }: Texts, i: InboxItemDto, now: number
       const place = num(p.place);
       return { text: place ? tr('k.tournament_result', { name: tname, place }) : tr('k.tournament_ended', { name: tname }) };
     }
+    case 'tournament_invite':
+      return {
+        text: tr('k.tournament_invite', { name, tournament: tname }),
+        state: tr(i.state === 'open' ? 's.joinable' : i.state === 'done' ? 's.registered' : 's.expired'),
+        done: i.state !== 'open',
+      };
     case 'vip': {
       const color = str(p.color);
       return { text: color ? tr('k.vip', { color: t(`vip.color.${color}` as MsgKey) }) : tr('k.vipOff') };

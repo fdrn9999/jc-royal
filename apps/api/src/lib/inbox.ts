@@ -77,6 +77,10 @@ const STATE_SQL = `CASE x.kind
         WHERE f.user_a = MIN(?1, x.actorId) AND f.user_b = MAX(?1, x.actorId) AND (f.status = 'accepted' OR f.requester_id = x.actorId)), 'expired')
     WHEN 'invite' THEN CASE WHEN x.at > ?2 - ${INBOX_INVITE_TTL_MS} AND EXISTS (SELECT 1 FROM tables t WHERE t.id = x.ref AND t.status = 'open' AND t.entry_blocked = 0) THEN 'open' ELSE 'expired' END
     WHEN 'tournament_start' THEN COALESCE((SELECT CASE status WHEN 'running' THEN 'open' ELSE 'done' END FROM tournaments WHERE id = x.ref), 'expired')
+    WHEN 'tournament_invite' THEN COALESCE((SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM tournament_entries e WHERE e.tournament_id = t.id AND e.user_id = ?1 AND e.status NOT IN ('unregistered', 'dropped')) THEN 'done'
+        WHEN t.status = 'registering' AND (SELECT COUNT(*) FROM tournament_entries e WHERE e.tournament_id = t.id AND e.status = 'registered') < t.capacity THEN 'open'
+        ELSE 'expired' END FROM tournaments t WHERE t.id = x.ref), 'expired')
     WHEN 'friend_table' THEN CASE WHEN x.at > ?2 - ${INBOX_INVITE_TTL_MS}
       AND EXISTS (SELECT 1 FROM tables t WHERE t.id = x.ref AND t.status = 'open' AND t.entry_blocked = 0 AND t.is_private = 0)
       AND EXISTS (SELECT 1 FROM table_sessions s WHERE s.table_id = x.ref AND s.user_id = x.actorId AND s.status = 'seated')
@@ -146,6 +150,7 @@ function hrefOf(r: InboxRowOut, params: InboxItemDto['params']): string | null {
     case 'tournament_start':
     case 'tournament_cancel':
     case 'tournament_result':
+    case 'tournament_invite':
       return r.ref ? `/tournaments/${r.ref}` : '/tournaments';
     case 'vip':
     case 'security':

@@ -17,6 +17,7 @@ import {
   type TournamentTimeBank,
   isKstNight,
   shownVip,
+  tournamentSeats,
   TOURNAMENT_STATUSES,
 } from '@jc/types';
 import { outboxForEntries, realtimeOutboxForMembers } from '@jc/db';
@@ -254,9 +255,9 @@ interface StartRow {
   roster: number;
 }
 
-/** Seat numbers 0–5 in a random order (crypto). */
-function shuffledSeats(): number[] {
-  const seats = [0, 1, 2, 3, 4, 5];
+/** Seat numbers 0 to `n` - 1 in a random order (crypto). */
+function shuffledSeats(n: number): number[] {
+  const seats = Array.from({ length: n }, (_, i) => i);
   const r = new Uint32Array(seats.length);
   crypto.getRandomValues(r);
   for (let i = seats.length - 1; i > 0; i--) {
@@ -336,7 +337,8 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
       if (opts.auto) return no('ineligible');
       continue;
     }
-    const players = results.slice(0, Math.min(t.capacity, 6));
+    const seatCount = tournamentSeats(t.capacity);
+    const players = results.slice(0, Math.min(t.capacity, seatCount));
     if (opts.auto ? players.length < t.capacity : players.length < t.minPlayers) {
       if (opts.auto) return no('not_full');
       fail(409, 'tournament_not_ready', 'not enough eligible players', { eligible: players.length, minPlayers: t.minPlayers, dropped });
@@ -345,7 +347,7 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     const first = levels[0];
     if (!first) fail(500, 'tournament_structure_invalid', 'the tournament has no blind levels');
     const tableId = `sng-${id}`;
-    const seats = shuffledSeats();
+    const seats = shuffledSeats(seatCount);
     const started = `tn.status = 'running' AND tn.table_id = '${tableId}' AND tn.started_at = ${now}`;
     const mine = `EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND ${started})`;
     const told = tournamentNoticeTold(db, id, 'started', now);
@@ -369,9 +371,9 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
         .prepare(
           `INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, allow_spectators,
                   entry_blocked, room_type, bots_enabled, created_by, created_at, updated_at)
-           SELECT ?2, ?3, 6, ?4, ?5, ?6, ?6, ?7, 0, 1, 1, 'tournament', 0, ?8, ?9, ?9 WHERE ${mine}`,
+           SELECT ?2, ?3, ?10, ?4, ?5, ?6, ?6, ?7, 0, 1, 1, 'tournament', 0, ?8, ?9, ?9 WHERE ${mine}`,
         )
-        .bind(id, tableId, t.name, first.sb, first.bb, t.startStack, t.turnSeconds, opts.actorId, now),
+        .bind(id, tableId, t.name, first.sb, first.bb, t.startStack, t.turnSeconds, opts.actorId, now, seatCount),
       ...players.map((p, i) =>
         db
           .prepare(`UPDATE tournament_entries SET status = 'playing', seat_index = ?3, stack = ?4, updated_at = ?5 WHERE tournament_id = ?1 AND user_id = ?2 AND status = 'registered' AND ${mine}`)

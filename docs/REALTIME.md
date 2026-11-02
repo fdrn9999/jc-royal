@@ -224,7 +224,7 @@ API 라우트 ── D1 batch [변경 … , realtime_outbox 행] ── 커밋
 
 ## 9. 하지 않은 것
 
-- 토너먼트 초대. 리더보드·플레이 업적·9인 토너먼트는 뒤에 만들었고 실시간 이벤트를 더하지 않았다(업적은 카드를 다시 열 때, 친구 테이블 알림은 알림함 항목과 `notification.changed`로 보인다. `docs/SOCIAL.md`).
+- 리더보드·플레이 업적·9인 토너먼트·토너먼트 초대는 뒤에 만들었다. 토너먼트 초대는 알림함 항목과 같은 batch의 아웃박스 `notification.changed`로 알리고(`docs/TOURNAMENT.md` "친구 초대"), 나머지는 실시간 이벤트를 더하지 않았다(업적은 카드를 다시 열 때, 친구 테이블 알림은 알림함 항목과 `notification.changed`로 보인다. `docs/SOCIAL.md`).
 - 탭 사이 `BroadcastChannel`. 탭마다 소켓을 따로 열고, 회원당 10개로 제한한다.
 - 로비·룸 이벤트의 아웃박스(7절 '실시간 아웃박스').
 - Cloudflare Queues. 매분 크론이 다시 보내므로 쓰지 않았다(유료 설정과 별도 실패 복구가 필요하다).

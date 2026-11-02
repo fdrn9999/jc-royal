@@ -1350,7 +1350,22 @@ export const notifications = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull(),
     kind: text('kind', {
-      enum: ['friend_request', 'friend_accepted', 'dm', 'invite', 'friend_table', 'message', 'tournament_start', 'tournament_cancel', 'tournament_result', 'vip', 'security', 'notice', 'maintenance'],
+      enum: [
+        'friend_request',
+        'friend_accepted',
+        'dm',
+        'invite',
+        'friend_table',
+        'message',
+        'tournament_start',
+        'tournament_cancel',
+        'tournament_result',
+        'tournament_invite',
+        'vip',
+        'security',
+        'notice',
+        'maintenance',
+      ],
     }).notNull(),
     key: text('key').notNull(),
     /** The member who caused it (a friend), if any. */

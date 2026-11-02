@@ -151,4 +151,27 @@ describe('starting a tournament while a player stops qualifying', () => {
     expect(new Set(seats.map((s) => s.s)).size).toBe(4);
     expect(seats.every((s) => s.stack === 1500)).toBe(true);
   });
+
+  it('gives a tournament of up to six a six-seat table and one of seven to nine a nine-seat table, seating at random over all of it', async () => {
+    for (const [capacity, maxSeats] of [
+      [6, 6],
+      [7, 9],
+      [9, 9],
+    ] as const) {
+      const used = new Set<number>();
+      // Four players drawn eight times: on nine seats all four miss the last three with odds 15/126 a run, (15/126)^8 ≈ 4e-8 in all.
+      for (let run = 0; run < 8; run++) {
+        const db = database(capacity);
+        expect(await startTournament(env(db, null), TN, { actorId: 'admin', auto: false })).toMatchObject({ started: true, players: 4 });
+        expect(db.prepare(`SELECT max_seats AS n FROM tables WHERE id = ?1`).all(`sng-${TN}`)).toEqual([{ n: maxSeats }]);
+        const seats = db.prepare(`SELECT seat_index AS s FROM tournament_entries WHERE tournament_id = ?1`).all(TN).map((r) => Number(r.s));
+        expect(new Set(seats).size).toBe(4);
+        for (const s of seats) used.add(s);
+      }
+      expect(Math.min(...used)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(...used)).toBeLessThan(maxSeats);
+      if (maxSeats === 9) expect(Math.max(...used)).toBeGreaterThan(5);
+    }
+    // 24 databases with every migration (about 0.1 s each here).
+  }, 20_000);
 });

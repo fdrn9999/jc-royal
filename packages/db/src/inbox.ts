@@ -15,6 +15,7 @@ export type InboxRowKind =
   | 'tournament_start'
   | 'tournament_cancel'
   | 'tournament_result'
+  | 'tournament_invite'
   | 'vip'
   | 'security';
 

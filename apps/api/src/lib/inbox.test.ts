@@ -180,6 +180,31 @@ describe('the list', () => {
     expect((await list())[0]!.state).toBe('expired');
   });
 
+  it('shows a tournament invite as open while a seat is left, done once the member is in, and expired otherwise', async () => {
+    const { db, d1, list } = setup();
+    tournament(db, TID, 'registering');
+    await inboxStatement(d1, 'me', { kind: 'tournament_invite', key: 'tournament_invite:fr', actorId: 'fr', ref: TID, params: { name: 'Sunday' }, now: NOW - MIN }).run();
+    expect(await list()).toMatchObject([{ kind: 'tournament_invite', state: 'open', params: { name: 'Sunday' }, actor: { id: 'fr' }, href: `/tournaments/${TID}` }]);
+    expect(await list('me', { filter: 'game' })).toHaveLength(1);
+    const entry = (u: string, status: string) =>
+      db.prepare(`INSERT INTO tournament_entries (tournament_id, user_id, status, registered_at) VALUES (?1, ?2, ?3, 1) ON CONFLICT DO UPDATE SET status = excluded.status`).run(TID, u, status);
+    // Every seat taken by others: nothing to answer any more.
+    db.prepare(`UPDATE tournaments SET capacity = 2`).run();
+    entry('fr', 'registered');
+    entry('ot', 'registered');
+    expect((await list())[0]!.state).toBe('expired');
+    entry('ot', 'unregistered');
+    expect((await list())[0]!.state).toBe('open');
+    entry('me', 'registered');
+    expect((await list())[0]!.state).toBe('done');
+    // Played and out: still done (it was taken up); withdrawn before the start, and registration over: expired.
+    db.prepare(`UPDATE tournaments SET status = 'running'`).run();
+    entry('me', 'eliminated');
+    expect((await list())[0]!.state).toBe('done');
+    entry('me', 'unregistered');
+    expect((await list())[0]!.state).toBe('expired');
+  });
+
   it('lists the personal messages as one item, read by a marker until a newer one arrives', async () => {
     const { db, d1, one, unread } = setup();
     message(db, 'm1', NOW - 5 * MIN);

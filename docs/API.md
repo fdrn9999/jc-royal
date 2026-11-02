@@ -371,4 +371,4 @@
 
 ## 토너먼트(6인 SNG)
 
-회원 `GET /api/tournaments`, `GET /api/tournaments/:id`, `POST /api/tournaments/:id/register`, `POST /api/tournaments/:id/unregister`와 관리자 `/api/admin/tournaments*`, `/api/admin/tournament-templates*`. 요청·응답·오류 코드·권한은 `docs/TOURNAMENT.md` "API"에 있다. 대회 테이블(`roomType: 'tournament'`)은 로비 목록과 빠른 참가에 나오지 않고, 착석·충전·리바이는 룸이 `tournament_table`로 거절하며, 관리자 테이블 종료·긴급 제어·설정 변경은 409 `tournament_table`이다. 관리자 테이블 상세(`GET /api/admin/tables/:id`)는 대회 테이블이면 `tournament: {id, name, status}`를 더한다.
+회원 `GET /api/tournaments`, `GET /api/tournaments/:id`, `POST /api/tournaments/:id/register`, `POST /api/tournaments/:id/unregister`, `POST /api/tournaments/:id/invite`(친구 초대, 알림함 `tournament_invite`)와 관리자 `/api/admin/tournaments*`, `/api/admin/tournament-templates*`. 요청·응답·오류 코드·권한은 `docs/TOURNAMENT.md` "API"에 있다. 대회 테이블(`roomType: 'tournament'`)은 로비 목록과 빠른 참가에 나오지 않고, 착석·충전·리바이는 룸이 `tournament_table`로 거절하며, 관리자 테이블 종료·긴급 제어·설정 변경은 409 `tournament_table`이다. 관리자 테이블 상세(`GET /api/admin/tables/:id`)는 대회 테이블이면 `tournament: {id, name, status}`를 더한다.
