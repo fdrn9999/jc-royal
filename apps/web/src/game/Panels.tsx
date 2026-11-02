@@ -13,7 +13,8 @@ import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { AMOUNT_UNITS, pullSettings, setPrefs, usePrefs, useSettingsSync } from '../lib/prefs';
 import { AUTO_TIMES, autoBuyEstimate, draftFrom, draftRequest, editDraft, seatPolicy, type AutoBuyDraft } from './autoBuy';
-import { RequestError, rid, type TableSocketApi } from './useTableSocket';
+import { RequestError, rid } from './request';
+import type { TableSocketApi } from './useTableSocket';
 
 /**
  * Whether chips ran short at any point while a dialog was open: the free refill note then stays until it closes, so

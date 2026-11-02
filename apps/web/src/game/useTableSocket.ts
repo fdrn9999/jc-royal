@@ -5,6 +5,7 @@ import { Heartbeat, Outbox, type Outgoing } from './link';
 import { preActionSpot } from './preAction';
 import { REACTION_SHOW_MS, type SeatReaction } from './Reactions';
 import { RESTORED_MS, recoveryOf, type Recovery } from './recovery';
+import { RequestError, rid } from './request';
 
 /** `locked`: a private table that needs the join code first (the room closed the socket with 4003). */
 export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'closed' | 'unauthorized' | 'locked' | 'kicked';
@@ -81,13 +82,7 @@ export interface TableSocketApi {
   reopen: () => void;
 }
 
-export class RequestError extends Error {
-  constructor(public code: ErrorCode, message: string) {
-    super(message);
-  }
-}
-
-export const rid = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/-/g, '').slice(0, 24);
+export { RequestError, rid };
 
 /** What the hook keeps with a command until its answer. */
 interface Waiting {
