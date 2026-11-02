@@ -35,6 +35,7 @@
 | `notification_consents` | 회원 ID, 동의 종류(`service`·`night`), 동의·철회, 문구 버전, 경로(`signup`·`settings`), 시각. **IP·기기 정보 없음** | 동의를 받았다는 증거. 회원에게 보이지 않고 관리자 화면에도 없다 |
 | `push_subscriptions` | 회원 ID, 등록한 로그인 세션 ID, **푸시 서비스 주소(endpoint)와 그 SHA-256 해시**, 암호화 키(`p256dh`·`auth`), 대략의 브라우저 이름("Chrome · Android"), 만든·고친·마지막 성공·실패 시각, 연속 실패 수 | 회원이 이 브라우저에서 켰을 때만. 주소와 키는 발송에만 쓰고 응답·로그·관리자 화면·감사 기록에 넣지 않는다(기기 목록에는 이름과 시각만). 주소는 허용된 푸시 서비스(Google·Mozilla·Apple·Microsoft)만 받는다 |
 | `notification_events` | 회원 ID, 종류, 앱 안 이동 경로(예: `/friends/<회원 ID>`, `/tournaments/<ID>`), 중복 방지·묶음 키, 상태·사유·시도 횟수, 만든·보낸 시각. **메시지 본문·닉네임·금액은 없다** | 푸시 발송 대기열(`lib/notify.ts`). 푸시에 실리는 글은 보낼 때 정해진 일반 문구("새 메시지가 도착했습니다" 등)로만 만든다 |
+| `realtime_outbox` | 받을 회원 ID 목록(공개 이벤트는 없음), 이벤트 종류와 id, 이벤트 JSON(내용 없는 알림. 1:1 메시지는 상대 회원 ID와 `seq` 번호, 공지는 버전 번호), 상태·시도 횟수·마지막 실패 사유(허브 응답), 만든·보낸 시각. **메시지 본문·닉네임·금액·IP는 없다** | 열린 페이지에 "다시 읽어라"를 놓치지 않고 보내는 대기열(`docs/REALTIME.md` 7절). 회원에게 보이지 않고 관리자 화면에도 행은 없다(재시도·포기 수만 `ops_metrics`) |
 | `academy_progress`, `academy_gto_progress`, `user_badges` | 회원 ID, 진도(초급·고급 GTO 따로), 배지 | `academy_stats`에는 회원 ID가 없다(익명 집계) |
 | `admin_audit_log` | 운영자 ID, 조치, 대상, 상세, **운영자 IP** | 5절 |
 | `admin_notes` | 대상 회원 ID, 작성한 운영자 ID, 본문(500자), 작성 시각 | 운영자 인수인계용 내부 메모, 회원에게 보이지 않음. 이메일·전화번호·주민등록번호·카드 번호처럼 보이는 본문은 거절(5절) |
@@ -77,6 +78,7 @@
 | 동의 이력(`notification_consents`) | **기한 없음**(검토 필요) | 탈퇴해도 회원 ID로 남는다(동의 증거) | — |
 | 푸시 기기 등록(`push_subscriptions`) | 회원이 끄거나, 그 로그인이 끝날 때까지 | 이 브라우저에서 끄기·기기 목록에서 지우기·서비스 동의 철회(모든 기기)·탈퇴는 바로 삭제. 로그아웃·다른 기기 로그아웃·비밀번호 변경·재설정·정지는 끝난 로그인들의 등록을 세션 삭제 직후 지운다(`lib/signout.ts`). 이 삭제가 실패해도 발송은 살아 있는 세션의 등록에만 하므로 쓰이지 않고, 세션이 없어진 등록은 매일 정리 크론이 지운다. 푸시 서비스가 404·410을 주거나 400·401·403·413이 3번 이어지면 삭제 | `routes/notifications.ts`, `lib/notify.ts`, `lib/housekeeping.ts`, `/me/delete` |
 | 푸시 발송 기록(`notification_events`) | 7일(`PUSH_EVENT_RETENTION_MS`) | 정리 크론이 만든 지 7일 지난 행을 삭제. 탈퇴 시 그 회원의 행 삭제 | `lib/housekeeping.ts`, `/me/delete` |
+| 실시간 아웃박스(`realtime_outbox`) | 3일(`REALTIME_OUTBOX_RETENTION_MS`). 보내지 못한 행도 30분 뒤 포기한다 | 정리 크론이 끝난 지 3일 지난 행과 만든 지 3일 지난 행을 삭제. 탈퇴해도 바로 지우지 않는다(한 행에 다른 회원도 들어 있을 수 있고, 회원 ID와 내용 없는 알림뿐이라 3일 뒤 함께 지워진다) | `lib/housekeeping.ts` |
 | 접속 상태(허브 메모리) | 마지막 신호 뒤 90초 | 로그아웃하면 바로, 아니면 90초 뒤 허브가 지운다 | `apps/game-worker/src/presence.ts` |
 | 추천 기록(`referrals`) | **기한 없음**(검토 필요) | 탈퇴해도 행은 회원 ID로 남는다(원장 행이 가리킴). 탈퇴한 가입자의 대기 보상은 지급하지 않고, 탈퇴한 추천인 쪽은 `skipped`로 닫는다. 가입 네트워크 HMAC(`ip_hash`)은 30일 뒤 매일 크론이 지운다(`same_ip` 0·1은 남음). 이메일 HMAC(`email_hash`)은 탈퇴 뒤 같은 메일함으로 다시 가입해 보상을 또 받는 것을 막으려고 남긴다. `INTERNAL_SECRET`을 바꾸면 기존 HMAC과 맞지 않아 이 재가입 확인이 처음부터 다시 시작된다 | `lib/referral.ts` `sweepReferrals`, `/me/delete` |
 | 운영 통계 수치(`daily_stats`, 개인정보 없음) | **기한 없음** | 날짜·지표마다 숫자 하나라 회원별로 되돌리거나 지울 수 없다 | — |

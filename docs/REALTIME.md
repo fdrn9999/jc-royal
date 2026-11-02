@@ -11,7 +11,8 @@
 - **금액을 싣지 않는다.** `wallet.changed`에는 금액이 없다. 페이지는 `/api/auth/me`를 다시 읽는다(`balance += amount` 같은 계산은 없다).
 - **개인·공개를 나눈다.** 개인 이벤트(`scope: 'user'`)는 그 회원의 소켓에만 간다. 허브는 `users` 없는 개인 이벤트와 `users`가 붙은 공개 이벤트를 400으로 거절한다. 공개 이벤트에는 모든 회원이 볼 수 있는 값만 넣는다.
 - **발행은 D1 쓰기가 커밋된 뒤, 백그라운드에서 한다.** 발행이 실패해도 요청은 실패하지 않고, 지급·정산을 다시 하지 않는다.
-- **이벤트는 사라질 수 있다.** 재연결하면 다시 읽고, 소켓이 열려 있는 동안에도 느린 폴링을 안전망으로 남긴다(7절).
+- **놓치면 안 되는 이벤트는 아웃박스를 지난다.** 칩, VIP·역할, 친구 요청·수락, 1:1 메시지, 쪽지, 신고 처리, 토너먼트 안내, 공지·점검 이벤트는 그 변경과 같은 D1 batch에 `realtime_outbox` 행으로 쓴다. 허브가 받지 못하면 매분 크론이 다시 보낸다(7절 '실시간 아웃박스'). 그래서 두 번 갈 수 있다. 페이지는 `eventId`로 한 번만 처리한다.
+- **그래도 이벤트는 늦거나 사라질 수 있다.** 재연결하면 다시 읽고, 소켓이 열려 있는 동안에도 느린 폴링을 안전망으로 남긴다(7절).
 - **Web Push와 별개다.** 이 소켓은 열려 있는 페이지의 화면 동기화만 한다. 푸시 동의·설정·발송(`notification_events`)은 바꾸지 않았고, 이 소켓 때문에 새로 보내는 푸시는 없다. 푸시를 꺼도 실시간 동기화는 그대로 된다.
 
 ## 2. 구조
@@ -157,14 +158,53 @@
 - 소켓이 없거나 실시간 허브가 죽어도 REST와 폴링으로 모든 화면이 동작한다(E2E `lobby.spec.ts`가 소켓을 거절한 채 확인한다).
 
 **보장하지 않는 것**
-- **전달은 최선 노력이다. 실시간 아웃박스는 두지 않았다.**
-  - 허브에 닿지 못한 이벤트는 사라진다.
+- **아웃박스를 지나지 않는 이벤트의 전달은 최선 노력이다.** 아래 '실시간 아웃박스'의 표에 없는 이벤트(로비, 룸이 보내는 것, 내가 한 일의 내 다른 기기 알림)는 허브에 닿지 못하면 사라진다.
   - 그 페이지는 다음 재연결이나 폴링에서 따라잡는다. 소켓이 열린 채 이벤트 하나만 잃으면 최대 느린 폴링 한 번만큼 늦는다.
   - 칩 지급, 제재, 시스템 쪽지 같은 중요한 사건은 D1에 남아 있다(원장, 감사, 쪽지). 이벤트는 그것을 다시 읽으라는 알림일 뿐이다.
   - 로비 변경을 영속 이벤트 표에 쌓지 않는다.
+- **아웃박스 이벤트도 30분 안에 못 보내면 버린다.** 그동안 페이지는 폴링·재연결로 이미 다시 읽었다. 버린 수는 `rt_outbox_failed`로 센다.
 - **순서.** 서로 다른 자원 사이의 순서는 보장하지 않는다. `occurredAt`으로 정렬하지 않는다.
 - **로그아웃 직후.** revoke가 닿지 않은 소켓은 최대 약 5분 열려 있을 수 있다(3절).
 - **관리자 콘솔은 이 소켓을 쓰지 않는다.** 관리자 세션(`jc_asid`)은 `/ws/realtime`에 붙지 못한다. 관리자 사이 변경 알림은 관제센터 소켓(`/ws/admin/monitor`)으로 따로 받는다(`docs/CONTROL_CENTER.md`).
+
+### 실시간 아웃박스
+
+```
+API 라우트 ── D1 batch [변경 … , realtime_outbox 행] ── 커밋
+                 │
+                 ├─ 바로(waitUntil): /publish-batch → 허브 → 결과를 그 행에 저장(sent, 또는 1분 뒤 다시)
+                 └─ 매분 크론(flushRealtimeOutbox): 20초 넘게 pending인 행을 임대해 다시 보낸다
+```
+
+- **같은 batch에 쓴다.** 변경이 롤백되면 행도 없다. 변경이 일어났을 때만 쓰도록 조건을 붙인다. 원장은 `LEDGER_GUARD`(그 원장 행이 있을 때만), UPDATE·INSERT는 `IF_CHANGED`(바로 앞 문장이 행을 바꿨을 때만, `changes() > 0`), 받는 사람이 batch 안에서 정해지는 경우(토너먼트 참가자, 신고자들)는 `realtimeOutboxForMembers`가 같은 batch에서 그 회원들을 읽어 쓴다. 1:1 메시지의 `seq`는 batch 안에서 읽어 행의 이벤트에 넣는다(`fill`). 코드는 `packages/db/src/realtime-outbox.ts`, 보내는 쪽은 `apps/api/src/lib/realtime.ts`.
+- **행.** `id`(= `eventId`), `type`, `recipients`(회원 id JSON, 공개면 `NULL`), `event`(보낸 그대로의 JSON), `status`(`pending` → `sent` | `failed` | `expired`), `attempts`, `next_attempt_at`, `lease_until`, `expires_at`, `last_error`, `created_at`, `done_at`. 마이그레이션 `0038_realtime_outbox`.
+- **바로 보내기.** 커밋 뒤 요청의 `waitUntil`에서 한 번 보낸다. 결과는 `status = 'pending' AND lease_until IS NULL`인 행에만 저장한다. 조건이 거짓이라 쓰이지 않은 행이나 크론이 잡은 행은 바뀌지 않는다.
+- **크론.** 기존 매분 크론(`* * * * *`)이 푸시 대기열보다 먼저 돈다. 만료(30분)나 시도 6번을 넘은 행을 `expired`·`failed`로 닫고, 예정 시각이 지난 행을 50개까지 임대(`lease_until`, 60초)해 보낸다. 결과는 그 임대를 가진 채로만 저장한다. 그래서 두 크론이 겹쳐도 같은 행을 둘 다 저장하지 않는다. 대기는 1·2·5·10분(마지막 값 반복).
+- **허브마다 한 번.** 한 번 보낼 때 허브마다 `/publish-batch` 하나에 이벤트를 100개까지 묶는다. 결과는 이벤트마다(전달한 소켓 수, 또는 `bad event`·`bad audience`)다. 닿지 못한 허브의 이벤트만 실패한다. 공개 이벤트는 허브 4개 모두가 받아야 성공이다.
+- **두 번 갈 수 있다(최소 한 번).** 허브가 받고 응답이 사라지면 다음 시도가 다시 보낸다. 페이지는 `eventId`로 거른다(탭마다 최근 300개). 이벤트는 다시 읽으라는 알림일 뿐이라 두 번 읽어도 결과가 같다.
+- **섞인 버전.** `/publish-batch`가 없는 이전 game-worker가 404를 주면 그 허브에는 이벤트마다 `/publish`로 보낸다.
+
+| 이벤트 | 아웃박스를 지나는 변경 | 조건 |
+|---|---|---|
+| `wallet.changed` | 관리자 칩 지급·차감, 정합성 정정(기록·되돌리기), 추천 보상 | 그 원장 행이 있을 때 |
+| `account.changed` | 역할 변경, VIP 지정·해제·색 변경 | 같은 batch(VIP는 그 버전으로 저장됐을 때만) |
+| `member.vip.changed` | VIP 색이 다른 회원에게 보이게 바뀔 때 | 커밋 뒤 씀(아래 한계) |
+| `social.friend.changed` | 친구 요청, 수락 | 요청 행이 생기거나 수락으로 바뀌었을 때 |
+| `social.dm.created` | 1:1 메시지(테이블 초대 포함) | 그 메시지 행이 있을 때. `seq`는 batch 안에서 읽음 |
+| `message.changed` | 관리자 쪽지, 칩 안내, 가입 환영, 정지·해제 안내, 설정 초기화·복원 안내, 신고 처리 결과(신고자·대상), 토너먼트 시작·취소·중단 안내 | 쪽지 행을 쓴 회원에게만 |
+| `inbox.broadcast` | 모든 회원 쪽지함 공지 | 같은 batch |
+| `service.changed` | 공지·점검 생성·변경·삭제 | 커밋 뒤 씀(`rev`를 읽은 뒤) |
+| `tournament.changed` | 토너먼트 변경 전부 | 커밋 뒤 씀 |
+
+- **커밋 뒤에 쓰는 것(`outboxAfterCommit`).** 이벤트 내용이 커밋 뒤에야 정해지는 셋(`service.changed`의 `rev`, `member.vip.changed`의 보이는 색, `tournament.changed`)은 커밋 뒤 행을 쓰고 보낸다. 허브가 놓친 것은 다시 보내지만, 커밋과 그 쓰기 사이에 워커가 멈추면 이벤트는 아웃박스 전처럼 사라진다. 행을 못 쓰면 한 번 그냥 보내고, 실패는 `rt_undelivered`로 센다.
+- **아웃박스를 지나지 않는 것과 이유.**
+  - 로비 이벤트(`lobby.*`), 룸이 보내는 `wallet.changed`·`tournament.changed`: 인원·좌석은 1초마다 바뀌고 다음 이벤트나 60초 폴링이 덮는다. 룸은 D1 batch를 직접 다루지 않는다.
+  - 내가 한 일을 내 다른 기기에 알리는 것: 프로필 저장의 `account.changed`, 무료 리필의 `wallet.changed`, 쪽지 읽기·삭제의 `message.changed`, 대화 읽음 `social.dm.read`.
+  - 친구 거절·취소·삭제·차단의 `social.friend.changed`: 관계가 줄어드는 쪽이라, 놓쳐도 다음 읽기에서 사라지고 그 사이 보낼 수 있는 것은 서버가 거절한다.
+  - 로그아웃·정지·비밀번호 변경: 이벤트가 아니라 기존 `/revoke`(두 번 시도)와 허브의 5분 확인이 소켓을 닫는다(3절).
+- **지표.** `rt_outbox_retry`(바로 보내기나 크론이 실패해 다시 기다리는 이벤트), `rt_outbox_failed`(포기: 시도를 다 쓰거나 만료). 아웃박스를 지나지 않는 발행 실패는 그대로 `rt_undelivered`다. 관리 콘솔 대시보드의 운영 칸에 둘 다 지난 1시간 값이 보인다(`ops-rt-outbox-retry`, `ops-rt-outbox-failed`, 포기가 하나라도 있으면 빨간 숫자).
+- **보관.** 끝난 행(`sent`·`failed`·`expired`)은 3일 뒤, 아직 `pending`인 행도 만든 지 3일이 지나면 매일 정리 크론이 지운다. 행에는 회원 id와 이벤트(종류, id, 1:1 메시지의 상대와 `seq` 같은 숫자)만 있고 메시지 본문은 없다(`docs/PRIVACY_OPERATIONS.md`).
+- **테스트.** 단위 테스트 `apps/api/src/lib/realtime-outbox.test.ts`(마이그레이션을 적용한 SQLite와 가짜 허브: 조건, 롤백, 매개변수 번호, 허브별 실패, 재시도·포기·만료·임대, 이전 허브), 통합 테스트 `tests/integration/realtime.test.ts`의 'realtime outbox'(workerd: 지급 행이 `sent`로 끝나고 이벤트가 행과 같다, 반복 지급은 행을 더 쓰지 않는다, 1:1 메시지의 `seq`, 크론이 밀린 행을 보내고 만료된 행은 보내지 않는다).
 
 ## 8. 비용
 
@@ -172,17 +212,21 @@
 - **허브 알람.** 소켓이 있는 허브는 5분마다 한 번 깬다. D1 batch 하나로 소켓당 약 1–2행을 읽는다(`sessions` 기본 키와 `users` 기본 키). 소켓이 없으면 알람도 없다. 최근 로그아웃 기록이 남아 있으면 1분 뒤 한 번 더 깨서 지운다.
 - **공개 이벤트.** 받는 페이지가 D1을 읽지 않는다. 바뀐 테이블의 공개 카드나 숫자가 이벤트에 들어 있다. 방 만들기·닫기는 API가 카드를 만들려고 D1을 한 번(2행) 읽는다. 보는 사람 수와 상관없다.
 - **폴링 감소.** 로비를 보는 1,000명 기준으로 `/api/tables` 읽은 행은 분당 288,000에서 24,000으로 준다(계산, `docs/LOAD_TEST.md` 6.3).
+- **아웃박스.** 이벤트마다 D1 쓰기가 행 쓰기 1번과 결과 저장 1번 늘어난다(인덱스 2개). 매분 크론은 대상 행이 없으면 UPDATE 2문장(인덱스 `realtime_outbox_due_idx`)만 하고 허브를 부르지 않는다. 보낼 행이 있으면 허브 요청은 최대 4개(허브마다 `/publish-batch` 하나, 50행까지)다. 지운 행은 매일 정리 크론의 DELETE 1문장(`realtime_outbox_done_idx`)이다. 운영 측정은 하지 않았다.
 - **측정.** 요청별 D1 행과 쿼리 계획은 `docs/LOAD_TEST.md` 6.3–6.4에 있다. `D1_STATS`(응답 헤더 `x-d1-*`)는 로컬 측정 전용이다.
 
 ## 9. 하지 않은 것
 
 - 토너먼트 초대, 리더보드, 플레이 업적, 9인 토너먼트.
-- 실시간 아웃박스, 탭 사이 `BroadcastChannel`. 탭마다 소켓을 따로 열고, 회원당 10개로 제한한다.
+- 탭 사이 `BroadcastChannel`. 탭마다 소켓을 따로 열고, 회원당 10개로 제한한다.
+- 로비·룸 이벤트의 아웃박스(7절 '실시간 아웃박스').
+- Cloudflare Queues. 매분 크론이 다시 보내므로 쓰지 않았다(유료 설정과 별도 실패 복구가 필요하다).
 - Web Push 변경. 없다.
 
 ## 10. 배포
 
-- **D1 마이그레이션은 없다.** game-worker에 DO 마이그레이션 `v3`(`new_sqlite_classes: ["RealtimeHub"]`)를 더했다. `v1`(`TableRoom`)과 `v2`(`PresenceHub`)는 그대로다. api의 `REALTIME` 바인딩은 `script_name`으로 game-worker의 `RealtimeHub`를 가리킨다(dev와 production 둘 다).
+- **실시간 아웃박스(이 변경): D1 마이그레이션 `0038_realtime_outbox`.** 새 표 `realtime_outbox`와 인덱스 2개만 만든다. 기존 표는 바꾸지 않는다. 순서는 D1 마이그레이션 → game-worker(`/publish-batch`) → api다. api가 먼저 나가면 행을 쓰는 요청이 표가 없어 실패하므로 마이그레이션이 먼저다. game-worker가 이전 것이면 api가 `/publish`로 하나씩 보낸다(7절). 되돌리기: api를 되돌리면 행을 쓰지 않는다. 표는 남겨도 된다(정리 크론도 이전 버전에는 없으므로 남은 행은 직접 지운다: `DELETE FROM realtime_outbox`).
+- **처음 소켓을 넣을 때 D1 마이그레이션은 없었다.** game-worker에 DO 마이그레이션 `v3`(`new_sqlite_classes: ["RealtimeHub"]`)를 더했다. `v1`(`TableRoom`)과 `v2`(`PresenceHub`)는 그대로다. api의 `REALTIME` 바인딩은 `script_name`으로 game-worker의 `RealtimeHub`를 가리킨다(dev와 production 둘 다).
 - **순서는 game-worker → api(web 포함) → admin이다**(`docs/DEPLOYMENT.md` 3절과 같다).
 
 **섞인 버전**

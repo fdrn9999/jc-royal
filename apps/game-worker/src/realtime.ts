@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { REALTIME_CLOSE, REALTIME_PROTOCOL, RealtimeClientFrameSchema, RealtimeEventSchema } from '@jc/types';
+import { REALTIME_CLOSE, REALTIME_PROTOCOL, REALTIME_PUBLISH_BATCH_MAX, RealtimeClientFrameSchema, RealtimeEventSchema } from '@jc/types';
 import type { Env } from './room';
 import {
   FRAMES_PER_MIN,
@@ -54,6 +54,7 @@ export class RealtimeHub extends DurableObject<Env> {
       return new Response('bad request', { status: 400 });
     }
     if (op === '/publish') return this.publish(body);
+    if (op === '/publish-batch') return this.publishBatch(body);
     if (op === '/revoke') return this.revoke(body);
     return new Response('not found', { status: 404 });
   }
@@ -117,13 +118,33 @@ export class RealtimeHub extends DurableObject<Env> {
    * that wants its topic. A personal event is never sent to everyone, and a public one never carries `users`.
    */
   private publish(body: Record<string, unknown>): Response {
-    const parsed = RealtimeEventSchema.safeParse(body.event);
-    if (!parsed.success) return new Response('bad event', { status: 400 });
+    const r = this.deliver(body.event, body.users);
+    return typeof r === 'number' ? Response.json({ ok: true, sent: r }) : new Response(r, { status: 400 });
+  }
+
+  /**
+   * Several events in one call (the api's realtime outbox, apps/api/src/lib/realtime.ts): `items`, each as /publish's
+   * body. Each is checked and sent on its own; `results` says, in order, how many sockets got it or why it was refused.
+   */
+  private publishBatch(body: Record<string, unknown>): Response {
+    const items = body.items;
+    if (!Array.isArray(items) || items.length === 0 || items.length > REALTIME_PUBLISH_BATCH_MAX) return new Response('bad request', { status: 400 });
+    const results = items.map((it: unknown) => {
+      if (!it || typeof it !== 'object') return 'bad event';
+      const { event, users } = it as Record<string, unknown>;
+      return this.deliver(event, users);
+    });
+    return Response.json({ ok: true, results });
+  }
+
+  /** Sends one event to the sockets it is for: how many got it, or why it was refused. */
+  private deliver(event: unknown, users: unknown): number | 'bad event' | 'bad audience' {
+    const parsed = RealtimeEventSchema.safeParse(event);
+    if (!parsed.success) return 'bad event';
     const e = parsed.data;
-    const users = body.users;
     const personal = e.scope === 'user';
-    if (personal !== (users !== undefined)) return new Response('bad audience', { status: 400 });
-    if (personal && (!Array.isArray(users) || users.length === 0 || users.length > 500 || !users.every(isId))) return new Response('bad audience', { status: 400 });
+    if (personal !== (users !== undefined)) return 'bad audience';
+    if (personal && (!Array.isArray(users) || users.length === 0 || users.length > 500 || !users.every(isId))) return 'bad audience';
     const frame = JSON.stringify({ t: 'event', e });
     const now = Date.now();
     let sent = 0;
@@ -143,7 +164,7 @@ export class RealtimeHub extends DurableObject<Env> {
         this.close(ws, 1011, 'send failed');
       }
     }
-    return Response.json({ ok: true, sent });
+    return sent;
   }
 
   /** Ends the sockets of a sign-out, and remembers it a minute for handshakes the api checked just before. */

@@ -30,6 +30,9 @@ export function realtimeShardOf(userId: string, shards = REALTIME_SHARDS): numbe
   return h % shards;
 }
 
+/** Events one call to a hub's /publish-batch may carry (the api's realtime outbox sends its retries so, one call a hub). */
+export const REALTIME_PUBLISH_BATCH_MAX = 100;
+
 /** A hub's Durable Object name. */
 export const realtimeHubName = (shard: number) => `rt-${shard}`;
 

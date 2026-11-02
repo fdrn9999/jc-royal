@@ -239,7 +239,7 @@
 - **쿼리 수정**
   - `seatedOnClosed`를 CROSS JOIN으로 바꿔, 앉은 행에서 출발하게 했다.
   - 관리자 활성 목록은 `status IN ('open','closing')`으로 읽는다.
-- **운영 카운터**: `rt_undelivered`(허브가 받지 못한 이벤트)와 `rt_revoke_fail`(닿지 못한 소켓 닫기). 대시보드에 지난 1시간 값이 보인다.
+- **운영 카운터**: `rt_undelivered`(허브가 받지 못한 이벤트)와 `rt_revoke_fail`(닿지 못한 소켓 닫기). 실시간 아웃박스(`docs/REALTIME.md` '실시간 아웃박스')의 `rt_outbox_retry`(다시 보낼 이벤트)와 `rt_outbox_failed`(포기한 이벤트)도 같다. 대시보드에 지난 1시간 값이 보인다.
 - 지연과 부하의 측정값은 `docs/LOAD_TEST.md` §7에 있다. 20×1, 50×3, 100×5, 200×10(테이블×관리자)이고, 로컬 워커에서만 쟀다.
 
 ## 관리자 사이 변경 알림

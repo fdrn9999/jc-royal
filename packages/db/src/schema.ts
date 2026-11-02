@@ -678,6 +678,39 @@ export const opsMetrics = sqliteTable(
 );
 
 /**
+ * The realtime outbox (realtime-outbox.ts, apps/api/src/lib/realtime.ts): one row per platform event for the members'
+ * pages, written in the same D1 batch as the change it reports, so a committed change always has its event and an
+ * event never tells of a change that was rolled back. The api sends it at once after the commit; the minute cron sends
+ * again what that could not deliver, until `expires_at`. `id` is the event's eventId: a page that gets it twice (a send
+ * repeated after a lost answer) handles it once. Only what the event already says is kept here (types, ids, counters),
+ * never a message's text. Kept REALTIME_OUTBOX_RETENTION_MS after it is done.
+ */
+export const realtimeOutbox = sqliteTable(
+  'realtime_outbox',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull(),
+    /** JSON array of member ids (a personal event), or NULL: every hub (a public event). */
+    recipients: text('recipients'),
+    /** The event as the pages get it (RealtimeEvent JSON). */
+    event: text('event').notNull(),
+    status: text('status', { enum: ['pending', 'sent', 'failed', 'expired'] }).notNull().default('pending'),
+    /** Sends tried (the first one after the commit included). */
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    /** While the cron's sender holds it. */
+    leaseUntil: integer('lease_until'),
+    expiresAt: integer('expires_at').notNull(),
+    /** Why the last send failed (an error code or status, never a payload). */
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    /** When a hub took it everywhere it goes (status sent), or when it was given up (failed, expired). */
+    doneAt: integer('done_at'),
+  },
+  (t) => [index('realtime_outbox_due_idx').on(t.status, t.nextAttemptAt), index('realtime_outbox_done_idx').on(t.doneAt)],
+);
+
+/**
  * Days on which a member used the service (see stats.ts): the day and the member, nothing else. Kept for
  * ACTIVE_DAYS_RETENTION days by the daily housekeeping; deleted with the account.
  */

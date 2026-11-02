@@ -3,14 +3,14 @@
  * (no new seats or hands anywhere, optionally no member sign-in). Mounted inside the admin router: an admin session
  * and the admin origin are already required; maintenance changes also need the password confirmed recently.
  */
-import { schema } from '@jc/db';
+import { IF_CHANGED, realtimeOutboxStatement, schema } from '@jc/db';
 import { NOTICE_KINDS } from '@jc/types';
 import { and, desc, eq, gt, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { fail, parseBody } from '../lib/http';
-import { realtimeToAll, sendToAll, spreadFor } from '../lib/realtime';
+import { outboxAfterCommit, outboxToAll, realtimeOutboxSend, spreadFor } from '../lib/realtime';
 import { SERVICE_REV_SQL, tellRoomsAboutMaintenance, type RoomFanOut } from '../lib/service';
 import { audit } from './admin-auth';
 
@@ -106,12 +106,13 @@ function checkMaintenanceWindow(startsAt: number, endsAt: number, now: number) {
 /**
  * A notice or a maintenance window changed, committed: every page reads GET /api/service/status again, unless it holds
  * this `rev` already, after a random wait sized like an announcement to every member (spreadFor), so the reads come at
- * a steady rate. In the background, never failing the change.
+ * a steady rate. In the background, never failing the change; through the realtime outbox (read after the commit, so
+ * written after it), so a hub that misses it is sent it again.
  */
 function serviceChanged(c: Context<AppEnv>) {
   const send = async () => {
     const r = await c.env.DB.prepare(`SELECT ${SERVICE_REV_SQL} AS rev, (SELECT COUNT(*) FROM users WHERE status = 'active' AND is_bot = 0) AS members`).first<{ rev: number; members: number }>();
-    await sendToAll(c.env, { scope: 'service', type: 'service.changed', payload: { rev: Number(r?.rev ?? 0), spreadMs: spreadFor(Number(r?.members ?? 0)) } });
+    await outboxAfterCommit(c.env, [outboxToAll({ scope: 'service', type: 'service.changed', payload: { rev: Number(r?.rev ?? 0), spreadMs: spreadFor(Number(r?.members ?? 0)) } })]);
   };
   c.executionCtx.waitUntil(send().catch((err) => console.warn('realtime service change not sent', String(err))));
 }
@@ -183,17 +184,22 @@ export const adminServiceRoutes = new Hono<AppEnv>()
     if (body.sendInbox) {
       // One statement for every member, each in their own language (the inbox lists it as one send).
       batchId = crypto.randomUUID();
-      const r = await c.env.DB.prepare(
-        `INSERT INTO messages (id, user_id, category, title, body, sender_id, batch_id, created_at)
-         SELECT lower(hex(randomblob(16))), id, 'notice', CASE WHEN locale = 'en' THEN ?1 ELSE ?2 END,
-                CASE WHEN locale = 'en' THEN ?3 ELSE ?4 END, ?5, ?6, ?7
-         FROM users WHERE status = 'active' AND is_bot = 0`,
-      )
-        .bind(body.titleEn, body.titleKo, body.bodyEn ?? body.titleEn, body.bodyKo ?? body.titleKo, me, batchId, now)
-        .run();
-      sent = r.meta.changes ?? 0;
-      // Every member got one: one event for every page, each reading its count after its own wait (no row per member here).
-      if (sent) realtimeToAll(c, { scope: 'service', type: 'inbox.broadcast', payload: { spreadMs: spreadFor(sent) } });
+      // Every member gets one: one event for every page, each reading its count after its own wait (no row per member
+      // here), its outbox row written with the messages (none when there was no member). The wait is sized from the
+      // members counted just before.
+      const members = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND is_bot = 0`).first<{ n: number }>();
+      const told = outboxToAll({ scope: 'service', type: 'inbox.broadcast', payload: { spreadMs: spreadFor(Number(members?.n ?? 0)) } }, now);
+      const [r] = await c.env.DB.batch([
+        c.env.DB.prepare(
+          `INSERT INTO messages (id, user_id, category, title, body, sender_id, batch_id, created_at)
+           SELECT lower(hex(randomblob(16))), id, 'notice', CASE WHEN locale = 'en' THEN ?1 ELSE ?2 END,
+                  CASE WHEN locale = 'en' THEN ?3 ELSE ?4 END, ?5, ?6, ?7
+           FROM users WHERE status = 'active' AND is_bot = 0`,
+        ).bind(body.titleEn, body.titleKo, body.bodyEn ?? body.titleEn, body.bodyKo ?? body.titleKo, me, batchId, now),
+        realtimeOutboxStatement(c.env.DB, told, IF_CHANGED),
+      ]);
+      sent = r!.meta.changes ?? 0;
+      if (sent) realtimeOutboxSend(c, [told]);
     }
     await audit(c, 'service.notice.create', { type: 'notice', id }, { kind: body.kind, titleKo: body.titleKo, startsAt, endsAt: body.endsAt ?? null, postId, batchId, sent });
     return c.json({ id, postId, batchId, sent }, 201);

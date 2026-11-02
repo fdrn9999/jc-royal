@@ -267,6 +267,13 @@
       "when": 1793309074488,
       "tag": "0037_seated_user_index",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1793594400061,
+      "tag": "0038_realtime_outbox",
+      "breakpoints": true
     }
   ]
 }

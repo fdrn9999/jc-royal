@@ -25,6 +25,10 @@
  *   troubles (a session check that failed, a socket refused) are in the worker log only.
  * - `rt_revoke_fail`: a sign-out's closing of its live sockets (a member's, or a console sign-in's) that no hub took
  *   after the second try. Those sockets stay open until the hub's sweep finds the sign-in gone.
+ * - `rt_outbox_retry`: an event of the realtime outbox (realtime-outbox.ts) that a hub did not take, kept for another
+ *   try by the minute cron: one per event and failed try. Nothing is lost yet.
+ * - `rt_outbox_failed`: an outbox event given up, after its last try or past its expiry. Those pages catch up on their
+ *   next read, poll or reconnect only.
  */
 export const OPS_METRICS = [
   'ws_retry',
@@ -40,6 +44,8 @@ export const OPS_METRICS = [
   'web_error',
   'rt_undelivered',
   'rt_revoke_fail',
+  'rt_outbox_retry',
+  'rt_outbox_failed',
 ] as const;
 export type OpsMetric = (typeof OPS_METRICS)[number];
 

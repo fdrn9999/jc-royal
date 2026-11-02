@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Client, PASSWORD, signupBody, uniq, WEB_ORIGIN } from '../support/client';
 import { d1 as d1At } from '../support/d1';
+import { eventually } from '../support/push';
 import { RealtimeSocket } from '../support/realtime';
 import { prepareState, root, startWorker, TABLES, type RunningWorker } from '../support/worker';
 import { TableSocket } from '../support/ws';
@@ -621,5 +622,84 @@ describe('realtime socket: sign-outs', () => {
     expect(await s.waitClose()).toBe(4000);
     expect(s.events).toEqual([]);
     expect(await handshake(u.client)).toBe(401);
+  });
+});
+
+describe('realtime outbox (docs/REALTIME.md (10))', () => {
+  type Row = { status: string; recipients: string | null; event: string; attempts: number };
+  const outbox = (id: string) => d1<Row>(`SELECT status, recipients, event, attempts FROM realtime_outbox WHERE id = '${id}'`).then((r) => r[0]);
+  /** Saved as sent: the send right after the commit records it after the hub answered. */
+  const sent = (id: string) => eventually(() => outbox(id), (r) => r?.status === 'sent');
+  const runCron = async () => {
+    const r = await fetch(`${where.base}/cdn-cgi/local/scheduled?cron=${encodeURIComponent('* * * * *')}`);
+    await r.body?.cancel();
+    expect(r.ok).toBe(true);
+  };
+
+  it('a grant writes its event with the chips and sends it at once; the repeat writes none', async () => {
+    const target = await newUser();
+    const s = await rt(target.client);
+    await reauth();
+    const grant = { amount: 300, memo: 'outbox grant', idempotencyKey: uniq('rt-ob') };
+    expect((await admin.post(`/api/admin/users/${target.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: false });
+    const e = await s.event('wallet.changed');
+    const row = await sent(e.eventId);
+    expect(row).toMatchObject({ status: 'sent', attempts: 1 });
+    expect(JSON.parse(row!.recipients!)).toEqual([target.me.id]);
+    expect(JSON.parse(row!.event)).toEqual(e);
+    expect((await admin.post(`/api/admin/users/${target.me.id}/chips`, grant)).body).toMatchObject({ ok: true, duplicate: true });
+    const rows = await d1<{ n: number }>(`SELECT count(*) AS n FROM realtime_outbox WHERE type = 'wallet.changed' AND recipients LIKE '%${target.me.id}%'`);
+    expect(rows[0]!.n).toBe(1);
+  });
+
+  it("a 1:1 message's event carries the seq D1 gave the message, in the row as in the socket", async () => {
+    const [a, b] = await friends();
+    const sb = await rt(b.client);
+    const posted = await a.client.post(`/api/dm/${b.me.id}`, { text: 'outbox seq' });
+    expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+    const got = await sb.event('social.dm.created');
+    expect(got.payload).toEqual({ peerId: a.me.id, seq: posted.body.seq });
+    const row = await sent(got.eventId);
+    expect(JSON.parse(row!.event).payload).toEqual({ peerId: a.me.id, seq: posted.body.seq });
+    expect(JSON.parse(row!.recipients!)).toEqual([b.me.id]);
+  });
+
+  it('IF_CHANGED on D1: a friend request writes its event; a statement that changed nothing writes none', async () => {
+    const [a, b] = await Promise.all([newUser(), newUser()]);
+    const sb = await rt(b.client);
+    expect((await a.client.post('/api/friends/requests', { userId: b.me.id })).status).toBe(201);
+    const e = await sb.event('social.friend.changed');
+    const row = await sent(e.eventId);
+    expect(JSON.parse(row!.recipients!).sort()).toEqual([a.me.id, b.me.id].sort());
+    // Every route checks before its guarded write, so only a race reaches a change that did not happen: the guard's
+    // own SQL, on this worker's D1, after an UPDATE that matched a row and after one that matched none.
+    const [hit, miss] = [crypto.randomUUID(), crypto.randomUUID()];
+    const write = (id: string) =>
+      `INSERT INTO realtime_outbox (id, type, recipients, status, attempts, next_attempt_at, expires_at, created_at, event) SELECT '${id}', 'x', NULL, 'failed', 0, 0, 0, 0, '{}' WHERE (changes() > 0)`;
+    await d1(`UPDATE users SET updated_at = updated_at WHERE id = '${a.me.id}'; ${write(hit)}; UPDATE users SET updated_at = updated_at WHERE id = 'nobody'; ${write(miss)}`);
+    expect(await outbox(hit)).toMatchObject({ status: 'failed' });
+    expect(await outbox(miss)).toBeUndefined();
+  });
+
+  it('the minute cron sends what the first send did not, once, and drops what expired unsent', async () => {
+    const m = await newUser();
+    const s = await rt(m.client);
+    const now = Date.now();
+    const [due, old] = [crypto.randomUUID(), crypto.randomUUID()];
+    const event = (id: string) => JSON.stringify({ scope: 'user', type: 'wallet.changed', eventId: id, occurredAt: now });
+    // As a first send that a hub missed leaves them: tried once, due again (one of them past its expiry).
+    await d1(
+      `INSERT INTO realtime_outbox (id, type, recipients, event, status, attempts, next_attempt_at, expires_at, created_at, last_error) VALUES
+         ('${due}', 'wallet.changed', '["${m.me.id}"]', '${event(due)}', 'pending', 1, ${now - 1_000}, ${now + 1_800_000}, ${now - 60_000}, 'hub 0: 503'),
+         ('${old}', 'wallet.changed', '["${m.me.id}"]', '${event(old)}', 'pending', 1, ${now - 1_000}, ${now - 1}, ${now - 1_900_000}, 'hub 0: 503')`,
+    );
+    await runCron();
+    await s.until(() => s.events.some((e) => e.eventId === due), 15_000, 'retried event');
+    expect(await outbox(due)).toMatchObject({ status: 'sent', attempts: 2 });
+    expect(await outbox(old)).toMatchObject({ status: 'expired', attempts: 1 });
+    await runCron();
+    await s.ping();
+    await new Promise((r) => setTimeout(r, 500));
+    expect(s.events.map((e) => e.eventId).filter((id) => id === due || id === old)).toEqual([due]);
   });
 });

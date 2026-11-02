@@ -26,6 +26,8 @@ test('admin console: bootstrap, login, create table, adjust chips with password 
   await expect(page.getByTestId('ops-stats')).toContainText('실시간 전달 누락');
   await expect(page.getByTestId('ops-rt-undelivered')).toHaveText(/^\d[\d,]*$/);
   await expect(page.getByTestId('ops-rt-revoke-fail')).toHaveText(/^\d[\d,]*$/);
+  await expect(page.getByTestId('ops-rt-outbox-retry')).toHaveText(/^\d[\d,]*$/);
+  await expect(page.getByTestId('ops-rt-outbox-failed')).toHaveText(/^\d[\d,]*$/);
   await page.getByTestId('ops-stats').screenshot({ path: 'test-results/admin-ops-stats.png' });
   await expect(page.getByTestId('totals')).toBeVisible();
 

@@ -29,7 +29,7 @@ import { mailEnabled, passwordResetMail, sendMail, verificationCodeMail } from '
 import { notices } from '../lib/notices';
 import { saveSignupConsent } from '../lib/notification-settings';
 import { clientIp, rateLimit } from '../lib/rate-limit';
-import { realtimeToUsers } from '../lib/realtime';
+import { realtimeOutboxSend, realtimeToUsers } from '../lib/realtime';
 import { checkReferralCode, findReferrer, recordReferral, settleReferral } from '../lib/referral';
 import { refuseSignInInMaintenance } from '../lib/service';
 import { createSession, destroySession, renewUserCookie } from '../lib/session';
@@ -214,7 +214,8 @@ export const authRoutes = new Hono<AppEnv>()
     if (grant > 0) {
       await applyLedger(c.env.DB, { userId: id, type: 'signup_grant', amount: grant, idempotencyKey: `signup:${id}`, memo: 'welcome chips' });
     }
-    await sendMessages(db, { userIds: [id], category: 'system', ...notices(body.locale).welcome(grant) });
+    const welcome = await sendMessages(c.env.DB, { userIds: [id], category: 'system', ...notices(body.locale).welcome(grant) });
+    if (welcome.event) realtimeOutboxSend(c, [welcome.event]);
     // The referral is recorded under the policy in force now and paid if it may be; a failure here never fails the
     // signup (the referral, if recorded, is paid later by the member's card, the daily cron or an operator).
     if (referrer) {

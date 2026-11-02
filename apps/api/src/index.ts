@@ -4,6 +4,7 @@ import type { AppEnv, Env } from './env';
 import { countingD1, type D1Counts } from './lib/d1-stats';
 import { housekeeping } from './lib/housekeeping';
 import { flushPush } from './lib/notify';
+import { flushRealtimeOutbox } from './lib/realtime';
 import { sharePageResponse } from './lib/og';
 import { countOps } from './lib/ops';
 import { sweepReferrals } from './lib/referral';
@@ -27,7 +28,7 @@ import { blockRoutes, dmRoutes, friendPresenceRoutes, friendRoutes } from './rou
 import { tableRoutes, tableSocket } from './routes/tables';
 import { tournamentRoutes } from './routes/tournaments';
 
-/** wrangler.jsonc `triggers`: every minute, the push outbox; any other run is the daily one. */
+/** wrangler.jsonc `triggers`: every minute, the realtime and push outboxes; any other run is the daily one. */
 const PUSH_CRON = '* * * * *';
 
 const app = new Hono<AppEnv>();
@@ -121,11 +122,18 @@ export default {
    * Cron trigger (wrangler.jsonc `triggers`): rolls up the day that ended into the operations statistics (before the
    * housekeeping deletes old activity markers), deletes expired short-lived rows, then wakes rooms whose close or idle
    * close stalled, and settles referrals waiting for a payout (lib/referral.ts). Awaited, so a failure shows as a failed
-   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest. The minute trigger only sends
-   * the push outbox (lib/notify.ts), and without the push keys returns before touching D1.
+   * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest. The minute trigger sends
+   * again the realtime outbox's events no hub took yet (lib/realtime.ts), one call a hub, then the push outbox
+   * (lib/notify.ts), which without the push keys returns before touching D1.
    */
   async scheduled(event, env) {
     if (event.cron === PUSH_CRON) {
+      try {
+        const rt = await flushRealtimeOutbox(env, { limit: 50 });
+        if (rt.claimed || rt.dropped) console.log('realtime outbox', JSON.stringify(rt));
+      } catch (e) {
+        console.error('realtime outbox failed', e instanceof Error ? e.message : String(e));
+      }
       const sent = await flushPush(env, { limit: 50 });
       if (sent.claimed) console.log('push outbox', JSON.stringify(sent));
       return;

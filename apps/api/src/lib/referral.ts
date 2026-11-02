@@ -1,4 +1,4 @@
-import { applyLedger, createDb, dayStart, LEDGER_GUARD, statsDay } from '@jc/db';
+import { applyLedger, dayStart, LEDGER_GUARD, realtimeOutboxStatement, statsDay, type RealtimeOutboxRow } from '@jc/db';
 import {
   normalizeReferralCode,
   REFERRAL_CODE_RE,
@@ -14,7 +14,7 @@ import type { Env } from '../env';
 import { sendMessages } from './community';
 import { hmacSign } from './crypto';
 import { notices } from './notices';
-import { sendToUsers } from './realtime';
+import { outboxToUsers, sendOutboxNow } from './realtime';
 
 /**
  * Referral rewards: a member shares their code (or the link `/register?ref=CODE`); a new member who signs up with it
@@ -407,6 +407,8 @@ export async function settleReferral(env: Env, id: string, opts: { now?: number;
 
     let raced = false;
     if (plan.invitee === 'pay' && invitee) {
+      // The member's pages hear of the payment from a row written with it (the realtime outbox).
+      const wallet = outboxToUsers([row.inviteeId], { scope: 'user', type: 'wallet.changed' }, now);
       const r = await applyLedger(
         db,
         {
@@ -423,14 +425,16 @@ export async function settleReferral(env: Env, id: string, opts: { now?: number;
           db
             .prepare(`UPDATE referrals SET invitee_status = 'paid', invitee_ledger_id = ?1, invitee_paid_at = ?2, updated_at = ?2 WHERE id = ?3 AND invitee_status = 'pending' AND ${LEDGER_GUARD}`)
             .bind(ledgerId, now, id, ledgerId),
+          realtimeOutboxStatement(db, wallet, { sql: LEDGER_GUARD, params: [ledgerId] }),
         ],
       );
       if (r.status === 'applied') {
         paid.invitee = row.inviteeAmount;
-        await notify(env, invitee, 'invitee', row.inviteeAmount, referrer?.status === 'deleted' ? null : (referrer?.nickname ?? null));
+        await notify(env, invitee, 'invitee', row.inviteeAmount, referrer?.status === 'deleted' ? null : (referrer?.nickname ?? null), wallet);
       } else if (r.status === 'insufficient') raced = true;
     }
     if (plan.referrer === 'pay' && referrer) {
+      const wallet = outboxToUsers([row.referrerId], { scope: 'user', type: 'wallet.changed' }, now);
       const r = await applyLedger(
         db,
         {
@@ -456,11 +460,12 @@ export async function settleReferral(env: Env, id: string, opts: { now?: number;
           db
             .prepare(`UPDATE referrals SET referrer_status = 'paid', referrer_ledger_id = ?1, referrer_paid_at = ?2, updated_at = ?2 WHERE id = ?3 AND referrer_status = 'pending' AND ${LEDGER_GUARD}`)
             .bind(ledgerId, now, id, ledgerId),
+          realtimeOutboxStatement(db, wallet, { sql: LEDGER_GUARD, params: [ledgerId] }),
         ],
       );
       if (r.status === 'applied') {
         paid.referrer = row.referrerAmount;
-        await notify(env, referrer, 'referrer', row.referrerAmount, invitee?.nickname ?? null);
+        await notify(env, referrer, 'referrer', row.referrerAmount, invitee?.nickname ?? null, wallet);
       } else if (r.status === 'insufficient') raced = true;
     } else if (plan.referrer === 'capped' || plan.referrer === 'skipped') {
       await db.prepare(`UPDATE referrals SET referrer_status = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'pending' AND referrer_status = 'pending'`).bind(id, plan.referrer, now).run();
@@ -491,14 +496,19 @@ async function finish(db: D1Database, id: string, paid: SettleResult['paid']): P
   return { status: r?.status ?? null, referrerStatus: r?.referrerStatus, inviteeStatus: r?.inviteeStatus, failure: r?.failureCode ?? null, paid };
 }
 
-/** A system message to the member just paid, in their language. A message that fails never undoes the payment. */
-async function notify(env: Env, to: Person, side: 'referrer' | 'invitee', amount: number, other: string | null) {
+/**
+ * A system message to the member just paid, in their language, then the payment's event (`wallet`, written with it) and
+ * the message's. A message that fails never undoes the payment.
+ */
+async function notify(env: Env, to: Person, side: 'referrer' | 'invitee', amount: number, other: string | null, wallet: RealtimeOutboxRow) {
   const n = notices(to.locale === 'en' ? 'en' : 'ko');
-  await sendMessages(createDb(env.DB), { userIds: [to.id], category: 'system', ...n.referralPaid(side, amount, other) }).catch((e) => console.error('referral notice', e));
-  // Paid here from a request or the daily run, with no request context to hand the publish to: awaited, and it never throws.
-  await Promise.all([sendToUsers(env, [to.id], { scope: 'user', type: 'wallet.changed' }), sendToUsers(env, [to.id], { scope: 'user', type: 'message.changed' })]).catch((e) =>
-    console.warn('realtime referral', String(e)),
-  );
+  const msg = await sendMessages(env.DB, { userIds: [to.id], category: 'system', ...n.referralPaid(side, amount, other) }).catch((e: unknown) => {
+    console.error('referral notice', e);
+    return null;
+  });
+  // Paid here from a request or the daily run, with no request context to hand the send to: awaited, and it never
+  // throws (what no hub took, the minute cron sends again).
+  await sendOutboxNow(env, msg?.event ? [wallet, msg.event] : [wallet]).catch((e) => console.warn('realtime referral', String(e)));
 }
 
 /**

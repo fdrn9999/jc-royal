@@ -4,7 +4,7 @@
  * to admin_audit_log, refused and failed attempts too (lib/audit.ts). Actions marked so take preview: true and answer
  * what they would change without changing it.
  */
-import { applyLedger, findLedgerMismatches, LEDGER_GUARD, schema } from '@jc/db';
+import { applyLedger, findLedgerMismatches, LEDGER_GUARD, realtimeOutboxStatement, realtimeOutboxValues, schema } from '@jc/db';
 import { botSettingsIssues, ChipAdjustSchema, TableInputSchema, TablePatchSchema, type AcademyStatRow } from '@jc/types';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
@@ -40,7 +40,7 @@ import { sendMessages } from '../lib/community';
 import { mailEnabled, passwordResetMail, sendMail } from '../lib/mail';
 import { notices } from '../lib/notices';
 import { looksPersonal } from '../lib/pii';
-import { realtimeToUsers } from '../lib/realtime';
+import { outboxToUsers, realtimeOutboxSend } from '../lib/realtime';
 import { economy, LARGE_ADJUSTMENT } from '../lib/economy';
 import { liveOps } from '../lib/ops';
 import { kickEverywhere, refreshRoleEverywhere, roomCall } from '../lib/room';
@@ -727,7 +727,8 @@ const admin = new Hono<AppEnv>()
     if (body.reportId) {
       await c.var.db.insert(schema.reportEvents).values({ id: crypto.randomUUID(), reportId: body.reportId, actorId: c.var.user!.id, kind: 'sanction', toValue: 'user.suspend', body: reason, createdAt: at });
     }
-    await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(lang).suspended(reason), senderId: c.var.user!.id });
+    const suspended = await sendMessages(c.env.DB, { userIds: [id], category: 'sanction', ...notices(lang).suspended(reason), senderId: c.var.user!.id });
+    if (suspended.event) realtimeOutboxSend(c, [suspended.event]);
     await audit(c, 'user.suspend', { type: 'user', id }, { ...body, from: target.status, to: 'suspended', previousReason: target.suspendedReason, kick });
     return c.json({ ok: true, kick });
   })
@@ -768,7 +769,10 @@ const admin = new Hono<AppEnv>()
       .set({ status: 'active', suspendedReason: null, updatedAt: Date.now() })
       .where(and(eq(schema.users.id, id), eq(schema.users.status, 'suspended')))
       .returning({ id: schema.users.id });
-    if (lifted[0]) await sendMessages(c.var.db, { userIds: [id], category: 'sanction', ...notices(target.locale).unsuspended(), senderId: c.var.user!.id });
+    if (lifted[0]) {
+      const { event } = await sendMessages(c.env.DB, { userIds: [id], category: 'sanction', ...notices(target.locale).unsuspended(), senderId: c.var.user!.id });
+      if (event) realtimeOutboxSend(c, [event]);
+    }
     // The suspension's own reason is cleared from the account, so the record keeps it next to the reason for lifting it.
     await audit(c, 'user.unsuspend', { type: 'user', id }, { reason: body.reason, from: target.status, to: lifted[0] ? 'active' : target.status, suspendedReason: target.suspendedReason });
     return c.json({ ok: true });
@@ -819,17 +823,19 @@ const admin = new Hono<AppEnv>()
       .where(and(eq(schema.users.id, id), isNotNull(schema.users.vipColor)));
     const dropSessions = c.var.db.delete(schema.sessions).where(and(eq(schema.sessions.userId, id), eq(schema.sessions.kind, 'admin')));
     const dropSwitches = c.var.db.delete(schema.adminPermissions).where(eq(schema.adminPermissions.userId, id));
+    // The member's own pages read their account again (the role, a VIP color it ended): written with the change.
+    const changed = outboxToUsers([id], { scope: 'user', type: 'account.changed' }, now);
+    const tell = c.var.db.insert(schema.realtimeOutbox).values(realtimeOutboxValues(changed));
     const [vipBefore] = staff
-      ? await c.var.db.batch([vipNow, endVip, setRole, dropSessions, dropSwitches])
-      : await c.var.db.batch([vipNow, setRole, dropSessions, dropSwitches]);
+      ? await c.var.db.batch([vipNow, endVip, setRole, dropSessions, dropSwitches, tell])
+      : await c.var.db.batch([vipNow, setRole, dropSessions, dropSwitches, tell]);
     const vipEnded = staff && vipBefore[0]?.color ? vipBefore[0] : null;
     await audit(c, 'user.role', { type: 'user', id }, { from: target.role, to: body.role, reason: body.reason });
     if (switches) await audit(c, 'admin.grants.reset', { type: 'user', id }, { before: cleared, after: [], reason: body.reason, cause: 'role', from: target.role, to: body.role });
     if (vipEnded) await audit(c, 'user.vip', { type: 'user', id }, { from: vipEnded.color, to: null, reason: body.reason, cause: 'role', role: body.role, version: vipEnded.version + 1 });
     // Their console sign-ins ended with the role change: their control center sockets close too.
     adminMonitorRevoke(c, { user: id });
-    // The member's own pages read their account again (the role, a VIP color it ended).
-    realtimeToUsers(c, [id], { scope: 'user', type: 'account.changed' });
+    realtimeOutboxSend(c, [changed]);
     // The staff badge other players see at the tables where the member sits.
     const tables = await refreshRoleEverywhere(c.env, id, body.role);
     return c.json({ ok: true, tables });
@@ -889,6 +895,9 @@ const admin = new Hono<AppEnv>()
       });
     }
     const linked = ref ? { refLedgerId: ref.id, refType: ref.type } : {};
+    // The member's open pages read the balance and the ledger again (the event says only that they changed), from a row
+    // written with the chips.
+    const wallet = outboxToUsers([id], { scope: 'user', type: 'wallet.changed' });
     // The record goes in the ledger's batch: if it cannot be written, no chips move and the request fails (the console
     // keeps its key, so sending it again is this adjustment, once).
     const r = await applyLedger(
@@ -902,7 +911,10 @@ const admin = new Hono<AppEnv>()
         memo: body.memo,
         refId: ref?.id ?? null,
       },
-      (ledgerId) => [chipsRecord(c.env.DB, id, c.var.user!.id, clientIp(c), { amount: body.amount, memo: body.memo, ledgerId, ...linked })],
+      (ledgerId) => [
+        chipsRecord(c.env.DB, id, c.var.user!.id, clientIp(c), { amount: body.amount, memo: body.memo, ledgerId, ...linked }),
+        realtimeOutboxStatement(c.env.DB, wallet, { sql: LEDGER_GUARD, params: [ledgerId] }),
+      ],
     );
     if (r.status === 'insufficient') return refuse('insufficient_balance', 409, 'insufficient_balance', 'adjustment would make the balance negative (or user not found)');
     // The same request again (a retry, a double click): nothing changed, and that is on record. An adjustment made before
@@ -918,15 +930,16 @@ const admin = new Hono<AppEnv>()
       c.set('audited', true);
       // The adjustment and its record are committed: what follows reports it and never turns it into a failure (the
       // admin would see an error for chips that moved, and the retry finds them moved). The notice is logged if it fails.
-      await sendMessages(c.var.db, {
+      const notice = await sendMessages(c.env.DB, {
         userIds: [id],
         category: body.amount > 0 ? 'event' : 'admin',
         ...notices(target?.locale).chips(body.amount, body.memo, r.balanceAfter),
         senderId: c.var.user!.id,
-      }).catch((e) => console.error('chips notice not written', id, r.ledgerId, e));
-      // The member's open pages read the balance, the ledger and the inbox again (the event says only that they changed).
-      realtimeToUsers(c, [id], { scope: 'user', type: 'wallet.changed' });
-      realtimeToUsers(c, [id], { scope: 'user', type: 'message.changed' });
+      }).catch((e: unknown) => {
+        console.error('chips notice not written', id, r.ledgerId, e);
+        return null;
+      });
+      realtimeOutboxSend(c, notice?.event ? [wallet, notice.event] : [wallet]);
     }
     return c.json({ ok: true, duplicate: r.status === 'duplicate', balanceAfter: r.balanceAfter });
   })
@@ -1445,6 +1458,8 @@ const admin = new Hono<AppEnv>()
     const recordId = crypto.randomUUID();
     const revertId = crypto.randomUUID();
     const keys = [`reconcile:${id}:record`, `reconcile:${id}:revert`] as const;
+    // A recorded difference is a new row of the member's history; a revert also moves the balance.
+    const wallet = outboxToUsers([e.subjectId], { scope: 'user', type: 'wallet.changed' });
     // Every write holds only if the one before it happened: the record row only while the wallet is still off its ledger
     // by exactly this difference (and, to revert, the wallet can give it back), the revert row only after the record row,
     // the wallet only with the revert row, the event only with our last row. The keys make a second correction a no-op.
@@ -1470,6 +1485,7 @@ const admin = new Hono<AppEnv>()
         `UPDATE reconciliation_events SET resolved_by = ?1, resolved_at = ?2, resolution = ?3, detail = COALESCE(detail, '') || ?4
           WHERE id = ?5 AND (resolution IS NULL OR resolution = 'note') AND EXISTS (SELECT 1 FROM chip_ledger WHERE id = ?6)`,
       ).bind(actor, Date.now(), body.action, ` | ${body.action}: ${body.note}`, id, revert ? revertId : recordId),
+      realtimeOutboxStatement(DB, wallet, { sql: LEDGER_GUARD, params: [revert ? revertId : recordId] }),
       DB.prepare(`SELECT id, idempotency_key AS idempotencyKey, amount, balance_after AS balanceAfter FROM chip_ledger WHERE idempotency_key IN (?1, ?2)`).bind(...keys),
       DB.prepare(`SELECT balance FROM users WHERE id = ?1`).bind(e.subjectId),
     ]);
@@ -1480,12 +1496,12 @@ const admin = new Hono<AppEnv>()
       if (rows.length) fail(409, 'already_resolved', 'this event was already corrected');
       fail(409, 'reconcile_stale', 'the wallet changed while it was being corrected; open the event again');
     }
+    const events = [wallet];
     if (revert && before.status !== 'deleted' && balanceAfter !== null) {
-      await sendMessages(c.var.db, { userIds: [e.subjectId], category: 'admin', ...notices(before.locale).reconcileReverted(-difference, balanceAfter), senderId: actor });
-      realtimeToUsers(c, [e.subjectId], { scope: 'user', type: 'message.changed' });
+      const { event } = await sendMessages(DB, { userIds: [e.subjectId], category: 'admin', ...notices(before.locale).reconcileReverted(-difference, balanceAfter), senderId: actor });
+      if (event) events.push(event);
     }
-    // A recorded difference is a new row of the member's history; a revert also moves the balance.
-    realtimeToUsers(c, [e.subjectId], { scope: 'user', type: 'wallet.changed' });
+    realtimeOutboxSend(c, events);
     await audit(c, 'user.reconcile', { type: 'user', id: e.subjectId }, { eventId: id, action: body.action, difference, note: body.note, ledgerIds, balanceBefore: before.balance, balanceAfter });
     return c.json({ ok: true, action: body.action, ledgerIds, balanceAfter });
   })
