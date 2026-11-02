@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import type { MonitorRoomsResponse } from '@jc/types';
 import { ADMIN, adminLogin, sql } from './analytics-helpers';
 import { signUp, sitWith, test, uid } from './helpers';
 import { promoteSql } from '../support/grants';
@@ -40,6 +41,11 @@ test('ops log: a problem the minute check finds is on the control center without
 
   const page = await adminLogin(browser, op.email);
   await page.setViewportSize({ width: 1920, height: 1080 });
+  // Every rooms read the console makes, to check below that none carries a held card.
+  const roomReads: string[] = [];
+  page.on('response', (r) => {
+    if (r.url().includes('/api/admin/monitor/rooms')) r.text().then((body) => roomReads.push(body), () => {});
+  });
   await page.goto(`${ADMIN}/control-center`);
   await expect(page.getByTestId('cc-link')).toHaveAttribute('data-state', 'live');
   const ours = page.locator(`[data-testid=cc-ops-alert][data-table="${stuck}"]`);
@@ -62,6 +68,14 @@ test('ops log: a problem the minute check finds is on the control center without
   await expect(health(page, 'sync')).toHaveAttribute('data-state', 'ok');
   await expect(health(page, 'settlement')).toHaveAttribute('data-state', 'ok');
   await expect(health(page, 'lastGood')).toHaveAttribute('data-state', 'ok');
+  // The reads behind that health, with a hand dealt there: no held card or deck in them, by field name (the api's test
+  // compares the cards themselves: tests/integration/admin-monitor.test.ts).
+  const dealt = (body: string) => {
+    const r = (JSON.parse(body) as Partial<MonitorRoomsResponse>).rooms?.[live];
+    return !!r && 'room' in r && r.room.hand !== null;
+  };
+  await expect.poll(() => roomReads.some(dealt)).toBe(true);
+  for (const body of roomReads) expect(body).not.toMatch(/"(holeCards|remainingDeck|deck)"/);
   await page.screenshot({ path: 'test-results/ops-control-center-1920.png' });
 
   // One screen for the alert: its table, its log, and a note kept for every console.
@@ -74,14 +88,23 @@ test('ops log: a problem the minute check finds is on the control center without
   await page.getByTestId('ops-handling-investigating').click();
   await expect(page.getByTestId('ops-handling-investigating')).toBeDisabled();
   await expect(page.locator('[data-testid=ops-incident-event]')).toHaveCount(2);
-  // Not a member's name, not a card, anywhere on it.
+  // Not the seated member's name, and no card drawn, anywhere on it (a closed table: the rooms reads are checked above).
   await expect(page.getByTestId('ops-incident')).not.toContainText(member.nickname);
   expect(await page.locator('[data-testid=ops-incident] [data-card]').count()).toBe(0);
   await page.screenshot({ path: 'test-results/ops-incident-1920.png', fullPage: true });
 
   // The log, after the console was closed and opened again.
   await page.goto(`${ADMIN}/ops`);
-  await expect(page.locator(`[data-testid=ops-alert-row][data-code=seated_on_closed]`).filter({ hasText: 'E2E Ops Stuck' })).toBeVisible();
+  const stuckRow = page.locator(`[data-testid=ops-alert-row][data-code=seated_on_closed]`).filter({ hasText: 'E2E Ops Stuck' });
+  await expect(stuckRow).toBeVisible();
+  // A table's name filters the list to it, and says so in a chip that clears it.
+  await stuckRow.getByRole('button', { name: 'E2E Ops Stuck' }).click();
+  await expect(page).toHaveURL(new RegExp(`[?&]table=${stuck}`));
+  await expect(page.getByTestId('ops-table-chip')).toContainText('E2E Ops Stuck');
+  await expect(page.locator('[data-testid=ops-alert-row]')).toHaveCount(1);
+  await page.getByTestId('ops-table-chip').click();
+  await expect(page.getByTestId('ops-table-chip')).toHaveCount(0);
+  await expect(page).not.toHaveURL(/[?&]table=/);
   await page.getByTestId('ops-tab-events').click();
   // A line names its table as it is called now.
   await expect(page.locator('[data-testid=ops-event-row][data-kind=alert_handled]').filter({ hasText: 'E2E Ops Stuck' })).toBeVisible();

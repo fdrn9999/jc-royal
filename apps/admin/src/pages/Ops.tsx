@@ -31,7 +31,7 @@ import { applyRooms, freshnessOf, levelOf, problemsOf, type RoomEntry } from '..
 import { HANDLING_KEY, metricLabel, opsAlertText, opsEventText, sevLevel } from '../opsText';
 import { dayStart, Feedback, LoadError, Pager, PageState, type Note } from '../ui';
 import { Table } from './Console';
-import { ControlSection, LEVEL_KEY, LevelChip, TableHealth } from './ControlCenter';
+import { ControlSection, LEVEL_KEY, LevelChip, TableHealth, useNow } from './ControlCenter';
 
 type Cursor = { at: number; id: string };
 const PAGE = 50;
@@ -150,12 +150,14 @@ export function OpsPage() {
     setParams(next);
   };
   const filtered = keys.some((k) => params.get(k));
-  const table = params.get('colTable');
+  const table = params.get('table');
   const items = (tab === 'alerts' ? alerts.data?.items : events.data?.items) ?? [];
   const tableName = table
     ? ((tab === 'alerts' ? alerts.data?.items.find((a) => a.tableId === table)?.table?.name : events.data?.items.find((e) => e.tableId === table)?.tableName) ?? table)
     : null;
   const next = tab === 'alerts' ? alerts.data : events.data;
+  // Drawn again every 30 s, so a check that stopped shows as late on a page left open.
+  useNow(30_000);
   const now = Date.now();
 
   return (
@@ -329,17 +331,19 @@ export function OpsIncidentPage() {
   const { data, error, reload } = useData<OpsIncidentResponse>(`/api/admin/monitor/alerts/${encodeURIComponent(id)}`);
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
-  const [entry, setEntry] = useState<RoomEntry | undefined>(undefined);
+  // Kept by table: an answer about the table of the alert before (this page moved on to another) is not this one's.
+  const [rooms, setRooms] = useState<ReadonlyMap<string, RoomEntry>>(() => new Map());
   const [, tick] = useState(0);
   const tableId = data?.table?.id ?? null;
   const live = !!data?.table && data.table.status !== 'closed';
+  const entry = tableId ? rooms.get(tableId) : undefined;
 
   /** The room as it is now, asked once (and again on Refresh): the alert's table may have moved on since. */
   const readRoom = useCallback(async () => {
     if (!tableId) return;
     try {
       const r = await api<MonitorRoomsResponse>('/api/admin/monitor/rooms', { body: { ids: [tableId] } });
-      setEntry((prev) => applyRooms(new Map(prev ? [[tableId, prev]] : []), r, Date.now()).get(tableId));
+      setRooms((prev) => applyRooms(prev, r, Date.now()));
     } catch (e) {
       setNote({ ok: false, text: errText(e, t) });
     }

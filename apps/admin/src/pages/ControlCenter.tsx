@@ -210,7 +210,7 @@ const timeOf = (ms: number, locale: string) => new Intl.DateTimeFormat(locale ==
 const secs = (ms: number) => Math.max(0, Math.ceil(ms / 1000));
 const roomOf = (e: RoomEntry | undefined): MonitorRoom | null => (e && 'room' in e ? e.room : null);
 
-function useNow(every: number): number {
+export function useNow(every: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), every);
