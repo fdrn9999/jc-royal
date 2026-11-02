@@ -2,13 +2,19 @@ import { schema } from '@jc/db';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../env';
 import { HttpError, isPreview } from './http';
+import { controlEvent } from './ops-watch';
 import { matchedRoute } from './permissions';
 import { clientIp } from './rate-limit';
 
-/** One admin_audit_log row. `failed`: an attempt that was refused or broke off. */
-export async function audit(c: Context<AppEnv>, action: string, target?: { type: string; id: string }, detail?: unknown, outcome: 'ok' | 'failed' = 'ok') {
+/**
+ * One admin_audit_log row (its id is returned). `failed`: an attempt that was refused or broke off. A table control is
+ * also a line of the control center's operations log (ops_events, lib/ops-watch.ts), pointing back at this row; a
+ * failure to write that line changes nothing here.
+ */
+export async function audit(c: Context<AppEnv>, action: string, target?: { type: string; id: string }, detail?: unknown, outcome: 'ok' | 'failed' = 'ok'): Promise<string> {
+  const id = crypto.randomUUID();
   await c.var.db.insert(schema.adminAuditLog).values({
-    id: crypto.randomUUID(),
+    id,
     actorId: c.var.user?.id ?? 'anonymous',
     action,
     targetType: target?.type ?? null,
@@ -18,6 +24,17 @@ export async function audit(c: Context<AppEnv>, action: string, target?: { type:
     outcome,
   });
   c.set('audited', true);
+  const line = controlEvent(action, target, detail, outcome);
+  if (line) {
+    try {
+      await c.env.DB.prepare(`INSERT INTO ops_events (id, at, kind, code, severity, table_id, summary, correlation_id) VALUES (?1, ?2, 'admin_control', ?3, ?4, ?5, ?6, ?7)`)
+        .bind(crypto.randomUUID(), Date.now(), line.code, line.severity, line.tableId, line.summary, id)
+        .run();
+    } catch (e) {
+      console.error('ops log line not written', e instanceof Error ? e.message : String(e));
+    }
+  }
+  return id;
 }
 
 /** The audit page counts matches up to this many (a count over the whole log would read all of it). */

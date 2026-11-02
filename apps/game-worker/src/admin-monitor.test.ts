@@ -36,11 +36,12 @@ describe('hasTableDuty', () => {
 });
 
 describe("the other administrators' changes a socket hears of", () => {
-  it('follows the permissions: VIP with the vip duty, tournaments with the tournaments duty, both for a super admin', () => {
-    expect(changeKindsOf('super_admin', null)).toEqual(['vip', 'tournament']);
-    expect(changeKindsOf('admin', '["tables","vip"]')).toEqual(['vip']);
-    expect(changeKindsOf('admin', '["tables","tournaments"]')).toEqual(['tournament']);
-    expect(changeKindsOf('admin', '["tables"]')).toEqual([]);
+  it('follows the permissions: VIP with the vip duty, tournaments with the tournaments duty, alerts with table duty, all for a super admin', () => {
+    expect(changeKindsOf('super_admin', null)).toEqual(['vip', 'tournament', 'ops']);
+    expect(changeKindsOf('admin', '["tables","vip"]')).toEqual(['vip', 'ops']);
+    expect(changeKindsOf('admin', '["tables","tournaments"]')).toEqual(['tournament', 'ops']);
+    expect(changeKindsOf('admin', '["tables"]')).toEqual(['ops']);
+    expect(changeKindsOf('admin', '["vip"]')).toEqual(['vip']);
     expect(changeKindsOf('admin', 'not json')).toEqual([]);
     expect(changeKindsOf('user', '["vip","tournaments"]')).toEqual([]);
   });

@@ -19,13 +19,14 @@ describe('hubHeaders', () => {
     expect(h.get('upgrade')).toBe('websocket');
     expect(h.get('x-jc-internal')).toBe('secret');
     expect(JSON.parse(decodeURIComponent(h.get('x-jc-identity')!))).toEqual(identity);
-    expect(JSON.parse(h.get('x-jc-monitor-kinds')!)).toEqual([]);
+    // Table duty hears of the persistent alerts (ops), whatever the page claimed.
+    expect(JSON.parse(h.get('x-jc-monitor-kinds')!)).toEqual(['ops']);
     expect(h.has('x-jc-sweep-ms')).toBe(false);
   });
 
   it('the kinds are the grants’, and a local test’s sweep period is the api’s', () => {
     const h = hubHeaders(forged(), { INTERNAL_SECRET: 'secret', REALTIME_SWEEP_MS: '15000' }, identity, ['tables', 'tournaments']);
-    expect(JSON.parse(h.get('x-jc-monitor-kinds')!)).toEqual(['tournament']);
+    expect(JSON.parse(h.get('x-jc-monitor-kinds')!)).toEqual(['tournament', 'ops']);
     expect(h.get('x-jc-sweep-ms')).toBe('15000');
     expect(JSON.parse(hubHeaders(new Headers(), { INTERNAL_SECRET: 's' }, identity, ['vip', 'tournaments']).get('x-jc-monitor-kinds')!)).toEqual(['vip', 'tournament']);
   });

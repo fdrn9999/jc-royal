@@ -21,6 +21,8 @@ import {
   type MonitorSeat,
   type MonitorTable,
   type MonitorTablesResponse,
+  type OpsAlertDto,
+  type OpsAlertsResponse,
 } from '@jc/types';
 import {
   Badge,
@@ -58,7 +60,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useT, type Key } from '../i18n';
 import { actionLabel, botLevelLabel, botStyleLabel, seatPhaseLabel, stageLabel, tableIssueLabel, tnStatusLabel, topUpStateLabel, type Tr } from '../labels';
 import { REASONS } from '../adminTemplates';
-import { ApiError, errText, hasGrant, useAdmin } from '../lib';
+import { ApiError, errText, hasGrant, useAdmin, useData } from '../lib';
 import {
   alertChanges,
   alertOrder,
@@ -121,6 +123,7 @@ import {
   type TimelineEntry,
 } from '../monitor';
 import { useMonitorSocket } from '../monitorSocket';
+import { HANDLING_KEY as OPS_HANDLING_KEY, healthOf, opsAlertText, sevLevel, type HealthItem, type HealthKey, type HealthState } from '../opsText';
 import { AdminReasonField } from '../templateFields';
 import { Feedback, Modal, type Note } from '../ui';
 import { IDLE_AFTER_MS } from './Dashboard';
@@ -161,7 +164,7 @@ const LINK_KEY: Record<LinkState, Key> = { live: 'ccLinkLive', polling: 'ccLinkP
 const LINK_DOT: Record<LinkState, string> = { live: 'bg-success', polling: 'bg-warning', stale: 'bg-danger', connecting: 'bg-ink-500' };
 
 type Severity = Exclude<Level, 0>;
-const LEVEL_KEY: Record<Severity, Key> = { 1: 'ccLevel1', 2: 'ccLevel2', 3: 'ccLevel3', 4: 'ccLevel4' };
+export const LEVEL_KEY: Record<Severity, Key> = { 1: 'ccLevel1', 2: 'ccLevel2', 3: 'ccLevel3', 4: 'ccLevel4' };
 const LEVEL_ICON: Record<Severity, LucideIcon> = { 1: InfoIcon, 2: CircleAlertIcon, 3: TriangleAlertIcon, 4: OctagonAlertIcon };
 const LEVEL_CHIP: Record<Severity, string> = {
   1: 'border-info/40 bg-info/10 text-[#a9c8ee]',
@@ -461,15 +464,29 @@ export function ControlCenterPage() {
     [],
   );
 
+  // The persistent alerts (the api's minute check, kept in D1): read on each hello and when the hub says they changed;
+  // every five minutes too, in case the socket is down.
+  const ops = useData<OpsAlertsResponse>('/api/admin/monitor/alerts?state=open');
+  const reloadOps = ops.reload;
+  useEffect(() => {
+    const id = setInterval(() => void reloadOps(), 5 * 60_000);
+    return () => clearInterval(id);
+  }, [reloadOps]);
+
   const socket = useMonitorSocket({
     watch: view.focus,
     onHello: () => {
       helloSeen.current = true;
       void readList();
       void readFocus();
+      void reloadOps();
     },
     onEvent: (e: AdminMonitorEvent) => {
       if (rtt.current !== null) delays.current = addDelay(delays.current, e.occurredAt, Date.now(), skew.current);
+      if (e.type === 'admin.monitor.changed' && e.kind === 'ops') {
+        void reloadOps();
+        return;
+      }
       if (e.type === 'admin.monitor.room') {
         const room = e.room as MonitorRoom;
         if (!newerRoom(roomsRef.current.get(room.tableId), room)) return;
@@ -915,6 +932,7 @@ export function ControlCenterPage() {
 
         {/* The alerts, then the tables opened. On a phone the alerts come before the cards and the panel is a sheet. */}
         <div className="order-first flex min-w-0 flex-col gap-4 xl:sticky xl:top-[calc(var(--shell-h,7rem)+1rem)] xl:order-none xl:max-h-[calc(100dvh-var(--shell-h,7rem)-2rem)]">
+          <ServerAlerts data={ops.data} error={ops.error} skew={skew.current} onOpen={onOpen} />
           <AlertsPanel alerts={alerts} ready={meta !== null} onOpen={onOpen} onHandle={onHandle} />
           <aside
             aria-label={t('ccPanel')}
@@ -954,6 +972,7 @@ export function ControlCenterPage() {
                     j={activeJudged}
                     entry={rooms.get(active)}
                     skew={skew.current}
+                    opsAlerts={ops.data?.items.filter((a) => a.tableId === active) ?? []}
                     onClose={() => (view.focus.length > 1 ? closeOne(active) : closePanel())}
                     onActed={onActed}
                   />
@@ -1182,7 +1201,7 @@ function Mark({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   );
 }
 
-function LevelChip({ level, word }: { level: Severity; word: string }) {
+export function LevelChip({ level, word }: { level: Severity; word: string }) {
   const Icon = LEVEL_ICON[level];
   return (
     <span className={cx('inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-semibold', LEVEL_CHIP[level])}>
@@ -1225,12 +1244,14 @@ function FocusPanel({
   j,
   entry,
   skew,
+  opsAlerts,
   onClose,
   onActed,
 }: {
   j: Judged;
   entry: RoomEntry | undefined;
   skew: number;
+  opsAlerts: OpsAlertDto[];
   onClose: () => void;
   onActed: (tb: { id: string; name: string }, code: CtlAction, outcome: CtlOutcome) => void;
 }) {
@@ -1313,6 +1334,10 @@ function FocusPanel({
       <p className="text-xs text-ink-400" data-testid="cc-room-word">
         {roomWord} · {tb.liveAt ? t('ccD1Live', { time: timeOf(tb.liveAt, locale) }) : t('ccD1Never')}
       </p>
+
+      <Sec id="cc-sec-health" title={t('healthTitle')}>
+        <TableHealth table={tb} entry={entry} fresh={j.fresh} alerts={opsAlerts} now={now} />
+      </Sec>
 
       <Sec id="cc-sec-progress" title={t('ccSecProgress')}>
         {room ? (
@@ -1520,9 +1545,9 @@ function FocusPanel({
 // ------------------------------------------------------------------ acting on one table
 
 /** The console's own controls of a table (Console.tsx uses the same routes): what each changes, and its reasons. */
-type CtlAction = 'pause' | 'resume' | 'block' | 'unblock' | 'timer' | 'close';
+export type CtlAction = 'pause' | 'resume' | 'block' | 'unblock' | 'timer' | 'close';
 /** Done and confirmed by the room; saved but the room did not confirm (it applies it when it next loads); refused. */
-type CtlOutcome = 'ok' | 'unconfirmed' | 'failed';
+export type CtlOutcome = 'ok' | 'unconfirmed' | 'failed';
 const CTL_LABEL: Record<CtlAction, Key> = {
   pause: 'pauseHands',
   resume: 'resumeHands',
@@ -1559,7 +1584,7 @@ const RECOVER_TEXT: Record<RecoverResult, Key> = { bot_moved: 'tbRecoverBotMoved
  * tableControl grant (the routes refuse without it all the same). A tournament's table is run by its tournament: only
  * its turn timer can be recovered here.
  */
-function ControlSection({ j, room, onActed }: { j: Judged; room: MonitorRoom | null; onActed: (tb: { id: string; name: string }, code: CtlAction, outcome: CtlOutcome) => void }) {
+export function ControlSection({ j, room, onActed }: { j: Judged; room: MonitorRoom | null; onActed: (tb: { id: string; name: string }, code: CtlAction, outcome: CtlOutcome) => void }) {
   const { t } = useT();
   const { me, api } = useAdmin();
   const tb = j.table;
@@ -1879,6 +1904,170 @@ function AlertsPanel({ alerts, ready, onOpen, onHandle }: { alerts: Alert[]; rea
             ))}
           </ul>
         </details>
+      )}
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ one table's health, and the persistent alerts
+
+const HEALTH_LABEL: Record<HealthKey, Key> = {
+  members: 'healthMembers',
+  spectators: 'healthSpectators',
+  street: 'healthStreet',
+  lastAction: 'healthLastAction',
+  socket: 'healthSocket',
+  sync: 'healthSync',
+  errors: 'healthErrors',
+  timer: 'healthTimer',
+  settlement: 'healthSettlement',
+  lastGood: 'healthLastGood',
+};
+const HEALTH_CLS: Record<HealthState, string> = {
+  ok: 'border-success/25 bg-success/5',
+  warn: 'border-warning/35 bg-warning/8',
+  bad: 'border-danger/40 bg-danger/10',
+  unknown: 'border-dashed border-white/20 bg-transparent',
+  none: 'border-white/8 bg-ink-950/30',
+};
+const HEALTH_DOT: Record<HealthState, string> = { ok: 'bg-success', warn: 'bg-warning', bad: 'bg-danger', unknown: 'bg-ink-500', none: 'bg-ink-600' };
+const SYNC_KEY: Record<string, Key> = { read: 'healthSyncRead', live: 'healthSyncLive', stale: 'healthSyncStale', unknown: 'healthSyncNoAnswer', closing: 'ccFreshClosing', closed: 'ccFreshClosed' };
+
+function healthValue(t: Tr, h: HealthItem, now: number, locale: string): string {
+  if (h.state === 'unknown' && h.at === undefined) return t('healthUnknown');
+  const ago = (at: number) => {
+    const s = secs(now - at);
+    return s < 120 ? t('healthAgoS', { time: timeOf(at, locale), s }) : t('healthAgoM', { time: timeOf(at, locale), m: Math.floor(s / 60) });
+  };
+  switch (h.key) {
+    case 'members':
+      return t('healthMembersN', { n: h.n ?? 0, of: h.of ?? 0 });
+    case 'spectators':
+      return t('healthPeople', { n: h.n ?? 0 });
+    case 'street':
+      return h.code && h.code !== 'idle' ? stageLabel(t, h.code) : t('idleState');
+    case 'lastAction':
+      return h.state === 'none' ? t('healthNoHand') : h.at ? ago(h.at) : t('healthUnknown');
+    case 'socket':
+      return h.of ? t('healthSocketOff', { n: h.n ?? 0, off: h.of }) : t('healthSocketN', { n: h.n ?? 0 });
+    case 'sync':
+      return h.code ? (h.code === 'read' && h.at ? t('healthSyncRead', { time: timeOf(h.at, locale) }) : t(SYNC_KEY[h.code] ?? 'healthUnknown')) : t('healthUnknown');
+    case 'errors':
+      if (!h.n) return h.code === 'last_issue' ? t('healthNoneButPast') : t('healthNoErrors');
+      return t('healthErrorsN', { n: h.n, what: h.code ? (tableIssueLabel(t, h.code) === h.code ? opsAlertText(t, { code: h.code as OpsAlertDto['code'], detail: {} }) : tableIssueLabel(t, h.code)) : '' });
+    case 'timer':
+      if (h.state === 'none') return t('healthNoTurn');
+      if (h.code === 'late') return t('ccOverdue', { s: secs(h.n ?? 0) });
+      if (h.code) return h.n ? `${tableIssueLabel(t, h.code)} · ${t('ccOverdue', { s: secs(h.n) })}` : tableIssueLabel(t, h.code);
+      return t('ccLeft', { s: secs(h.n ?? 0) });
+    case 'settlement':
+      return h.code === 'seated_on_closed' ? t('ccPSeatedOnClosed') : h.code ? tableIssueLabel(t, h.code) : t('healthSettleOk');
+    case 'lastGood':
+      return h.at ? (h.code === 'd1' ? t('healthD1At', { time: timeOf(h.at, locale) }) : ago(h.at)) : t('healthUnknown');
+  }
+}
+
+/**
+ * One table's ten readings at a glance (docs/CONTROL_CENTER.md '테이블 상태 요약'). What the room has not told this page
+ * is shown as unknown (dashed), never as fine.
+ */
+export function TableHealth(props: { table: MonitorTable; entry: RoomEntry | undefined; fresh: Freshness | null; alerts: readonly OpsAlertDto[]; now: number }) {
+  const { t, locale } = useT();
+  const items = healthOf(props);
+  return (
+    <ul className="grid grid-cols-2 gap-1.5" data-testid="health">
+      {items.map((h) => (
+        <li key={h.key} data-testid={`health-${h.key}`} data-state={h.state} className={cx('min-w-0 rounded-lg border px-2 py-1.5', HEALTH_CLS[h.state])}>
+          <span className="block truncate text-[10px] text-ink-400">{t(HEALTH_LABEL[h.key])}</span>
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-ivory">
+            <span aria-hidden className={cx('size-1.5 shrink-0 rounded-full', HEALTH_DOT[h.state])} />
+            <span className="min-w-0 break-words">{healthValue(t, h, props.now, locale)}</span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The check runs every minute; past this, its silence says nothing. */
+const WATCH_LATE_MS = 3 * 60_000;
+const SERVER_ALERTS_SHOWN = 5;
+
+/**
+ * The persistent alerts: what the api's minute check found wrong, kept in D1, so they are here when the console opens
+ * again (the list below is this page's own readings). How recently the check ran, and how much it could see, comes
+ * first: no alert is no news only if it ran lately and every room answered.
+ */
+export function ServerAlerts({ data, error, skew, onOpen }: { data: OpsAlertsResponse | null; error: string | null; skew: number; onOpen?: (id: string) => void }) {
+  const { t, locale } = useT();
+  useNow(30_000);
+  const now = Date.now() + skew;
+  const items = data?.items ?? [];
+  const counts = [4, 3, 2, 1].map((l) => [l as Severity, items.filter((a) => sevLevel(a.severity) === l).length] as const).filter(([, n]) => n > 0);
+  const w = data?.watch ?? null;
+  const late = w !== null && now - w.checkedAt > WATCH_LATE_MS;
+  return (
+    <section aria-labelledby="cc-ops-h" data-testid="cc-ops" className="flex min-w-0 flex-col gap-2 rounded-xl border border-white/10 bg-ink-900 p-3 xl:shrink-0">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h2 id="cc-ops-h" className="text-sm font-bold text-ivory">
+          {t('opsServerAlerts')}
+        </h2>
+        <span className="text-xs text-ink-400 tabular-nums" data-testid="cc-ops-count">
+          {t('ccAlertsActive', { n: items.length })}
+        </span>
+        <span className="flex flex-wrap gap-1">
+          {counts.map(([l, n]) => (
+            <LevelChip key={l} level={l} word={`${t(LEVEL_KEY[l])} ${n}`} />
+          ))}
+        </span>
+        <Link to="/ops" className="ms-auto text-xs font-semibold text-gold-300 hover:underline" data-testid="cc-ops-log">
+          {t('opsLogLink')}
+        </Link>
+      </div>
+      <p className={cx('text-[11px]', late || !w ? 'font-semibold text-warning' : 'text-ink-400')} data-testid="cc-ops-watch" data-late={late || !w ? '1' : '0'}>
+        {!data ? '' : !w ? t('opsWatchNever') : t(late ? 'opsWatchLate' : 'opsWatchLine', { time: timeOf(w.checkedAt, locale), rooms: w.rooms, unanswered: w.unanswered, skipped: w.skipped, m: Math.floor((now - w.checkedAt) / 60_000) })}
+      </p>
+      {error ? (
+        <p className="text-xs text-[#f0a0a2]">{error}</p>
+      ) : !data ? (
+        <Spinner />
+      ) : items.length === 0 ? (
+        <p className="text-sm text-ink-400" data-testid="cc-ops-none">
+          {t('opsNoOpen')}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {items.slice(0, SERVER_ALERTS_SHOWN).map((a) => (
+            <li key={a.id} data-testid="cc-ops-alert" data-code={a.code} data-severity={a.severity} data-table={a.tableId ?? ''} className={cx('rounded-lg border border-white/8 bg-ink-950/40 px-2.5 py-2', a.handling === 'dismissed' && 'opacity-60')}>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <LevelChip level={sevLevel(a.severity)} word={t(LEVEL_KEY[sevLevel(a.severity)])} />
+                {a.tableId && onOpen && a.table && a.table.status !== 'closed' ? (
+                  <button type="button" onClick={() => onOpen(a.tableId!)} className="min-w-0 truncate text-left text-sm font-semibold text-ivory hover:underline">
+                    {a.table.name}
+                  </button>
+                ) : (
+                  <span className="min-w-0 truncate text-sm font-semibold text-ivory">{a.tableId ? (a.table?.name ?? a.tableId) : t('opsServiceWide')}</span>
+                )}
+                {a.handling !== 'new' && <Badge>{t(OPS_HANDLING_KEY[a.handling])}</Badge>}
+              </div>
+              <p className={cx('mt-0.5 text-xs', LEVEL_TEXT[sevLevel(a.severity)])}>{opsAlertText(t, a)}</p>
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-400 tabular-nums">
+                <span>{t('ccAlertFirst', { time: timeOf(a.openedAt, locale) })}</span>
+                <span>{t('opsSeenN', { n: a.seen })}</span>
+                <Link to={`/ops/alerts/${a.id}`} className="ms-auto font-semibold text-gold-300 hover:underline" data-testid="cc-ops-detail">
+                  {t('opsIncidentLink')}
+                </Link>
+              </p>
+            </li>
+          ))}
+          {items.length > SERVER_ALERTS_SHOWN && (
+            <li className="text-xs">
+              <Link to="/ops" className="text-gold-300 hover:underline">
+                {t('opsMore', { n: items.length - SERVER_ALERTS_SHOWN })}
+              </Link>
+            </li>
+          )}
+        </ul>
       )}
     </section>
   );

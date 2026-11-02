@@ -725,6 +725,82 @@ export const realtimeOutbox = sqliteTable(
 );
 
 /**
+ * The control center's alerts that outlive a page (apps/api/src/lib/ops-watch.ts, docs/CONTROL_CENTER.md): what the
+ * minute cron found wrong, one row per problem from when it was first confirmed until it was gone. `dedupe_key` is the
+ * problem (its code and table, or `-` for one of the whole service): a problem seen again while open is the same row,
+ * counted. A row with `confirmed_at` NULL is a sighting not yet counted as an alert (a transient state is counted only
+ * once seen twice in a row); it is deleted when the next check does not see it. Only codes, ids, counts and times are
+ * kept here: never a player's name, a card or a request's payload. Kept OPS_LOG_RETENTION_MS after it was resolved.
+ */
+export const opsAlerts = sqliteTable(
+  'ops_alerts',
+  {
+    id: text('id').primaryKey(),
+    dedupeKey: text('dedupe_key').notNull(),
+    code: text('code').notNull(),
+    severity: text('severity', { enum: ['info', 'warning', 'error', 'critical'] }).notNull(),
+    tableId: text('table_id'),
+    /** A short English line from the code and the numbers (the console words it from `code` and `detail`). */
+    summary: text('summary').notNull(),
+    /** JSON of numbers and codes (a metric's count, the room's issue), never free text. */
+    detail: text('detail'),
+    firstSeenAt: integer('first_seen_at').notNull(),
+    confirmedAt: integer('confirmed_at'),
+    lastSeenAt: integer('last_seen_at').notNull(),
+    seen: integer('seen').notNull().default(1),
+    resolvedAt: integer('resolved_at'),
+    /** An administrator's note on it: new, acknowledged, being looked into, or set aside. It changes nothing else. */
+    handling: text('handling', { enum: ['new', 'ack', 'investigating', 'dismissed'] }).notNull().default('new'),
+    handledAt: integer('handled_at'),
+  },
+  (t) => [
+    // One unresolved row per problem: the cron's insert of a new one meets this if another run got there first.
+    uniqueIndex('ops_alerts_open_uq').on(t.dedupeKey).where(sql`resolved_at IS NULL`),
+    index('ops_alerts_resolved_idx').on(t.resolvedAt),
+    index('ops_alerts_table_idx').on(t.tableId, t.firstSeenAt),
+    index('ops_alerts_seen_idx').on(t.firstSeenAt),
+  ],
+);
+
+/**
+ * The persistent operations log the control center searches (docs/CONTROL_CENTER.md): an alert opened, raised,
+ * resolved or noted by an administrator, and an administrator's table control. Append only. `alert_id` ties a line to
+ * its alert, `correlation_id` an administrator's control to its admin_audit_log row (which names who did it and why;
+ * this log does not). Never a card, a player's name, a reason's text or a request's payload; not every action of a hand
+ * (those are the hand records). Kept OPS_LOG_RETENTION_MS.
+ */
+export const opsEvents = sqliteTable(
+  'ops_events',
+  {
+    id: text('id').primaryKey(),
+    at: integer('at').notNull(),
+    kind: text('kind', { enum: ['alert_opened', 'alert_raised', 'alert_resolved', 'alert_handled', 'admin_control'] }).notNull(),
+    code: text('code').notNull(),
+    severity: text('severity', { enum: ['info', 'warning', 'error', 'critical'] }).notNull(),
+    tableId: text('table_id'),
+    summary: text('summary').notNull(),
+    alertId: text('alert_id'),
+    correlationId: text('correlation_id'),
+  },
+  (t) => [index('ops_events_at_idx').on(t.at), index('ops_events_table_idx').on(t.tableId, t.at), index('ops_events_alert_idx').on(t.alertId)],
+);
+
+/**
+ * The minute check's last run (one row, id 1): when it finished and what it could see, so the console tells a quiet
+ * service from a check that stopped running (no alert is not "all well" when nothing looked).
+ */
+export const opsWatch = sqliteTable('ops_watch', {
+  id: integer('id').primaryKey(),
+  checkedAt: integer('checked_at').notNull(),
+  tookMs: integer('took_ms').notNull(),
+  /** Rooms asked, and how many of those did not answer. */
+  rooms: integer('rooms').notNull(),
+  unanswered: integer('unanswered').notNull(),
+  /** Tables in play left unasked this time (more than OPS_WATCH_ROOMS_MAX). */
+  skipped: integer('skipped').notNull(),
+});
+
+/**
  * Days on which a member used the service (see stats.ts): the day and the member, nothing else. Kept for
  * ACTIVE_DAYS_RETENTION days by the daily housekeeping; deleted with the account.
  */

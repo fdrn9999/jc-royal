@@ -4,6 +4,7 @@ import type { AppEnv, Env } from './env';
 import { countingD1, type D1Counts } from './lib/d1-stats';
 import { housekeeping } from './lib/housekeeping';
 import { flushPush } from './lib/notify';
+import { watchOps } from './lib/ops-watch';
 import { flushRealtimeOutbox } from './lib/realtime';
 import { sharePageResponse } from './lib/og';
 import { countOps } from './lib/ops';
@@ -126,7 +127,8 @@ export default {
    * close stalled, and settles referrals waiting for a payout (lib/referral.ts). Awaited, so a failure shows as a failed
    * run; a failed rollup does not stop the clean-up, nor a failed referral sweep the rest. The minute trigger sends
    * again the realtime outbox's events no hub took yet (lib/realtime.ts), one call a hub, then the push outbox
-   * (lib/notify.ts), which without the push keys returns before touching D1.
+   * (lib/notify.ts), which without the push keys returns before touching D1, then checks the service for the control
+   * center's persistent alerts (lib/ops-watch.ts), last so a slow room never holds up a delivery.
    */
   async scheduled(event, env) {
     if (event.cron === PUSH_CRON) {
@@ -138,6 +140,12 @@ export default {
       }
       const sent = await flushPush(env, { limit: 50 });
       if (sent.claimed) console.log('push outbox', JSON.stringify(sent));
+      try {
+        const ops = await watchOps(env);
+        if (ops.changes) console.log('ops watch', JSON.stringify(ops));
+      } catch (e) {
+        console.error('ops watch failed', e instanceof Error ? e.message : String(e));
+      }
       return;
     }
     let failed: unknown = null;
