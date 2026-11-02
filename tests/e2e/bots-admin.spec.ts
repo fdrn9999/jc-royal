@@ -27,7 +27,11 @@ async function reauthIfAsked(page: Page) {
 }
 
 /** Today's counters for the expert bots, as a table's record would add them (game-worker bot-stats.ts, `bt_<level>_<key>`). */
-const EXPERT_PLAY = { hands: 40, vpipOpp: 40, vpip: 11, pfr: 6, threeBetOpp: 20, threeBet: 1, bbStealOpp: 10, bbFoldToSteal: 4, foldToOverbetOpp: 8, foldToOverbet: 4, decisions: 200, fallbacks: 2, lagMs: 3000 };
+const EXPERT_PLAY = {
+  ...{ hands: 400, vpipOpp: 400, vpip: 110, pfr: 60, threeBetOpp: 200, threeBet: 10, bbStealOpp: 100, bbFoldToSteal: 40, foldToOverbetOpp: 80, foldToOverbet: 40 },
+  ...{ foldTo3BetOpp: 30, foldTo3Bet: 12, cbetOpp: 150, cbet: 140, foldToCbetOpp: 120, foldToCbet: 50, sawFlop: 160, showdowns: 50, postBets: 120, postCalls: 60 },
+  ...{ decisions: 2000, fallbacks: 20, lagMs: 30000 },
+};
 
 // The test ends with bots off; the seeded policy (on, 1,000,000 chips, 20 bots) comes back for whatever runs next.
 test.afterEach(() => {
@@ -76,7 +80,22 @@ test('bot administration: the seated bot and its fund, a policy change with befo
 
   // How each level played: every rate with its own denominator, and how the moves went.
   const expert = page.getByTestId('bots-level-play').locator('tr[data-level="expert"]');
-  await expect(expert.locator('td')).toHaveText(['전문가', '40', '27.5% (40)', '15.0% (40)', '5.0% (20)', '60.0% (10)', '50.0% (8)', '200', '2 (1.0%)', '0 (0.0%)', '15 ms', '0']);
+  await expect(expert.locator('td')).toHaveText(['전문가', '400', '27.5% (400)', '15.0% (400)', '5.0% (200)', '60.0% (100)', '50.0% (80)', '2,000', '20 (1.0%)', '0 (0.0%)', '15 ms', '0']);
+  // Apart from it, folded away: the same level beside the simulation, judged only with enough chances and a large
+  // difference (30 chances to fold to a 3-bet are too few; a continuation bet 93% of the time is far above it; AF 2.00 is near).
+  const tendency = page.getByTestId('bots-tendency');
+  await expect(tendency).not.toHaveAttribute('open', '');
+  await tendency.locator('summary').click();
+  const live = tendency.locator('tr[data-level="expert"]');
+  await expect(live.locator('td[data-k="foldTo3Bet"]')).toHaveAttribute('data-judged', 'few');
+  await expect(live.locator('td[data-k="foldTo3Bet"]')).toContainText('40.0% (30)');
+  await expect(live.locator('td[data-k="cbet"]')).toHaveAttribute('data-judged', 'high');
+  await expect(live.locator('td[data-k="cbet"]')).toContainText('93.3% (150)');
+  await expect(live.locator('td[data-k="af"]')).toHaveAttribute('data-judged', 'near');
+  await expect(live.locator('td[data-k="af"]')).toContainText('2.00 (120/60)');
+  await expect(live.locator('td[data-k="wtsd"]')).toContainText('31.3% (160)');
+  await expect(live.locator('td[data-k="cbet"]')).toContainText('시뮬');
+  await tendency.screenshot({ path: 'test-results/bots-tendency.png', animations: 'disabled' });
 
   // The table's own page shows the same settings and whether bots may sit there now.
   await row.getByRole('link', { name: 'E2E Bots Admin' }).click();
