@@ -317,6 +317,12 @@ describe('realtime socket: the account and the wallet', () => {
     expect(e).toMatchObject({ scope: 'service', payload: { vip: 'gold' }, revision: made.vip.version });
     const adminId = (await admin.get('/api/admin/auth/me')).body.user.id as string;
     for (const secret of ['public vip reason', adminId, m.email, m.me.nickname]) expect(JSON.stringify(e)).not.toContain(secret);
+    // Its outbox row is the change's own batch's (a worker stopped after the commit leaves it for the cron): the event as
+    // it arrived, the color included, written at the change's clock.
+    const vipRows = `SELECT event, created_at AS created FROM realtime_outbox WHERE type = 'member.vip.changed' AND json_extract(event, '$.resourceId') = '${m.me.id}'`;
+    const [stored] = await d1<{ event: string; created: number }>(`${vipRows} AND id = '${e.eventId}'`);
+    expect(JSON.parse(stored!.event)).toEqual(e);
+    expect(stored!.created).toBe((await d1<{ t: number }>(`SELECT vip_changed_at AS t FROM users WHERE id = '${m.me.id}'`))[0]!.t);
     // a color change is heard with a newer revision; the color it already has tells nobody
     const recolored = await set({ enabled: true, color: 'rose' });
     await theirs.until(() => heard().length === 2, 15_000, 'second member.vip.changed');
@@ -330,6 +336,8 @@ describe('realtime socket: the account and the wallet', () => {
     await theirs.ping();
     await new Promise((r) => setTimeout(r, 500));
     expect(heard()).toHaveLength(2);
+    // and no row was written for them either
+    expect(await d1(vipRows)).toHaveLength(2);
   });
 
   it('a role change tells the member, whose own sign-in stays', async () => {

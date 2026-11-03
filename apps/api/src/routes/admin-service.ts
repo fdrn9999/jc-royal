@@ -5,12 +5,12 @@
  */
 import { IF_CHANGED, realtimeOutboxStatement, schema } from '@jc/db';
 import { NOTICE_KINDS } from '@jc/types';
-import { and, desc, eq, gt, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { fail, parseBody } from '../lib/http';
-import { outboxAfterCommit, outboxToAll, realtimeOutboxSend, spreadFor } from '../lib/realtime';
+import { outboxToAll, realtimeOutboxSend, spreadFor } from '../lib/realtime';
 import { SERVICE_REV_SQL, tellRoomsAboutMaintenance, type RoomFanOut } from '../lib/service';
 import { audit } from './admin-auth';
 
@@ -104,17 +104,29 @@ function checkMaintenanceWindow(startsAt: number, endsAt: number, now: number) {
 }
 
 /**
- * A notice or a maintenance window changed, committed: every page reads GET /api/service/status again, unless it holds
- * this `rev` already, after a random wait sized like an announcement to every member (spreadFor), so the reads come at
- * a steady rate. In the background, never failing the change; through the realtime outbox (read after the commit, so
- * written after it), so a hub that misses it is sent it again.
+ * A notice or a maintenance window changes: `change`, the one statement that changes it, in a batch with what tells every
+ * page to read GET /api/service/status again (`service.changed`), unless it holds the `rev` the change leaves already,
+ * after a random wait sized like an announcement to every member (spreadFor), so the reads come at a steady rate. The
+ * event's outbox row is written right after the change (IF_CHANGED), with that `rev` read in the batch, so it is there
+ * exactly when the change is, whatever happens after the commit; it is sent at once, in the background, and a hub that
+ * misses it is sent it again. Returns the change's result.
  */
-function serviceChanged(c: Context<AppEnv>) {
-  const send = async () => {
-    const r = await c.env.DB.prepare(`SELECT ${SERVICE_REV_SQL} AS rev, (SELECT COUNT(*) FROM users WHERE status = 'active' AND is_bot = 0) AS members`).first<{ rev: number; members: number }>();
-    await outboxAfterCommit(c.env, [outboxToAll({ scope: 'service', type: 'service.changed', payload: { rev: Number(r?.rev ?? 0), spreadMs: spreadFor(Number(r?.members ?? 0)) } })]);
-  };
-  c.executionCtx.waitUntil(send().catch((err) => console.warn('realtime service change not sent', String(err))));
+async function changeService(c: Context<AppEnv>, change: D1PreparedStatement, now: number): Promise<D1Result> {
+  const db = c.env.DB;
+  const members = await db.prepare(`SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND is_bot = 0`).first<{ n: number }>();
+  const spreadMs = spreadFor(Number(members?.n ?? 0));
+  const told = outboxToAll({ scope: 'service', type: 'service.changed', payload: { rev: 0, spreadMs } }, now);
+  const [done, , read] = await db.batch([
+    change,
+    realtimeOutboxStatement(db, told, IF_CHANGED, { path: '$.payload.rev', sql: SERVICE_REV_SQL }),
+    db.prepare(`SELECT ${SERVICE_REV_SQL} AS rev`),
+  ]);
+  // A change with RETURNING is told by its rows.
+  if (done!.meta.changes || done!.results.length) {
+    const rev = Number((read!.results[0] as { rev: number } | undefined)?.rev ?? 0);
+    realtimeOutboxSend(c, [{ ...told, event: { ...told.event, payload: { rev, spreadMs } } as typeof told.event }]);
+  }
+  return done!;
 }
 
 /** The board post: Korean first, the English version below it (the board has one language per post). */
@@ -164,21 +176,14 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       postId = crypto.randomUUID();
       await c.var.db.insert(schema.posts).values({ id: postId, authorId: me, title: body.titleKo, body: boardBody(body), isNotice: true });
     }
-    await c.var.db.insert(schema.serviceNotices).values({
-      id,
-      kind: body.kind,
-      titleKo: body.titleKo,
-      titleEn: body.titleEn,
-      bodyKo: body.bodyKo,
-      bodyEn: body.bodyEn,
-      startsAt,
-      endsAt: body.endsAt ?? null,
-      postId,
-      createdBy: me,
-      createdAt: now,
-      updatedAt: now,
-    });
-    serviceChanged(c);
+    await changeService(
+      c,
+      c.env.DB.prepare(
+        `INSERT INTO service_notices (id, kind, title_ko, title_en, body_ko, body_en, starts_at, ends_at, post_id, created_by, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)`,
+      ).bind(id, body.kind, body.titleKo, body.titleEn, body.bodyKo, body.bodyEn, startsAt, body.endsAt ?? null, postId, me, now),
+      now,
+    );
     let sent = 0;
     let batchId: string | null = null;
     if (body.sendInbox) {
@@ -222,8 +227,21 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       startsAt,
       endsAt,
     };
-    await c.var.db.update(schema.serviceNotices).set({ ...next, updatedAt: now }).where(eq(schema.serviceNotices.id, id));
-    serviceChanged(c);
+    await changeService(
+      c,
+      c.env.DB.prepare(`UPDATE service_notices SET kind = ?2, title_ko = ?3, title_en = ?4, body_ko = ?5, body_en = ?6, starts_at = ?7, ends_at = ?8, updated_at = ?9 WHERE id = ?1`).bind(
+        id,
+        next.kind,
+        next.titleKo,
+        next.titleEn,
+        next.bodyKo,
+        next.bodyEn,
+        startsAt,
+        endsAt,
+        now,
+      ),
+      now,
+    );
     // The board post written with it follows the edit; an inbox message already sent stays as it was.
     if (n.postId) await c.var.db.update(schema.posts).set({ title: next.titleKo, body: boardBody(next), updatedAt: now }).where(eq(schema.posts.id, n.postId));
     await audit(c, 'service.notice.update', { type: 'notice', id }, { before: { titleKo: n.titleKo, startsAt: n.startsAt, endsAt: n.endsAt, kind: n.kind }, after: { titleKo: next.titleKo, startsAt, endsAt, kind: next.kind } });
@@ -233,14 +251,12 @@ export const adminServiceRoutes = new Hono<AppEnv>()
   .post('/service/notices/:id/end', async (c) => {
     const id = c.req.param('id');
     const now = Date.now();
-    const N = schema.serviceNotices;
-    const r = await c.var.db
-      .update(N)
-      .set({ endsAt: now, updatedAt: now })
-      .where(and(eq(N.id, id), isNull(N.deletedAt), or(isNull(N.endsAt), gt(N.endsAt, now))))
-      .returning({ id: N.id });
-    if (!r[0]) fail(409, 'conflict', 'this notice has already ended');
-    serviceChanged(c);
+    const r = await changeService(
+      c,
+      c.env.DB.prepare(`UPDATE service_notices SET ends_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL AND (ends_at IS NULL OR ends_at > ?2)`).bind(id, now),
+      now,
+    );
+    if (!r.meta.changes) fail(409, 'conflict', 'this notice has already ended');
     await audit(c, 'service.notice.end', { type: 'notice', id });
     return c.json({ ok: true });
   })
@@ -248,15 +264,14 @@ export const adminServiceRoutes = new Hono<AppEnv>()
   .delete('/service/notices/:id', async (c) => {
     const id = c.req.param('id');
     const now = Date.now();
-    const N = schema.serviceNotices;
-    const r = await c.var.db
-      .update(N)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(and(eq(N.id, id), isNull(N.deletedAt)))
-      .returning({ titleKo: N.titleKo });
-    if (!r[0]) fail(404, 'not_found', 'notice not found');
-    serviceChanged(c);
-    await audit(c, 'service.notice.delete', { type: 'notice', id }, { titleKo: r[0].titleKo });
+    const r = await changeService(
+      c,
+      c.env.DB.prepare(`UPDATE service_notices SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL RETURNING title_ko AS titleKo`).bind(id, now),
+      now,
+    );
+    const gone = r.results[0] as { titleKo: string } | undefined;
+    if (!gone) fail(404, 'not_found', 'notice not found');
+    await audit(c, 'service.notice.delete', { type: 'notice', id }, { titleKo: gone.titleKo });
     return c.json({ ok: true });
   })
   // ---------------------------------------------------------------- maintenance
@@ -286,15 +301,16 @@ export const adminServiceRoutes = new Hono<AppEnv>()
     checkMaintenanceWindow(startsAt, body.endsAt, now);
     const id = crypto.randomUUID();
     // One statement, so two admins planning at once cannot both succeed.
-    const r = await c.env.DB.prepare(
-      `INSERT INTO maintenance_windows (id, starts_at, ends_at, block_login, message_ko, message_en, created_by, created_at, updated_at)
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8
-       WHERE NOT EXISTS (SELECT 1 FROM maintenance_windows WHERE ended_at IS NULL AND cancelled_at IS NULL AND ends_at > ?8)`,
-    )
-      .bind(id, startsAt, body.endsAt, body.blockLogin ? 1 : 0, body.messageKo, body.messageEn, c.var.user!.id, now)
-      .run();
+    const r = await changeService(
+      c,
+      c.env.DB.prepare(
+        `INSERT INTO maintenance_windows (id, starts_at, ends_at, block_login, message_ko, message_en, created_by, created_at, updated_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8
+         WHERE NOT EXISTS (SELECT 1 FROM maintenance_windows WHERE ended_at IS NULL AND cancelled_at IS NULL AND ends_at > ?8)`,
+      ).bind(id, startsAt, body.endsAt, body.blockLogin ? 1 : 0, body.messageKo, body.messageEn, c.var.user!.id, now),
+      now,
+    );
     if (!r.meta.changes) fail(409, 'conflict', 'another maintenance window is planned or under way');
-    serviceChanged(c);
     const rooms = await tellRoomsAboutMaintenance(c.env);
     await audit(c, 'maintenance.schedule', { type: 'maintenance', id }, { startsAt, endsAt: body.endsAt, blockLogin: !!body.blockLogin, reason: body.reason, rooms: fanOutSummary(rooms) });
     return c.json({ id, startsAt, rooms }, 201);
@@ -321,13 +337,15 @@ export const adminServiceRoutes = new Hono<AppEnv>()
       messageEn: body.messageEn === undefined ? w.messageEn : body.messageEn,
     };
     // Only while it is still unfinished: an end or cancel that came first wins.
-    const r = await c.var.db
-      .update(W)
-      .set({ ...next, updatedAt: now })
-      .where(and(eq(W.id, id), isNull(W.endedAt), isNull(W.cancelledAt), gt(W.endsAt, now)))
-      .returning({ id: W.id });
-    if (!r[0]) fail(409, 'conflict', 'this maintenance is already over');
-    serviceChanged(c);
+    const r = await changeService(
+      c,
+      c.env.DB.prepare(
+        `UPDATE maintenance_windows SET starts_at = ?2, ends_at = ?3, block_login = ?4, message_ko = ?5, message_en = ?6, updated_at = ?7
+          WHERE id = ?1 AND ended_at IS NULL AND cancelled_at IS NULL AND ends_at > ?7`,
+      ).bind(id, startsAt, endsAt, next.blockLogin ? 1 : 0, next.messageKo, next.messageEn, now),
+      now,
+    );
+    if (!r.meta.changes) fail(409, 'conflict', 'this maintenance is already over');
     const rooms = await tellRoomsAboutMaintenance(c.env);
     await audit(
       c,
@@ -341,21 +359,20 @@ export const adminServiceRoutes = new Hono<AppEnv>()
   .post('/service/maintenance/:id/stop', async (c) => {
     const id = c.req.param('id');
     const body = await parseBody(c, StopSchema);
-    const W = schema.maintenanceWindows;
     const now = Date.now();
-    const r = await c.var.db
-      .update(W)
-      .set({
-        endedAt: sql`CASE WHEN ${W.startsAt} <= ${now} THEN ${now} ELSE NULL END`,
-        cancelledAt: sql`CASE WHEN ${W.startsAt} <= ${now} THEN NULL ELSE ${now} END`,
-        updatedAt: now,
-      })
-      .where(and(eq(W.id, id), isNull(W.endedAt), isNull(W.cancelledAt), gt(W.endsAt, now)))
-      .returning({ startsAt: W.startsAt, endsAt: W.endsAt });
-    if (!r[0]) fail(409, 'conflict', 'this maintenance is already over');
-    const action = r[0].startsAt <= now ? 'maintenance.end' : 'maintenance.cancel';
-    serviceChanged(c);
+    const r = await changeService(
+      c,
+      c.env.DB.prepare(
+        `UPDATE maintenance_windows SET ended_at = CASE WHEN starts_at <= ?2 THEN ?2 ELSE NULL END, cancelled_at = CASE WHEN starts_at <= ?2 THEN NULL ELSE ?2 END, updated_at = ?2
+          WHERE id = ?1 AND ended_at IS NULL AND cancelled_at IS NULL AND ends_at > ?2
+          RETURNING starts_at AS startsAt, ends_at AS endsAt`,
+      ).bind(id, now),
+      now,
+    );
+    const w = r.results[0] as { startsAt: number; endsAt: number } | undefined;
+    if (!w) fail(409, 'conflict', 'this maintenance is already over');
+    const action = w.startsAt <= now ? 'maintenance.end' : 'maintenance.cancel';
     const rooms = await tellRoomsAboutMaintenance(c.env);
-    await audit(c, action, { type: 'maintenance', id }, { startsAt: r[0].startsAt, plannedEnd: r[0].endsAt, reason: body.reason, rooms: fanOutSummary(rooms) });
+    await audit(c, action, { type: 'maintenance', id }, { startsAt: w.startsAt, plannedEnd: w.endsAt, reason: body.reason, rooms: fanOutSummary(rooms) });
     return c.json({ ok: true, ended: action === 'maintenance.end', rooms });
   });

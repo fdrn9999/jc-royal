@@ -1,4 +1,4 @@
-import { REALTIME_OUTBOX_MAX_ATTEMPTS, realtimeOutboxRetryAt, realtimeOutboxStatement, writeOps, type RealtimeOutboxRow } from '@jc/db';
+import { REALTIME_OUTBOX_MAX_ATTEMPTS, realtimeOutboxRetryAt, writeOps, type RealtimeOutboxRow } from '@jc/db';
 import type { Context } from 'hono';
 import {
   REALTIME_PUBLISH_BATCH_MAX,
@@ -186,29 +186,6 @@ export function realtimeOutboxSend(c: Context<AppEnv>, rows: readonly RealtimeOu
   c.executionCtx.waitUntil(sendOutboxNow(c.env, rows).catch((err) => console.warn('realtime outbox send failed', String(err))));
 }
 
-/**
- * For an event whose content is read back once the change committed (it cannot be in the change's batch): written to
- * the outbox now, then sent as realtimeOutboxSend does. A stop between the commit and this write loses it, as it did
- * before the outbox; a hub that misses it no longer does. A row that cannot be written is sent once without it.
- */
-export function realtimeOutboxAfter(c: Context<AppEnv>, rows: readonly RealtimeOutboxRow[]) {
-  if (rows.length === 0) return;
-  c.executionCtx.waitUntil(outboxAfterCommit(c.env, rows).catch((err) => console.warn('realtime outbox send failed', String(err))));
-}
-
-/** realtimeOutboxAfter's work, awaited (for a background task that first reads what the event says). */
-export async function outboxAfterCommit(env: Env, rows: readonly RealtimeOutboxRow[]): Promise<void> {
-  if (rows.length === 0) return;
-  try {
-    await env.DB.batch(rows.map((r) => realtimeOutboxStatement(env.DB, r)));
-  } catch (e) {
-    console.warn('realtime outbox not written', errorText(e));
-    const failed = await publishOutbox(env, rows);
-    if (failed.size) await writeOps(env.DB, 'rt_undelivered', failed.size);
-    return;
-  }
-  await sendOutboxNow(env, rows);
-}
 
 export async function sendOutboxNow(env: Env, rows: readonly RealtimeOutboxRow[], clock: () => number = Date.now): Promise<void> {
   const failed = await publishOutbox(env, rows);

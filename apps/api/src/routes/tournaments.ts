@@ -30,6 +30,7 @@ import {
   timeBankOf,
   TOURNAMENT_ID,
   tournamentChanged,
+  tournamentTold,
   type StartResult,
 } from '../lib/tournament';
 import { notBlocked, pairOf } from './social';
@@ -158,6 +159,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
       .first<RegisterRow>();
     if (!t) fail(404, 'tournament_not_found', 'tournament not found');
     const now = Date.now();
+    const changed = tournamentTold(db, id, now);
     const [ins] = await db.batch([
       // min_hands is fixed when the tournament is opened, so it is bound (as the LIMIT of the hands count).
       db
@@ -180,6 +182,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
             WHERE id = ?1 AND EXISTS (SELECT 1 FROM tournament_entries WHERE tournament_id = ?1 AND user_id = ?2 AND status = 'registered' AND registered_at = ?3)`,
         )
         .bind(id, me, now),
+      changed.statement,
     ]);
     if (!ins?.meta.changes) {
       const [mine, cur] = await db.batch<{ status: string }>([
@@ -198,7 +201,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
       }
       fail(409, 'tournament_conflict', 'registration changed meanwhile; try again');
     }
-    tournamentChanged(c.env, id, c.executionCtx);
+    tournamentChanged(c.env, id, changed.row, c.executionCtx);
     let start: StartResult | null = null;
     if (t.autoStart === 1) {
       const n = await db.prepare(`SELECT COUNT(*) AS n FROM tournament_entries WHERE tournament_id = ?1 AND status = 'registered'`).bind(id).first<{ n: number }>();
@@ -220,6 +223,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
     await rateLimit(c, `tournament-register:${me}`, 20, 60_000);
     const db = c.env.DB;
     const now = Date.now();
+    const changed = tournamentTold(db, id, now);
     const [up] = await db.batch([
       db
         .prepare(
@@ -234,6 +238,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
             WHERE id = ?1 AND EXISTS (SELECT 1 FROM tournament_entries WHERE tournament_id = ?1 AND user_id = ?2 AND status = 'unregistered' AND updated_at = ?3)`,
         )
         .bind(id, me, now),
+      changed.statement,
     ]);
     if (!up?.meta.changes) {
       const [mine, cur] = await db.batch<{ status: string }>([
@@ -247,7 +252,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
         if (status === 'cancelled') fail(409, 'tournament_state', 'the tournament was cancelled', { status });
         fail(409, 'tournament_started', 'a started tournament cannot be left', { status });
       }
-    } else tournamentChanged(c.env, id, c.executionCtx);
+    } else tournamentChanged(c.env, id, changed.row, c.executionCtx);
     return c.json({ ok: true });
   })
   /**

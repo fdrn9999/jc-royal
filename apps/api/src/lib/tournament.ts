@@ -20,13 +20,13 @@ import {
   tournamentSeats,
   TOURNAMENT_STATUSES,
 } from '@jc/types';
-import { outboxForEntries, realtimeOutboxForMembers } from '@jc/db';
+import { IF_CHANGED, outboxForEntries, realtimeOutboxForMembers, realtimeOutboxStatement, type RealtimeOutboxRow } from '@jc/db';
 import type { Env } from '../env';
 import { adminTournamentChanged } from './admin-monitor';
 import { fail } from './http';
 import { notices } from './notices';
 import { queuePush } from './notify';
-import { outboxAfterCommit, outboxToAll, outboxToUsers, sendOutboxNow } from './realtime';
+import { outboxToAll, outboxToUsers, sendOutboxNow } from './realtime';
 import { roomCallEnv } from './room';
 import { currentMaintenance } from './service';
 
@@ -225,15 +225,22 @@ export interface StartResult {
 }
 
 /**
- * A tournament changed in D1 (opened, registration, a start, a cancel, a pause): the tournament pages read it again.
- * Public and carries only the id; in the background, never failing the change (without `ctx` the pages' poll finds it),
- * through the realtime outbox (written after the change), so a hub that misses it is sent it again. The console's
- * tournament pages hear of it too, with its version (admin.monitor.changed).
+ * The tournament pages read a tournament again: its `tournament.changed` (public, the id alone), for the batch of the
+ * change (opened, registration, a start, a cancel, a pause), written right after the statement that makes it (IF_CHANGED)
+ * so it is there exactly when the change is, whatever happens after the commit.
  */
-export function tournamentChanged(env: Env, id: string, ctx: Pick<ExecutionContext, 'waitUntil'> | undefined) {
-  ctx?.waitUntil(
-    outboxAfterCommit(env, [outboxToAll({ scope: 'lobby', type: 'tournament.changed', resourceId: id })]).catch((err) => console.warn('realtime tournament change not sent', String(err))),
-  );
+export function tournamentTold(db: D1Database, id: string, now: number) {
+  const row = outboxToAll({ scope: 'lobby', type: 'tournament.changed', resourceId: id }, now);
+  return { row, statement: realtimeOutboxStatement(db, row, IF_CHANGED) };
+}
+
+/**
+ * A tournament change committed with its tournamentTold row: the row is sent now, in the background, never failing the
+ * change (without `ctx`, or a hub that misses it, the minute cron sends it). The console's tournament pages hear of it
+ * too, with its version (admin.monitor.changed).
+ */
+export function tournamentChanged(env: Env, id: string, told: RealtimeOutboxRow, ctx: Pick<ExecutionContext, 'waitUntil'> | undefined) {
+  ctx?.waitUntil(sendOutboxNow(env, [told]).catch((err) => console.warn('realtime tournament change not sent', String(err))));
   ctx?.waitUntil(adminTournamentChanged(env, id).catch((err) => console.warn('admin monitor tournament publish failed', String(err))));
 }
 
@@ -325,14 +332,16 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     });
     if (lost.length > 0) {
       const open = `EXISTS (SELECT 1 FROM tournaments WHERE id = ?1 AND status IN ('registering', 'closed'))`;
-      await db.batch([
+      const changed = tournamentTold(db, id, now);
+      const res = await db.batch([
         ...lost.map((l) =>
           db.prepare(`UPDATE tournament_entries SET status = 'dropped', updated_at = ?3 WHERE tournament_id = ?1 AND user_id = ?2 AND status = 'registered' AND ${open}`).bind(id, l.userId, now),
         ),
         db.prepare(`UPDATE tournaments SET roster = roster + 1, updated_at = ?2 WHERE id = ?1 AND status IN ('registering', 'closed')`).bind(id, now),
+        changed.statement,
       ]);
       dropped.push(...lost);
-      tournamentChanged(env, id, opts.ctx);
+      if (res.at(-2)?.meta.changes) tournamentChanged(env, id, changed.row, opts.ctx);
       // The automatic start keeps registration open for the seats this freed.
       if (opts.auto) return no('ineligible');
       continue;
@@ -351,6 +360,7 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     const started = `tn.status = 'running' AND tn.table_id = '${tableId}' AND tn.started_at = ${now}`;
     const mine = `EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND ${started})`;
     const told = tournamentNoticeTold(db, id, 'started', now);
+    const changed = tournamentTold(db, id, now);
     // The players qualify when the batch commits, not only when they were read above: a suspension (or a seat taken in
     // another tournament, a verification taken back) in between changes neither the version nor the roster, so the
     // start is conditional on it too and looks again (dropping that player) when it no longer holds. Hands played only
@@ -367,6 +377,7 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
                                   OR ${ELSEWHERE_SQL('u.id')})`,
         )
         .bind(id, tableId, now, players.length, t.roster, t.version, JSON.stringify(players.map((p) => p.userId)), t.requireVerified),
+      changed.statement,
       db
         .prepare(
           `INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, allow_spectators,
@@ -388,7 +399,7 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     // look again (a start that already happened is refused at the top).
     if (!res[0]?.meta.changes) continue;
     told.send(env, opts.ctx, res[res.length - 2]);
-    tournamentChanged(env, id, opts.ctx);
+    tournamentChanged(env, id, changed.row, opts.ctx);
     const live = await reloadRoom(env, tableId);
     // After the start is saved, never with it: a push that can't be queued leaves the start as it is.
     await queuePush(
