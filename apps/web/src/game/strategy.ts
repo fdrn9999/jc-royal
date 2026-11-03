@@ -3,13 +3,18 @@
  * decision review, StrategyPanel). Built from the stored record alone, as the replay is: the actions, the stacks and
  * the viewer's own cards; never a card the record does not already show the viewer, and only for finished hands.
  *
- * Strategy comes in two kinds kept apart, so one never passes for the other:
+ * What is said comes in kinds kept apart (AnalysisKind), so one never passes for another:
+ *  - math: plain arithmetic of the moment (pot odds, the size of the bet faced, the stack-to-pot ratio, the effective
+ *    stack) and what the viewer's cards made and drew to with the board then (handNow);
+ *  - heuristic: in the one spot they were drawn for, the academy's illustrative opening ranges. A teaching picture,
+ *    not a verdict;
  *  - solver: how often each choice is played (and its EV, where given) from a provider holding real solver output for
- *    the spot, always shown with the provider's source. None ships with the app (SOLVER_PROVIDERS is empty), so for
- *    now every spot reads as unsupported there;
- *  - educational: plain arithmetic of the moment (pot odds, the size of the bet faced, the stack-to-pot ratio) and, in
- *    the one spot they were drawn for, the academy's illustrative opening ranges. A teaching picture, not a verdict.
+ *    the spot (SolverProvider, asked only what the viewer knew: requestOf), always shown with its source;
+ *  - unavailable: no solver is connected (SOLVER_PROVIDERS is empty, so for now every spot reads so), none covers the
+ *    spot, or the analysis failed. Never a guessed frequency in its place.
  */
+import { BACKDOOR_FLUSH, cardCode, drawFlags, FLUSH_DRAW, GUTSHOT, NUT_FLUSH_DRAW, OPEN_ENDED, OVERCARDS } from '@jc/poker-engine/draws';
+import { evaluateKnown, rankClassIndex, rankValue, type Evaluation } from '@jc/poker-engine/evaluate';
 import type { Card } from '@jc/types';
 import { MATRIX_RANKS, OPEN_RANGES, parseRange, spr, type HandClass, type OpenSeat } from '../academy/gto/math';
 import { seatPositions } from './positions';
@@ -189,16 +194,79 @@ export interface SolverStrategy {
   /** Expected value of each choice in big blinds, where the data has it. */
   ev?: { choice: Choice; bb: number }[];
 }
-export type SolverAnswer = SolverStrategy | { kind: 'unsupported'; reason: 'noData' | 'noPosition' };
+/**
+ * The solver's part of a decision: real output, or why there is none: no solver connected, none covering the spot, a
+ * position the record does not settle, or an analysis that failed (an error, or no answer in time).
+ */
+export type SolverAnswer = SolverStrategy | { kind: 'unsupported'; reason: 'noSolver' | 'noData' | 'noPosition' } | { kind: 'failed' };
 
-/** A source of real solver output: what it holds for a decision, or null for a spot it does not cover. */
-export interface StrategyProvider {
-  id: string;
-  lookup(d: Decision, hand: ReplayInput): Omit<SolverStrategy, 'kind'> | null;
+/**
+ * What a solver is asked about one decision: only what the viewer knew as it came to them. Their own two cards, the
+ * board as far as it had come, the chips (every stack is on the table for all to see) and the actions before it, which
+ * the whole table saw. No other player's cards (even ones shown later at showdown), no card still to come, nothing that
+ * happened after.
+ */
+export interface SolverRequest {
+  stage: DecisionStage;
+  position: string;
+  heroSeat: number;
+  buttonSeat: number | null;
+  bigBlind: number | null;
+  dealt: number;
+  live: number;
+  pot: number;
+  toCall: number;
+  stack: number;
+  effective: number;
+  streetPot: number;
+  cards: Card[] | null;
+  board: Card[];
+  options: Choice[];
+  /** Each player's chips as the hand was dealt. */
+  stacks: { seat: number; chips: number }[];
+  /** The hand's actions before the decision, in order (chips each added). */
+  line: { stage: string; seat: number; type: string; amount: number }[];
 }
 
-/** The solver data the app has: none yet. A provider added here must hold real solver output and name its source. */
-export const SOLVER_PROVIDERS: readonly StrategyProvider[] = [];
+export type SolverStatus = 'queued' | 'running' | 'done' | 'failed' | 'unsupported';
+
+/**
+ * A source of real solver output, which may take its time: `analyze` starts an analysis of the spot (null: a spot it
+ * does not cover), `getStatus` follows it, `getResult` reads it once done. It works on a finished hand's record only,
+ * from the replay, so nothing about it touches a table being played.
+ */
+export interface SolverProvider {
+  id: string;
+  analyze(req: SolverRequest): Promise<string | null>;
+  getStatus(job: string): Promise<SolverStatus>;
+  getResult(job: string): Promise<Omit<SolverStrategy, 'kind'> | null>;
+}
+
+/** The solvers the app has: none yet. A provider added here must hold real solver output and name its source. */
+export const SOLVER_PROVIDERS: readonly SolverProvider[] = [];
+
+/** The question put to a solver about `d`, from what the viewer knew then (see SolverRequest). */
+export function requestOf(d: Decision, hand: ReplayInput, heroSeat: number): SolverRequest {
+  return {
+    stage: d.stage,
+    position: d.position ?? '',
+    heroSeat,
+    buttonSeat: hand.buttonSeat,
+    bigBlind: hand.bigBlind ?? null,
+    dealt: d.dealt,
+    live: d.live,
+    pot: d.pot,
+    toCall: d.toCall,
+    stack: d.stack,
+    effective: d.effective,
+    streetPot: d.streetPot,
+    cards: d.cards ? [...d.cards] : null,
+    board: d.board.slice(0, BOARD_AT[d.stage]),
+    options: [...d.options],
+    stacks: hand.players.map((p) => ({ seat: p.seatIndex, chips: p.stackStart })),
+    line: hand.actions.slice(0, d.action).map((a) => ({ stage: a.stage, seat: a.seatIndex, type: a.type, amount: a.amount })),
+  };
+}
 
 /** Frequencies a provider gave that can stand as an answer: its own source named, the decision's own choices, adding to 1. */
 function usable(r: Omit<SolverStrategy, 'kind'>, d: Decision): boolean {
@@ -213,16 +281,118 @@ function usable(r: Omit<SolverStrategy, 'kind'>, d: Decision): boolean {
   );
 }
 
-/** The first provider's answer for the decision, or why there is none. */
-export function solverFor(d: Decision, hand: ReplayInput, providers: readonly StrategyProvider[] = SOLVER_PROVIDERS): SolverAnswer {
+/** Why there can be no solver answer for `d` without asking any solver; null when one may be asked. */
+export function solverUnavailable(d: Decision, providers: readonly SolverProvider[] = SOLVER_PROVIDERS): SolverAnswer | null {
+  if (providers.length === 0) return { kind: 'unsupported', reason: 'noSolver' };
   if (!d.position) return { kind: 'unsupported', reason: 'noPosition' };
-  for (const p of providers) {
-    const r = p.lookup(d, hand);
-    if (r && usable(r, d)) return { kind: 'solver', ...r };
-  }
-  return { kind: 'unsupported', reason: 'noData' };
+  return null;
 }
 
+export interface SolverWait {
+  /** Stops following the analysis (the review closed, another decision picked). */
+  signal?: AbortSignal;
+  /** How long between looks at its status, and how long it may take in all before it counts as failed. */
+  pollMs?: number;
+  timeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const pause = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+
+/**
+ * The first provider's usable answer for the decision, or why there is none. A provider that covers no such spot, or
+ * answers with something unusable, passes it on to the next; one that fails (an error, a failed status, no answer in
+ * time) too, and the decision reads as failed if no other answers.
+ */
+export async function solverFor(d: Decision, hand: ReplayInput, heroSeat: number, providers: readonly SolverProvider[] = SOLVER_PROVIDERS, wait: SolverWait = {}): Promise<SolverAnswer> {
+  const now = solverUnavailable(d, providers);
+  if (now) return now;
+  const { signal, pollMs = 1000, timeoutMs = 60_000, sleep = pause } = wait;
+  const req = requestOf(d, hand, heroSeat);
+  let failed = false;
+  for (const p of providers) {
+    if (signal?.aborted) return { kind: 'failed' };
+    try {
+      const job = await p.analyze(req);
+      if (job === null) continue;
+      let status = await p.getStatus(job);
+      for (let waited = 0; status === 'queued' || status === 'running'; waited += pollMs) {
+        if (signal?.aborted) return { kind: 'failed' };
+        if (waited >= timeoutMs) {
+          status = 'failed';
+          break;
+        }
+        await sleep(pollMs);
+        status = await p.getStatus(job);
+      }
+      if (status === 'failed') failed = true;
+      if (status !== 'done') continue;
+      const r = await p.getResult(job);
+      if (r && usable(r, d)) return { kind: 'solver', ...r };
+    } catch {
+      failed = true;
+    }
+  }
+  return failed ? { kind: 'failed' } : { kind: 'unsupported', reason: 'noData' };
+}
+
+/**
+ * Which kind of analysis a part of the review is, each marked as such so none passes for another: plain arithmetic of
+ * the moment (math), a rule of thumb such as the academy's example ranges (heuristic), real solver output (solver), or
+ * none to give (unavailable).
+ */
+export type AnalysisKind = 'math' | 'heuristic' | 'solver' | 'unavailable';
+
+/** The study notes' kinds: the arithmetic is math, the academy's example range a heuristic. */
+export const NOTE_KINDS: Record<EducationalNote['kind'], AnalysisKind> = { potOdds: 'math', betSize: 'math', spr: 'math', openRange: 'heuristic' };
+
+/** How the viewer's pair ranks against the board: over it, pairing its top, second or a lower card, a pocket pair under its top card, or the board's own pair. */
+export type PairKind = 'over' | 'top' | 'second' | 'low' | 'pocket' | 'board';
+/** A draw the viewer held, as the bots read draws (@jc/poker-engine/draws). */
+export type DrawKind = 'nutFlush' | 'flush' | 'straight' | 'gutshot' | 'backdoorFlush' | 'overcards';
+
+export interface HandNow {
+  /** The best hand of the viewer's cards and the board then (preflop, the two cards alone). */
+  made: Evaluation;
+  /** For one pair after the flop: how it ranks against the board. */
+  pair: PairKind | null;
+  /** On the flop and the turn: what more could come, only where it would beat what is made. */
+  draws: DrawKind[];
+}
+
+const FLUSH_AND_UP = rankClassIndex('flush');
+const STRAIGHT = rankClassIndex('straight');
+
+/** What the viewer's two cards made at the decision with the board as it stood, and what they drew to: no card still to come. */
+export function handNow(d: Decision): HandNow | null {
+  if (d.cards?.length !== 2) return null;
+  const board = d.board.slice(0, BOARD_AT[d.stage]);
+  const made = evaluateKnown([...d.cards, ...board]);
+  if (!made) return null;
+  let pair: PairKind | null = null;
+  if (made.rankClass === 'pair' && board.length > 0) {
+    const p = made.score[1]!;
+    const [x, y] = d.cards.map(rankValue) as [number, number];
+    const ranks = [...new Set(board.map(rankValue))].sort((a, b) => b - a);
+    if (x === y && x === p) pair = p > ranks[0]! ? 'over' : 'pocket';
+    else if (x === p || y === p) pair = p === ranks[0] ? 'top' : p === ranks[1] ? 'second' : 'low';
+    else pair = 'board';
+  }
+  const flags = drawFlags(cardCode(d.cards[0]!), cardCode(d.cards[1]!), board.map(cardCode));
+  const rank = rankClassIndex(made.rankClass);
+  let draws: DrawKind[] = [];
+  if (flags & NUT_FLUSH_DRAW) draws.push('nutFlush');
+  else if (flags & FLUSH_DRAW) draws.push('flush');
+  else if (flags & BACKDOOR_FLUSH) draws.push('backdoorFlush');
+  if (flags & OPEN_ENDED) draws.push('straight');
+  else if (flags & GUTSHOT) draws.push('gutshot');
+  // Two overcards matter while nothing of the viewer's own is made (the board's own pair is everyone's).
+  if (flags & OVERCARDS && (made.rankClass === 'high-card' || pair === 'board')) draws.push('overcards');
+  // A draw to less than what is made is no draw: nothing beats a made flush here, a straight still draws to a flush.
+  if (rank >= FLUSH_AND_UP) draws = [];
+  else if (rank === STRAIGHT) draws = draws.filter((k) => k === 'nutFlush' || k === 'flush' || k === 'backdoorFlush');
+  return { made, pair, draws };
+}
 /**
  * What a call cost at the decision, as pot odds: where the viewer called or folded, the certain ones the hand page shows
  * (potOddsFor); where they raised a bet they could have called in full, what that call would have cost. Null with

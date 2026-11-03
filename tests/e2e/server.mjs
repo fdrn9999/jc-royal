@@ -31,7 +31,7 @@ writeFileSync(
    ('e2e-rebuy', 'E2E Rebuy', 2, 5, 10, 100, 1000, 30), ('e2e-autotop', 'E2E Auto top-up', 2, 5, 10, 100, 1000, 30), ('e2e-autotop-m', 'E2E Auto top-up Mobile', 2, 5, 10, 100, 1000, 30), ('e2e-stats', 'E2E Stats', 2, 5, 10, 100, 1000, 30), ('e2e-stats-m', 'E2E Stats Mobile', 2, 5, 10, 100, 1000, 30),
    ('e2e-resend', 'E2E Resend', 2, 5, 10, 100, 1000, 30), ('e2e-pre', 'E2E Pre-action', 2, 5, 10, 100, 1000, 30), ('e2e-muck', 'E2E Muck', 2, 5, 10, 100, 1000, 30), ('e2e-show', 'E2E Show', 2, 5, 10, 100, 1000, 30), ('e2e-reveal', 'E2E Reveal', 2, 5, 10, 100, 1000, 30), ('e2e-replay', 'E2E Replay', 2, 5, 10, 100, 1000, 30), ('e2e-uncalled', 'E2E Uncalled', 2, 5, 10, 100, 1000, 30),
    ('e2e-kick', 'E2E Emergency', 2, 5, 10, 100, 1000, 30), ('e2e-maint', 'E2E Maintenance', 2, 5, 10, 100, 1000, 30), ('e2e-close', 'E2E Close', 2, 5, 10, 100, 1000, 30),
-   ('e2e-role', 'E2E Role', 6, 5, 10, 100, 1000, 60), ('e2e-bb', 'E2E Big Blinds', 2, 10, 20, 200, 2000, 60), ('e2e-card', 'E2E Card', 2, 5, 10, 100, 1000, 30),
+   ('e2e-role', 'E2E Role', 6, 5, 10, 100, 1000, 60), ('e2e-bb', 'E2E Big Blinds', 2, 10, 20, 200, 2000, 60), ('e2e-card', 'E2E Card', 2, 5, 10, 100, 1000, 30), ('e2e-hud', 'E2E HUD', 2, 5, 10, 100, 1000, 30),
   ('e2e-react', 'E2E Reactions', 6, 5, 10, 100, 1000, 60), ('e2e-refill', 'E2E Refill', 2, 5, 10, 100, 1000, 60), ('e2e-tb', 'E2E Time bank', 2, 5, 10, 100, 1000, 60), ('e2e-fold', 'E2E Fold leave', 6, 5, 10, 100, 1000, 60), ('e2e-fold2', 'E2E Fold cancel', 2, 5, 10, 100, 1000, 60), ('e2e-fold-m', 'E2E Fold leave Mobile', 2, 5, 10, 100, 1000, 60);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, allow_spectators) VALUES
    ('e2e-lobby-full', 'E2E Lobby Hidden', 2, 3, 6, 60, 600, 30, 0), ('e2e-lobby-fav', 'E2E Lobby Fav', 6, 3, 6, 60, 600, 30, 1), ('e2e-lobby-m', 'E2E Lobby Mobile', 2, 3, 6, 60, 600, 30, 0),
@@ -43,7 +43,7 @@ writeFileSync(
    ('e2e-vault', 'E2E Vault', 6, 5, 10, 100, 1000, 30, 1, '${createHash('sha256').update('e2e-vault:vault-88').digest('base64url')}', 0),
    ('e2e-mine-vault', 'E2E Mine Vault', 2, 5, 10, 100, 1000, 60, 1, '${createHash('sha256').update('e2e-mine-vault:mine-99').digest('base64url')}', 0);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, bots_enabled, bot_level, bot_max, bot_fill_to) VALUES
-   ('e2e-bots-m', 'E2E Bots Mobile', 6, 5, 10, 100, 1000, 60, 1, 'normal', 2, 3), ('e2e-bots-admin', 'E2E Bots Admin', 2, 5, 10, 100, 1000, 60, 1, 'hard', 1, 2),
+   ('e2e-bots-m', 'E2E Bots Mobile', 6, 5, 10, 100, 1000, 60, 1, 'normal', 2, 3), ('e2e-hud-bots', 'E2E HUD Bots', 6, 5, 10, 100, 1000, 60, 1, 'normal', 2, 3), ('e2e-bots-admin', 'E2E Bots Admin', 2, 5, 10, 100, 1000, 60, 1, 'hard', 1, 2),
    ('e2e-nine', 'E2E Nine', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9), ('e2e-sound', 'E2E Sound', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2),
    ('e2e-music', 'E2E Music', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-music-b', 'E2E Music B', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2),
    ('e2e-phones', 'E2E Phones', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-flip', 'E2E Flip', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2),

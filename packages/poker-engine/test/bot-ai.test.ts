@@ -37,6 +37,7 @@ import {
 } from '../src';
 import { allCombos, classCombos, classId, className, NUM_CLASSES, TOTAL_COMBOS } from '../src/ai/classes';
 import { percentile, PLAY_ORDER, rangeShare, topRange } from '../src/ai/ranges';
+import { cbetLikelihoods } from '../src/ai/villain';
 import { equityIfRaised, equityOf, readSpot } from '../src/ai/spot';
 import { seating } from '../src/ai/walk';
 
@@ -789,6 +790,61 @@ describe('Bot AI 2.0: public statistics', () => {
     expect(tendencies(counters({ hands: 300, vpipOpp: 300, vpip: 150, pfr: 20, postBets: 20, postCalls: 80 }), 14).type).toBe('LP');
     expect(tendencies(counters({ hands: 300, vpipOpp: 300, vpip: 60, pfr: 50, postBets: 90, postCalls: 30 }), 14).type).toBe('TAG');
   });
+
+  it('reads a continuation bet at the bettor’s own rate: the strengths keep their order, the share of the range is the rate', () => {
+    // A flop bet's likelihoods by bucket (air, weak, draw, medium, strong) and a range over them.
+    const l = [0.25, 0.4, 0.55, 0.75, 0.95];
+    const mass = [30, 25, 10, 20, 15];
+    const share = (x: number[]) => x.reduce((a, v, b) => a + v * mass[b]!, 0) / mass.reduce((a, v) => a + v, 0);
+    for (const rate of [0.3, 0.45, 0.6, 0.8, 0.9]) {
+      const x = cbetLikelihoods(l, mass, rate);
+      expect(share(x)).toBeCloseTo(rate, 3);
+      for (let b = 1; b < l.length; b++) expect(x[b]!).toBeGreaterThan(x[b - 1]!);
+    }
+    // Betting more often widens the range toward the weak hands; less often, toward the strong ones.
+    const often = cbetLikelihoods(l, mass, 0.85);
+    const seldom = cbetLikelihoods(l, mass, 0.3);
+    expect(often[0]! / often[4]!).toBeGreaterThan(l[0]! / l[4]!);
+    expect(seldom[0]! / seldom[4]!).toBeLessThan(l[0]! / l[4]!);
+    // A rate past what any range explains is held inside 10–95%, and the power inside 1/20–4: a player who seldom bets
+    // is read as betting a narrow range, never as betting only the strongest hands. An empty range is left as it was.
+    expect(share(cbetLikelihoods(l, mass, 1))).toBeCloseTo(0.95, 3);
+    expect(cbetLikelihoods(l, mass, 0)).toEqual(cbetLikelihoods(l, mass, 0.1));
+    const floor = share(cbetLikelihoods(l, mass, 0.1));
+    expect(floor).toBeGreaterThanOrEqual(0.1);
+    expect(floor).toBeCloseTo(share(l.map((x) => Math.pow(x, 4))), 3);
+    expect(cbetLikelihoods(l, [0, 0, 0, 0, 0], 0.9)).toEqual(l);
+  });
+
+  it('gives a hand more equity against a player who continuation-bets every flop than one who seldom does', async () => {
+    // Heads-up: the button raises, the big blind calls and checks a K-8-4 flop, the button bets half the pot.
+    const spot = () =>
+      viewAt(1, 2, { 1: '9c 9s' }, [
+        [0, 'raise', 25],
+        [1, 'call'],
+        [1, 'check'],
+        [0, 'bet', 25],
+      ], { board: 'Kh 8d 4c 2s 7h' });
+    const regular = { hands: 300, vpipOpp: 300, vpip: 80, pfr: 60, postBets: 90, postCalls: 50, postBetOpp: 400 };
+    const always = { stats: { 0: counters({ ...regular, cbetOpp: 120, cbet: 114 }) } };
+    const seldom = { stats: { 0: counters({ ...regular, cbetOpp: 120, cbet: 30 }) } };
+    const v = await spot();
+    for (const level of ['normal', 'hard', 'expert'] as const) {
+      const eq = (o: { stats: Record<number, Counters> }) => {
+        const s = readSpot(level, v, seeded(3), o);
+        return equityOf(s, s.opps);
+      };
+      const [a, b] = [eq(always), eq(seldom)];
+      console.log(`${level} 99 on K-8-4 facing a c-bet: from one who always bets ${pct(a)} | from one who seldom does ${pct(b)}`);
+      expect(a).toBeGreaterThan(b + 0.05);
+    }
+    // The easy level reads no statistics.
+    const easy = (o: { stats: Record<number, Counters> }) => {
+      const s = readSpot('easy', v, seeded(3), o);
+      return equityOf(s, s.opps);
+    };
+    expect(easy(always)).toBe(easy(seldom));
+  }, 60_000);
 });
 
 describe('Bot AI 2.0: levels and styles move separately', () => {
@@ -1046,7 +1102,7 @@ describe('Bot AI 2.0: fairness and safety', () => {
       const r = decideBot(level, v, seeded(1), { stats: { 0: broken } });
       expect(['fold', 'call', 'raise', 'allin']).toContain(r.type);
     }
-    expect(STRATEGY_VERSION).toBe('bot-ai-2.0');
+    expect(STRATEGY_VERSION).toBe('bot-ai-2.1');
     const styles = new Set(Array.from({ length: 100 }, (_, i) => styleFor(`bot-${i}`)));
     // Only the auto styles, the hash as it was before 'casual' (an account set to no style keeps the one it had).
     expect([...styles].sort()).toEqual([...BOT_AUTO_STYLES].sort());

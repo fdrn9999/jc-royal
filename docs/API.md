@@ -187,6 +187,7 @@
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/api/players/:id/card` | PlayerCardDto `{user, joinedMonth('YYYY-MM', 한국 시간), self, achievements, stats, privacy?}`. `achievements`는 `[{code, at}]`, 회원이 숨겼으면 `null`. `stats`는 `{hands, vpip, pfr, wtsd, wsd, tournamentWins}`(비율은 `{n, of}` 표본과 함께), 회원이 켜지 않았으면 `null`(기본). 내 카드는 둘 다 늘 있고 `privacy`(공개 설정 4개)가 붙는다. 없는 회원·탈퇴·정지·테이블 봇·어느 쪽이든 차단한 사이는 모두 같은 404 `player_not_found`. 칩·이메일·핸드의 카드는 없다. 분당 120회 |
+| GET | `/api/players/:id/hud?scope=cash\|tournament` | PlayerHudDto `{bot, scope, stats}`. 좌석 카드 안의 테이블 HUD(`docs/SOCIAL.md` 5절). `scope`는 연 테이블의 종류(기본 `cash`, 그 밖의 값은 400). `stats`는 그 종류 테이블에서 최근 90일 중 가장 최근 1,000핸드의 `{hands, vpip, pfr, wtsd, wsd, counted, threeBet, foldTo3Bet, cbet, foldToCbet, aggression{bets, calls}}`(비율은 `{n, of}`, `/api/me/stats`와 같은 셈). 회원은 `showStats`를 켰거나 나 자신일 때만, 아니면 `null`. 테이블 봇은 늘 보이고 `bot: true`. 404는 카드와 같다(봇은 404가 아님). 칩·손익·핸드의 카드는 없다. 카드와 함께 분당 120회 |
 | GET | `/api/leaderboard` | `?season=YYYY-MM`(기본은 이번 달, 한국 시간). LeaderboardDto `{season, from, to, rows, ranked, me, hidden}`. `rows`는 상위 50명 `{rank, user, tournaments, wins, score}`, `me`는 내 줄(토너먼트가 3개 미만이면 `rank: null`, 리더보드 표시를 껐으면 `null`), `hidden`은 내가 표시를 껐는지. 형식이 틀리면 400 `invalid_season`. 분당 60회 |
 
 ## 접속 상태 `/api/me/presence`, `/api/friends/presence` (로그인 필요)

@@ -25,7 +25,7 @@ export interface AchievementDto {
 export interface PrivacySettingsDto {
   /** Achievements on my card (default on). */
   showAchievements: boolean;
-  /** Hands played, VPIP, PFR, WTSD and W$SD on my card (default off). */
+  /** Hands played, VPIP, PFR, WTSD and W$SD on my card, and the table HUD's figures (default off). */
   showStats: boolean;
   /** Tell my friends when I sit at a public table (default on; never while invisible, never a private table). */
   shareTable: boolean;
@@ -59,6 +59,47 @@ export interface PlayerCardDto {
   stats: PlayerCardStatsDto | null;
   /** My own card only. */
   privacy?: PrivacySettingsDto;
+}
+
+// ------------------------------------------------------------------ table HUD (GET /api/players/:id/hud)
+
+/**
+ * Which tables a seat's HUD counts: the ordinary ones (official and member rooms) or the tournament ones, the kind of
+ * table it is opened at. Practice hands are never recorded, so a practice table's HUD counts that session in the
+ * browser only.
+ */
+export const HUD_SCOPES = ['cash', 'tournament'] as const;
+export type HudScope = (typeof HUD_SCOPES)[number];
+/** A HUD counts the player's latest hands of its scope: at most HUD_HANDS of them, from the last HUD_DAYS days. */
+export const HUD_HANDS = 1000;
+export const HUD_DAYS = 90;
+
+/** The card's figures and the later ones /api/me/stats has, by the same counting (each ratio over its chances). */
+export interface HudStatsDto {
+  hands: number;
+  vpip: StatRatio;
+  pfr: StatRatio;
+  wtsd: StatRatio;
+  wsd: StatRatio;
+  /** Of `hands`, those the 3-bet, c-bet and AF figures count (recorded since they were added). */
+  counted: number;
+  threeBet: StatRatio;
+  foldTo3Bet: StatRatio;
+  cbet: StatRatio;
+  foldToCbet: StatRatio;
+  /** Bets and raises, and calls, after the flop. */
+  aggression: { bets: number; calls: number };
+}
+
+/**
+ * A seat's HUD: a member's statistics only as their card shows them (shown, or my own), a table bot's always and
+ * marked as a bot's. Not found the way the card is (no such player, a withdrawn or suspended member, a block).
+ */
+export interface PlayerHudDto {
+  bot: boolean;
+  scope: HudScope;
+  /** Null: the member keeps their statistics to themselves. */
+  stats: HudStatsDto | null;
 }
 
 // ------------------------------------------------------------------ season leaderboard (GET /api/leaderboard)

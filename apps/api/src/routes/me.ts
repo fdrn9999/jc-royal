@@ -1,5 +1,5 @@
 import { schema } from '@jc/db';
-import { HAND_RANK_CLASSES, HandListQuerySchema, HandNoteInputSchema, POSITIONS, SettingsSaveSchema, type SettingsSaveResult, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto } from '@jc/types';
+import { HAND_RANK_CLASSES, HandListQuerySchema, HandNoteInputSchema, POSITIONS, SettingsSaveSchema, type SettingsSaveResult, TREND_DAYS, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type PositionStatsDto, type StatsDto, type StatsTrendDto, type TrendDays } from '@jc/types';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
@@ -9,6 +9,7 @@ import { replayLog, replayPlayer, replayUser } from '../lib/community';
 import { countNote, failureMetric, isFiltered, listHands, readNote, savedMetrics, saveNote } from '../lib/handNotes';
 import { fail, parseBody } from '../lib/http';
 import { countOps } from '../lib/ops';
+import { PLAY_STATS_COLUMNS, playRatios, type PlayStatsRow } from '../lib/play-stats';
 import { rateLimit } from '../lib/rate-limit';
 import { referralMe } from '../lib/referral';
 import { realtimeToUsers } from '../lib/realtime';
@@ -19,6 +20,25 @@ function pageParams(q: (k: string) => string | undefined) {
   const limit = Math.min(Math.max(Number(q('limit') ?? 20) || 20, 1), 100);
   const before = Number(q('before') ?? 0) || undefined;
   return { limit, before };
+}
+
+const DAY = 86_400_000;
+
+/**
+ * The period a statistics request asks for: `days` (TREND_DAYS) and `tz` (minutes east of UTC, as the browser reports
+ * it negated), and `from`, the first moment of the first of those days in that time zone (today counts as one).
+ * Without `days`, `all` asks for every hand (from 0) and otherwise the default is 30 days.
+ */
+function statsPeriod(q: (k: string) => string | undefined, all: boolean): { days: TrendDays | null; tz: number; from: number } {
+  const raw = q('days');
+  const days = Number(raw ?? 30);
+  const tz = Number(q('tz') ?? 0);
+  if (!(raw === undefined && all) && !(TREND_DAYS as readonly number[]).includes(days)) fail(400, 'bad_request', `days must be one of ${TREND_DAYS.join(', ')}`);
+  if (!Number.isInteger(tz) || tz < -720 || tz > 840) fail(400, 'bad_request', 'tz must be minutes east of UTC (-720 to 840)');
+  if (raw === undefined && all) return { days: null, tz, from: 0 };
+  const off = tz * 60_000;
+  const today = Math.floor((Date.now() + off) / DAY);
+  return { days: days as TrendDays, tz, from: (today - days + 1) * DAY - off };
 }
 
 export const meRoutes = new Hono<AppEnv>()
@@ -74,6 +94,8 @@ export const meRoutes = new Hono<AppEnv>()
    */
   .get('/stats', async (c) => {
     const uid = c.var.user!.id;
+    // The last 7, 30 or 90 days (the trend's days), or every hand without `days`.
+    const { days, from } = statsPeriod((k) => c.req.query(k), true);
     const [aggR, potR, bestR, posR] = await c.env.DB.batch([
       c.env.DB.prepare(
         `SELECT COUNT(*) AS played,
@@ -82,59 +104,47 @@ export const meRoutes = new Hono<AppEnv>()
                 COALESCE(SUM(pot_won), 0) AS totalWon,
                 COALESCE(SUM(net), 0) AS net,
                 COALESCE(MAX(CASE WHEN net > 0 THEN net END), 0) AS biggestWin,
-                COUNT(vpip) AS dealt,
-                COALESCE(SUM(vpip), 0) AS vpip,
-                COALESCE(SUM(pfr), 0) AS pfr,
-                COALESCE(SUM(saw_flop), 0) AS sawFlop,
-                COALESCE(SUM(saw_flop AND went_to_showdown), 0) AS wtsd,
-                COALESCE(SUM(went_to_showdown AND pot_won IS NOT NULL), 0) AS showdowns,
-                COALESCE(SUM(went_to_showdown AND pot_won > 0), 0) AS wsd,
-                COUNT(big_blind) AS counted,
-                COUNT(three_bet) AS threeBetOf, COALESCE(SUM(three_bet), 0) AS threeBet,
-                COUNT(fold_3bet) AS foldTo3BetOf, COALESCE(SUM(fold_3bet), 0) AS foldTo3Bet,
-                COUNT(cbet) AS cbetOf, COALESCE(SUM(cbet), 0) AS cbet,
-                COUNT(fold_cbet) AS foldToCbetOf, COALESCE(SUM(fold_cbet), 0) AS foldToCbet,
-                COALESCE(SUM(post_bets), 0) AS postBets, COALESCE(SUM(post_calls), 0) AS postCalls,
+                ${PLAY_STATS_COLUMNS},
                 TOTAL(CASE WHEN big_blind > 0 THEN net * 1.0 / big_blind END) AS bbWon
-         FROM hand_players WHERE user_id = ?1`,
-      ).bind(uid),
+         FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2`,
+      ).bind(uid, from),
       // Chips a player put in are won - net (payouts include uncalled chips handed back). The contested pot is all chips
       // put in minus the part of the largest contribution nobody matched; only hands the user put chips into count.
       c.env.DB.prepare(
         `WITH c AS (
            SELECT hp.hand_id, hp.user_id, hp.won - hp.net AS put,
                   ROW_NUMBER() OVER (PARTITION BY hp.hand_id ORDER BY hp.won - hp.net DESC) AS rk
-           FROM hand_players hp WHERE hp.hand_id IN (SELECT hand_id FROM hand_players WHERE user_id = ?1)
+           FROM hand_players hp WHERE hp.hand_id IN (SELECT hand_id FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2)
          ), pots AS (
            SELECT SUM(put) - MAX(CASE WHEN rk = 1 THEN put ELSE 0 END) + MAX(CASE WHEN rk = 2 THEN put ELSE 0 END) AS pot,
                   MAX(CASE WHEN user_id = ?1 THEN put ELSE 0 END) AS myPut
            FROM c GROUP BY hand_id
          )
          SELECT COALESCE(MAX(pot), 0) AS largest, AVG(pot) AS avg FROM pots WHERE myPut > 0`,
-      ).bind(uid),
+      ).bind(uid, from),
       c.env.DB.prepare(
         `SELECT rank_class AS rankClass, rank_value AS rankValue, best_five AS bestFive FROM hand_players
-         WHERE user_id = ?1 AND went_to_showdown = 1 AND rank_value IS NOT NULL
+         WHERE user_id = ?1 AND ended_at >= ?2 AND went_to_showdown = 1 AND rank_value IS NOT NULL
          ORDER BY rank_value DESC LIMIT 1`,
-      ).bind(uid),
+      ).bind(uid, from),
       c.env.DB.prepare(
-        `SELECT position, COUNT(*) AS hands, COALESCE(SUM(vpip), 0) AS vpip, COALESCE(SUM(pfr), 0) AS pfr, COALESCE(SUM(net), 0) AS net
-         FROM hand_players WHERE user_id = ?1 AND position IS NOT NULL GROUP BY position`,
-      ).bind(uid),
+        `SELECT position, COUNT(*) AS hands, COALESCE(SUM(vpip), 0) AS vpip, COALESCE(SUM(pfr), 0) AS pfr, COALESCE(SUM(net), 0) AS net,
+                COUNT(big_blind) AS counted, TOTAL(CASE WHEN big_blind > 0 THEN net * 1.0 / big_blind END) AS bbWon
+         FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2 AND position IS NOT NULL GROUP BY position`,
+      ).bind(uid, from),
     ]);
-    type Agg = Record<
-      | 'played' | 'measured' | 'won' | 'totalWon' | 'net' | 'biggestWin' | 'dealt' | 'vpip' | 'pfr' | 'sawFlop' | 'wtsd' | 'showdowns' | 'wsd'
-      | 'counted' | 'threeBetOf' | 'threeBet' | 'foldTo3BetOf' | 'foldTo3Bet' | 'cbetOf' | 'cbet' | 'foldToCbetOf' | 'foldToCbet' | 'postBets' | 'postCalls' | 'bbWon',
-      number
-    >;
+    type Agg = PlayStatsRow & Record<'played' | 'measured' | 'won' | 'totalWon' | 'net' | 'biggestWin' | 'bbWon', number>;
     const agg = (aggR!.results as Agg[])[0]!;
     const pot = (potR!.results as { largest: number; avg: number | null }[])[0];
     const best = (bestR!.results as { rankClass: string; rankValue: number; bestFive: string | null }[])[0];
-    const byPos = new Map((posR!.results as (Omit<PositionStatsDto, 'position'> & { position: string })[]).map((r) => [r.position, r]));
+    const byPos = new Map((posR!.results as (Omit<PositionStatsDto, 'position' | 'bb100'> & { position: string; bbWon: number })[]).map((r) => [r.position, r]));
+    const bb100 = (bbWon: number, counted: number) => (counted > 0 ? Math.round((bbWon / counted) * 100 * 100) / 100 : null);
     const stats: StatsDto = {
+      days,
       handsPlayed: agg.played,
       handsWon: agg.won,
-      winRate: agg.measured > 0 ? Math.round((agg.won / agg.measured) * 1000) / 10 : 0,
+      // No hand to measure, no rate (not 0%).
+      winRate: agg.measured > 0 ? Math.round((agg.won / agg.measured) * 1000) / 10 : null,
       totalWon: agg.totalWon,
       netChips: agg.net,
       largestPot: pot?.largest ?? 0,
@@ -144,48 +154,48 @@ export const meRoutes = new Hono<AppEnv>()
         best && (HAND_RANK_CLASSES as readonly string[]).includes(best.rankClass)
           ? { rankClass: best.rankClass, cards: best.bestFive ? (JSON.parse(best.bestFive) as string[]) : [] }
           : null,
-      vpip: { n: agg.vpip, of: agg.dealt },
-      pfr: { n: agg.pfr, of: agg.dealt },
+      ...playRatios(agg),
       raiseShare: { n: agg.pfr, of: agg.vpip },
-      wtsd: { n: agg.wtsd, of: agg.sawFlop },
-      wsd: { n: agg.wsd, of: agg.showdowns },
-      counted: agg.counted,
-      threeBet: { n: agg.threeBet, of: agg.threeBetOf },
-      foldTo3Bet: { n: agg.foldTo3Bet, of: agg.foldTo3BetOf },
-      cbet: { n: agg.cbet, of: agg.cbetOf },
-      foldToCbet: { n: agg.foldToCbet, of: agg.foldToCbetOf },
-      aggression: { bets: agg.postBets, calls: agg.postCalls },
-      bb100: agg.counted > 0 ? Math.round((agg.bbWon / agg.counted) * 100 * 100) / 100 : null,
+      bb100: bb100(agg.bbWon, agg.counted),
       positions: POSITIONS.map((position) => {
         const r = byPos.get(position);
-        return { position, hands: r?.hands ?? 0, vpip: r?.vpip ?? 0, pfr: r?.pfr ?? 0, net: r?.net ?? 0 };
+        return { position, hands: r?.hands ?? 0, vpip: r?.vpip ?? 0, pfr: r?.pfr ?? 0, net: r?.net ?? 0, counted: r?.counted ?? 0, bb100: r ? bb100(r.bbWon, r.counted) : null };
       }),
     };
     return c.json(stats);
   })
   /**
-   * Net chips per day over the last `days` days, cut at the caller's time zone (`tz`, minutes east of UTC, as the
-   * browser reports it negated). Days without hands are left out.
+   * Per day over the last `days` days, cut at the caller's time zone (`tz`, minutes east of UTC, as the browser reports
+   * it negated): hands, net chips, and the counts behind VPIP, PFR, the showdown figures and BB/100, with the same
+   * columns and rules as /stats. Days without hands are left out.
    */
   .get('/stats/trend', async (c) => {
-    const days = Number(c.req.query('days') ?? 30);
-    const tz = Number(c.req.query('tz') ?? 0);
-    if (!(TREND_DAYS as readonly number[]).includes(days)) fail(400, 'bad_request', `days must be one of ${TREND_DAYS.join(', ')}`);
-    if (!Number.isInteger(tz) || tz < -720 || tz > 840) fail(400, 'bad_request', 'tz must be minutes east of UTC (-720 to 840)');
-    const DAY = 86_400_000;
+    const { days, tz, from } = statsPeriod((k) => c.req.query(k), false);
     const off = tz * 60_000;
-    const today = Math.floor((Date.now() + off) / DAY);
-    const from = (today - days + 1) * DAY - off;
     const { results } = await c.env.DB.prepare(
-      `SELECT CAST((ended_at + ?2) / ${DAY} AS INTEGER) AS d, COUNT(*) AS hands, SUM(net) AS net
+      `SELECT CAST((ended_at + ?2) / ${DAY} AS INTEGER) AS d, COUNT(*) AS hands, SUM(net) AS net,
+              COUNT(vpip) AS dealt, COALESCE(SUM(vpip), 0) AS vpip, COALESCE(SUM(pfr), 0) AS pfr,
+              COALESCE(SUM(saw_flop), 0) AS sawFlop, COALESCE(SUM(saw_flop AND went_to_showdown), 0) AS wtsd,
+              COALESCE(SUM(went_to_showdown AND pot_won IS NOT NULL), 0) AS showdowns, COALESCE(SUM(went_to_showdown AND pot_won > 0), 0) AS wsd,
+              COUNT(big_blind) AS counted, TOTAL(CASE WHEN big_blind > 0 THEN net * 1.0 / big_blind END) AS bbWon
        FROM hand_players WHERE user_id = ?1 AND ended_at >= ?3 GROUP BY d ORDER BY d`,
     )
       .bind(c.var.user!.id, off, from)
-      .all<{ d: number; hands: number; net: number }>();
+      .all<Record<'d' | 'hands' | 'net' | 'dealt' | 'vpip' | 'pfr' | 'sawFlop' | 'wtsd' | 'showdowns' | 'wsd' | 'counted' | 'bbWon', number>>();
     const out: StatsTrendDto = {
-      days: days as StatsTrendDto['days'],
+      days: days!,
       tz,
-      points: results.map((r) => ({ day: new Date(r.d * DAY).toISOString().slice(0, 10), hands: r.hands, net: r.net })),
+      points: results.map((r) => ({
+        day: new Date(r.d * DAY).toISOString().slice(0, 10),
+        hands: r.hands,
+        net: r.net,
+        vpip: { n: r.vpip, of: r.dealt },
+        pfr: { n: r.pfr, of: r.dealt },
+        wtsd: { n: r.wtsd, of: r.sawFlop },
+        wsd: { n: r.wsd, of: r.showdowns },
+        counted: r.counted,
+        bbWon: Math.round(r.bbWon * 10_000) / 10_000,
+      })),
     };
     return c.json(out);
   })

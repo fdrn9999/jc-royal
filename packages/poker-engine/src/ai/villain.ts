@@ -237,19 +237,57 @@ export function likelihoods(e: ActEvent, t?: Tendencies): number[] {
 const STAGE_CARDS = { flop: 3, turn: 4, river: 5 } as const;
 
 /**
+ * The likelihoods of a continuation bet, matched to how often this player makes one (`rate`). Over the player's range on
+ * this board (`mass`, its weight in each bucket) the bet model above comes to some share of hands betting. A player who
+ * continues more often than that cannot be doing it only with the hands the model expects, and one who continues less
+ * often bets a narrower range. Every likelihood is raised to the one power that makes the share their rate: below 1 the
+ * weaker hands gain the most, above 1 they lose the most, and the strengths keep the model's order. The rate is
+ * smoothed toward the population's like every tendency, so a few hands move it little.
+ */
+export function cbetLikelihoods(l: readonly number[], mass: readonly number[], rate: number): number[] {
+  const p = l.map((x) => clamp(x, 1e-3, 1));
+  const total = mass.reduce((a, x) => a + x, 0);
+  if (!(total > 0)) return l.slice();
+  const target = clamp(rate, 0.1, 0.95);
+  const share = (g: number) => mass.reduce((a, x, b) => a + x * Math.pow(p[b]!, g), 0) / total;
+  // The share falls as the power grows; halve the interval on its logarithm.
+  let lo = Math.log(0.05);
+  let hi = Math.log(4);
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    if (share(Math.exp(mid)) > target) lo = mid;
+    else hi = mid;
+  }
+  const g = Math.exp((lo + hi) / 2);
+  return p.map((x) => Math.pow(x, g));
+}
+
+/** A bet heads-up on the flop, first on the street, by the player who made the last raise before it. */
+const isCbet = (e: ActEvent, raiser: number | null) => e.stage === 'flop' && e.kind === 'raise' && e.level === 0 && e.seat === raiser && e.rivals === 1 && e.size < BIG_BET;
+
+/**
  * A player's combinations after their actions on the flop, turn and river: each action multiplies every combination
  * by how likely a hand of its strength on that street's board was to take it. Never empties the range: an action that
- * would leave nothing (a line no model predicts) is ignored.
+ * would leave nothing (a line no model predicts) is ignored. When the reader adapts (`t`), a heads-up continuation bet
+ * is read with the player's own continuation-bet rate (`cbetLikelihoods`): the population's for a player with no record
+ * yet, a bot or someone who is not counted.
  */
 export function narrow(weights: Float64Array, seat: number, log: readonly Logged[], board: readonly number[], t?: Tendencies): Float64Array {
   const w = weights.slice();
   const next = new Float64Array(w.length);
+  let raiser: number | null = null;
   for (const { e } of log) {
+    if (e.stage === 'preflop' && e.kind === 'raise') raiser = e.seat;
     if (e.seat !== seat || e.stage === 'preflop' || e.kind === 'fold') continue;
     const cards = STAGE_CARDS[e.stage as keyof typeof STAGE_CARDS];
     if (!cards || board.length < cards) continue;
     const table = strengthTable(board.slice(0, cards));
-    const l = likelihoods(e, t);
+    let l = likelihoods(e, t);
+    if (t && isCbet(e, raiser)) {
+      const mass = [0, 0, 0, 0, 0];
+      for (let i = 0; i < w.length; i++) if (w[i] && table.hs[i]! >= 0) mass[bucketOf(table.hs[i]!, table.draws[i]!)]! += w[i]!;
+      l = cbetLikelihoods(l, mass, t.cbet);
+    }
     let sum = 0;
     for (let i = 0; i < w.length; i++) {
       const x = w[i]!;

@@ -29,7 +29,7 @@ export type { DecideOptions, PubSeat } from './ai/spot';
 export type { PubAction } from './ai/walk';
 
 /** Written to logs with each bot decision batch, so a change of strategy shows up in the record. */
-export const STRATEGY_VERSION = 'bot-ai-2.0';
+export const STRATEGY_VERSION = 'bot-ai-2.1';
 
 /** Everything a bot may know when it decides. Nothing in it is hidden from the player in that seat. */
 export interface BotView {

@@ -491,6 +491,8 @@ export function TablePage() {
   // A tournament table: no wallet chips here (no buy-in, top-up, rebuy or waiting list), and its seat is not given up
   // by leaving the screen; the way out goes to the tournament's page.
   const tn = s?.tournament ?? null;
+  // A seat's HUD counts the player's hands at this kind of table.
+  const hudScope = tn ? 'tournament' : 'cash';
   const autoPolicy = s ? seatPolicy(s.you) : null;
   // Standing up folds my hand while I am still in it (not folded, not all in): at once on my turn, else when it comes,
   // so I am asked first. Folded, all in (I stand up once it is settled) or between hands, it folds nothing.
@@ -1187,12 +1189,13 @@ export function TablePage() {
             onClose={() => setPicked(null)}
             newTab
             chatMute
+            hud={hudScope}
             onReport={() => {
               if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
               setPicked(null);
             }}
           />
-          <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} />
+          <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} hud={hudScope} />
           <ReportModal subject={reporting} onClose={() => setReporting(null)} />
         </Suspense>
       )}

@@ -40,8 +40,10 @@ const sizes: Record<Size, string> = {
 
 /** A button's look, for a link that leads somewhere but should read as one of the buttons beside it. */
 export function buttonClass(variant: Variant = 'gold', size: Size = 'md', className?: string) {
+  // Colours, shadow, opacity and transform ease; size and padding never do, so a bar that changes at a breakpoint
+  // (the icon size's padding) is laid out at once, not squeezing what sits beside it for a moment.
   return cx(
-    'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition-all duration-150',
+    'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition duration-150',
     'disabled:opacity-45 disabled:cursor-not-allowed active:translate-y-px',
     variants[variant],
     sizes[size],

@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { buildReplay, type ReplayInput } from '../src/game/replay';
-import { beforeOnStreet, callPrice, decisionsOf, educationalFor, handClass, SOLVER_PROVIDERS, solverFor, sprOf, type StrategyProvider } from '../src/game/strategy';
+import type { Card } from '@jc/types';
+import {
+  beforeOnStreet,
+  callPrice,
+  decisionsOf,
+  educationalFor,
+  handClass,
+  handNow,
+  requestOf,
+  SOLVER_PROVIDERS,
+  solverFor,
+  solverUnavailable,
+  sprOf,
+  type Decision,
+  type SolverProvider,
+  type SolverRequest,
+  type SolverStatus,
+} from '../src/game/strategy';
 
 const a = (seatIndex: number, stage: string, type: string, amount = 0) => ({ seatIndex, stage, type, amount });
 const player = (seatIndex: number, stackStart: number, holeCards: string[] | null = null) => ({
@@ -145,27 +162,50 @@ describe('handClass', () => {
 });
 
 describe('solverFor: solver frequencies only from real solver data, always with its source', () => {
-  it('ships with no solver data: every decision reads as unsupported, none as a solver’s answer', () => {
+  /** A provider that answers `r` after `running` looks at its status (or the status `end` then). */
+  const provider = (r: Awaited<ReturnType<SolverProvider['getResult']>>, o: { running?: number; end?: SolverStatus; covers?: boolean; seen?: SolverRequest[] } = {}): SolverProvider => {
+    let looks = 0;
+    return {
+      id: 'test',
+      analyze: async (req) => {
+        o.seen?.push(req);
+        return o.covers === false ? null : 'job-1';
+      },
+      getStatus: async () => (looks++ < (o.running ?? 0) ? 'running' : (o.end ?? 'done')),
+      getResult: async () => r,
+    };
+  };
+  const now = { sleep: async () => {} };
+  const freqs = [
+    { choice: 'fold' as const, share: 0.2 },
+    { choice: 'call' as const, share: 0.5 },
+    { choice: 'raise' as const, share: 0.3 },
+  ];
+
+  it('ships with no solver: every decision reads as unavailable for that, none as a solver’s answer', async () => {
     expect(SOLVER_PROVIDERS).toHaveLength(0);
     const h = hand();
-    for (const d of decisions(h)) expect(solverFor(d, h)).toEqual({ kind: 'unsupported', reason: 'noData' });
-    // Without a position the record states plainly, no spot can be looked up at all.
-    const [d] = decisions(hand({ buttonSeat: null }));
+    for (const d of decisions(h)) {
+      expect(solverUnavailable(d)).toEqual({ kind: 'unsupported', reason: 'noSolver' });
+      expect(await solverFor(d, h, 0)).toEqual({ kind: 'unsupported', reason: 'noSolver' });
+    }
+    // Without a position the record states plainly, no spot can be looked up at all, a solver or not.
+    const noButton = hand({ buttonSeat: null });
+    const [d] = decisions(noButton);
     expect(d!.position).toBeNull();
-    expect(solverFor(d!, h)).toEqual({ kind: 'unsupported', reason: 'noPosition' });
+    const seen: SolverRequest[] = [];
+    expect(await solverFor(d!, noButton, 0, [provider({ source: 'S', freqs }, { seen })], now)).toEqual({ kind: 'unsupported', reason: 'noPosition' });
+    expect(seen).toEqual([]);
   });
 
-  it('shows a provider’s frequencies with its source, and refuses any that do not fit the decision', () => {
+  it('shows a provider’s frequencies with its source once its analysis is done, and refuses any that do not fit the decision', async () => {
     const h = hand();
     const call = decisions(h)[2]!;
-    const provider = (r: ReturnType<StrategyProvider['lookup']>): StrategyProvider => ({ id: 'test', lookup: () => r });
-    const freqs = [
-      { choice: 'fold' as const, share: 0.2 },
-      { choice: 'call' as const, share: 0.5 },
-      { choice: 'raise' as const, share: 0.3 },
-    ];
-    expect(solverFor(call, h, [provider({ source: 'Test solver · 6-max 100bb', freqs })])).toEqual({ kind: 'solver', source: 'Test solver · 6-max 100bb', freqs });
-    // No source; a choice the viewer did not have (check, facing a bet); shares not adding up to 1; an unusable EV; a spot it does not cover.
+    const answer = { source: 'Test solver · 6-max 100bb', freqs };
+    expect(await solverFor(call, h, 0, [provider(answer)], now)).toEqual({ kind: 'solver', ...answer });
+    // Taking its time: followed until done.
+    expect(await solverFor(call, h, 0, [provider(answer, { running: 3 })], now)).toEqual({ kind: 'solver', ...answer });
+    // No source; a choice the viewer did not have (check, facing a bet); shares not adding up to 1; an unusable EV; no result.
     for (const bad of [
       { source: ' ', freqs },
       { source: 'S', freqs: [{ choice: 'check' as const, share: 1 }] },
@@ -173,11 +213,81 @@ describe('solverFor: solver frequencies only from real solver data, always with 
       { source: 'S', freqs, ev: [{ choice: 'call' as const, bb: Number.NaN }] },
       null,
     ]) {
-      expect(solverFor(call, h, [provider(bad)])).toEqual({ kind: 'unsupported', reason: 'noData' });
+      expect(await solverFor(call, h, 0, [provider(bad)], now)).toEqual({ kind: 'unsupported', reason: 'noData' });
     }
+    // A spot it does not cover, or one it calls unsupported.
+    expect(await solverFor(call, h, 0, [provider(answer, { covers: false })], now)).toEqual({ kind: 'unsupported', reason: 'noData' });
+    expect(await solverFor(call, h, 0, [provider(answer, { end: 'unsupported' })], now)).toEqual({ kind: 'unsupported', reason: 'noData' });
+  });
+
+  it('reads a failed, thrown or overlong analysis as failed, unless another provider answers', async () => {
+    const h = hand();
+    const call = decisions(h)[2]!;
+    const answer = { source: 'S', freqs };
+    const throws: SolverProvider = { id: 'x', analyze: async () => Promise.reject(new Error('down')), getStatus: async () => 'done', getResult: async () => answer };
+    expect(await solverFor(call, h, 0, [provider(answer, { end: 'failed' })], now)).toEqual({ kind: 'failed' });
+    expect(await solverFor(call, h, 0, [throws], now)).toEqual({ kind: 'failed' });
+    // Still running after the time it may take: given up, never shown half done.
+    expect(await solverFor(call, h, 0, [provider(answer, { running: 1000 })], { ...now, pollMs: 1000, timeoutMs: 5000 })).toEqual({ kind: 'failed' });
+    expect(await solverFor(call, h, 0, [throws, provider(answer)], now)).toEqual({ kind: 'solver', ...answer });
+    // Stopped (the review closed): no answer taken.
+    const stop = new AbortController();
+    stop.abort();
+    expect(await solverFor(call, h, 0, [provider(answer)], { ...now, signal: stop.signal })).toEqual({ kind: 'failed' });
+  });
+
+  it('asks only what the viewer knew then: never another player’s cards, a card still to come or an action after', async () => {
+    const h = hand();
+    // The button showed its cards at the end of the hand; the record has the whole board.
+    h.players[3] = player(3, 10_000, ['Qs', 'Qd']);
+    const flopCall = decisions(h)[2]!;
+    const seen: SolverRequest[] = [];
+    await solverFor(flopCall, h, 0, [provider(null, { seen })], now);
+    const [req] = seen;
+    expect(req).toEqual(requestOf(flopCall, h, 0));
+    expect(req).toMatchObject({ stage: 'flop', position: 'UTG', heroSeat: 0, cards: ['Ah', 'Kh'], board: ['Kd', '7c', '2s'], toCall: 375, options: ['fold', 'call', 'raise'] });
+    expect(req!.line).toEqual(h.actions.slice(0, flopCall.action).map((x) => ({ stage: x.stage, seat: x.seatIndex, type: x.type, amount: x.amount })));
+    const text = JSON.stringify(req);
+    for (const hidden of ['Qs', 'Qd', '9h', '4d']) expect(text).not.toContain(hidden);
+    expect(Object.keys(req!)).not.toContain('players');
   });
 });
 
+describe('handNow: what the viewer’s cards made and drew to with the board then, and nothing still to come', () => {
+  const flop = decisions(hand())[1]!;
+  const at = (cards: string[], board: string[], stage: Decision['stage'] = 'flop') => handNow({ ...flop, stage, cards: cards as Card[], board: board as Card[] });
+
+  it('ranks a pair against the board', () => {
+    expect(at(['Ah', 'Kh'], ['Kd', '7c', '2s'])).toMatchObject({ made: { rankClass: 'pair' }, pair: 'top', draws: [] });
+    expect(at(['7h', '6h'], ['Kd', '7c', '2s'])?.pair).toBe('second');
+    expect(at(['2h', '3h'], ['Kd', '7c', '2s'])?.pair).toBe('low');
+    expect(at(['Ac', 'Ad'], ['Kd', '7c', '2s'])?.pair).toBe('over');
+    expect(at(['Qc', 'Qd'], ['Kd', '7c', '2s'])?.pair).toBe('pocket');
+    // The board's own pair is everyone's: two overcards still draw.
+    expect(at(['Ah', 'Jc'], ['7d', '7c', '2s'])).toMatchObject({ pair: 'board', draws: ['overcards'] });
+  });
+
+  it('names the draws as the bots read them, only where they would beat what is made', () => {
+    expect(at(['Ah', 'Th'], ['Kh', '7h', '2c'])).toMatchObject({ made: { rankClass: 'high-card' }, draws: ['nutFlush'] });
+    expect(at(['Qh', 'Jh'], ['Kh', '7h', 'Tc'])?.draws).toEqual(['flush', 'straight']);
+    expect(at(['9s', '7d'], ['8c', '5h', 'Kd'])?.draws).toEqual(['gutshot']);
+    expect(at(['As', 'Qd'], ['8c', '5h', '2d'])?.draws).toEqual(['overcards']);
+    expect(at(['Ah', '3h'], ['Kh', '7c', '2c'])?.draws).toEqual(['backdoorFlush']);
+    // Made: a flush draws to nothing more here, a straight still to a flush.
+    expect(at(['Ah', 'Th'], ['Kh', '7h', '2h'])).toMatchObject({ made: { rankClass: 'flush' }, draws: [] });
+    expect(at(['9h', '8h'], ['Th', 'Jh', '7c'])).toMatchObject({ made: { rankClass: 'straight' }, draws: ['flush'] });
+    // Nothing is left to come on the river.
+    expect(at(['Qh', 'Jh'], ['Kh', '7h', 'Tc', '2d', '3s'], 'river')?.draws).toEqual([]);
+  });
+
+  it('reads the board only as far as the decision’s street, and the two cards alone preflop', () => {
+    // A board the record has whole: at the flop the turn and river were still to come.
+    expect(at(['Qh', 'Jh'], ['Kh', '7h', 'Tc', 'Ah', '9h'])).toMatchObject({ made: { rankClass: 'high-card' }, draws: ['flush', 'straight'] });
+    expect(at(['Ac', 'Ad'], ['Kd', '7c', '2s'], 'preflop')).toMatchObject({ made: { rankClass: 'pair' }, pair: null, draws: [] });
+    expect(at(['Ac', 'Kd'], [], 'preflop')).toMatchObject({ made: { rankClass: 'high-card' }, pair: null, draws: [] });
+    expect(handNow({ ...flop, cards: null })).toBeNull();
+  });
+});
 describe('educationalFor: plain arithmetic, and the academy’s example range only where it was drawn for', () => {
   it('gives pot odds, the bet’s size and the SPR of the decision', () => {
     const h = hand();

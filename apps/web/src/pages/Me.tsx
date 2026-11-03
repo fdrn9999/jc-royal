@@ -9,7 +9,7 @@ import { useBadges } from '../academy/sync';
 import { HandNotePanel, HandRow } from '../components/HandNotes';
 import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
-import { MoreStats, PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
+import { MoreStats, PositionBb100, PositionTable, RatioStat, StatDefinitions, StatsPeriodChoice, StatsTrend, usePeriodStats, type StatsPeriod } from '../components/PlayStats';
 import { NotificationSettings } from '../components/NotificationSettings';
 import { PresenceLabel, PresenceModePicker } from '../components/Presence';
 import { ReferralCard } from '../components/Referral';
@@ -78,11 +78,57 @@ function TabPanel({ tab, k, children }: { tab: MeTab; k: MeTab; children: ReactN
   );
 }
 
+/** The history's statistics over one period: every figure from the same route, counted the same way. */
+function PeriodStats({ ps }: { ps: StatsDto }) {
+  const { t } = useI18n();
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3" data-testid="stats" data-days={ps.days ?? 'all'}>
+      <Stat label={t('me.handsPlayed')} value={formatChips(ps.handsPlayed)} />
+      <Stat label={t('me.handsWon')} value={formatChips(ps.handsWon)} sub={`${t('me.winRate')} ${ps.winRate === null ? '—' : `${ps.winRate}%`}`} />
+      <Stat label={t('me.totalWon')} value={formatChips(ps.totalWon)} sub={t('me.totalWonHint')} />
+      <Stat label={t('me.net')} value={<span className={ps.netChips >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}><Figure>{signed(ps.netChips)}</Figure></span>} />
+      <Stat label={t('me.largestPot')} value={formatChips(ps.largestPot)} sub={t('me.largestPotHint')} />
+      <Stat label={t('me.avgPot')} value={ps.avgPot === null ? '—' : formatChips(ps.avgPot)} sub={t('me.avgPotHint')} />
+      <Stat label={t('me.biggestWin')} value={formatChips(ps.biggestWin)} sub={t('me.biggestWinHint')} />
+      <RatioStat label="VPIP" ratio={ps.vpip} hint={t('me.vpipHint')} testid="stats-vpip" />
+      <RatioStat label="PFR" ratio={ps.pfr} hint={t('me.pfrHint')} testid="stats-pfr" />
+      <RatioStat label={t('me.raiseShare')} ratio={ps.raiseShare} hint={t('me.raiseShareHint')} testid="stats-raise-share" />
+      <RatioStat label={t('me.wtsd')} ratio={ps.wtsd} hint={t('me.wtsdHint')} testid="stats-wtsd" />
+      <RatioStat label={t('me.wsd')} ratio={ps.wsd} hint={t('me.wsdHint')} testid="stats-wsd" />
+      <MoreStats st={ps} />
+      <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{t('me.bestHand')}</div>
+        {ps.bestHand ? (
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <span className="font-semibold text-gold-300">{t(`hand.${handLabelKey(ps.bestHand.rankClass, ps.bestHand.cards)}` as MsgKey)}</span>
+            <span className="flex gap-1">
+              {ps.bestHand.cards.map((c) => (
+                <PlayingCard key={c} card={c as Card} size="2rem" />
+              ))}
+            </span>
+          </div>
+        ) : (
+          <div className="mt-1 text-sm text-ink-400">{t('me.none')}</div>
+        )}
+      </div>
+      <div className="col-span-2 md:col-span-3">
+        <PositionTable positions={ps.positions} />
+      </div>
+      <div className="col-span-2 md:col-span-3">
+        <PositionBb100 positions={ps.positions} />
+      </div>
+    </div>
+  );
+}
+
 export function MePage() {
   const { t, locale, err } = useI18n();
   const { me, setMe, logout } = useAuth();
   const nav = useNavigate();
   const stats = useLoad<StatsDto>('/api/me/stats');
+  // The history's statistics, over the period chosen there (the figures above the tabs stay those of every hand).
+  const [period, setPeriod] = useState<StatsPeriod>('all');
+  const view = usePeriodStats(stats.data, period);
   const badgeCount = useBadges().length;
   const mine = useMyPresence();
   const hands = useLoad<HandSummaryDto[]>('/api/me/hands?limit=15');
@@ -233,7 +279,7 @@ export function MePage() {
         <div className="grid" data-testid="me-kpi-winrate">
           <Stat
             label={t('me.winRate')}
-            value={kpi((s) => (s.handsPlayed > 0 ? `${s.winRate}%` : '—'))}
+            value={kpi((s) => (s.winRate === null ? '—' : `${s.winRate}%`))}
             sub={st && st.handsPlayed > 0 ? t('me.ratioOf', { n: formatChips(st.handsWon), of: formatChips(st.handsPlayed) }) : undefined}
           />
         </div>
@@ -285,44 +331,17 @@ export function MePage() {
       <TabPanel tab={tab} k="history">
         <Panel title={t('me.stats')}>
           {st ? (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3" data-testid="stats">
-              <Stat label={t('me.handsPlayed')} value={formatChips(st.handsPlayed)} />
-              <Stat label={t('me.handsWon')} value={formatChips(st.handsWon)} sub={`${t('me.winRate')} ${st.winRate}%`} />
-              <Stat label={t('me.totalWon')} value={formatChips(st.totalWon)} sub={t('me.totalWonHint')} />
-              <Stat label={t('me.net')} value={<span className={st.netChips >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}><Figure>{signed(st.netChips)}</Figure></span>} />
-              <Stat label={t('me.largestPot')} value={formatChips(st.largestPot)} sub={t('me.largestPotHint')} />
-              <Stat label={t('me.avgPot')} value={st.avgPot === null ? '—' : formatChips(st.avgPot)} sub={t('me.avgPotHint')} />
-              <Stat label={t('me.biggestWin')} value={formatChips(st.biggestWin)} sub={t('me.biggestWinHint')} />
-              <RatioStat label="VPIP" ratio={st.vpip} hint={t('me.vpipHint')} testid="stats-vpip" />
-              <RatioStat label="PFR" ratio={st.pfr} hint={t('me.pfrHint')} testid="stats-pfr" />
-              <RatioStat label={t('me.raiseShare')} ratio={st.raiseShare} hint={t('me.raiseShareHint')} testid="stats-raise-share" />
-              <RatioStat label={t('me.wtsd')} ratio={st.wtsd} hint={t('me.wtsdHint')} testid="stats-wtsd" />
-              <RatioStat label={t('me.wsd')} ratio={st.wsd} hint={t('me.wsdHint')} testid="stats-wsd" />
-              <MoreStats st={st} />
-              <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{t('me.bestHand')}</div>
-                {st.bestHand ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
-                    <span className="font-semibold text-gold-300">{t(`hand.${handLabelKey(st.bestHand.rankClass, st.bestHand.cards)}` as MsgKey)}</span>
-                    <span className="flex gap-1">
-                      {st.bestHand.cards.map((c) => (
-                        <PlayingCard key={c} card={c as Card} size="2rem" />
-                      ))}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="mt-1 text-sm text-ink-400">{t('me.none')}</div>
-                )}
-              </div>
-              <div className="col-span-2 md:col-span-3">
-                <PositionTable positions={st.positions} />
-              </div>
-              <div className="col-span-2 md:col-span-3">
-                <StatsTrend />
-              </div>
-              <div className="col-span-2 md:col-span-3">
-                <StatDefinitions />
-              </div>
+            <div className="flex flex-col gap-3">
+              <StatsPeriodChoice value={period} onChange={setPeriod} />
+              {view.data ? (
+                <PeriodStats ps={view.data} />
+              ) : view.failed ? (
+                <Empty>{t('common.error')}</Empty>
+              ) : (
+                <div className="h-40 animate-pulse rounded-xl bg-ink-850/80" data-testid="stats-loading" />
+              )}
+              <StatsTrend period={period} />
+              <StatDefinitions />
             </div>
           ) : stats.error ? (
             <Failed x={stats} />

@@ -19,13 +19,17 @@ const SCREENS = [
 // the river check.
 const DECISIONS = [2, 8, 11, 15, 19];
 // What each one's figures of the moment read: the price of a call (the blind, the all-in, the flop bet; nothing to call
-// after), the SPR from the flop on (the flop began 3,250 in the pot, 99,199 behind), and who acted before on the street.
+// after), the SPR from the flop on (the flop began 3,250 in the pot, 99,199 behind), who acted before on the street,
+// the effective stack (the viewer's against the deepest other live player's: as dealt before the flop, as the street began\n// after), and what the viewer's own
+// queens made with the board as it stood (Qc 9s 5d, then 3h, then 2c: a set, nothing to draw to).
+const POCKET = { ko: '현재 핸드 포켓 퀸', en: 'Hand now Pocket Queens' };
+const SET = { ko: '현재 핸드 Q 트리플', en: 'Hand now Three Qs' };
 const FIGURES = [
-  { odds: { ko: '필요 승률 40%', en: 'equity needed 40%' }, spr: { ko: '플랍부터', en: 'from the flop' }, before: 'abcdefghijklmnop' },
-  { odds: { ko: '필요 승률 15%', en: 'equity needed 15%' }, spr: { ko: '플랍부터', en: 'from the flop' }, before: 'JC봇_Hard_00003' },
-  { odds: { ko: '필요 승률 28%', en: 'equity needed 28%' }, spr: { ko: '30.5', en: '30.5' }, before: 'ZZZZZZZZZZZZZZZZ' },
-  { odds: { ko: '콜할 금액 없음', en: 'Nothing to call' }, spr: { ko: '(스트리트 시작)', en: '(as the street began)' }, before: 'ZZZZZZZZZZZZZZZZ' },
-  { odds: { ko: '콜할 금액 없음', en: 'Nothing to call' }, spr: { ko: '(스트리트 시작)', en: '(as the street began)' }, before: { ko: '이 스트리트의 첫 액션', en: 'First to act on this street' } },
+  { odds: { ko: '필요 승률 40%', en: 'equity needed 40%' }, spr: { ko: '플랍부터', en: 'from the flop' }, before: 'abcdefghijklmnop', effective: '100,000 (1000 BB)', hand: POCKET },
+  { odds: { ko: '필요 승률 15%', en: 'equity needed 15%' }, spr: { ko: '플랍부터', en: 'from the flop' }, before: 'JC봇_Hard_00003', effective: '99,999 (1000 BB)', hand: POCKET },
+  { odds: { ko: '필요 승률 28%', en: 'equity needed 28%' }, spr: { ko: '30.5', en: '30.5' }, before: 'ZZZZZZZZZZZZZZZZ', effective: '99,199 (992 BB)', hand: SET },
+  { odds: { ko: '콜할 금액 없음', en: 'Nothing to call' }, spr: { ko: '(스트리트 시작)', en: '(as the street began)' }, before: 'ZZZZZZZZZZZZZZZZ', effective: '97,199 (972 BB)', hand: SET },
+  { odds: { ko: '콜할 금액 없음', en: 'Nothing to call' }, spr: { ko: '(스트리트 시작)', en: '(as the street began)' }, before: { ko: '이 스트리트의 첫 액션', en: 'First to act on this street' }, effective: '41,200 (412 BB)', hand: SET },
 ] as const;
 
 /** The step line, the table and the controls, where they sit on the page (not the screen) and how big they are. */
@@ -100,6 +104,9 @@ test('replay decision review: opened under the controls at every size, it moves 
     await expect(panel).toBeVisible();
     await expect(p.getByTestId('replay-strategy-pick')).toBeVisible();
     await expect(p.getByTestId('replay-strategy-kind')).toHaveText(locale === 'ko' ? '학습용 · 솔버 결과 아님' : 'For study · not solver output');
+    // The four kinds of analysis, each said in words.
+    const kinds = p.getByTestId('replay-strategy-legend').locator('[data-analysis]');
+    await expect(kinds).toHaveText(locale === 'ko' ? ['수학 계산', '휴리스틱', '솔버 분석', '분석 불가'] : ['Math', 'Heuristic', 'Solver', 'Unavailable']);
     expect(await areas(p), `${where}: opening it`).toEqual(before);
     const open = await review(p);
     expect(open.top, `${where}: under the areas`).toBeGreaterThanOrEqual(open.above - 0.5);
@@ -109,8 +116,9 @@ test('replay decision review: opened under the controls at every size, it moves 
     expect(open.overflow, where).toBeLessThanOrEqual(0);
     expect(await widerThanDevice(p), where).toBe(false);
 
-    // Each decision a tap away: the replay goes to its step, which the review marks; the solver's part says the spot
-    // is not supported (there is no solver data), and the played choice is among the options.
+    // Each decision a tap away: the replay goes to its step, which the review marks; its hand analysis reads the
+    // figures of the moment as math; the solver's part says there is no solver analysis (none is connected) rather
+    // than a guess, and the played choice is among the options.
     const chips = p.locator('[data-testid^=replay-strategy-decision-]');
     await expect(chips).toHaveCount(DECISIONS.length);
     let tallest = 0;
@@ -118,13 +126,20 @@ test('replay decision review: opened under the controls at every size, it moves 
       await p.getByTestId(`replay-strategy-decision-${k}`).click();
       await expect(index).toHaveText(`${step}/22`);
       await expect(p.getByTestId(`replay-strategy-decision-${k}`)).toHaveAttribute('aria-current', 'step');
-      await expect(p.getByTestId('replay-strategy-solver')).toHaveAttribute('data-kind', 'unsupported');
+      const solver = p.getByTestId('replay-strategy-solver');
+      await expect(solver).toHaveAttribute('data-kind', 'unsupported');
+      await expect(solver).toHaveAttribute('data-reason', 'noSolver');
+      await expect(solver).toContainText(locale === 'ko' ? '솔버 분석 불가 · 연결된 솔버 없음' : 'Solver analysis unavailable · no solver connected');
+      await expect(solver.locator('[data-analysis]')).toHaveAttribute('data-analysis', 'unavailable');
+      await expect(p.getByTestId('replay-analysis').locator('[data-analysis]')).toHaveAttribute('data-analysis', 'math');
       await expect(p.locator('[data-testid=replay-strategy-options] [data-played]')).toHaveCount(1);
       await expect(p.getByTestId('replay-strategy-position')).toContainText('UTG');
       const want = FIGURES[k]!;
       await expect(p.getByTestId('replay-strategy-odds')).toContainText(want.odds[locale]);
       await expect(p.getByTestId('replay-strategy-spr')).toContainText(want.spr[locale]);
       await expect(p.getByTestId('replay-strategy-before')).toContainText(typeof want.before === 'string' ? want.before : want.before[locale]);
+      await expect(p.getByTestId('replay-analysis-effective')).toHaveText(want.effective);
+      await expect(p.getByTestId('replay-analysis-hand')).toHaveText(want.hand[locale]);
       const at = await review(p);
       expect(at.past, `${where} · step ${step}: running past its sides`).toEqual([]);
       expect(at.overflow, `${where} · step ${step}`).toBeLessThanOrEqual(0);
@@ -135,9 +150,21 @@ test('replay decision review: opened under the controls at every size, it moves 
     }
     // The flop call faced a bet: its size and the SPR are put as arithmetic for study, beside the plain pot odds.
     await p.getByTestId('replay-strategy-decision-2').click();
-    await expect(p.getByTestId('replay-strategy-note-betSize')).toBeVisible();
-    await expect(p.getByTestId('replay-strategy-note-spr')).toBeVisible();
+    await expect(p.getByTestId('replay-strategy-note-betSize').locator('[data-analysis]')).toHaveAttribute('data-analysis', 'math');
+    await expect(p.getByTestId('replay-strategy-note-spr').locator('[data-analysis]')).toHaveAttribute('data-analysis', 'math');
     await p.screenshot({ path: test.info().outputPath(`review-${sc.name}-${locale}.png`), fullPage: true });
+    // The analysis leads on to what the hand page already has, each brought into view with the keyboard there: the
+    // decision's detail, the hand's note and its lessons. The step line, the table and the controls stay where they were.
+    await p.getByTestId('replay-analysis-go-actions').click();
+    await expect(p.getByTestId('replay-strategy-detail')).toBeFocused();
+    await expect(p.getByTestId('replay-strategy-detail')).toBeInViewport();
+    await p.getByTestId('replay-analysis-go-note').click();
+    await expect(p.getByTestId('hand-memo')).toBeFocused();
+    await expect(p.getByTestId('hand-memo')).toBeInViewport();
+    await p.getByTestId('replay-analysis-go-academy').click();
+    await expect(p.getByTestId('hand-lessons').locator('a').first()).toBeFocused();
+    await expect(p.getByTestId('hand-lessons')).toBeInViewport();
+    expect(await areas(p), `${where}: after the ways on`).toEqual(before);
 
     // A step that is not a decision: the review says to pick one, and keeps its height.
     await p.getByTestId('replay-next').click();
