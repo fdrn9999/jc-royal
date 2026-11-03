@@ -402,6 +402,36 @@ async function inkless(p: Page, where: string, reveal = false) {
   return out;
 }
 
+/**
+ * Whether the robots (the boxes inkless shoots) held still for 400 ms within 5 s, as table-stable.spec's settledTable
+ * waits for the table: false when they were still moving at 5 s.
+ */
+function robotsStill(p: Page): Promise<boolean> {
+  return p.evaluate(
+    () =>
+      new Promise<boolean>((done) => {
+        const boxes = () =>
+          JSON.stringify(
+            Array.from(document.querySelectorAll('[data-testid=table] [data-testid=bot-badge] svg'), (e) => {
+              const b = e.getBoundingClientRect();
+              return [b.left, b.top, b.width, b.height];
+            }),
+          );
+        const start = performance.now();
+        let last = boxes();
+        let still = start;
+        const tick = (now: number) => {
+          const at = boxes();
+          if (at !== last) [last, still] = [at, now];
+          if (now - still >= 400) done(true);
+          else if (now - start >= 5_000) done(false);
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+}
+
 /** Checks, else folds (table-text.spec). */
 async function act(p: Page) {
   const bar = p.getByTestId('action-bar');
@@ -566,6 +596,11 @@ test('bot mark, live: only on the seats the server says are bots, named like one
   await expect.poll(() => sockA.states.slice(dropped + 1).some((n) => n > 0), { message: 'reconnected', timeout: 30_000 }).toBe(true);
   await expect.poll(() => misMarked(a.page, sockA.state()), { timeout: 30_000 }).toEqual([]);
   expect(placement(await seatMarks(a.page), 'reconnected', { hit: 'pick' })).toEqual([]);
+  // Back, the table says so for a while (RESTORED_MS) in the banner above it, takes that room back when the note goes and
+  // is laid out for its new size a frame or more later (useBoxSize): the robots' pixels are read once both are over, not
+  // across the move (a box measured before it and shot after).
+  await expect(a.page.locator('[data-testid=table-banner][data-recovery]')).toHaveCount(0, { timeout: 10_000 });
+  expect(await robotsStill(a.page), 'reconnected: the robots held still for 400 ms within 5 s').toBe(true);
   expect(await inkless(a.page, 'reconnected')).toEqual([]);
   await a.page.reload();
   await expect(filled(a.page)).toHaveCount(9, { timeout: 30_000 });
