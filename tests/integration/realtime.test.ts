@@ -137,8 +137,12 @@ describe('realtime socket: personal events', () => {
     expect(ok.body).toMatchObject({ ok: true, duplicate: false, balanceAfter: 10_700 });
     const e = await mine.event('wallet.changed');
     expect(e).toMatchObject({ scope: 'user', type: 'wallet.changed' });
-    // the event says that the wallet changed, never by how much: the page reads the balance
-    expect(JSON.stringify(e)).not.toContain('700');
+    // the event says that the wallet changed, never by how much: the page reads the balance. Its id and clock are random
+    // and may hold the digits by chance, so they are held to their own shapes and the rest is searched.
+    const { eventId, occurredAt, ...rest } = e as { eventId: string; occurredAt: number };
+    expect(eventId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(Math.abs(occurredAt - Date.now())).toBeLessThan(60_000);
+    expect(JSON.stringify(rest)).not.toContain('700');
     await mine.event('message.changed');
     // every page of the member, none of another member
     await second.event('wallet.changed');
