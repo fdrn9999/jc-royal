@@ -37,7 +37,7 @@ import { TimeBankButton } from '../game/TimeBank';
 import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { legacyMuckStep } from '../game/olderRooms';
 import { ReactionButton, ReactionTray, useReactionSender, useReactionTray } from '../game/Reactions';
-import { recoveryText } from '../game/recoveryText';
+import { RecoveryNote } from '../game/RecoveryNote';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useBoxSize, useTableLayout, useTableStatus } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
@@ -452,6 +452,8 @@ export function TablePage() {
     }
   }
 
+  // The line over the table. A recovery's steps are not in it but in the header (RecoveryNote): what it says of the view
+  // kept meanwhile stays, so the line neither comes nor goes with a drop.
   const banner =
     sock.status === 'locked'
       ? t('table.locked')
@@ -461,13 +463,11 @@ export function TablePage() {
           ? t('table.replaced')
           : sock.status === 'closed'
             ? t('table.closed')
-            : sock.recovery
-              ? recoveryText(locale)(sock.recovery)
-              : sock.status === 'reconnecting'
-              ? t('table.reconnecting')
-              : sock.status === 'connecting' || !s
-                ? t('table.connecting')
-                : s.status === 'closing' || s.status === 'closed'
+            : !s
+              ? sock.status === 'reconnecting'
+                ? t('table.reconnecting')
+                : t('table.connecting')
+              : s.status === 'closing' || s.status === 'closed'
                   ? null
                   : s.maintenance?.active
                     ? t('table.maintenance', { end: when(s.maintenance.endsAt, locale) })
@@ -653,13 +653,20 @@ export function TablePage() {
               )}
             </>
           );
-          // The host opens the room's settings from its name, so the header needs no extra button on a phone.
-          return isHost ? (
-            <button type="button" className="jc-tap min-w-0 rounded-lg px-1.5 py-0.5 text-left hover:bg-white/5" onClick={() => setHosting(true)} aria-label={t('room.manage')} data-testid="room-manage">
-              {title}
-            </button>
-          ) : (
-            <div className="min-w-0">{title}</div>
+          // The host opens the room's settings from its name, so the header needs no extra button on a phone. While the
+          // connection recovers, the name steps aside for its note (the room's settings wait, as the turn does).
+          const away = sock.recovery ? 'invisible' : '';
+          return (
+            <div className="@container relative flex min-w-0 flex-1 items-center self-stretch">
+              {isHost ? (
+                <button type="button" className={cx('jc-tap min-w-0 rounded-lg px-1.5 py-0.5 text-left hover:bg-white/5', away)} onClick={() => setHosting(true)} aria-label={t('room.manage')} data-testid="room-manage">
+                  {title}
+                </button>
+              ) : (
+                <div className={cx('min-w-0', away)}>{title}</div>
+              )}
+              {sock.recovery && <RecoveryNote recovery={sock.recovery} onRetry={sock.status === 'reconnecting' ? sock.reconnect : undefined} />}
+            </div>
           );
         })()}
         <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
@@ -746,9 +753,9 @@ export function TablePage() {
       </div>
 
       {banner && (
-        <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status" data-testid="table-banner" data-recovery={sock.recovery ?? undefined}>
+        <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status" data-testid="table-line">
           {banner}
-          {sock.status === 'reconnecting' && (
+          {!s && sock.status === 'reconnecting' && (
             <button className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" onClick={sock.reconnect}>
               {t('table.reconnectNow')}
             </button>
@@ -902,7 +909,7 @@ export function TablePage() {
                 {short ? (
                   <>
                     {/* The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen. */}
-                    <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
+                    <TimeBankButton s={s} onUse={addBankTime} locked={!sock.synced} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
                     <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column />
                   </>
                 ) : (
@@ -910,7 +917,7 @@ export function TablePage() {
                   // holds both), and puts it in the presets' line while the raise panel is open (ActionBar's `bank`); wider,
                   // it is beside the bar.
                   <div className="pointer-events-none flex w-full shrink-0 flex-col items-center gap-1.5 sm:w-auto sm:flex-row sm:items-end sm:justify-end sm:gap-2">
-                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} chip={chip} />} />
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} locked={!sock.synced} chip={chip} />} />
                   </div>
                 )}
               </>

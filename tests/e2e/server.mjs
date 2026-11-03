@@ -51,6 +51,7 @@ writeFileSync(
    ('e2e-bd2', 'E2E Board 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-bd6', 'E2E Board 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-bd9', 'E2E Board 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-tx6', 'E2E Text 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-tx9', 'E2E Text 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-stable', 'E2E Stable', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-stable-c', 'E2E Stable Coach', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6),
+   ('e2e-rc2', 'E2E Recovery 2', 2, 5, 10, 100, 1000, 60, 1, 'normal', 1, 2), ('e2e-rc6', 'E2E Recovery 6', 6, 5, 10, 100, 1000, 60, 1, 'normal', 5, 6), ('e2e-rc9', 'E2E Recovery 9', 9, 5, 10, 100, 1000, 60, 1, 'normal', 8, 9),
    ('e2e-deep', 'E2E Deep', 2, 1, 3, 30, 10000, 60, 1, 'normal', 1, 2),
    ('e2e-boticon', 'E2E Bot Icon', 9, 5, 10, 100, 1000, 60, 1, 'normal', 7, 9), ('e2e-boticon6', 'E2E Bot Icon 6', 6, 5, 10, 100, 1000, 60, 1, 'expert', 5, 6);
    INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, bots_enabled, bot_level, bot_max, bot_fill_to, beginner) VALUES
