@@ -12,7 +12,7 @@ test('my statistics: VPIP, PFR, showdowns, positions and the daily trend from a 
   await playOneHand(a.page, b.page);
 
   const shown = async (page: Page) => {
-    await page.goto('/me');
+    await page.goto('/me?tab=history');
     await expect(page.getByTestId('stats')).toBeVisible();
     const pos = Object.fromEntries(
       await Promise.all(
@@ -72,7 +72,7 @@ test('my statistics: VPIP, PFR, showdowns, positions and the daily trend from a 
   await btn.screenshot({ path: 'test-results/me-stats-play-desktop.png', fullPage: true });
 
   // The spectator watched the whole hand: nothing counted, dashes instead of 0%.
-  await watcher.page.goto('/me');
+  await watcher.page.goto('/me?tab=history');
   const ws = watcher.page.getByTestId('stats');
   await expect(ws).toBeVisible();
   await expect(watcher.page.getByTestId('stats-vpip')).toContainText('—');

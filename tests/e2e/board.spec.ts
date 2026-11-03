@@ -40,8 +40,12 @@ test('board: write, comment, edit own content; others cannot edit', async ({ bro
   await expect(a.page.getByTestId('post-title')).toHaveText('E2E 수정된 제목');
 
   // My page lists the post for A and the comment for B.
+  // My Page's activity tab: by a click, or by its address.
   await a.page.goto('/me');
+  await a.page.getByTestId('me-tab-activity').click();
+  await expect(a.page.getByTestId('my-posts')).toBeVisible();
   await expect(a.page.getByTestId('my-posts')).toContainText('E2E 수정된 제목');
-  await b.page.goto('/me');
+  await b.page.goto('/me?tab=activity');
+  await expect(b.page.getByTestId('my-comments')).toBeVisible();
   await expect(b.page.getByTestId('my-comments')).toContainText('B의 댓글');
 });

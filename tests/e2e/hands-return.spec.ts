@@ -65,16 +65,17 @@ test('hand list → a hand → back: the same filter, as many hands as were load
     await expect(row).toBeInViewport();
   }
 
-  // From My Page, the hand goes back to My Page.
-  await page.goto('/me');
+  // From My Page's play history, the hand goes back to it.
+  await page.goto('/me?tab=history');
   await page.getByTestId('hand-row').first().getByRole('link').click();
   await expect(page.getByTestId('hand-back')).toHaveText('← 마이페이지');
   await page.getByTestId('hand-back').click();
-  await expect(page).toHaveURL('/me');
+  await expect(page).toHaveURL('/me?tab=history');
+  await expect(page.getByTestId('me-tab-history')).toHaveAttribute('aria-selected', 'true');
 
-  // Opened directly (a shared address), back goes to My Page.
+  // Opened directly (a shared address), back goes to My Page's play history.
   await page.goto(`/me/hands/${pick.id}`);
-  await expect(page.getByTestId('hand-back')).toHaveAttribute('href', '/me');
+  await expect(page.getByTestId('hand-back')).toHaveAttribute('href', '/me?tab=history');
 });
 
 test('a hand → the lesson or practice it points to → back: the hand again; a lesson opened directly goes back to the Academy', async ({ browser }) => {

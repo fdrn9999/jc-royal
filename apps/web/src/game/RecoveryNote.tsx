@@ -21,7 +21,9 @@ export function RecoveryNote({ recovery, onRetry }: { recovery: Recovery; onRetr
   const Icon = ICONS[recovery];
   const pill = cx(
     'pointer-events-auto flex h-full max-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-gold-500/35 bg-ink-900 px-2 text-left text-gold-300 shadow-lg @max-[6rem]:px-1.5 @md:gap-2 @md:px-3',
-    onRetry && 'jc-tap hover:bg-ink-800',
+    // A short screen's header is 44px with its border, the note a pixel less: a finger has 44px of it at least, the rest
+    // of the header's height around it.
+    onRetry && "jc-tap relative hover:bg-ink-800 before:absolute before:inset-x-0 before:inset-y-[min(0px,calc((100%_-_44px)/2))] before:content-['']",
   );
   const body = (
     <>

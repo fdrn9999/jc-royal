@@ -14,7 +14,7 @@ import {
   type TournamentSummaryDto,
   type VipColor,
 } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, Modal, Panel, Spinner, TrophyIcon } from '@jc/ui';
+import { Badge, Button, cx, Empty, formatChips, Modal, Panel, Spinner, Tabs, TrophyIcon } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { MemberName } from '../components/MemberName';
@@ -304,20 +304,7 @@ export function TournamentsPage() {
         </section>
       )}
 
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4" role="tablist">
-        {(['active', 'ended'] as const).map((k) => (
-          <button
-            key={k}
-            role="tab"
-            aria-selected={tab === k}
-            onClick={() => setTab(k)}
-            data-testid={`tn-tab-${k}`}
-            className={cx('shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition', tab === k ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory')}
-          >
-            {tr(`tab.${k}` as TnKey)}
-          </button>
-        ))}
-      </div>
+      <Tabs className="-mx-4 px-4" value={tab} onChange={setTab} items={(['active', 'ended'] as const).map((k) => ({ key: k, testid: `tn-tab-${k}`, label: tr(`tab.${k}` as TnKey) }))} />
 
       {!data && !error && (
         <div className="flex justify-center py-16 text-gold-400">

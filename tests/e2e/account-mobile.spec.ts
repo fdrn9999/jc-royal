@@ -14,7 +14,10 @@ test('mobile: my page fits the phone, the header gear opens settings with logout
   const { page, email } = await signUp(browser, { mobile: true });
 
   // The session list shows this phone's long user agent on one line; it must not widen the page.
+  // It is on the account tab, a tap away, and the tab is in the address.
   await page.goto('/me');
+  await page.getByTestId('me-tab-account').tap();
+  await expect(page).toHaveURL('/me?tab=account');
   await expect(page.getByText(/현재 기기|This device/)).toBeVisible();
   // Settings live behind a gear that every page header shows, on the phone too.
   const gear = page.getByTestId('settings-open');
@@ -57,7 +60,7 @@ test('mobile: my page fits the phone, the header gear opens settings with logout
   await expect(page.getByTestId('settings-open')).toBeVisible();
   // My page also offers logout next to the account actions. The page's lists come in after it opens and push the
   // button down (a tap at where it was reaches nothing): it is tapped once they are in and it holds still.
-  await page.goto('/me');
+  await page.goto('/me?tab=account');
   await expect(page.getByText(/현재 기기|This device/)).toBeVisible();
   const logout = page.getByTestId('me-logout');
   await expect(async () => {

@@ -1,6 +1,6 @@
 import { formatChips, Logo, MailIcon, SettingsIcon } from '@jc/ui';
-import { useState, type ReactNode } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { SettingsModal } from '../game/Panels';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
@@ -70,6 +70,26 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState(false);
   const social = dmUnread + friendRequests;
   useTopOnNewPage();
+  // The current page's link, should the strip cut it (a phone on its side has no scrollbar to say there is more), is
+  // brought whole into it: on a new page, and whenever the strip changes size (it shows from 640px, as a phone turns).
+  const strip = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const s = strip.current;
+    if (!s) return;
+    const fit = () => {
+      const a = s.querySelector('[aria-current=page]');
+      if (!a) return;
+      const box = s.getBoundingClientRect();
+      const b = a.getBoundingClientRect();
+      if (b.right > box.right) s.scrollLeft += b.right - box.right + 4;
+      else if (b.left < box.left) s.scrollLeft -= box.left - b.left + 4;
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
+    watch.observe(s);
+    return () => watch.disconnect();
+  }, [pathname]);
   async function signOut() {
     setSettings(false);
     await logout();
@@ -96,6 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               mouse) rather than wrapping them. The padding keeps a focused link's outline inside the scrolling strip, and a
               link reached by Tab is brought fully into it (the browser leaves a half-hidden one as it is). */}
           <nav
+            ref={strip}
             className="hidden min-w-0 scroll-px-1 items-center overflow-x-auto p-1 [scrollbar-width:thin] sm:flex lg:ml-2"
             onFocus={(e) => e.target.scrollIntoView({ block: 'nearest', inline: 'nearest' })}
             data-testid="header-nav"

@@ -480,6 +480,17 @@ async function throughDrops(browser: Browser, state: Signed, nickname: string, t
     await expect.poll(() => sockets.length).toBeGreaterThan(before);
     await same('reconnecting');
     expect(await bannerCovers(p), `${name} reconnecting`).toEqual([]);
+    // While it retries the note is a button: a thumb's size, 44 × 44 px at least, wherever a finger lands on it.
+    if ((await banner.getAttribute('data-recovery')) === 'reconnecting') {
+      const hit = await p.getByTestId('reconnect-now').evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        const s = getComputedStyle(el, '::before');
+        const before = s.content !== 'none' && s.position === 'absolute' ? { top: parseFloat(s.top), bottom: parseFloat(s.bottom) } : { top: 0, bottom: 0 };
+        return { w: b.width, h: b.height - Math.min(0, before.top) - Math.min(0, before.bottom) };
+      });
+      expect(hit.w, `${name}: the retry's width`).toBeGreaterThanOrEqual(44);
+      expect(hit.h, `${name}: the retry's height`).toBeGreaterThanOrEqual(44);
+    }
     await shot('reconnecting');
 
     // Back online, the room's state held back: the page shows the hand it had, locked.

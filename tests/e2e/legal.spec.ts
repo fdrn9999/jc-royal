@@ -55,7 +55,7 @@ test('account deletion explains what is removed, and the board shows the author 
   // The signed-in shell has the same footer links.
   await expect(a.page.getByRole('navigation', { name: '개인정보 처리방침 / 이용약관' })).toBeVisible();
 
-  await a.page.goto('/me');
+  await a.page.goto('/me?tab=account');
   await a.page.getByRole('button', { name: '회원 탈퇴' }).click();
   const dialog = a.page.getByRole('dialog');
   await expect(dialog).toContainText('1:1 대화(상대방 쪽 포함)');

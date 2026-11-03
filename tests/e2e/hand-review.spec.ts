@@ -17,8 +17,10 @@ test('hand review: filter my hands on the server, bookmark and tag them, keep a 
   const ids = seedHands(await idOf(a.page), await idOf(b.page));
   const page = a.page;
 
-  // My Page → all hands: newest first.
+  // My Page → play history → all hands: newest first.
   await page.goto('/me');
+  await page.getByTestId('me-tab-history').click();
+  await expect(page).toHaveURL('/me?tab=history');
   await page.getByTestId('me-all-hands').click();
   await expect(page).toHaveURL('/me/hands');
   await expect(page.getByRole('heading', { name: '내 핸드 기록' })).toBeVisible();

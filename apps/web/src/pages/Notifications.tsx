@@ -3,7 +3,7 @@
  * asked; more at the end, a page at a time. The bell in the header shows the newest; this page the rest.
  */
 import { INBOX_FILTER_NAMES, type InboxFilter, type InboxItemDto } from '@jc/types';
-import { Button, cx, Empty } from '@jc/ui';
+import { Button, Empty, Tabs } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { InboxEntry, useInboxText, useOpenInboxItem } from '../components/Inbox';
 import { LoadFailed, Loading } from '../components/Loading';
@@ -101,20 +101,13 @@ export function NotificationsPage() {
       <div className="flex flex-wrap items-center gap-2">
         {/* A phone gives the scrolling chips a line of their own, edge to edge, and the checkbox the next one: beside it, the
             row's bleed into the page margin ran under the checkbox and cut a chip there. */}
-        <div className="-mx-4 flex min-w-0 grow basis-[calc(100%+2rem)] gap-2 overflow-x-auto px-4 sm:mx-0 sm:basis-0 sm:px-0" role="tablist" aria-label={tr('filter')}>
-          {TABS.map((k) => (
-            <button
-              key={k}
-              role="tab"
-              aria-selected={tab === k}
-              onClick={() => choose(k, unreadOnly)}
-              data-testid={`inbox-tab-${k}`}
-              className={cx('shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition', tab === k ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory')}
-            >
-              {tr(`f.${k}`)}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          className="-mx-4 min-w-0 grow basis-[calc(100%+2rem)] px-4 sm:mx-0 sm:basis-0 sm:px-0"
+          label={tr('filter')}
+          value={tab}
+          onChange={(k) => choose(k, unreadOnly)}
+          items={TABS.map((k) => ({ key: k, testid: `inbox-tab-${k}`, label: tr(`f.${k}`) }))}
+        />
         <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-ink-300">
           <input type="checkbox" className="accent-gold-500" checked={unreadOnly} onChange={(e) => choose(tab, e.target.checked)} data-testid="inbox-unread-only" />
           {tr('unreadOnly')}

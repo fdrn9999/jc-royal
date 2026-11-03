@@ -108,7 +108,7 @@ await page.waitForSelector('[data-testid=message]');
 await page.locator('[data-testid=message] button').first().click();
 await page.waitForTimeout(300);
 await page.screenshot({ path: `${out}/04-inbox.png` });
-await page.goto(`${base}/me`);
+await page.goto(`${base}/me?tab=activity`);
 await page.waitForTimeout(1200);
 await page.locator('[data-testid=my-posts]').scrollIntoViewIfNeeded();
 await page.screenshot({ path: `${out}/05-mypage-posts.png` });

@@ -108,16 +108,24 @@ test('the Me page on a phone keeps nine- and ten-digit amounts inside their boxe
     await expect(page.getByTestId('refill-tables')).toHaveText('0');
     await expect(page.getByTestId('refill-total')).toHaveText('123,456,789');
     await expect(page.getByTestId('me-balance')).toHaveText('123,456,789');
+    await expect(page.getByTestId('me-kpi-hands')).toContainText('1,234,567');
+    await expect(page.getByTestId('me-kpi-winrate')).toContainText('456,789 / 1,234,567');
+    await expect(page.getByTestId('ledger')).toContainText('123,456,789');
+    expect(await overflowing(page), `${name}: amounts run out of their boxes`).toEqual([]);
+    expect(await widerThanDevice(page)).toBe(false);
+    await page.getByTestId('refill-card').screenshot({ path: shot(`refill-${name}`) });
+    await page.getByTestId('me-kpis').screenshot({ path: shot(`kpis-${name}`) });
+    // The statistics are on the next tab; what a hidden tab holds has no size to measure, so each is measured open.
+    await page.getByTestId('me-tab-history').click();
     const stats = page.getByTestId('stats');
     await expect(stats).toContainText('9,876,543,210');
     await expect(stats).toContainText('-123,456,789');
     await expect(page.getByTestId('stats-pos-BB')).toContainText('+123,456,789');
     await expect(page.getByTestId('stats-trend-summary')).toBeVisible();
-    await expect(page.getByTestId('ledger')).toContainText('123,456,789');
-    expect(await overflowing(page), `${name}: amounts run out of their boxes`).toEqual([]);
+    expect(await overflowing(page), `${name}: amounts run out of their boxes (history)`).toEqual([]);
     expect(await widerThanDevice(page)).toBe(false);
-    await page.getByTestId('refill-card').screenshot({ path: shot(`refill-${name}`) });
     await stats.screenshot({ path: shot(`stats-${name}`) });
+    await page.getByTestId('me-tab-dashboard').click();
   };
 
   for (const [w, h] of [

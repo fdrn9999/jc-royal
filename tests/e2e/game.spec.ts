@@ -67,7 +67,7 @@ test('two browsers: join, buy in, play a hand to showdown, refresh, stand up wit
   expect(before).toBeGreaterThan(0);
 
   // My page: the showdown A played is a pot of at least both big blinds, shown apart from the single-hand profit.
-  await a.page.goto('/me');
+  await a.page.goto('/me?tab=history');
   const statValue = async (label: RegExp) => Number(((await a.page.getByText(label).locator('xpath=..').locator('.font-mono').textContent()) ?? '').replace(/[^\d]/g, ''));
   await expect(a.page.getByText(/^(참여한 최대 팟|Largest pot played)$/)).toBeVisible();
   expect(await statValue(/^(참여한 최대 팟|Largest pot played)$/)).toBeGreaterThanOrEqual(20);

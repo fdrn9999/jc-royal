@@ -22,7 +22,7 @@ test('mobile: hand list filters fold away, bookmarks and tags are thumb-sized, t
   const ids = seedHands(await idOf(a.page), await idOf(b.page));
   const page = a.page;
 
-  await page.goto('/me');
+  await page.goto('/me?tab=history');
   await page.getByTestId('me-all-hands').tap();
   await expect.poll(() => listed(page, ids)).toEqual(['A', 'B', 'C', 'D']);
   expect(await widerThanDevice(page)).toBe(false);

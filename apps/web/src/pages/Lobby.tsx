@@ -1,5 +1,5 @@
 import type { LobbyTableDto, TournamentSummaryDto } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, HourglassIcon, Input, LockIcon, PlayIcon, PlusIcon, RefreshCwIcon, Spinner, SproutIcon, StarIcon, TrophyIcon, UserIcon } from '@jc/ui';
+import { Badge, Button, cx, Empty, formatChips, HourglassIcon, Input, LockIcon, PlayIcon, PlusIcon, RefreshCwIcon, Spinner, SproutIcon, StarIcon, Tabs, TrophyIcon, UserIcon } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
@@ -371,25 +371,25 @@ function Lobby() {
       <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} paused={!!paused} mine={mine} />
 
       <div className="flex flex-col gap-2">
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1" role="tablist">
-          {FILTERS.map((f) => {
+        <Tabs
+          className="-mx-4 px-4"
+          value={filter}
+          onChange={(f) => view({ filter: f })}
+          items={FILTERS.map((f) => {
             const n = f === 'fav' || f === 'recent' ? counts[f] : 0;
-            return (
-              <button
-                key={f}
-                role="tab"
-                aria-selected={filter === f}
-                onClick={() => view({ filter: f })}
-                data-testid={`lobby-filter-${f}`}
-                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${filter === f ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory'}`}
-              >
-                {f === 'fav' && <StarIcon className="mr-1 inline size-3.5 align-[-2px]" />}
-                {t(`lobby.filter.${f}` as MsgKey)}
-                {n > 0 && <span className="ml-1 tabular-nums opacity-70">{n}</span>}
-              </button>
-            );
+            return {
+              key: f,
+              testid: `lobby-filter-${f}`,
+              label: (
+                <>
+                  {f === 'fav' && <StarIcon className="mr-1 inline size-3.5 align-[-2px]" />}
+                  {t(`lobby.filter.${f}` as MsgKey)}
+                  {n > 0 && <span className="ml-1 tabular-nums opacity-70">{n}</span>}
+                </>
+              ),
+            };
           })}
-        </div>
+        />
         {!any && (
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-300" data-testid="lobby-filtered">
             {t('lobby.filteredBy', { what: filteredBy })}

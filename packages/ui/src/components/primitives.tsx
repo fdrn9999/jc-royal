@@ -38,6 +38,17 @@ const sizes: Record<Size, string> = {
   lg: 'h-12 px-6 text-base',
 };
 
+/** A button's look, for a link that leads somewhere but should read as one of the buttons beside it. */
+export function buttonClass(variant: Variant = 'gold', size: Size = 'md', className?: string) {
+  return cx(
+    'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition-all duration-150',
+    'disabled:opacity-45 disabled:cursor-not-allowed active:translate-y-px',
+    variants[variant],
+    sizes[size],
+    className,
+  );
+}
+
 export function Button({
   variant = 'gold',
   size = 'md',
@@ -50,13 +61,7 @@ export function Button({
     <button
       {...rest}
       disabled={rest.disabled || loading}
-      className={cx(
-        'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition-all duration-150',
-        'disabled:opacity-45 disabled:cursor-not-allowed active:translate-y-px',
-        variants[variant],
-        sizes[size],
-        className,
-      )}
+      className={buttonClass(variant, size, className)}
     >
       {loading && <Spinner className="size-4" />}
       {children}
@@ -169,6 +174,75 @@ export function Panel({ className, children, title, actions, id }: { className?:
       )}
       {children}
     </section>
+  );
+}
+
+/** The tab an arrow key, Home or End moves to from tab `i` of `n` (round the ends); -1 for any other key. */
+function tabStep(key: string, i: number, n: number) {
+  if (key === 'ArrowRight') return (i + 1) % n;
+  if (key === 'ArrowLeft') return (i + n - 1) % n;
+  if (key === 'Home') return 0;
+  if (key === 'End') return n - 1;
+  return -1;
+}
+
+/**
+ * A row of pill tabs that scrolls sideways when it runs out of room (`className` places the row). Each tab is a 44 px tall
+ * touch target round its pill, so the row looks as before. Arrow keys, Home and End move between the tabs and choose;
+ * only the chosen one is in the tab order. A tab with its own panel names it (`controls`) and gives the panel its `id`
+ * to be labelled by.
+ */
+export function Tabs<K extends string>({
+  value,
+  onChange,
+  items,
+  label,
+  className,
+}: {
+  value: K;
+  onChange: (key: K) => void;
+  items: readonly { key: K; label: ReactNode; testid?: string; id?: string; controls?: string }[];
+  label?: string;
+  className?: string;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  return (
+    <div ref={row} role="tablist" aria-label={label} className={cx('flex gap-2 overflow-x-auto', className)}>
+      {items.map((it, i) => {
+        const on = it.key === value;
+        return (
+          <button
+            key={it.key}
+            id={it.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            aria-controls={it.controls}
+            tabIndex={on ? 0 : -1}
+            onClick={() => onChange(it.key)}
+            onKeyDown={(e) => {
+              const j = tabStep(e.key, i, items.length);
+              if (j < 0) return;
+              e.preventDefault();
+              onChange(items[j]!.key);
+              row.current?.querySelectorAll<HTMLElement>('[role="tab"]')[j]?.focus();
+            }}
+            data-testid={it.testid}
+            className="jc-tap group flex min-h-11 shrink-0 items-center outline-none"
+          >
+            <span
+              className={cx(
+                'rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors',
+                'group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-gold-400',
+                on ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 group-hover:text-ivory',
+              )}
+            >
+              {it.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

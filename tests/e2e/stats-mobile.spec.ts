@@ -8,7 +8,7 @@ test('mobile: my statistics, positions and the daily trend fit the phone in Kore
   await sitWith(o.page, 'e2e-stats-m', 500);
   await playOneHand(m.page, o.page);
 
-  await m.page.goto('/me');
+  await m.page.goto('/me?tab=history');
   await expect(m.page.getByTestId('stats')).toBeVisible();
   await expect(m.page.getByTestId('stats-vpip')).toContainText('/ 1 핸드');
   await expect(m.page.getByTestId('stats-wtsd')).toContainText('100%');
