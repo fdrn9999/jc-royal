@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { badgesFor } from '../lib/badges';
+import { challengesFor } from '../lib/challenges';
 import { replayLog, replayPlayer, replayUser } from '../lib/community';
 import { countNote, failureMetric, isFiltered, listHands, readNote, savedMetrics, saveNote } from '../lib/handNotes';
 import { fail, parseBody } from '../lib/http';
@@ -66,6 +67,15 @@ export const meRoutes = new Hono<AppEnv>()
     const uid = c.var.user!.id;
     await rateLimit(c, `referral-me:${uid}`, 30, 60_000);
     return c.json(await referralMe(c.env, uid, new URL(c.req.url).origin));
+  })
+  /**
+   * This day's and this week's challenges (lib/challenges.ts): judged again from the server's records before they are
+   * counted, so it is rate limited. Never chips.
+   */
+  .get('/challenges', async (c) => {
+    const uid = c.var.user!.id;
+    await rateLimit(c, `challenges:${uid}`, 30, 60_000);
+    return c.json(await challengesFor(c.env.DB, uid, Date.now()));
   })
   .get('/ledger', async (c) => {
     const { limit, before } = pageParams((k) => c.req.query(k));

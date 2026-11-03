@@ -282,3 +282,53 @@ test('lobby: with the realtime socket up, a new room, a seat taken there and its
   await expect(card).toHaveCount(0);
   expect(gets.n).toBe(base);
 });
+
+test('lobby: starring says so where the eye is; a favourite closed since is noted in the favourites tab and cleared from there', async ({ browser }) => {
+  const { page } = await signUp(browser);
+  const name = `Fav Gone ${Date.now() % 100_000}`;
+  const id = await page.evaluate(async (n) => {
+    const r = await fetch('/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: n, maxSeats: 6, bigBlind: 10, minBuyIn: 100, maxBuyIn: 1000 }) });
+    return ((await r.json()) as { id: string }).id;
+  }, name);
+  await page.reload();
+  const card = page.locator(`[data-testid="lobby-table"][data-table="${id}"]`);
+  const star = card.getByTestId('fav-toggle');
+  const said = page.getByTestId('lobby-fav-said');
+  await star.click();
+  await expect(star).toHaveAttribute('aria-pressed', 'true');
+  await expect(said).toHaveText(new RegExp(`^${name}: (즐겨찾기에 추가했습니다|added to favorites)`));
+  await expect(said).toHaveAttribute('role', 'status');
+  // Shown over the page's foot, inside the screen, and never in the way of a click.
+  const box = (await said.boundingBox())!;
+  expect(box.width).toBeGreaterThan(200);
+  expect(box.y + box.height).toBeLessThanOrEqual(900);
+  expect(await said.evaluate((e) => getComputedStyle(e).pointerEvents)).toBe('none');
+  await page.screenshot({ path: 'test-results/lobby-fav-said-desktop.png', animations: 'disabled' });
+  await star.click();
+  await expect(said).toHaveText(new RegExp(`^${name}: (즐겨찾기에서 뺐습니다|removed from favorites)`));
+  await star.click();
+  await expect(star).toHaveAttribute('aria-pressed', 'true');
+  // It goes away by itself.
+  await expect(said).toHaveText('', { timeout: 6_000 });
+
+  // The host closes the room: its card goes, the favourite stays; only the favourites tab says so.
+  expect(await page.evaluate(async (t) => (await fetch(`/api/rooms/${t}/close`, { method: 'POST' })).status, id)).toBe(200);
+  await page.reload();
+  await expect(page.getByTestId('lobby-table').first()).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await expect(page.getByTestId('lobby-fav-gone')).toHaveCount(0);
+  await page.getByTestId('lobby-filter-fav').click();
+  const gone = page.getByTestId('lobby-fav-gone');
+  await expect(gone).toContainText(/닫혀서 목록에 없는 테이블: 1개|closed and no longer listed: 1/);
+  await expect(page.getByText(/지금 열려 있는 즐겨찾기 테이블이 없습니다|None of your favorite tables is open now/)).toBeVisible();
+  await page.screenshot({ path: 'test-results/lobby-fav-gone-desktop.png', animations: 'disabled' });
+  await gone.getByTestId('lobby-fav-gone-clear').click();
+  await expect(gone).toHaveCount(0);
+  await expect(said).toHaveText(/닫힌 테이블 1개를 즐겨찾기에서 뺐습니다|Closed tables removed from favorites: 1/);
+  await expect(page.getByText(/즐겨찾는 테이블이 없습니다|No favorite tables yet/)).toBeVisible();
+  // Cleared for the account, not for this screen only.
+  await page.reload();
+  await page.getByTestId('lobby-filter-fav').click();
+  await expect(page.getByText(/즐겨찾는 테이블이 없습니다|No favorite tables yet/)).toBeVisible();
+  await expect(page.getByTestId('lobby-fav-gone')).toHaveCount(0);
+});

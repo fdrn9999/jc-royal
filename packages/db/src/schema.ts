@@ -547,6 +547,24 @@ export const userBadges = sqliteTable(
   (t) => [primaryKey({ columns: [t.userId, t.badge] })],
 );
 
+/**
+ * Challenges completed (CHALLENGES in @jc/types, packages/db/src/challengesSql.ts): one row per member, code and period
+ * (a Korean day or week number), written by the server from what it recorded and never from anything a client says.
+ * Apart from user_badges: an achievement is once for good, a challenge every period. `points` is what the challenge
+ * gave then, a progress figure that never touches chips or the ledger.
+ */
+export const challengeCompletions = sqliteTable(
+  'challenge_completions',
+  {
+    userId: text('user_id').notNull().references(() => users.id),
+    code: text('code').notNull(),
+    period: integer('period').notNull(),
+    points: integer('points').notNull(),
+    completedAt: integer('completed_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.code, t.period] })],
+);
+
 /** Anonymous aggregate counters for Academy content (no user id is stored). */
 export const academyStats = sqliteTable(
   'academy_stats',

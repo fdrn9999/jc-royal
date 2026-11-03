@@ -11,15 +11,13 @@
  *   are added as events arrive. Day 0
  *   holds markers.
  */
-export const STATS_TZ_OFFSET_MS = 9 * 60 * 60_000;
-export const STATS_DAY = 86_400_000;
+import { dayStart, STATS_DAY, statsDay } from './days';
+
+export { dayStart, STATS_DAY, STATS_TZ_OFFSET_MS, statsDay } from './days';
 /** Activity markers are kept this long; the daily housekeeping deletes older days. */
 export const ACTIVE_DAYS_RETENTION = 35;
 /** ...or longer while the rollup has fallen behind and still needs them, but never longer than this. */
 export const ACTIVE_DAYS_MAX_RETENTION = 60;
-
-export const statsDay = (at: number) => Math.floor((at + STATS_TZ_OFFSET_MS) / STATS_DAY);
-export const dayStart = (day: number) => day * STATS_DAY - STATS_TZ_OFFSET_MS;
 
 /** Academy counters, added by POST /api/academy/events (anonymous: per day, never per member). */
 export const ACADEMY_METRICS = ['ac_lesson_start', 'ac_lesson_done', 'ac_scenario_start', 'ac_scenario_done', 'ac_answer', 'ac_correct'] as const;

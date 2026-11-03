@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StatRatio } from './api';
+import type { ChallengeSummaryDto } from './challenges';
 import type { PublicUserDto } from './social';
 
 // ------------------------------------------------------------------ achievements
@@ -7,9 +8,10 @@ import type { PublicUserDto } from './social';
 /**
  * Achievements: decorative marks the server gives from what it recorded (user_badges, `play:` codes, written by
  * packages/db/src/achievements.ts), never claimed by a client and never linked to chips or the ledger. A made hand
- * counts only when its cards were face up for the table, so a mucked hand never shows through one.
+ * counts only when its cards were face up for the table, so a mucked hand never shows through one. `challenges_10`: ten
+ * challenges completed (CHALLENGES in ./challenges), once.
  */
-export const ACHIEVEMENTS = ['first_hand', 'first_win', 'full_house', 'quads', 'straight_flush', 'hands_100', 'tournament_win', 'streak_7'] as const;
+export const ACHIEVEMENTS = ['first_hand', 'first_win', 'full_house', 'quads', 'straight_flush', 'hands_100', 'tournament_win', 'streak_7', 'challenges_10'] as const;
 export type AchievementCode = (typeof ACHIEVEMENTS)[number];
 /** The namespace of these codes in user_badges (the academy's badges have their own). */
 export const ACHIEVEMENT_PREFIX = 'play:';
@@ -56,6 +58,8 @@ export interface PlayerCardDto {
   self: boolean;
   /** Null: the member keeps them to themselves (on my own card: always there, with `privacy` telling who else sees them). */
   achievements: AchievementDto[] | null;
+  /** Challenges completed and their points, behind the same choice as `achievements`. */
+  challenges: ChallengeSummaryDto | null;
   stats: PlayerCardStatsDto | null;
   /** My own card only. */
   privacy?: PrivacySettingsDto;

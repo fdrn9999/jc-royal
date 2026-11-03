@@ -6,6 +6,7 @@ import { BadgeShelf } from '../academy/Badges';
 import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
+import { ChallengesCard } from '../components/Challenges';
 import { HandNotePanel, HandRow } from '../components/HandNotes';
 import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
@@ -303,6 +304,7 @@ export function MePage() {
       <TabPanel tab={tab} k="dashboard">
         <RefillCard onClaimed={() => void ledger.reload()} />
         <ReferralCard onPaid={ledger.reload} />
+        <ChallengesCard />
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Panel title={t('me.ledger')}>
             {ledger.data && ledger.data.length === 0 && <Empty>{t('me.none')}</Empty>}

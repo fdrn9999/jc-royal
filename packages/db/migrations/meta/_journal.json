@@ -309,6 +309,13 @@
       "when": 1793731964664,
       "tag": "0043_mtt_private_tournaments",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1793739075255,
+      "tag": "0044_challenges",
+      "breakpoints": true
     }
   ]
 }

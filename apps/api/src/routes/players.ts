@@ -16,6 +16,7 @@ import {
   type LeaderboardRowDto,
   type PlayerCardDto,
   type PlayerCardStatsDto,
+  type ChallengeSummaryDto,
   HUD_DAYS,
   HUD_HANDS,
   HUD_SCOPES,
@@ -26,6 +27,7 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireUser } from '../lib/auth';
 import { badgesFor } from '../lib/badges';
+import { CHALLENGE_TOTALS_SQL } from '../lib/challenges';
 import { fail } from '../lib/http';
 import { PLAY_STATS_COLUMNS, playRatios, type PlayStatsRow } from '../lib/play-stats';
 import { rateLimit } from '../lib/rate-limit';
@@ -81,8 +83,9 @@ export const playerRoutes = new Hono<AppEnv>()
     if (u.isBot) notFound();
     const showAchievements = self || u.showAchievements === 1;
     const showStats = self || u.showStats === 1;
-    const [badgesR, statsR] = await c.env.DB.batch([
+    const [badgesR, challengesR, statsR] = await c.env.DB.batch([
       c.env.DB.prepare(`SELECT badge, awarded_at AS at FROM user_badges WHERE user_id = ?1 AND badge LIKE '${ACHIEVEMENT_PREFIX}%' AND ?2 ORDER BY awarded_at`).bind(id, showAchievements ? 1 : 0),
+      c.env.DB.prepare(`${CHALLENGE_TOTALS_SQL} AND ?2`).bind(id, showAchievements ? 1 : 0),
       c.env.DB.prepare(
         `SELECT COUNT(*) AS hands, ${PLAY_STATS_COLUMNS},
                 (SELECT COUNT(*) FROM tournament_entries te JOIN tournaments tt ON tt.id = te.tournament_id
@@ -94,6 +97,7 @@ export const playerRoutes = new Hono<AppEnv>()
     const achievements = ((badgesR!.results ?? []) as { badge: string; at: number }[])
       .map((b) => ({ code: b.badge.slice(ACHIEVEMENT_PREFIX.length) as AchievementCode, at: b.at }))
       .filter((b) => codes.has(b.code));
+    const done = challengesR!.results[0] as ChallengeSummaryDto | undefined;
     const s = (statsR!.results as (PlayStatsRow & Record<'hands' | 'wins', number>)[])[0];
     const r = s && playRatios(s);
     const stats: PlayerCardStatsDto | null = showStats && s && r ? { hands: s.hands, vpip: r.vpip, pfr: r.pfr, wtsd: r.wtsd, wsd: r.wsd, tournamentWins: s.wins } : null;
@@ -102,6 +106,7 @@ export const playerRoutes = new Hono<AppEnv>()
       joinedMonth: u.joinedMonth,
       self,
       achievements: showAchievements ? achievements : null,
+      challenges: showAchievements && done ? { points: Number(done.points), completed: Number(done.completed) } : null,
       stats,
       ...(self
         ? { privacy: { showAchievements: u.showAchievements === 1, showStats: u.showStats === 1, shareTable: u.shareTable === 1, showRanking: u.showRanking === 1 } }

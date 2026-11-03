@@ -5,9 +5,9 @@
  * room can safely retry after a crash or an eviction between the D1 write and
  * its own storage write.
  */
-import { achievementsForHand, applyLedger, botStatsIncrement, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
+import { achievementsForHand, applyLedger, botStatsIncrement, challengeStatements, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
-import { BOT_LEVELS, BOT_TABLE_STYLES, toSocialPolicy, type BotLevel, type BotTableStyle, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
+import { BOT_LEVELS, BOT_TABLE_STYLES, CHALLENGE_ACHIEVEMENT_AT, CHALLENGES, toSocialPolicy, type BotLevel, type BotTableStyle, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
 import { DETAIL_STATS_SQL, detailStatsBinds } from './detail-stats';
 import { TOURNAMENT_JSON, toTournamentRow, type TournamentRow } from './tournament';
 
@@ -358,6 +358,13 @@ export async function recordHand(
     await d1.batch(achievementsForHand(d1, rec.handId));
   } catch (e) {
     console.error('achievements failed', tableId, rec.handId, e);
+  }
+  try {
+    // Challenges (packages/db/src/challengesSql.ts) for the day and week the hand ended in: from the hand's record only,
+    // once per member, code and period whatever runs again.
+    await d1.batch(challengeStatements(d1, CHALLENGES, 'hand', rec.handId, rec.endedAt, CHALLENGE_ACHIEVEMENT_AT));
+  } catch (e) {
+    console.error('challenges failed', tableId, rec.handId, e);
   }
   const policies = results[1 + policy.length]?.results[0] as { timeBank?: unknown; social?: unknown } | undefined;
   return {
