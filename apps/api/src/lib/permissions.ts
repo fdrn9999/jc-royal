@@ -58,6 +58,8 @@ export const CAPABILITIES = {
   'tournament.structure': 'super_admin',
   /** See every administrator's feature switches and turn them on or off (GRANTS). */
   'admins.grants': 'super_admin',
+  /** Delete a post, a closed table or an archived template permanently, where nothing blocks it (lib/purge.ts). */
+  'data.purge': 'super_admin',
 } as const satisfies Record<string, AdminRole>;
 export type Capability = keyof typeof CAPABILITIES;
 
@@ -275,6 +277,7 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'PATCH /tables/:id': r('tables', 'table.update', { target: 'table' }),
   'POST /tables/:id/control': r('tableControl', 'table.control', { reauth, target: 'table' }),
   'POST /tables/:id/close': r('tableControl', 'table.close', { reauth, preview, target: 'table' }),
+  'POST /tables/:id/purge': r('tableControl', 'table.purge', { role: CAPABILITIES['data.purge'], reauth, preview, target: 'table' }),
   // A turn whose timer failed, recovered by the room's own rules (routes/admin-timebank.ts); no one's time is set by hand.
   'POST /tables/:id/timer-recover': r('tableControl', 'table.timer_recover', { reauth, target: 'table' }),
   // The control center's reads (routes/admin-monitor.ts): table duty sees them; its buttons are the routes above.
@@ -350,6 +353,7 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /board/notices': r('board', 'board.notice.create'),
   'PATCH /board/notices/:id': r('board', 'board.notice.update', { target: 'post' }),
   'POST /board/posts/:id/status': r('board', 'board.post.status', { target: 'post' }),
+  'POST /board/posts/:id/purge': r('board', 'board.post.purge', { role: CAPABILITIES['data.purge'], reauth, preview, target: 'post' }),
   'POST /board/comments/:id/status': r('board', 'board.comment.status', { target: 'comment' }),
   'POST /messages': r('messages', 'message.send'),
   'GET /messages': r('messages', 'message.list'),
@@ -405,6 +409,7 @@ export const ROUTE_RULES: Record<string, RouteRule> = {
   'POST /tournament-templates': r('tournaments', 'tournament_template.create', { role: CAPABILITIES['tournament.structure'], reauth, preview }),
   'PUT /tournament-templates/:id': r('tournaments', 'tournament_template.update', { role: CAPABILITIES['tournament.structure'], reauth, preview, target: 'tournament_template' }),
   'POST /tournament-templates/:id/status': r('tournaments', 'tournament_template.status', { role: CAPABILITIES['tournament.structure'], reauth, target: 'tournament_template' }),
+  'POST /tournament-templates/:id/purge': r('tournaments', 'tournament_template.purge', { role: CAPABILITIES['data.purge'], reauth, preview, target: 'tournament_template' }),
 };
 
 const ADMIN_BASE = '/api/admin';

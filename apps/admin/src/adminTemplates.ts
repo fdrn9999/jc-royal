@@ -206,6 +206,13 @@ export const REASONS = {
     archived: [r('tpl.archive.unused', '더 이상 쓰지 않는 템플릿', 'No longer used'), r('tpl.archive.replaced', '새 템플릿으로 대체', 'Replaced by a new template'), r('tpl.archive.ended', '운영 일정 종료', 'Schedule over')],
     active: [r('tpl.active.resume', '운영 재개', 'Back in use'), r('tpl.active.event', '이벤트 일정 시작', 'Event schedule starting')],
   },
+  /** 영구 삭제 (purge.tsx): why a record is removed for good rather than hidden. */
+  purge: [
+    r('purge.request', '회원 요청에 따른 삭제', 'Removed at the member’s request'),
+    r('purge.mistake', '잘못 만든 항목 정리', 'Created by mistake'),
+    r('purge.test', '시험·중복 데이터 정리', 'Test or duplicate data'),
+    r('purge.legal', '법적 요청에 따른 삭제', 'Legal request', { detailRequired: true }),
+  ],
   tournamentTpl: {
     create: [r('tpl.new', '신규 대회 추가', 'New tournament'), r('tpl.event', '이벤트 대회 준비', 'Preparing an event tournament'), policyChange],
     edit: [r('tpl.structure', '대회 구조 조정', 'Structure adjusted'), r('tpl.prize', '상금 구조 변경', 'Prize structure changed'), r('tpl.blinds', '블라인드 구조 조정', 'Blind structure adjusted'), policyChange],

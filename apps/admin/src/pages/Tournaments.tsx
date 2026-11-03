@@ -39,6 +39,7 @@ import {
   type Tr,
 } from '../labels';
 import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { PurgeDialog } from '../purge';
 import { AdminReasonField } from '../templateFields';
 import { ChangedNotice, Feedback, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { Table } from './Console';
@@ -840,11 +841,14 @@ export function TournamentTemplatesPage() {
   const [note, setNote] = useState<Note>(null);
   const [editing, setEditing] = useState<TournamentTemplateDto | 'new' | null>(null);
   const [statusAct, setStatusAct] = useState<TournamentTemplateDto | null>(null);
+  const [purge, setPurge] = useState<TournamentTemplateDto | null>(null);
   const superAdmin = canDo(me, 'tournament.structure');
+  const purgeable = canDo(me, 'data.purge');
   const changed = async (n: Note) => {
     setNote(n);
     setEditing(null);
     setStatusAct(null);
+    setPurge(null);
     await reload();
   };
   const rows = data?.templates ?? [];
@@ -891,6 +895,7 @@ export function TournamentTemplatesPage() {
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => setEditing(x)} data-testid="tpl-edit">{t('edit')}</Button>
                     <Button size="sm" variant={x.status === 'active' ? 'danger' : 'outline'} onClick={() => setStatusAct(x)} data-testid="tpl-status">{t(x.status === 'active' ? 'tplArchive' : 'tplActivate')}</Button>
+                    {x.status === 'archived' && purgeable && <Button size="sm" variant="danger" onClick={() => { setNote(null); setPurge(x); }} data-testid="tpl-purge">{t('purgeAction')}</Button>}
                     <Link to={`/audit?targetType=tournament_template&targetId=${encodeURIComponent(x.id)}`} className="self-center text-xs text-gold-300 hover:underline">{t('audit')} →</Link>
                   </div>
                 )}
@@ -911,6 +916,7 @@ export function TournamentTemplatesPage() {
       )}
       {editing && <TemplateEditor key={editing === 'new' ? 'new' : `${editing.id}:${editing.version}`} tpl={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onChanged={changed} />}
       {statusAct && <TemplateStatusDialog tpl={statusAct} onClose={() => setStatusAct(null)} onChanged={changed} />}
+      {purge && <PurgeDialog kind="tournament_template" id={purge.id} onClose={() => setPurge(null)} onDone={changed} />}
     </div>
   );
 }

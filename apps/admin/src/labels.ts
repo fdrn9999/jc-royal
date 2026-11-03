@@ -89,6 +89,7 @@ const auditNames = labeler({
   'board.notice.create': 'auditNoticeCreate',
   'board.notice.update': 'auditNoticeUpdate',
   'board.post.status': 'auditPostStatus',
+  'board.post.purge': 'auditPostPurge',
   'hand.list': 'auditHandList',
   'hand.view_sensitive': 'auditHandView',
   'integrity.review': 'auditIntegrityReview',
@@ -141,6 +142,7 @@ const auditNames = labeler({
   'social.policy': 'auditSocialPolicy',
   'social.view': 'auditSocialView',
   'table.close': 'auditTableClose',
+  'table.purge': 'auditTablePurge',
   'table.create': 'auditTableCreate',
   'table.update': 'auditTableUpdate',
   'table.control': 'auditTableControl',
@@ -161,6 +163,7 @@ const auditNames = labeler({
   'tournament_template.create': 'auditTplCreate',
   'tournament_template.list': 'auditTplList',
   'tournament_template.status': 'auditTplStatus',
+  'tournament_template.purge': 'auditTplPurge',
   'tournament_template.update': 'auditTplUpdate',
   'user.chips': 'auditUserChips',
   'user.chips_duplicate': 'auditChipsDuplicate',
@@ -229,6 +232,7 @@ export const capabilityLabel = labeler({
   'timebank.policy': 'capTimeBankPolicy',
   'social.policy': 'capSocialPolicy',
   'tournament.structure': 'capTournamentStructure',
+  'data.purge': 'capDataPurge',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({

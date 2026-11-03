@@ -124,6 +124,7 @@
 | `social.policy` | 소셜 정책(빠른 반응 켜기·간격·횟수, 최고 관리자·관리자 표시) 변경. 조회는 기능 `social`(스위치 `tables`)이 있는 관리자 누구나 |
 | `tournament.structure` | 대회 템플릿(구조) 만들기·바꾸기·보관. 개별 대회 열기·진행 제어는 기능 `tournaments`가 있는 관리자 누구나 |
 | `admins.grants` | 관리자별 기능 스위치 보기·바꾸기(아래). 스위치로 넘겨줄 수 없다 |
+| `data.purge` | 게시글·닫힌 테이블·보관된 대회 템플릿의 영구 삭제(아래 "영구 삭제"). 미리보기도 최고관리자만. 스위치로 넘겨줄 수 없다 |
 
 - 역할별 표는 코드에 있다. 역할이 허용하는 범위를 바꾸려면 검토를 거친 코드 변경이 필요하다. 콘솔의 "보안" 화면은 표를 읽기 전용으로 보여 준다(`GET /api/admin/security/permissions`, 내 능력·기능별 일반 관리자 가능 여부·재확인 여부·기능이 기대는 스위치, 내 스위치와 기능별로 실제 쓸 수 있는 작업 수 `effective`).
 - 콘솔은 `GET /api/admin/auth/me`의 `permissions`(능력)와 `grants`(켜진 스위치)로 할 수 없는 메뉴·버튼을 숨기거나 막고 이유를 보여 주지만(예: 내보내기), 판정은 언제나 서버가 한다. 주소를 직접 열어도 서버가 거절한다.
@@ -133,7 +134,7 @@
 
 - **유효 권한 = 역할이 허용하는 범위(위 표) ∩ 최고관리자가 켜 둔 기능 스위치.** 스위치는 관리자마다 D1 `admin_permissions`(관리자 ID, 켜진 스위치 JSON, 버전, 바꾼 사람·시각)에 저장하고, 서버가 요청마다 읽는다(요청 안에서 한 번). 최고관리자는 모든 스위치가 켜진 것으로 보고 스위치가 없다. 일반 관리자는 행이 없거나 목록에 없는 기능이 모두 꺼져 있다(**기본 거부**). 나중에 코드에 더하는 스위치도 최고관리자가 켜기 전까지 꺼져 있다.
 - **스위치(24개, `GRANTS`)**: VIP 회원 지정·색 변경·해제(`vip`, 0031에서 추가, 기존 관리자에게는 꺼진 채로 시작), 대시보드 조회(`dashboard`), 회원 조회(`members`, 회원 메모 포함), 회원 정지·해제(`sanctions`), 회원 강제 연결 종료(`disconnect`), 신고 조회·처리(`reports`), 게시판 관리(`board`), 공지 발송(`notices`), 쪽지 발송(`messages`), 테이블 생성·수정(`tables`, 소셜 정책 조회 포함), 테이블 긴급 제어(`tableControl`, 종료·타이머 복구 포함), 소액 칩 조정(`chips`), 원장 조회(`ledger`), 경제 통계(`economy`), 운영 통계(`stats`, 아카데미 통계 포함), 추천인 운영(`referral`), 봇 운영(`bots`), 그리고 기존 기능인 대회 진행(`tournaments`), 무료 칩 보충(`refill`), 핸드 기록(`hands`, 종료 핸드 카드 열람 포함), 정합성 점검(`reconcile`), 계정 설정 진단(`settings`), 재설정 링크(`resetLinks`), 점검 공지(`maintenance`, 브랜드 상태 조회 포함). 0028에서 기능 `social`·`brand`를 더했지만 새 스위치는 만들지 않고 같은 업무의 스위치에 붙였다(기존 관리자는 스위치를 다시 켜지 않아도 배포 직후 새 화면을 본다).
-- **넘겨줄 수 없는 것**: 관리자 권한 설정(`admins.grants`), 최고관리자 지정·강등(`roles.change`), 관리자·최고관리자 제재(`admins.manage`), 고액 칩 조정(`chips.large`), 원장 정합성 직접 보정(`ledger.correct`), 회원 정보 대량 내보내기(`members.export`), 각종 정책 변경(`*.policy`, `tournament.structure`)은 능력(역할)으로만 정해지고 스위치가 없다. 시스템 비밀(Cloudflare secret, 메일 키 등)은 콘솔 API가 아예 없다. 감사 로그(자기 기록)와 보안 화면(자기 세션·권한)은 모든 관리자에게 항상 열려 있다.
+- **넘겨줄 수 없는 것**: 관리자 권한 설정(`admins.grants`), 최고관리자 지정·강등(`roles.change`), 관리자·최고관리자 제재(`admins.manage`), 고액 칩 조정(`chips.large`), 원장 정합성 직접 보정(`ledger.correct`), 회원 정보 대량 내보내기(`members.export`), 영구 삭제(`data.purge`), 각종 정책 변경(`*.policy`, `tournament.structure`)은 능력(역할)으로만 정해지고 스위치가 없다. 시스템 비밀(Cloudflare secret, 메일 키 등)은 콘솔 API가 아예 없다. 감사 로그(자기 기록)와 보안 화면(자기 세션·권한)은 모든 관리자에게 항상 열려 있다.
 - **거절**: 역할 밖이면 403 `forbidden`(`super admin only`), 역할은 되지만 스위치가 꺼져 있으면 403 `permission_off`(`this feature is turned off for your account`). 미리보기도 똑같이 거절하고, 둘 다 `<action>.failed`로 실패 감사에 남는다(요청 본문은 남기지 않는다). 한 라우트가 여러 기능의 정보를 돌려주면 라우트가 직접 나눈다: 회원 상세는 `ledger`가 꺼지면 원장, `reports`가 꺼지면 최근 신고를 빼고 `hidden`에 적으며, 회원 이력은 신고 항목을 뺀다. 테이블 수정으로 입장을 막는 것(`entryBlocked`)은 긴급 제어와 같아서 `tableControl`과 재확인을 함께 요구한다.
 - **바꾸기(최고관리자만)**: `GET /api/admin/security/admins`(닉네임·ID 검색, 역할 필터, 서버 페이지, 이메일 없음), `GET /api/admin/security/admins/:id`(스위치·버전·기능별 실제 권한·변경 이력, 이력에 IP 없음), `PUT /api/admin/security/admins/:id/grants` `{grants, baseVersion, reason, preview?}`. 본인(400 `cannot change your own permissions`), 최고관리자·회원(409 `not_plain_admin`), 그 사이 다른 최고관리자가 저장한 경우(409 `admin_grants_conflict`, 지금 스위치·버전을 `details`로), 바뀐 것이 없는 경우(400 `admin_grants_no_change`)는 거절한다. 미리보기는 켜지고 꺼지는 스위치와 쓸 수 있는 작업 수 전 → 후를 보여 주고 아무것도 쓰지 않는다. 저장은 비밀번호 재확인과 사유(2–200자)를 받고, "아직 일반 관리자이고 버전이 그대로일 때만" 쓰는 한 문장이라 동시에 저장해도 하나만 된다.
 - **적용 시점**: 저장 즉시, 그 관리자의 **다음 요청부터**(세션은 그대로). 콘솔은 `permission_off`를 받으면 내 정보를 다시 읽어 메뉴를 고친다.
@@ -145,7 +146,7 @@
 
 ## 변경 미리보기
 
-회원 정지·해제·강제 연결 종료·권한 변경·칩 조정, 테이블 종료와 신고 처리(B9), 무료 칩 보충 정책 변경, 테이블 봇 정책 변경, 추천 보상 정책 변경, 시간 은행 정책 변경, 소셜 정책 변경, 회원 계정 설정 초기화·복구는 실행 전에 무엇이 바뀌는지 먼저 보여 준다. 같은 라우트에 `preview: true`를 보내면 아무것도 쓰지 않고 다음을 돌려준다.
+회원 정지·해제·강제 연결 종료·권한 변경·칩 조정, 테이블 종료와 신고 처리(B9), 무료 칩 보충 정책 변경, 테이블 봇 정책 변경, 추천 보상 정책 변경, 시간 은행 정책 변경, 소셜 정책 변경, 회원 계정 설정 초기화·복구, 영구 삭제는 실행 전에 무엇이 바뀌는지 먼저 보여 준다. 같은 라우트에 `preview: true`를 보내면 아무것도 쓰지 않고 다음을 돌려준다.
 
 | 작업 | 미리보기 |
 |---|---|
@@ -164,6 +165,7 @@
 | 계정 설정 복구 | 언제의 초기화를 되돌리는지, 돌아올 설정 수와 즐겨찾기 수, 착석한 테이블 수, 다시 복구할 수 없음 |
 | 신고 처리 | 함께 닫힐 같은 대상의 열린 신고 수, 결과 쪽지를 받을 신고자 수(탈퇴 제외)와 대상 회원 안내 여부, 실제로 숨겨질 공개 글·댓글이 있는지 |
 | 관리자 기능 권한 | 켜지는·꺼지는 스위치, 쓸 수 있는 작업 수 전 → 후, 새 버전, 적용 시점(다음 요청부터) |
+| 영구 삭제 | 삭제 대상과 ID, 함께 지워지는 것과 건수, 남는 기록, 막는 것과 건수, 대상 상태의 지문, 확인 문구(아래 "영구 삭제") |
 
 - 미리보기는 비밀번호 재확인을 묻지 않는다(실제 변경이 묻는다). **역할 검사는 미리보기에도 그대로** 적용된다. 일반 관리자가 관리자 계정을 정지하려 하면 미리보기 단계에서 403으로 거절되고, 거절은 실패 감사에 남는다.
 - 미리보기에 담기는 내용은 회원·테이블 상세에서 관리자가 이미 보는 정보뿐이다. 카드 정보는 없다.
@@ -230,7 +232,8 @@ maintenance.schedule, maintenance.update, maintenance.end, maintenance.cancel,
 board.post.status, board.comment.status, message.send,
 report.view, report.resolved, report.dismissed, report.severity, report.assign, report.note,
 integrity.view, integrity.review,
-settings.reset, settings.restore, timebank.policy, table.timer_recover, social.policy, tournament.create, tournament.registration, tournament.start, tournament.cancel, tournament.pause, tournament.resume, tournament.abort, tournament.recover, tournament_template.create, tournament_template.update, tournament_template.status
+settings.reset, settings.restore, timebank.policy, table.timer_recover, social.policy, tournament.create, tournament.registration, tournament.start, tournament.cancel, tournament.pause, tournament.resume, tournament.abort, tournament.recover, tournament_template.create, tournament_template.update, tournament_template.status,
+board.post.purge, table.purge, tournament_template.purge
 ```
 
 조회도 남긴다. `user.list`(회원 목록·검색: 검색어, 필터, 정렬, 건수), `user.view`(회원 상세: 생년월일·동의 기록 포함), `report.view`(신고 목록: 1:1 메시지 신고 ID 포함)는 화면을 열 때마다 1행씩 쌓인다. 1:1 대화를 읽는 관리자 API는 없고, 관리자가 보는 1:1 메시지는 신고 증거뿐이다. 보관 기간은 정하지 않았다(`docs/PRIVACY_OPERATIONS.md` 5·9절). 회원 상세의 "관리 이력·메모"는 이 감사 로그(그 회원 대상의 제재·권한·칩·재설정 링크·메모 삭제와 그 회원에 대한 신고 결정)와 메모를 시간순으로 보여 준다. 최근 참여 테이블과 신고 건수는 상세 조회(`user.view`)에 함께 담기고, 기간별 활동(`/activity`)과 이력(`/timeline`) 조회는 따로 기록하지 않는다(콘솔은 상세를 연 뒤에만 부른다).
@@ -258,7 +261,61 @@ settings.reset, settings.restore, timebank.policy, table.timer_recover, social.p
 - 행위자·조치·실패·대상·시각 필터는 각각 인덱스를 탄다(`audit_actor_idx`, `audit_action_idx`, 부분 인덱스 `audit_failed_idx`, 기존 대상·시각 인덱스). 이 다섯은 인덱스 순서가 곧 시간순이라 목록은 한 페이지만 읽는다(첫 페이지의 건수는 인덱스에서 최대 10,001개를 센다). 조치 묶음(`user.*`)은 인덱스로 범위를 좁히지만 묶음에 든 행을 모두 읽어 시간순으로 정렬하고, 본문 검색은 다른 필터 범위 안의 행을 모두 읽는다. 합성 데이터 20만 행(`node:sqlite`, 실행 계획 확인)에서 페이지와 건수 한 번에 한 조치 0.6 ms, 실패만 0.2 ms, 대상 하나 0.1 ms, `user.*`(8만 행) 39.6 ms, 본문 검색 53.1 ms였다. 로그가 커지면 묶음·본문 검색은 기간을 함께 좁혀 쓴다.
 - **일반 관리자는 자기 기록만** 본다(`audit.all`이 없으면 행위자가 자기로 고정된다). 슈퍼관리자는 모든 관리자의 기록을 본다. `paged=1` 없는 기존 목록 응답도 같은 범위다.
 
-## 최초 관리자 생성(부트스트랩)
+## 영구 삭제
+
+일반 삭제(게시글·댓글의 `deleted` 상태, 서비스 공지의 `deleted_at`, 대회 템플릿 보관, 테이블 종료)는 그대로 두고, 그 옆에 **영구 삭제**를 따로 두었다. 일반 삭제는 되돌릴 수 있고 기록을 지우지 않는다. 영구 삭제는 행을 지우고 되돌릴 수 없다. 기존 일반 삭제를 영구 삭제로 바꾼 곳은 없다.
+
+### 데이터 분류
+
+| 분류 | 뜻 | 대상 |
+|---|---|---|
+| A. 이미 물리 삭제 | 기존 동작 그대로. 바꾸지 않았다 | 관리자 내부 메모(`DELETE /users/:id/notes/:noteId`, 남의 메모는 `notes.delete_any`), 관리자 콘솔 세션 종료, 봇 개별 설정 되돌리기, 정지·역할 변경 때 지우는 로그인 세션·기능 스위치, 만료된 세션·재설정 링크·인증 메일·속도 제한·푸시 기록·알림(하우스키핑), 회원 탈퇴 때 지우는 본인 데이터(`auth.ts`) |
+| B. 조건부 영구 삭제 | 최고관리자만, 막는 기록이 없을 때만. 아래 절차 | 게시글(댓글·첨부 핸드 연결 포함), 아무 일도 없었던 닫힌 테이블, 대회를 연 적 없는 보관된 대회 템플릿 |
+| C. 영구 삭제 없음 | 콘솔에 선택지가 없고, 서버 라우트도 없다 | 회원 계정(탈퇴는 익명화), 칩 원장(`chip_ledger`), 정산된 핸드(`hands`·`hand_players`), 관리자 감사 로그(`admin_audit_log`), 신고와 처리 기록·증거(`reports`·`report_events`), 정합성 이벤트, 무료 칩 수령, 추천, 대회와 참가 기록, 각종 정책, 봇 계정 |
+
+- 분류 C는 돈(가상 칩)의 흐름, 게임 결과, 관리자 행위, 분쟁 증거다. 지우면 원장 검사·정산·감사가 맞지 않거나 분쟁을 확인할 수 없다.
+- B의 세 가지는 남이 기대는 기록이 없는 경우에만 지운다. 다른 기록이 가리키면 지우지 않고 무엇이 막는지와 대신 할 일(신고 처리, 공지 내리기, 닫힌 상태·보관 상태로 두기)을 보여 준다.
+
+### 무엇이 막는지
+
+| 대상 | 함께 지워지는 것 | 막는 것(하나라도 있으면 지우지 않는다) | 남는 것(대상의 ID를 그대로 가리킴) |
+|---|---|---|---|
+| 게시글 | 그 글의 댓글·답글, 첨부 핸드 연결(`post_hands`), 글 | 글이나 그 댓글에 대한 열린 신고, 이 글을 건 서비스 공지(내려지지 않은 것) | 처리된 신고와 증거, 내려진 서비스 공지, 감사 로그 |
+| 테이블 | 테이블 행 | 닫히지 않음, 대회 테이블, 핸드(행 또는 `hands_played`), 착석 기록, 칩 원장, 초대 메시지, 대회, 열린 운영 경보, D1의 착석·연결 수, 방이 답하지 않음, 방에 앉은 회원·연결·진행 중 핸드 | 운영 로그, 해결된 운영 경보, 봇 기록, 감사 로그 |
+| 대회 템플릿 | 템플릿 행 | 보관되지 않음, 이 템플릿으로 연 대회 | 감사 로그 |
+
+- 외래 키는 그대로이고 `ON DELETE CASCADE`는 더하지 않았다. 지우는 순서(댓글 → 첨부 핸드 연결 → 글)를 코드가 정한다. 외래 키가 있는 곳(`hands`·`table_sessions`·`direct_messages` → `tables`)은 막는 것에 들어 있어, 외래 키 오류로 끝나는 경우가 없다.
+- 테이블 방(Durable Object)의 저장소는 지우지 않는다. D1 행이 없으면 방은 `not_found`로 답하고 입장할 수 없다.
+- 알림함의 초대 알림은 지운 테이블을 가리키면 '지난 초대'로 보인다(닫힌 테이블과 같다).
+
+### 절차
+
+1. 콘솔: 일반 삭제 창에 **삭제 방식**(○ 일반 삭제 ○ 영구 삭제)이 있다. 최고관리자에게만 보이고, 처음에는 일반 삭제가 골라져 있다. 이미 일반 삭제한 글, 닫힌 테이블, 보관된 템플릿에는 '영구 삭제' 단추가 따로 있다.
+2. 대상 검증·영향 미리보기: 서버가 지금 D1을 읽어 계획을 돌려준다(`preview: true`, 아무것도 쓰지 않음). 삭제 대상과 ID, 함께 지워지는 것과 건수, 남는 기록, 참조 무결성(막는 것과 그 건수, 대신 할 일), 권한, 되돌릴 수 없음을 붉은 상자로 보인다. 테이블은 D1에 막는 것이 없을 때 방에도 묻는다.
+3. 막는 것이 있으면 사유·확인 칸과 실행 단추가 없다. 서버도 같은 이유로 거절한다(409 `purge_blocked`).
+4. 사유(2–200자)와 확인 문구(대상 ID의 앞 8자)를 직접 입력해야 실행 단추가 켜진다.
+5. 보낼 때 비밀번호를 다시 확인한다(5분 재확인).
+6. 서버 재검증: 역할(요청마다 D1에서 다시 읽음, 방금 강등된 관리자는 403), 재확인, 계획을 다시 읽어 미리보기 때의 지문(`fingerprint`, 대상 상태의 해시)과 비교(다르면 409 `purge_changed`와 새 계획), 막는 것(409 `purge_blocked`), 확인 문구(400 `purge_confirm`).
+7. 실행: 한 D1 batch(한 트랜잭션). 감사 행을 "대상이 계획 때와 같고 막는 것이 없을 때만" 넣고(`INSERT … SELECT … WHERE`), 각 `DELETE`는 그 감사 행이 있을 때만 지운다. 그 사이 대상이 바뀌었으면 아무것도 쓰지 않고 409 `purge_changed`, batch가 실패하면 전부 되돌아가고 500 `purge_failed`. 같은 대상을 둘이 동시에 지우면 한쪽만 되고 다른 쪽은 404 또는 409다.
+8. 감사: 성공은 `board.post.purge`·`table.purge`·`tournament_template.purge` 한 행(지운 행과 같은 트랜잭션). 거절·실패는 `<조치>.failed`(실패 감사).
+
+### 권한
+
+- 능력 `data.purge`(최고관리자 전용, 스위치로 넘겨줄 수 없음). 라우트 규칙은 기능 스위치(`board`·`tableControl`·`tournaments`)와 재확인, 미리보기를 함께 요구한다. 일반 관리자는 미리보기도 403 `forbidden`(`super admin only`)이다.
+- 2인 승인은 만들지 않았다. 지금은 최고관리자 한 명의 비밀번호 재확인과 확인 문구, 감사 행으로 막는다(감사 상세 `approval: {mode: 'single', role: 'super_admin', reauth: true}`). 2인 승인이 필요하면 승인 요청 테이블과 다른 최고관리자의 승인 단계를 더해야 한다(남은 과제).
+
+### 감사 상세
+
+`{reason, class: 'B', removed: {테이블: 건수}, kept: {테이블: 건수}, fingerprint, approval, …사실}`. 사실은 ID·시각·크기뿐이다.
+
+- 게시글: 작성자 ID, 상태, 공지 여부, 작성 시각, 제목·본문 길이, 제목과 본문의 SHA-256 해시. **제목과 본문은 남기지 않는다**(어떤 글이었는지는 해시와 길이로만 맞춰 볼 수 있다).
+- 테이블: 이름, 방 종류, 만든 관리자 ID, 만든·닫힌 시각.
+- 대회 템플릿: 이름, 버전, 만든 시각.
+- 감사 로그를 지우는 라우트는 없다. 영구 삭제의 대상 종류에도 감사 로그가 없다.
+
+### 시험
+
+- 운영 데이터에는 돌리지 않는다. 통합 시험(`tests/integration/admin-purge.test.ts`)과 E2E(`tests/e2e/admin-purge.spec.ts`)는 로컬 wrangler D1에서 만든 데이터만 지운다.
 
 1. 배포 시크릿을 설정한다: `wrangler secret put ADMIN_BOOTSTRAP_TOKEN --env production -c apps/api/wrangler.jsonc` (16자 이상 무작위 값).
 2. 플레이어 사이트에서 관리자로 쓸 계정을 가입한다.

@@ -24,6 +24,7 @@ import {
   userStatusLabel,
 } from '../labels';
 import { ApiError, canDo, errText, hasGrant, useAdmin, useData } from '../lib';
+import { PurgeDialog } from '../purge';
 import { AdminReasonField } from '../templateFields';
 import { ChangedNotice, dayStart, Feedback, JumpNav, jumpTarget, ListState, LoadError, Modal, PageState, Pager, type Note } from '../ui';
 import { MemberActivityPanel, MemberHistoryPanel, MemberReportsPanel, RecentTablesPanel, type MemberReports, type RecentTable } from './Member';
@@ -1380,9 +1381,12 @@ function BadgeLink({ to, testid, children }: { to: string | null; testid?: strin
 export function TableDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useT();
-  const { api } = useAdmin();
+  const { api, me } = useAdmin();
   const { data, error, reload } = useData<{ table: TableRow; live: LiveStatus | null; diagnosis?: Diagnosis | null; tournament?: { id: string; name: string; status: string } | null }>(`/api/admin/tables/${id}`);
   const [note, setNote] = useState<Note>(null);
+  const [purging, setPurging] = useState(false);
+  // Once the table is deleted permanently there is nothing to read again: the page says so and links back to the list.
+  const [purged, setPurged] = useState<Note>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [closePv, setClosePv] = useState<{ data: ClosePreview } | { error: unknown } | null>(null);
   const closeSeq = useRef(0);
@@ -1457,6 +1461,14 @@ export function TableDetailPage() {
     setConfirmClose(false);
     setClosePv(null);
   };
+  if (purged) {
+    return (
+      <div className="flex flex-col gap-4" data-testid="table-purged">
+        <Feedback note={purged} />
+        <Link to="/tables" className="self-start text-sm text-gold-300 hover:underline">{t('tables')} →</Link>
+      </div>
+    );
+  }
   if (!data) return <PageState error={error} onRetry={reload} />;
   const tb = data.table;
   const live = data.live;
@@ -1668,10 +1680,25 @@ export function TableDetailPage() {
         <TableBotsPanel key={[tb.botsEnabled, tb.botLevel, tb.botStyle, tb.botMinHumans, tb.botMax, tb.botFillTo, tb.botYield].join(':')} tb={tb} live={live} act={act} />
       </div>
       )}
-      <div className="flex flex-wrap gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <Link to={`/hands?tableId=${id}`} className="text-sm text-gold-300">{t('hands')} →</Link>
         <Link to={`/audit?targetType=table&targetId=${encodeURIComponent(id)}`} className="text-sm text-gold-300" data-testid="table-audit">{t('audit')} →</Link>
+        {/* A tournament's table belongs to its tournament's record and is never deleted (the API refuses it too). */}
+        {tb.status === 'closed' && !tnTable && canDo(me, 'data.purge') && (
+          <Button size="sm" variant="danger" className="ml-auto" onClick={() => { setNote(null); setPurging(true); }} data-testid="table-purge">{t('purgeAction')}</Button>
+        )}
       </div>
+      {purging && (
+        <PurgeDialog
+          kind="table"
+          id={id}
+          onClose={() => setPurging(false)}
+          onDone={(n) => {
+            setPurging(false);
+            setPurged(n);
+          }}
+        />
+      )}
       <Modal
         open={confirmClose}
         onClose={endClose}
