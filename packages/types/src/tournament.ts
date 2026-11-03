@@ -19,6 +19,10 @@ export const ACTIVE_TOURNAMENT_STATUSES = ['registering', 'closed', 'running'] a
 export const ENTRY_STATUSES = ['registered', 'unregistered', 'dropped', 'playing', 'eliminated', 'won', 'stopped'] as const;
 export type EntryStatus = (typeof ENTRY_STATUSES)[number];
 
+/** 'sng': one table (a Sit & Go). 'mtt': several tables seated by a coordinator (docs/TOURNAMENT_MTT.md), opened only while MTT_ENABLED is on. */
+export const TOURNAMENT_FORMATS = ['sng', 'mtt'] as const;
+export type TournamentFormat = (typeof TOURNAMENT_FORMATS)[number];
+
 export interface BlindLevel {
   sb: number;
   bb: number;
@@ -50,11 +54,16 @@ export interface TournamentStructure {
   requireVerified: boolean;
   /** Starts by itself when the last seat is taken (when every registered player is still eligible). */
   autoStart: boolean;
+  /** 'mtt' for a multi-table tournament, played at tables of `tableSeats`; both left out for a Sit & Go. */
+  format?: TournamentFormat;
+  tableSeats?: 6 | 9;
 }
 
 export const TOURNAMENT_LIMITS = {
   name: { min: 2, max: 40 },
   capacity: { min: 2, max: 9 },
+  /** A multi-table tournament: more players than one table seats, up to this many (no load test above it yet). */
+  mttCapacity: { max: 60 },
   startStack: { min: 100, max: 1_000_000 },
   levels: { min: 1, max: 30 },
   blind: { max: 1_000_000 },
@@ -92,8 +101,9 @@ export const TournamentTimeBankSchema = z.object({
 
 export const TournamentStructureSchema = z.object({
   name: z.string().trim().min(L.name.min).max(L.name.max),
-  capacity: z.number().int().min(L.capacity.min).max(L.capacity.max),
-  minPlayers: z.number().int().min(L.capacity.min).max(L.capacity.max),
+  // A Sit & Go's capacity is up to L.capacity.max (tournamentStructureProblem): one schema for both formats.
+  capacity: z.number().int().min(L.capacity.min).max(L.mttCapacity.max),
+  minPlayers: z.number().int().min(L.capacity.min).max(L.mttCapacity.max),
   startStack: z.number().int().min(L.startStack.min).max(L.startStack.max),
   levels: z.array(BlindLevelSchema).min(L.levels.min).max(L.levels.max),
   levelMinutes: z.number().int().min(L.levelMinutes.min).max(L.levelMinutes.max),
@@ -102,9 +112,14 @@ export const TournamentStructureSchema = z.object({
   minHands: z.number().int().min(L.minHands.min).max(L.minHands.max),
   requireVerified: z.boolean(),
   autoStart: z.boolean(),
+  format: z.enum(TOURNAMENT_FORMATS).optional(),
+  tableSeats: z.union([z.literal(6), z.literal(9)]).optional(),
 });
 
 export type TournamentStructureProblem =
+  | 'capacity_over_table'
+  | 'mtt_table_seats'
+  | 'mtt_one_table'
   | 'min_players_over_capacity'
   | 'small_blind_not_below_big'
   | 'levels_decrease'
@@ -115,11 +130,41 @@ export type TournamentStructureProblem =
 
 /** Why a structure's values do not hold together (beyond each one's own range), or null. */
 export function tournamentStructureProblem(s: TournamentStructure): TournamentStructureProblem | null {
+  if (s.format === 'mtt') {
+    if (!s.tableSeats) return 'mtt_table_seats';
+    if (s.capacity <= s.tableSeats) return 'mtt_one_table';
+  } else if (s.capacity > L.capacity.max) return 'capacity_over_table';
   if (s.minPlayers > s.capacity) return 'min_players_over_capacity';
   if (s.levels.some((l) => l.sb >= l.bb)) return 'small_blind_not_below_big';
   if (s.levels.some((l, i) => i > 0 && (l.sb < s.levels[i - 1]!.sb || l.bb < s.levels[i - 1]!.bb))) return 'levels_decrease';
   if (s.startStack < s.levels[0]!.bb * TOURNAMENT_MIN_START_BB) return 'start_stack_too_small';
   return s.timeBank.enabled ? timeBankProblem(s.timeBank) : null;
+}
+
+/** A random whole number from 0 to n − 1. */
+export type Rand = (n: number) => number;
+
+/** `xs` in a random order (Fisher–Yates with `rand`). */
+export function shuffledWith<T>(xs: readonly T[], rand: Rand): T[] {
+  const a = [...xs];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = rand(i + 1);
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+
+/** Tables a multi-table tournament of `players` starts with at `seats` a table. */
+export const mttTableCount = (players: number, seats: number) => Math.max(1, Math.ceil(players / seats));
+
+/** A multi-table tournament's first seating: `userIds` (already shuffled) dealt round the tables in turn, so table sizes differ by one at most. */
+export function mttDeal(userIds: readonly string[], seats: number, tableIds: readonly string[], rand: Rand): { userId: string; table: string; seat: number }[] {
+  const per: string[][] = tableIds.map(() => []);
+  userIds.forEach((u, i) => per[i % tableIds.length]!.push(u));
+  return per.flatMap((us, k) => {
+    const free = shuffledWith(Array.from({ length: seats }, (_, i) => i), rand);
+    return us.map((userId, i) => ({ userId, table: tableIds[k]!, seat: free[i]! }));
+  });
 }
 
 /** The blinds of level `index` (0-based); past the last level, the last. */
@@ -202,8 +247,15 @@ export interface TournamentSummaryDto {
   winner: string | null;
   /** The winner's VIP name color, when they have one. */
   winnerVip?: VipColor;
-  /** The viewer's entry, if any. */
-  me: { status: EntryStatus; place: number | null } | null;
+  /** The viewer's entry, if any; `tableId`: a multi-table tournament's table they play at now. */
+  me: { status: EntryStatus; place: number | null; tableId?: string | null } | null;
+  /** A multi-table tournament (left out for a Sit & Go): seats at each table, and its open tables as last written. */
+  mtt?: { tableSeats: number; tablesLeft: number | null };
+  /**
+   * A members' private Sit & Go: shown only to its host, the friends the host invited and its players (never in anyone
+   * else's list, and not found for them). `mine`: the viewer is the host.
+   */
+  private?: { host: string; mine: boolean };
 }
 
 export interface TournamentDetailDto extends TournamentSummaryDto {
@@ -216,7 +268,41 @@ export interface TournamentDetailDto extends TournamentSummaryDto {
   entries: TournamentEntryView[];
   /** Whether the viewer could register now, and if not, why (null when registration is not open). */
   eligibility: { ok: true } | { ok: false; reason: TournamentIneligible | 'active_elsewhere' | 'full'; handsLeft?: number } | null;
+  /** A multi-table tournament's open tables and how many play at each (as its coordinator last wrote): to watch. */
+  tables?: { id: string; players: number }[];
   now: number;
+}
+
+/** A members' private Sit & Go (docs/TOURNAMENT.md "비공개 대회"). */
+export const PRIVATE_TOURNAMENT = {
+  /** A host has at most this many private tournaments not yet ended. */
+  openPerHost: 1,
+  /** The join code: this many characters of JOIN_CODE_ALPHABET (about 50 bits). */
+  codeLength: 10,
+} as const;
+/** No 0/O, 1/I/L: a code read aloud or typed from a message. */
+export const JOIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+/** POST /api/tournaments/private: a private tournament from an active Sit & Go template. */
+export const PrivateTournamentCreateSchema = z
+  .object({ templateId: z.string().regex(/^[a-z0-9-]{3,40}$/), name: z.string().trim().min(TOURNAMENT_LIMITS.name.min).max(TOURNAMENT_LIMITS.name.max).optional() })
+  .strict();
+/** POST /api/tournaments/join: registering with a private tournament's code. */
+export const TournamentJoinCodeSchema = z.object({ code: z.string().trim().min(4).max(20) }).strict();
+/** A code as typed: upper case, without spaces or dashes. */
+export const normalizeJoinCode = (code: string) => code.toUpperCase().replace(/[\s-]/g, '');
+
+/** A Sit & Go template a member may open a private tournament from. */
+export interface PrivateTemplateDto {
+  id: string;
+  name: string;
+  capacity: number;
+  minPlayers: number;
+  startStack: number;
+  levelMinutes: number;
+  turnSeconds: number;
+  firstLevel: BlindLevel;
+  levelCount: number;
 }
 
 /**
@@ -323,6 +409,10 @@ export interface AdminTournamentRow {
   version: number;
   roster: number;
   recovery: TournamentRecoveryCode[];
+  /** A multi-table tournament (left out for a Sit & Go): seats at each table and its open tables. */
+  mtt?: { tableSeats: number; tablesLeft: number | null };
+  /** A members' private tournament: its host's nickname. */
+  privateHost?: string;
 }
 
 /** The tournament as its table shows it (TableView.tournament). */
@@ -348,4 +438,9 @@ export interface TournamentTableView {
   places: { nickname: string; place: number; vip?: VipColor }[];
   /** The viewer: still playing, out (with place), the winner, stopped by an abort, or watching. */
   you: { status: 'playing' | 'eliminated' | 'won' | 'stopped' | 'watching'; place: number | null };
+  /**
+   * A multi-table tournament's table: tables still open, whether this is the final table (its seats drawn) or the final
+   * table waiting for its players, and the table the viewer was moved to (only their own; the page follows them there).
+   */
+  mtt?: { tables: number; finalTable: boolean; hold: boolean; movedTo: string | null };
 }

@@ -2,21 +2,24 @@
  * Members' Sit & Go tournaments (docs/TOURNAMENT.md): the list (open and running, or ended) and one tournament with its
  * structure, clock, players and register / withdraw. Free entry, no prize: nothing here shows or moves wallet chips.
  * The server decides everything (eligibility, seats, the start); these pages only show its answers and refresh while
- * the tournament can still change.
+ * the tournament can still change. A member may open a private Sit & Go for friends (docs/TOURNAMENT.md "비공개 대회"):
+ * who sees it, who may register and what its host may do are all decided by the server; its join code is answered
+ * once, when made, and never put in a link.
  */
 import {
   blindsAt,
   type EntryStatus,
   type FriendDto,
   type FriendsDto,
+  type PrivateTemplateDto,
   type TournamentDetailDto,
   type TournamentStatus,
   type TournamentSummaryDto,
   type VipColor,
 } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, Modal, Panel, Spinner, Tabs, TrophyIcon } from '@jc/ui';
+import { Badge, Button, cx, Empty, Field, formatChips, Input, Modal, Panel, Spinner, Tabs, TrophyIcon } from '@jc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { MemberName } from '../components/MemberName';
 import { Avatar } from '../components/Social';
 import { api, ApiError } from '../lib/api';
@@ -157,6 +160,25 @@ function MyBadge({ me }: { me: TournamentSummaryDto['me'] }) {
   );
 }
 
+/** What kind of tournament beyond its status: multi-table, private (and whose). */
+function KindBadges({ s }: { s: TournamentSummaryDto }) {
+  const tr = useTn();
+  return (
+    <>
+      {s.mtt && (
+        <span data-testid="tn-mtt">
+          <Badge tone="blue">{tr('mtt')}</Badge>
+        </span>
+      )}
+      {s.private && (
+        <span data-testid="tn-private" data-mine={s.private.mine}>
+          <Badge tone="gold">{s.private.mine ? tr('private.mine') : tr('private.by', { host: s.private.host })}</Badge>
+        </span>
+      )}
+    </>
+  );
+}
+
 /** A trophy and "Won by {name}", with the winner's VIP color and mark on the name only (the sentence comes from the translation). */
 function WonBy({ tr, name, vip, className }: { tr: Tn; name: string; vip?: VipColor; className?: string }) {
   const MARK = '\u0000';
@@ -188,6 +210,7 @@ function SummaryCard({ s, highlight }: { s: TournamentSummaryDto; highlight?: bo
           <div className="mt-1 flex flex-wrap gap-1.5">
             <StatusBadge status={s.status} />
             <MyBadge me={s.me} />
+            <KindBadges s={s} />
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -236,6 +259,8 @@ export function TournamentsPage() {
   const [data, setData] = useState<ListDto | null>(null);
   const [error, setError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
   const seq = useRef(0);
 
   const load = useCallback(
@@ -296,13 +321,22 @@ export function TournamentsPage() {
         <section className="flex flex-col gap-2" data-testid="tn-current">
           <h2 className="text-xs font-bold tracking-[0.08em] text-gold-300">{tr('current')}</h2>
           <SummaryCard s={current} highlight />
-          {current.status === 'running' && current.tableId && current.me?.status === 'playing' && (
-            <Link to={`/table/${current.tableId}`} className="jc-tap self-start rounded-lg bg-gold-500 px-4 py-2 text-sm font-bold text-ink-950 hover:bg-gold-400" data-testid="tn-current-table">
+          {current.status === 'running' && (current.tableId ?? current.me?.tableId) && current.me?.status === 'playing' && (
+            <Link to={`/table/${current.tableId ?? current.me.tableId}`} className="jc-tap self-start rounded-lg bg-gold-500 px-4 py-2 text-sm font-bold text-ink-950 hover:bg-gold-400" data-testid="tn-current-table">
               {t('tn.toTable')} →
             </Link>
           )}
         </section>
       )}
+
+      <div className="flex flex-wrap gap-2" data-testid="tn-private-actions">
+        <Button size="sm" variant="outline" onClick={() => setCreating(true)} data-testid="tn-private-open">
+          {tr('private.open')}
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setJoining(true)} data-testid="tn-join-open">
+          {tr('private.join')}
+        </Button>
+      </div>
 
       <Tabs className="-mx-4 px-4" value={tab} onChange={setTab} items={(['active', 'ended'] as const).map((k) => ({ key: k, testid: `tn-tab-${k}`, label: tr(`tab.${k}` as TnKey) }))} />
 
@@ -345,7 +379,185 @@ export function TournamentsPage() {
           </Button>
         </div>
       )}
+      <CreatePrivate open={creating} onClose={() => setCreating(false)} />
+      <JoinByCode open={joining} onClose={() => setJoining(false)} />
     </div>
+  );
+}
+
+interface PrivateTemplatesDto {
+  templates: PrivateTemplateDto[];
+  openPerHost: number;
+}
+
+/**
+ * Opens a private Sit & Go from a template operators made. The server checks it all again (the template, the host's
+ * other tournaments, their eligibility); the join code it answers once is handed to the tournament page in memory.
+ */
+function CreatePrivate({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t, err } = useI18n();
+  const tr = useTn();
+  const nav = useNavigate();
+  const [data, setData] = useState<PrivateTemplatesDto | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setData(null);
+    setError(null);
+    setName('');
+    api<PrivateTemplatesDto>('/api/tournaments/private/templates')
+      .then((r) => {
+        setData(r);
+        setPick(r.templates[0]?.id ?? null);
+      })
+      .catch((x) => setError(err(x instanceof ApiError ? x.code : null)));
+  }, [open, err]);
+
+  async function create() {
+    if (!pick) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ ok: true; id: string; code: string }>('/api/tournaments/private', { body: { templateId: pick, ...(name.trim() ? { name: name.trim() } : {}) } });
+      onClose();
+      nav(`/tournaments/${encodeURIComponent(r.id)}`, { state: { code: r.code } });
+    } catch (x) {
+      const e = x instanceof ApiError ? x : null;
+      const det = (e?.details ?? {}) as { reason?: string; handsLeft?: number };
+      setError(e?.code === 'tournament_ineligible' && det.reason ? ineligibleText(tr, t, det.reason, det.handsLeft) : err(e?.code));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={tr('private.createTitle')}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button loading={busy} disabled={!pick || !data?.templates.length} onClick={() => void create()} data-testid="tn-private-create">
+            {tr('private.create')}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3 text-sm" data-testid="tn-private-form">
+        <p className="text-ink-300">{tr('private.createHint')}</p>
+        {!data && !error && (
+          <div className="flex justify-center py-6 text-gold-400">
+            <Spinner />
+          </div>
+        )}
+        {data && data.templates.length === 0 && <Empty>{tr('private.noTemplates')}</Empty>}
+        {data && data.templates.length > 0 && (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="sr-only">{tr('structure')}</legend>
+            {data.templates.map((x) => (
+              <label
+                key={x.id}
+                className={cx('jc-tap flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2', pick === x.id ? 'border-gold-500/60 bg-gold-500/10' : 'border-white/10 hover:border-gold-500/30')}
+                data-testid="tn-private-template"
+              >
+                <input type="radio" name="tn-private-template" className="mt-1 accent-gold-500" checked={pick === x.id} onChange={() => setPick(x.id)} />
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate font-semibold text-ivory">{x.name}</span>
+                  <span className="text-xs text-ink-300">
+                    {tr('players', { n: x.minPlayers, cap: x.capacity })} · {tr('startStack')} {formatChips(x.startStack)} · {formatChips(x.firstLevel.sb)}/{formatChips(x.firstLevel.bb)} ·{' '}
+                    {tr('minutes', { n: x.levelMinutes })}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {data && data.templates.length > 0 && (
+          <Field label={tr('private.name')}>{(fid) => <Input id={fid} value={name} maxLength={40} autoComplete="off" onChange={(e) => setName(e.target.value)} data-testid="tn-private-name" />}</Field>
+        )}
+        {data && <p className="text-xs text-ink-400">{tr('private.limit', { n: data.openPerHost })} {tr('private.recordNote')}</p>}
+        {error && (
+          <p className="text-danger" role="alert" data-testid="tn-private-error">
+            {error}
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** Registers with a private tournament's join code (the server finds the tournament by the code's hash). */
+function JoinByCode({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t, err } = useI18n();
+  const tr = useTn();
+  const nav = useNavigate();
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setCode('');
+    setError(null);
+  }, [open]);
+
+  async function join() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ ok: true; id: string; started?: boolean; tableId?: string | null }>('/api/tournaments/join', { body: { code: code.trim() } });
+      onClose();
+      nav(r.started && r.tableId ? `/table/${r.tableId}` : `/tournaments/${encodeURIComponent(r.id)}`);
+    } catch (x) {
+      const e = x instanceof ApiError ? x : null;
+      const det = (e?.details ?? {}) as { reason?: string; handsLeft?: number };
+      setError(e?.code === 'tournament_ineligible' && det.reason ? ineligibleText(tr, t, det.reason, det.handsLeft) : err(e?.code));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={tr('private.joinTitle')}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button loading={busy} disabled={code.trim().length < 4} onClick={() => void join()} data-testid="tn-join-submit">
+            {tr('private.joinSubmit')}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-3 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (code.trim().length >= 4 && !busy) void join();
+        }}
+      >
+        <p className="text-ink-300">{tr('private.joinHint')}</p>
+        <Field label={tr('private.code')}>
+          {(fid) => (
+            <Input id={fid} value={code} maxLength={20} autoComplete="off" autoCapitalize="characters" spellCheck={false} className="font-mono tracking-[0.12em]" onChange={(e) => setCode(e.target.value)} data-testid="tn-join-code" />
+          )}
+        </Field>
+        {error && (
+          <p className="text-danger" role="alert" data-testid="tn-join-error">
+            {error}
+          </p>
+        )}
+      </form>
+    </Modal>
   );
 }
 
@@ -446,7 +658,16 @@ export function TournamentPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [inviting, setInviting] = useState(false);
+  // A private tournament's join code, answered once (when it was opened, handed over in memory, or a new one): it lives
+  // in this page's state only, and the navigation state that carried it is cleared at once, so no link holds it.
+  const loc = useLocation();
+  const [code, setCode] = useState<string | null>(() => (loc.state as { code?: unknown } | null)?.code as string | null ?? null);
+  const [copied, setCopied] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const seq = useRef(0);
+  useEffect(() => {
+    if ((loc.state as { code?: unknown } | null)?.code) nav(loc.pathname, { replace: true, state: null });
+  }, [loc.state, loc.pathname, nav]);
 
   const load = useCallback(
     async (quiet = false) => {
@@ -493,6 +714,56 @@ export function TournamentPage() {
     }
   }
 
+  /** The host's own actions on their private tournament; the server checks it is theirs and its state allows it. */
+  async function host(action: 'start' | 'cancel' | 'code') {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api<{ ok: true; started?: boolean; tableId?: string | null; code?: string }>(`/api/tournaments/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+      if (action === 'start' && r.started && r.tableId) {
+        nav(`/table/${r.tableId}`);
+        return;
+      }
+      if (action === 'code' && r.code) {
+        setCode(r.code);
+        setCopied(false);
+      }
+      if (action === 'cancel') {
+        setCancelling(false);
+        setCode(null);
+        setMsg({ tone: 'ok', text: tr('private.cancelled') });
+      }
+    } catch (x) {
+      const e = x instanceof ApiError ? x : null;
+      if (action === 'cancel') setCancelling(false);
+      setMsg({ tone: 'err', text: err(e?.code) });
+    } finally {
+      setBusy(false);
+      void load(true);
+    }
+  }
+
+  async function decline() {
+    setBusy(true);
+    try {
+      await api(`/api/tournaments/${encodeURIComponent(id)}/decline`, { method: 'POST' });
+      nav('/tournaments', { replace: true });
+    } catch (x) {
+      setMsg({ tone: 'err', text: err(x instanceof ApiError ? x.code : null) });
+      setBusy(false);
+    }
+  }
+
+  async function copyCode() {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   if (!d) {
     return (
       <div className="flex flex-col gap-5">
@@ -525,6 +796,11 @@ export function TournamentPage() {
   const tb = d.timeBank;
   const conds = [d.requireVerified ? tr('cond.verified') : null, d.minHands > 0 ? tr('cond.hands', { n: d.minHands }) : null].filter(Boolean).join(' · ') || tr('cond.none');
   const sec = (ms: number) => Math.round(ms / 1000);
+  const hosting = !!d.private?.mine;
+  const pending = d.status === 'registering' || d.status === 'closed';
+  // A multi-table tournament has no one table: a player goes to theirs, a watcher picks one from the list below.
+  const myTable = d.me?.tableId ?? null;
+  const tableLink = d.tableId ?? (mine === 'playing' ? myTable : null);
 
   return (
     <div className="flex flex-col gap-5" data-testid="tn-detail" data-status={d.status}>
@@ -536,14 +812,56 @@ export function TournamentPage() {
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge status={d.status} />
           <MyBadge me={d.me} />
+          <KindBadges s={d} />
           <Badge>{tr('free')}</Badge>
         </div>
+        {d.private && !hosting && (
+          <p className="text-sm text-ink-200" data-testid="tn-private-invited">
+            {tr('private.invited', { host: d.private.host })}
+          </p>
+        )}
       </header>
 
       {error && (
         <p className="rounded-lg border border-gold-500/25 bg-gold-500/10 px-3 py-2 text-sm text-gold-300" role="status" data-testid="tn-stale">
           {tr('stale')}
         </p>
+      )}
+
+      {hosting && pending && (
+        <div data-testid="tn-host">
+          <Panel title={tr('private.hostPanel')} className="flex flex-col gap-3">
+            <p className="text-sm text-ink-200" data-testid="tn-host-hint">{tr(d.registered < d.minPlayers ? 'private.startWait' : 'private.startHint', { n: d.registered, min: d.minPlayers })}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" loading={busy} disabled={d.registered < d.minPlayers} onClick={() => void host('start')} data-testid="tn-host-start">
+                {tr('private.start')}
+              </Button>
+              {d.status === 'registering' && (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => void host('code')} data-testid="tn-host-code">
+                  {tr('private.newCode')}
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setCancelling(true)} data-testid="tn-host-cancel">
+                {tr('private.cancel')}
+              </Button>
+            </div>
+            {code && d.status === 'registering' && (
+              <div className="flex flex-col gap-2 rounded-lg border border-gold-500/30 bg-gold-500/5 p-3" data-testid="tn-code-box">
+                <span className="text-[11px] text-ink-400">{tr('private.code')}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="select-all break-all font-mono text-lg font-bold tracking-[0.16em] text-gold-300" data-testid="tn-code">
+                    {code}
+                  </code>
+                  <Button size="sm" variant="outline" onClick={() => void copyCode()} data-testid="tn-code-copy">
+                    {copied ? tr('private.copied') : tr('private.copy')}
+                  </Button>
+                </div>
+                <p className="text-xs text-ink-300">{tr('private.codeOnce')}</p>
+              </div>
+            )}
+            <p className="text-xs text-ink-400">{tr('private.recordNote')}</p>
+          </Panel>
+        </div>
       )}
 
       {/* What the viewer can do now */}
@@ -563,23 +881,29 @@ export function TournamentPage() {
         {(d.status === 'registering' || d.status === 'closed') && mine === 'registered' && (
           <>
             <p className="text-sm text-ink-100" data-testid="tn-registered">
-              {d.autoStart ? tr('registeredAuto') : tr('registeredOp')}
+              {d.autoStart ? tr('registeredAuto') : !d.private ? tr('registeredOp') : hosting ? tr('registeredMine') : tr('registeredHost')}
             </p>
             <Button className="self-start" variant="outline" loading={busy} onClick={() => void register(false)} data-testid="tn-unregister">
               {tr('unregister')}
             </Button>
           </>
         )}
-        {d.status === 'registering' && d.registered < d.capacity && (
+        {d.status === 'registering' && d.registered < d.capacity && (!d.private || hosting) && (
           <Button className="self-start" size="sm" variant="outline" onClick={() => setInviting(true)} data-testid="tn-invite">
             {tr('invite.open')}
           </Button>
         )}
+        {d.private && !hosting && !holding && pending && (
+          <Button className="self-start" size="sm" variant="ghost" disabled={busy} onClick={() => void decline()} data-testid="tn-decline">
+            {tr('private.decline')}
+          </Button>
+        )}
+        {d.private && !hosting && <p className="text-xs text-ink-400">{tr('private.recordNote')}</p>}
         {d.status === 'closed' && <p className="text-sm text-ink-300">{tr('closedNote')}</p>}
         {(d.status === 'registering' || d.status === 'closed') && <p className="text-xs text-ink-400">{tr('leaveNote')}</p>}
-        {d.status === 'running' && d.tableId && (
+        {d.status === 'running' && tableLink && (
           <Link
-            to={`/table/${d.tableId}`}
+            to={`/table/${tableLink}`}
             className={cx(
               'jc-tap self-start rounded-lg px-4 py-2 text-sm font-bold',
               mine === 'playing' ? 'bg-gold-500 text-ink-950 hover:bg-gold-400' : 'border border-gold-500/50 text-gold-300 hover:bg-gold-500/10',
@@ -639,6 +963,32 @@ export function TournamentPage() {
         </p>
       </Panel>
 
+      {d.tables && d.tables.length > 0 && (
+        <div data-testid="tn-tables">
+          <Panel title={tr('tables')}>
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {d.tables.map((x) => (
+                <li key={x.id}>
+                  <Link
+                    to={`/table/${x.id}`}
+                    className={cx('jc-tap flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm', x.id === myTable ? 'border-gold-500/60 bg-gold-500/10' : 'border-white/10 hover:border-gold-500/40')}
+                    data-testid="tn-table-link"
+                    data-table={x.id}
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5 font-semibold">
+                      {tr('tableN', { n: x.id.split('-').at(-1) ?? '' })}
+                      {x.id === myTable && <span className="shrink-0 text-xs font-normal text-gold-300">({tr('myTable')})</span>}
+                    </span>
+                    <span className="shrink-0 font-mono text-xs tabular-nums text-ink-300">{tr('tablePlayers', { n: x.players })} →</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-ink-400">{tr('tablesNote')}</p>
+          </Panel>
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel title={`${tr('entries')} · ${d.status === 'running' || d.status === 'finished' || d.status === 'aborted' ? d.registered : tr('players', { n: d.registered, cap: d.capacity })}`}>
           {d.entries.length === 0 ? (
@@ -675,7 +1025,7 @@ export function TournamentPage() {
             <dt className="text-ink-400">{tr('conditions')}</dt>
             <dd className="text-right">{conds}</dd>
             <dt className="text-ink-400">{tr('start')}</dt>
-            <dd className="text-right">{d.autoStart ? tr('start.auto') : tr('start.operator', { n: d.minPlayers })}</dd>
+            <dd className="text-right">{d.autoStart ? tr('start.auto') : tr(d.private ? 'start.host' : 'start.operator', { n: d.minPlayers })}</dd>
           </dl>
           <ol className="grid grid-cols-2 gap-1.5 text-xs sm:grid-cols-3" data-testid="tn-levels">
             {d.levels.map((l, i) => {
@@ -694,6 +1044,23 @@ export function TournamentPage() {
       </div>
       {/* Keyed by the tournament: who was invited here is not who was invited to another one opened from this page. */}
       <InviteFriends key={id} id={id} open={inviting} onClose={() => setInviting(false)} />
+      <Modal
+        open={cancelling}
+        onClose={() => setCancelling(false)}
+        title={tr('private.cancel')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCancelling(false)}>
+              {tr('private.keep')}
+            </Button>
+            <Button variant="danger" loading={busy} onClick={() => void host('cancel')} data-testid="tn-host-cancel-confirm">
+              {tr('private.cancel')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-200">{tr('private.cancelAsk')}</p>
+      </Modal>
     </div>
   );
 }

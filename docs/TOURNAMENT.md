@@ -6,8 +6,8 @@
 
 | 포함 | 제외(이번 버전) |
 |---|---|
-| 한 테이블 2–9명(정원 6명까지 6석, 7명부터 9석), 같은 시작 스택, 시간으로 오르는 블라인드 | 멀티 테이블 토너먼트, 테이블 합치기(설계만: `docs/TOURNAMENT_MTT.md`, 구현하지 않음) |
-| 등록·등록 취소·시작·진행·탈락·종료, 순위와 결과 화면, 친구 초대 | 리바이·애드온, 늦은 등록 |
+| 한 테이블 2–9명(정원 6명까지 6석, 7명부터 9석), 같은 시작 스택, 시간으로 오르는 블라인드 | 멀티 테이블 토너먼트는 이 문서 밖(`docs/TOURNAMENT_MTT.md`, 플래그 `MTT_ENABLED` 뒤, 기본 꺼짐) |
+| 등록·등록 취소·시작·진행·탈락·종료, 순위와 결과 화면, 친구 초대, 회원이 여는 비공개 대회(아래 "비공개 대회") | 리바이·애드온, 늦은 등록, 비공개 MTT |
 | 관리자의 템플릿·개별 대회·진행 제어(마감·시작·취소·일시정지·재개·운영 중단·복구) | 참가비·상금·환급, 칩 보상 |
 | 대회 전용 시간 은행(템플릿에서 정함) | 봇 참가, 앤티 |
 | | 대회 핸드의 핸드 기록·리플레이·플레이어 통계 |
@@ -67,6 +67,23 @@ registering ⇄ closed ──start──▶ running ──1명 남음──▶ f
 - 쓰는 batch 안의 실시간 아웃박스가 받는 사람의 페이지에 `notification.changed`를 보낸다(`docs/REALTIME.md`). 웹 푸시는 보내지 않는다(알림함과 헤더 벨만).
 - 차단하면 친구 관계가 끝나므로 새 초대는 403이고, 이미 받은 초대는 알림함이 차단한 상대의 항목을 숨기는 규칙대로 목록에서 빠진다. 탈퇴한 회원이 보낸 초대도 빠진다.
 
+## 비공개 대회
+
+회원이 호스트가 되어 여는 SNG다. 새 대회 구조를 만들지 않고, 운영자가 켜 둔 SNG 템플릿(활성, 형식 `sng`) 하나를 골라 그 값을 그대로 복사한다. 등록·시작·진행·탈락·종료·취소는 위의 SNG 규칙과 같은 코드(`startTournament`, `cancelTournament`)를 쓰고, 다른 점만 아래에 적는다. MTT 템플릿으로는 열 수 없다.
+
+- 열기(`POST /api/tournaments/private {templateId, name?}`): 한 문장에 모든 조건이 있다. 템플릿이 활성 SNG이고, 호스트가 그 템플릿의 등록 조건(정지·봇·인증·최소 핸드)을 만족하고 다른 대회에 참가 중이 아니며, 호스트가 끝나지 않은 비공개 대회를 갖고 있지 않고(호스트마다 1개), 열린 비공개 대회가 전체 100개 미만이다. 호스트는 처음부터 등록된다. 회원마다 10분에 5번까지.
+- 보이는 사람: 호스트, 이 대회에 참가 기록이 있는 회원, 호스트가 초대한 회원(알림함 항목 `tournament_private:<대회 id>`이 있는 회원). 같은 조건(`visibleSql`)을 목록·상세·등록·초대가 모두 쓴다. 그 밖의 회원에게는 목록에 나오지 않고 상세와 모든 요청이 404 `tournament_not_found`다. 일반 대회 목록과 공개 API는 비공개 대회의 내부 정보를 돌려주지 않는다. 한계: 로비의 `tournament.changed` 실시간 이벤트에는 비공개 대회의 id가 실린다(상세는 권한이 없으면 404).
+- 참가 코드: 10자(`JOIN_CODE_ALPHABET` 31자 중, 약 50비트, 0/O·1/I/L 없음). 만들 때와 새로 발급할 때(`POST /:id/code`, 등록 중일 때만) 호스트에게 한 번만 답하고, D1에는 해시만 둔다. 새 코드를 발급하면 이전 코드는 더 이상 통하지 않는다. 초대 링크에는 코드나 토큰을 넣지 않는다(링크는 `/tournaments/:id`이고, 권한은 서버가 초대 항목으로 판단한다). 코드로 등록(`POST /api/tournaments/join {code}`)은 위 "등록"과 같은 조건을 거치고, 틀린 코드와 이미 닫힌 대회의 코드는 똑같이 404 `tournament_code_invalid`다. 회원마다 10분에 10번, IP마다 10분에 30번.
+- 초대: 위 "친구 초대"와 같은 알림함·같은 조건(수락된 친구, 어느 쪽도 차단하지 않음, 정원, 등록 상태)이고, 호스트만 보낸다(다른 회원은 403 `tournament_invite_host_only`). 항목은 대회마다 하나다. 받은 회원은 항목에서 수락(등록)하거나 거절(`POST /:id/decline`, 항목을 지운다)한다. 거절하면 참가 기록이 없는 한 그 대회가 다시 보이지 않는다. 항목의 상태는 위와 같이 `done`·`open`·`expired`이고, 취소된 대회의 초대도 `expired`("만료")로 보인다(따로 "취소" 상태는 없다).
+- 시작·취소: 호스트가 한다(`POST /:id/start`, `POST /:id/cancel`, 다른 회원은 403 `tournament_host_only`). 시작은 운영자의 시작처럼 등록을 다시 읽고 최소 인원 이상이어야 하며 한 번만 일어난다. 템플릿이 "정원이 차면 자동 시작"이면 정원을 채운 등록이 시작한다. 취소는 운영자의 시작 전 취소와 같이 등록자에게 쪽지를 보낸다(호스트도 등록자이므로 받는다). 운영자는 관리자 화면에서 비공개 대회를 보고(배지 "비공개 · 호스트") 같은 권한으로 취소·운영 중단할 수 있다. 등록하지 못한 채 남은 비공개 대회는 자동으로 만료되지 않는다(호스트나 운영자가 취소한다).
+- 테이블: 대회 테이블은 `is_private`이다. 그 대회의 참가자만 들어갈 수 있고, 다른 회원의 소켓은 코드 없는 비공개 테이블처럼 4003으로 닫힌다.
+- 공식 기록에서 뺀다: 리더보드, 프로필의 대회 우승 수, 대회 우승 업적은 비공개 대회를 세지 않는다. 친구끼리 정한 대회가 공개 순위를 바꾸지 않게 하려는 무결성 선택이다. 참가자의 대회 화면이 이 사실을 알린다. 운영자의 열린 대회 수 한도에도 비공개 대회는 세지 않는다(비공개는 위의 100개 한도를 따로 쓴다).
+- 한계: 호스트도 자기 대회의 등록을 취소할 수 있다. 템플릿 고르기(`GET /api/tournaments/private/templates`)는 활성 SNG 템플릿을 모두(최대 50개) 보여 준다.
+
+## 관전·대회 줄
+
+- 진행 중인 대회의 화면에서 회원은 테이블을 관전한다(SNG는 그 테이블, MTT는 테이블 목록에서 고른다). 관전은 기존 테이블 화면과 서버 투영을 그대로 쓴다. 관전자에게 진행 중인 핸드의 홀카드는 보이지 않고, 쇼다운에서 공개된 카드만 일반 테이블 규칙대로 보인다.
+- 테이블 위 대회 줄: 레벨·블라인드·시계, 남은 인원/참가 인원. 남은 인원을 누르면 순위와 스택(대회 칩, 진행 중인 핸드에 건 칩은 빼고)이 펼쳐진다. MTT에서는 테이블 수, 이동 중 안내, 파이널 테이블 표시(`FINAL TABLE`)가 더해진다(SNG에는 파이널 테이블 표시가 없다). 대회가 끝나면 결과 카드가 우승자를 보여 준다.
 ## 시작
 
 시작(관리자 또는 자동)은 같은 함수 하나다.
@@ -174,7 +191,13 @@ registering ⇄ closed ──start──▶ running ──1명 남음──▶ f
 | `GET /api/tournaments/:id` | 대회 상세: 구조·참가자·순위·내 자격(`eligibility`) |
 | `POST /api/tournaments/:id/register` | 등록. 자격(정지·봇·인증·최소 핸드·다른 대회 참가 중)과 정원을 서버에서 확인. 정원을 채운 등록이 자동 시작이면 `started: true, tableId` |
 | `POST /api/tournaments/:id/unregister` | 시작 전 등록 취소 |
-| `POST /api/tournaments/:id/invite` | 친구 초대 `{userId}`(위 "친구 초대"). 201 `{ok: true}`. 400 `invite_self`·`bad_request`, 403 `not_friends`, 404 `tournament_not_found`, 409 `tournament_not_open`·`tournament_invite_joined`·`tournament_full`, 429 |
+| `POST /api/tournaments/:id/invite` | 친구 초대 `{userId}`(위 "친구 초대"). 201 `{ok: true}`. 400 `invite_self`·`bad_request`, 403 `not_friends`·`tournament_invite_host_only`(비공개), 404 `tournament_not_found`, 409 `tournament_not_open`·`tournament_invite_joined`·`tournament_full`, 429 |
+| `GET /api/tournaments/private/templates` | 비공개 대회에 쓸 수 있는 활성 SNG 템플릿과 호스트당 한도 |
+| `POST /api/tournaments/private` | 비공개 대회 열기 `{templateId, name?}`. 201 `{ok, id, code}`(코드는 이때만). 404 `tournament_template_not_found`, 403 `tournament_ineligible`, 409 `tournament_private_limit`·`tournament_already_active`·`tournament_limit`·`tournament_template_conflict`, 429 |
+| `POST /api/tournaments/join` | 코드로 등록 `{code}`. 등록과 같은 답에 `id`. 404 `tournament_code_invalid`, 429 |
+| `POST /api/tournaments/:id/start`, `/cancel` | 호스트의 시작·시작 전 취소(비공개만). 403 `tournament_host_only`, 409 `tournament_state` |
+| `POST /api/tournaments/:id/code` | 호스트의 새 참가 코드(등록 중만, 이전 코드는 무효). `{ok, code}` |
+| `POST /api/tournaments/:id/decline` | 비공개 대회 초대 거절(알림함 항목을 지운다) |
 
 관리자(`apps/api/src/routes/admin-tournaments.ts`, 권한은 위 "권한"):
 
@@ -216,3 +239,5 @@ registering ⇄ closed ──start──▶ running ──1명 남음──▶ f
 | 정원 7–9명 대회의 9석 테이블 | 완료 | 완료 | api 단위 테스트(정원 6은 6석, 7·9는 9석 테이블, 좌석은 그 테이블 전체에서 무작위) | 안 함 |
 | 6명·9명이 모두 앉아 끝까지 가는 대회 | 완료 | 완료 | 없음(통합 테스트는 2인·3인 대회, 브라우저 E2E는 2인 대회. 9석 테이블의 게임 자체는 캐시 9인 테이블과 같은 엔진·화면) | 안 함 |
 | 친구 초대(친구·차단·정원·등록 상태 확인, 알림함 항목의 참가 가능·등록함·만료) | 완료 | 완료 | api 단위 테스트(항목 상태), 통합 테스트(`tournament-invite.test.ts`) | 안 함 |
+| 비공개 대회(호스트가 SNG 템플릿으로 열기, 코드·초대로만 보임, 호스트의 시작·취소, 참가자만 들어가는 테이블, 공식 기록 제외) | 완료 | 완료 | 통합 테스트(`private-tournament.test.ts`), 모바일 E2E(`tournament-private-mobile.spec.ts`: 320·360·390·812×375·1440) | 안 함 |
+| 관전 화면의 대회 줄(남은 인원·순위·스택), 결과 카드의 우승 | 완료 | 완료 | 모바일 E2E(같은 파일, 320에서 줄이 넘치지 않음) | 안 함 |

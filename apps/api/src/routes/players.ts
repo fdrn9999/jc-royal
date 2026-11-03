@@ -85,7 +85,8 @@ export const playerRoutes = new Hono<AppEnv>()
       c.env.DB.prepare(`SELECT badge, awarded_at AS at FROM user_badges WHERE user_id = ?1 AND badge LIKE '${ACHIEVEMENT_PREFIX}%' AND ?2 ORDER BY awarded_at`).bind(id, showAchievements ? 1 : 0),
       c.env.DB.prepare(
         `SELECT COUNT(*) AS hands, ${PLAY_STATS_COLUMNS},
-                (SELECT COUNT(*) FROM tournament_entries WHERE user_id = ?1 AND status = 'won') AS wins
+                (SELECT COUNT(*) FROM tournament_entries te JOIN tournaments tt ON tt.id = te.tournament_id
+                  WHERE te.user_id = ?1 AND te.status = 'won' AND tt.is_private = 0) AS wins
            FROM hand_players WHERE user_id = ?1 AND ?2`,
       ).bind(id, showStats ? 1 : 0),
     ]);
@@ -146,7 +147,7 @@ export const leaderboardRoutes = new Hono<AppEnv>().use('*', requireUser).get('/
     `WITH t AS (
        SELECT tn.id, COUNT(*) AS n
          FROM tournaments tn JOIN tournament_entries e ON e.tournament_id = tn.id JOIN users u ON u.id = e.user_id
-        WHERE tn.status = 'finished' AND tn.finished_at >= ?1 AND tn.finished_at < ?2 AND e.status IN ('eliminated', 'won') AND e.place IS NOT NULL
+        WHERE tn.status = 'finished' AND tn.is_private = 0 AND tn.finished_at >= ?1 AND tn.finished_at < ?2 AND e.status IN ('eliminated', 'won') AND e.place IS NOT NULL
         GROUP BY tn.id HAVING SUM(u.is_bot = 0) >= ?3
      ), r AS (
        SELECT e.user_id, COUNT(*) AS played, SUM(e.status = 'won') AS wins, SUM(t.n - e.place) AS beaten, SUM(t.n - 1) AS possible

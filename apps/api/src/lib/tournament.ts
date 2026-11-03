@@ -15,8 +15,12 @@ import {
   type TournamentStatus,
   type TournamentSummaryDto,
   type TournamentTimeBank,
+  type Rand,
   isKstNight,
+  mttDeal,
+  mttTableCount,
   shownVip,
+  shuffledWith,
   tournamentSeats,
   TOURNAMENT_STATUSES,
 } from '@jc/types';
@@ -27,6 +31,7 @@ import { fail } from './http';
 import { notices } from './notices';
 import { queuePush } from './notify';
 import { outboxToAll, outboxToUsers, sendOutboxNow } from './realtime';
+import { INTERNAL_HEADER } from '../routes/tables';
 import { roomCallEnv } from './room';
 import { currentMaintenance } from './service';
 
@@ -80,9 +85,22 @@ export const SUMMARY_COLUMNS = `tn.id, tn.name, tn.status, tn.capacity, tn.min_p
   tn.started_at AS startedAt, COALESCE(tn.finished_at, tn.aborted_at, tn.cancelled_at) AS endedAt,
   (SELECT COUNT(*) FROM tournament_entries e WHERE e.tournament_id = tn.id AND e.status NOT IN ('unregistered', 'dropped')) AS registered,
   w.nickname AS winner, w.role AS winnerRole, w.status AS winnerStatus, w.is_bot AS winnerBot, w.vip_color AS winnerVipColor,
-  me.status AS meStatus, me.place AS mePlace`;
+  me.status AS meStatus, me.place AS mePlace, me.table_id AS meTableId, tn.format, tn.table_seats AS tableSeats, tn.tables_left AS tablesLeft,
+  tn.is_private AS isPrivate, h.nickname AS host, tn.host_id = ?1 AS hostMine`;
 export const SUMMARY_FROM = `tournaments tn LEFT JOIN users w ON w.id = tn.winner_id
-  LEFT JOIN tournament_entries me ON me.tournament_id = tn.id AND me.user_id = ?1`;
+  LEFT JOIN tournament_entries me ON me.tournament_id = tn.id AND me.user_id = ?1 LEFT JOIN users h ON h.id = tn.host_id`;
+
+/** The inbox key of a private tournament's invite (one per tournament: the host's, the only one who invites to it). */
+export const privateInviteKey = (id: string) => `tournament_private:${id}`;
+
+/**
+ * Whether member `user` may see (and register for) tournament `tn`: any public one; a private one only as its host,
+ * with an entry in it (registered with the code or an invite once, whatever came after), or with its host's invite in
+ * their inbox. The server's only test of a private tournament's access: the list, the page and registering use it.
+ */
+export const visibleSql = (tn: string, user: string) => `(${tn}.is_private = 0 OR ${tn}.host_id = ${user}
+  OR EXISTS (SELECT 1 FROM tournament_entries v WHERE v.tournament_id = ${tn}.id AND v.user_id = ${user})
+  OR EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = ${user} AND n.key = 'tournament_private:' || ${tn}.id AND n.actor_id = ${tn}.host_id))`;
 
 export function summaryOf(r: Record<string, unknown>): TournamentSummaryDto {
   const levels = parseLevels(r.levels);
@@ -111,7 +129,11 @@ export function summaryOf(r: Record<string, unknown>): TournamentSummaryDto {
     endedAt: (r.endedAt as number | null) ?? null,
     winner: (r.winner as string | null) ?? null,
     ...(winnerVip ? { winnerVip } : {}),
-    me: r.meStatus ? { status: r.meStatus as EntryStatus, place: (r.mePlace as number | null) ?? null } : null,
+    me: r.meStatus
+      ? { status: r.meStatus as EntryStatus, place: (r.mePlace as number | null) ?? null, ...(r.format === 'mtt' ? { tableId: (r.meTableId as string | null) ?? null } : {}) }
+      : null,
+    ...(r.format === 'mtt' ? { mtt: { tableSeats: Number(r.tableSeats), tablesLeft: r.tablesLeft === null || r.tablesLeft === undefined ? null : Number(r.tablesLeft) } } : {}),
+    ...(Number(r.isPrivate) === 1 ? { private: { host: String(r.host ?? ''), mine: Number(r.hostMine) === 1 } } : {}),
   };
 }
 
@@ -195,11 +217,84 @@ export function tournamentNoticeTold(db: D1Database, tournamentId: string, kind:
   };
 }
 
+/**
+ * Cancels a tournament before its start (an operator, or a private tournament's host as `hostId`): no result, its join
+ * code gone, the registered members told by a system message and a push. One conditional statement (from `baseVersion`
+ * when given): null when it changed nothing (already started or cancelled, another version, not the host's).
+ */
+export async function cancelTournament(
+  env: Env,
+  t: { id: string; name: string },
+  opts: { actorId: string; reason: string | null; baseVersion?: number; hostId?: string; ctx?: Pick<ExecutionContext, 'waitUntil'> },
+): Promise<{ notified: number } | null> {
+  const db = env.DB;
+  const now = Date.now();
+  const told = tournamentNoticeTold(db, t.id, 'cancelled', now);
+  const changed = tournamentTold(db, t.id, now);
+  const guard = `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`;
+  const [r, , sent] = await db.batch([
+    db
+      .prepare(
+        `UPDATE tournaments SET status = 'cancelled', cancelled_at = ?2, end_reason = 'cancelled', end_note = ?3, ended_by = ?4, join_code_hash = NULL,
+                version = version + 1, updated_at = ?2
+          WHERE id = ?1 AND status IN ('registering', 'closed') AND (?5 IS NULL OR version = ?5) AND (?6 IS NULL OR (is_private = 1 AND host_id = ?6))`,
+      )
+      .bind(t.id, now, opts.reason, opts.actorId, opts.baseVersion ?? null, opts.hostId ?? null),
+    changed.statement,
+    tournamentNotice(db, t, 'cancelled', ['registered'], guard, now),
+    told.statement,
+  ]);
+  if (!r?.meta.changes) return null;
+  told.send(env, opts.ctx, sent);
+  tournamentChanged(env, t.id, changed.row, opts.ctx);
+  await queuePush(
+    env,
+    [outboxForEntries(db, { tournamentId: t.id, type: 'tournament_cancel', statuses: ['registered'], prefix: 'tournament_cancel', url: `/tournaments/${t.id}`, guard, now, night: isKstNight(now) })],
+    opts.ctx,
+  );
+  return { notified: sent?.meta.changes ?? 0 };
+}
+
 /** Asks the tournament's room to read D1 again (twice when it does not answer). Null: it did not answer. */
 export async function reloadRoom(env: Env, tableId: string | null) {
   if (!tableId) return null;
   return (await roomCallEnv(env, tableId, 'reload')) ?? (await roomCallEnv(env, tableId, 'reload'));
 }
+
+/**
+ * Calls a multi-table tournament's coordinator (game worker, docs/TOURNAMENT_MTT.md): `init` and `reload` read the
+ * tournament in D1 again and wake its tables, `status` is the console's view. Null when it does not answer.
+ */
+export async function coordinatorCall(env: Env, id: string, op: 'init' | 'reload' | 'status'): Promise<Record<string, unknown> | null> {
+  try {
+    const stub = env.TOURNAMENTS.get(env.TOURNAMENTS.idFromName(id));
+    const res = await stub.fetch(`https://mtt/${op}`, {
+      method: 'POST',
+      headers: { [INTERNAL_HEADER]: env.INTERNAL_SECRET, 'content-type': 'application/json' },
+      body: JSON.stringify({ tournamentId: id }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** Tells whoever plays the tournament to read D1 again: its room (a Sit & Go) or its coordinator (twice when it does not answer). */
+export async function reloadTournament(env: Env, t: { id: string; format?: string | null; tableId: string | null }) {
+  if (t.format === 'mtt') return (await coordinatorCall(env, t.id, 'reload')) ?? (await coordinatorCall(env, t.id, 'reload'));
+  return reloadRoom(env, t.tableId);
+}
+
+/** Whether multi-table tournaments may be opened and started (MTT_ENABLED, off unless set). */
+export const mttEnabled = (env: Pick<Env, 'MTT_ENABLED'>) => env.MTT_ENABLED === '1';
+
+/** A random whole number from 0 to n − 1 (crypto). */
+const cryptoRand: Rand = (n) => {
+  const r = new Uint32Array(1);
+  crypto.getRandomValues(r);
+  return r[0]! % n;
+};
 
 export interface StartOptions {
   /** The operator who started it (null: the automatic start when the last seat was taken). */
@@ -260,18 +355,9 @@ interface StartRow {
   requireVerified: number;
   version: number;
   roster: number;
-}
-
-/** Seat numbers 0 to `n` - 1 in a random order (crypto). */
-function shuffledSeats(n: number): number[] {
-  const seats = Array.from({ length: n }, (_, i) => i);
-  const r = new Uint32Array(seats.length);
-  crypto.getRandomValues(r);
-  for (let i = seats.length - 1; i > 0; i--) {
-    const j = r[i]! % (i + 1);
-    [seats[i], seats[j]] = [seats[j]!, seats[i]!];
-  }
-  return seats;
+  format: string;
+  tableSeats: number;
+  isPrivate: number;
 }
 
 /**
@@ -295,7 +381,7 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     const t = await db
       .prepare(
         `SELECT id, name, status, capacity, min_players AS minPlayers, start_stack AS startStack, levels, turn_seconds AS turnSeconds,
-                min_hands AS minHands, require_verified AS requireVerified, version, roster
+                min_hands AS minHands, require_verified AS requireVerified, version, roster, format, table_seats AS tableSeats, is_private AS isPrivate
            FROM tournaments WHERE id = ?1`,
       )
       .bind(id)
@@ -310,6 +396,11 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
       fail(409, 'tournament_started', 'the tournament has already started', { status: t.status });
     }
     if (opts.baseVersion !== undefined && t.version !== opts.baseVersion) fail(409, 'tournament_conflict', 'the tournament changed meanwhile', { version: t.version, status: t.status });
+    const mtt = t.format === 'mtt';
+    if (mtt && !mttEnabled(env)) {
+      if (opts.auto) return no('state');
+      fail(409, 'mtt_disabled', 'multi-table tournaments are not enabled');
+    }
     const m = await currentMaintenance(db, now);
     if (m?.active) {
       if (opts.auto) return no('maintenance');
@@ -346,8 +437,8 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
       if (opts.auto) return no('ineligible');
       continue;
     }
-    const seatCount = tournamentSeats(t.capacity);
-    const players = results.slice(0, Math.min(t.capacity, seatCount));
+    const seatCount = mtt ? t.tableSeats : tournamentSeats(t.capacity);
+    const players = results.slice(0, mtt ? t.capacity : Math.min(t.capacity, seatCount));
     if (opts.auto ? players.length < t.capacity : players.length < t.minPlayers) {
       if (opts.auto) return no('not_full');
       fail(409, 'tournament_not_ready', 'not enough eligible players', { eligible: players.length, minPlayers: t.minPlayers, dropped });
@@ -355,9 +446,20 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     const levels = parseLevels(t.levels);
     const first = levels[0];
     if (!first) fail(500, 'tournament_structure_invalid', 'the tournament has no blind levels');
-    const tableId = `sng-${id}`;
-    const seats = shuffledSeats(seatCount);
-    const started = `tn.status = 'running' AND tn.table_id = '${tableId}' AND tn.started_at = ${now}`;
+    // A Sit & Go plays at its one table (tournaments.table_id); a multi-table tournament at tables naming it
+    // (tables.tournament_id), dealt round them in turn, its coordinator seating everyone from then on.
+    const tableIds = mtt ? Array.from({ length: mttTableCount(players.length, seatCount) }, (_, k) => `mtt-${id}-${k + 1}`) : [`sng-${id}`];
+    const tableId = mtt ? null : tableIds[0]!;
+    const seating = mttDeal(
+      shuffledWith(
+        players.map((p) => p.userId),
+        cryptoRand,
+      ),
+      seatCount,
+      tableIds,
+      cryptoRand,
+    );
+    const started = `tn.status = 'running' AND ${tableId ? `tn.table_id = '${tableId}'` : 'tn.table_id IS NULL'} AND tn.started_at = ${now}`;
     const mine = `EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND ${started})`;
     const told = tournamentNoticeTold(db, id, 'started', now);
     const changed = tournamentTold(db, id, now);
@@ -370,25 +472,31 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
         .prepare(
           `UPDATE tournaments SET status = 'running', version = version + 1, table_id = ?2, started_at = ?3, level = 0, level_ends_at = NULL,
                   level_left_ms = CASE WHEN json_array_length(levels) > 1 THEN level_ms ELSE NULL END, paused_at = ?3, pause_requested = 0,
-                  pause_changed_at = NULL, players_left = ?4, hands = 0, room_seen_at = NULL, updated_at = ?3
+                  pause_changed_at = NULL, players_left = ?4, hands = 0, room_seen_at = NULL, tables_left = ?9, join_code_hash = NULL, updated_at = ?3
             WHERE id = ?1 AND status IN ('registering', 'closed') AND roster = ?5 AND version = ?6
               AND NOT EXISTS (SELECT 1 FROM json_each(?7) p LEFT JOIN users u ON u.id = p.value
                                WHERE u.id IS NULL OR u.status != 'active' OR u.is_bot != 0 OR (?8 = 1 AND u.email_verified_at IS NULL)
                                   OR ${ELSEWHERE_SQL('u.id')})`,
         )
-        .bind(id, tableId, now, players.length, t.roster, t.version, JSON.stringify(players.map((p) => p.userId)), t.requireVerified),
+        .bind(id, tableId, now, players.length, t.roster, t.version, JSON.stringify(players.map((p) => p.userId)), t.requireVerified, mtt ? tableIds.length : null),
       changed.statement,
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, allow_spectators,
-                  entry_blocked, room_type, bots_enabled, created_by, created_at, updated_at)
-           SELECT ?2, ?3, ?10, ?4, ?5, ?6, ?6, ?7, 0, 1, 1, 'tournament', 0, ?8, ?9, ?9 WHERE ${mine}`,
-        )
-        .bind(id, tableId, t.name, first.sb, first.bb, t.startStack, t.turnSeconds, opts.actorId, now, seatCount),
-      ...players.map((p, i) =>
+      // A private tournament's table is private too: only its players watch it (the room checks it).
+      ...tableIds.map((tid, k) =>
         db
-          .prepare(`UPDATE tournament_entries SET status = 'playing', seat_index = ?3, stack = ?4, updated_at = ?5 WHERE tournament_id = ?1 AND user_id = ?2 AND status = 'registered' AND ${mine}`)
-          .bind(id, p.userId, seats[i]!, t.startStack, now),
+          .prepare(
+            `INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, allow_spectators,
+                    entry_blocked, room_type, bots_enabled, tournament_id, created_by, created_at, updated_at)
+             SELECT ?2, ?3, ?10, ?4, ?5, ?6, ?6, ?7, ?11, 1, 1, 'tournament', 0, ?12, ?8, ?9, ?9 WHERE ${mine}`,
+          )
+          .bind(id, tid, mtt ? `${t.name} #${k + 1}` : t.name, first.sb, first.bb, t.startStack, t.turnSeconds, opts.actorId, now, seatCount, t.isPrivate ? 1 : 0, mtt ? id : null),
+      ),
+      ...seating.map((p) =>
+        db
+          .prepare(
+            `UPDATE tournament_entries SET status = 'playing', seat_index = ?3, stack = ?4, table_id = ?6, updated_at = ?5
+              WHERE tournament_id = ?1 AND user_id = ?2 AND status = 'registered' AND ${mine}`,
+          )
+          .bind(id, p.userId, p.seat, t.startStack, now, mtt ? p.table : null),
       ),
       // Nobody else can be registered (the roster did not change); never leave a registration behind a started tournament.
       db.prepare(`UPDATE tournament_entries SET status = 'dropped', updated_at = ?2 WHERE tournament_id = ?1 AND status = 'registered' AND ${mine}`).bind(id, now),
@@ -400,14 +508,27 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
     if (!res[0]?.meta.changes) continue;
     told.send(env, opts.ctx, res[res.length - 2]);
     tournamentChanged(env, id, changed.row, opts.ctx);
-    const live = await reloadRoom(env, tableId);
+    // A multi-table tournament's coordinator first (it seats the tables from D1), then each table; a table that does
+    // not answer calls the coordinator the first time it is opened.
+    const live = mtt ? !!(await reloadTournament(env, { id, format: 'mtt', tableId: null })) && (await Promise.all(tableIds.map((tid) => reloadRoom(env, tid)))).every(Boolean) : !!(await reloadRoom(env, tableId));
     // After the start is saved, never with it: a push that can't be queued leaves the start as it is.
     await queuePush(
       env,
-      [outboxForEntries(db, { tournamentId: id, type: 'tournament_start', statuses: ['playing'], prefix: 'tournament_start', url: `/table/${tableId}`, guard: started, now, night: isKstNight(now) })],
+      [
+        outboxForEntries(db, {
+          tournamentId: id,
+          type: 'tournament_start',
+          statuses: ['playing'],
+          prefix: 'tournament_start',
+          url: tableId ? `/table/${tableId}` : `/tournaments/${id}`,
+          guard: started,
+          now,
+          night: isKstNight(now),
+        }),
+      ],
       opts.ctx,
     );
-    return { started: true, tableId, players: players.length, dropped, roomConfirmed: !!live };
+    return { started: true, tableId, players: players.length, dropped, roomConfirmed: live };
   }
   if (opts.auto) return no('busy');
   fail(409, 'tournament_conflict', 'registrations kept changing; try again');

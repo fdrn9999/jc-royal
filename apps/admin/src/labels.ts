@@ -290,6 +290,8 @@ export const tableIssueLabel = labeler({
   session_without_seat: 'issueSessionWithoutSeat',
   seat_without_session: 'issueSeatWithoutSession',
   timer_unarmed: 'issueTimerUnarmed',
+  tournament_unsynced: 'issueTournamentUnsynced',
+  tournament_unanswered: 'issueTournamentUnanswered',
 });
 /** Service notices and maintenance windows (the admin service page). */
 export const noticeKindLabel = labeler({ general: 'noticeKindGeneral', urgent: 'noticeKindUrgent', maintenance: 'noticeKindMaintenance' });
@@ -366,6 +368,9 @@ export const tnRecoveryLabel = labeler({
 export const tnEndReasonLabel = labeler({ completed: 'tnStFinished', finished: 'tnStFinished', cancelled: 'tnStCancelled', aborted: 'tnStAborted' });
 /** Why a template's values do not hold together (@jc/types tournamentStructureProblem). */
 export const structureProblemLabel = labeler({
+  capacity_over_table: 'tnPbCapacityOverTable',
+  mtt_table_seats: 'tnPbMttTableSeats',
+  mtt_one_table: 'tnPbMttOneTable',
   min_players_over_capacity: 'tnPbMinPlayers',
   small_blind_not_below_big: 'tnPbSmallBlind',
   levels_decrease: 'tnPbLevelsDecrease',

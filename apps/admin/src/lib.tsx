@@ -126,6 +126,7 @@ const BY_CODE: Record<string, Key> = {
   tournament_started: 'errTnStarted',
   tournament_not_ready: 'errTnNotReady',
   tournament_limit: 'errTnLimit',
+  mtt_disabled: 'errMttDisabled',
   tournament_name_mismatch: 'errTnNameMismatch',
   tournament_structure_invalid: 'errTnStructure',
   tournament_table: 'errTnTable',

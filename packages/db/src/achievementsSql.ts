@@ -38,10 +38,10 @@ export const ACHIEVEMENT_HAND_SQL: readonly string[] = [
       AND (SELECT COUNT(*) FROM (SELECT 1 FROM hand_players x WHERE x.user_id = hp.user_id LIMIT 100)) >= 100`,
 ];
 
-/** The winner of a finished tournament (`?1`). */
+/** The winner of a finished tournament (`?1`); not of a private one, which is no official record (docs/TOURNAMENT.md "비공개 대회"). */
 export const ACHIEVEMENT_TOURNAMENT_SQL = `${INSERT}
   SELECT t.winner_id, 'play:tournament_win', t.finished_at FROM tournaments t JOIN users u ON u.id = t.winner_id AND u.is_bot = 0
-   WHERE t.id = ?1 AND t.status = 'finished' AND t.finished_at IS NOT NULL`;
+   WHERE t.id = ?1 AND t.status = 'finished' AND t.finished_at IS NOT NULL AND t.is_private = 0`;
 
 /**
  * Seven days in a row of use (active_days, Korean days), for every member, from the first such run still kept: given

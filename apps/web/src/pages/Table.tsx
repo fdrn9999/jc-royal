@@ -30,6 +30,7 @@ import { LinkShare } from '../components/Share';
 import { ANY, parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
 import type { ReportSubject } from '../components/Social';
+import type { StandingSeat } from '../game/TournamentHud';
 import { ActionHelp, CurrentHandPill, StageNote, useNotesFit } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
@@ -66,10 +67,15 @@ const HandRankingChart = lazyPart(
   () => <LoadFailed className="py-6" onRetry={() => location.reload()} />,
 );
 // Only tournament tables show these, so they (and their text) stay out of the entry chunk; a tournament table's id
-// starts with sng- (docs/TOURNAMENT.md), which lets the page fetch them before the room's first state arrives.
+// starts with sng- or mtt- (docs/TOURNAMENT.md), which lets the page fetch them before the room's first state arrives.
 const loadTournamentHud = () => import('../game/TournamentHud');
 const TournamentBar = lazyPart(() => loadTournamentHud().then((m) => m.TournamentBar));
 const TournamentResult = lazyPart(() => loadTournamentHud().then((m) => m.TournamentResult));
+
+/** The seated players' stacks for the tournament standings: what every seat shows, nothing more. */
+function standingSeats(s: TableView | null): StandingSeat[] {
+  return (s?.seats ?? []).flatMap((x) => (x.state !== 'empty' && x.nickname ? [{ seatIndex: x.seatIndex, nickname: x.nickname, stack: x.stack, vip: x.vip }] : []));
+}
 
 /** Nobody still in is dealt a hand: everyone left is away, and the level clock waits with them (not an operator's pause). */
 function tournamentStalled(s: TableView): boolean {
@@ -142,7 +148,7 @@ export function TableRoute() {
 export function TablePage() {
   const { id = '' } = useParams();
   useEffect(() => {
-    if (id.startsWith('sng-')) void loadTournamentHud();
+    if (id.startsWith('sng-') || id.startsWith('mtt-')) void loadTournamentHud();
   }, [id]);
   const [params, setParams] = useSearchParams();
   // Sent here by quick play: if the seat is gone on arrival, offer the next table instead of a dead end.
@@ -156,6 +162,11 @@ export function TablePage() {
   const sock = useTableSocket(id);
   const { reopen } = sock;
   const s = sock.state;
+  // A multi-table tournament moved me to another table (between hands; docs/TOURNAMENT_MTT.md): the page follows.
+  const movedTo = s?.tournament?.mtt?.movedTo ?? null;
+  useEffect(() => {
+    if (movedTo && movedTo !== id) nav(`/table/${movedTo}`, { replace: true });
+  }, [movedTo, id, nav]);
   // Table amounts in the player's unit; the wallet balance and the blinds in the header stay in chips.
   const amt = useAmounts(s?.table.bigBlind ?? 0);
   const [codeOpen, setCodeOpen] = useState(false);
@@ -747,7 +758,7 @@ export function TablePage() {
       </header>
       {tn && (
         <Suspense fallback={null}>
-          <TournamentBar tn={tn} />
+          <TournamentBar tn={tn} seats={standingSeats(s)} />
         </Suspense>
       )}
       <div className="z-40">

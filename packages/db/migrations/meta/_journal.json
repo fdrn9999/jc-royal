@@ -302,6 +302,13 @@
       "when": 1793609983991,
       "tag": "0042_social_privacy_achievements",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1793731964664,
+      "tag": "0043_mtt_private_tournaments",
+      "breakpoints": true
     }
   ]
 }

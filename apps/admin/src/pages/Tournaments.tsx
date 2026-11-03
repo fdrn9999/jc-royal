@@ -90,6 +90,16 @@ function StatusBadges({ r }: { r: AdminTournamentRow }) {
   return (
     <span className="flex flex-wrap items-center gap-1">
       <Badge tone={STATUS_TONE[r.status]}>{tnStatusLabel(t, r.status)}</Badge>
+      {r.mtt && (
+        <span data-testid="tn-badge-mtt">
+          <Badge tone="blue">{t('tnFormatMttShort')}{r.mtt.tablesLeft !== null && r.status === 'running' ? ` · ${t('tnTablesN', { n: r.mtt.tablesLeft })}` : ''}</Badge>
+        </span>
+      )}
+      {r.privateHost !== undefined && (
+        <span data-testid="tn-badge-private">
+          <Badge tone="gold">{t('tnPrivateBy', { who: r.privateHost || '—' })}</Badge>
+        </span>
+      )}
       {r.status === 'running' && r.pauseRequested && <Badge tone="gold">{t(r.clockStoppedAt !== null ? 'tnPaused' : 'tnPausePending')}</Badge>}
       {r.recovery.map((c) => (
         <Badge key={c} tone="red">{tnRecoveryLabel(t, c)}</Badge>
@@ -345,7 +355,8 @@ function CreatePanel({ onCreated }: { onCreated: (n: Note) => void }) {
 }
 
 /** A structure as rows (the create summary, a tournament's own copy, a template). */
-function StructureView({ s, compact = false }: { s: TournamentStructure; compact?: boolean }) {
+/** A structure's facts. `privateHost`: a members' private tournament, which its host starts. */
+function StructureView({ s, compact = false }: { s: TournamentStructure & { privateHost?: string }; compact?: boolean }) {
   const { t } = useT();
   return (
     <div className="flex flex-col gap-3">
@@ -367,7 +378,7 @@ function tbText(t: Tr, tb: TournamentTimeBank): string {
   return t('tnTimeBankRule', { initial: Math.round(tb.initialMs / 1000), max: Math.round(tb.maxMs / 1000), unit: Math.round(tb.unitMs / 1000), hands: tb.refillHands, refill: Math.round(tb.refillMs / 1000) });
 }
 
-function structureRows(t: Tr, s: TournamentStructure): [Key, string][] {
+function structureRows(t: Tr, s: TournamentStructure & { privateHost?: string }): [Key, string][] {
   return [
     ['name', s.name],
     ['tnCapacity', t('tnPlayersN', { n: s.capacity })],
@@ -379,7 +390,7 @@ function structureRows(t: Tr, s: TournamentStructure): [Key, string][] {
     ['tnTimeBank', tbText(t, s.timeBank)],
     ['tnMinHands', s.minHands > 0 ? t('tnHandsN', { n: s.minHands }) : t('none')],
     ['tnRequireVerified', s.requireVerified ? t('yes') : t('no')],
-    ['tnAutoStart', s.autoStart ? t('tnAutoStartOn') : t('tnAutoStartOff')],
+    ['tnAutoStart', s.autoStart ? t('tnAutoStartOn') : s.privateHost !== undefined ? t('tnAutoStartHost') : t('tnAutoStartOff')],
   ];
 }
 
@@ -427,7 +438,10 @@ interface Entry {
 interface LiveSeat { seatIndex: number; userId: string; nickname: string; stack: number; connected: boolean; sittingOut: boolean; inHand: boolean; timeouts: number; timeBank: { ms: number } | null }
 interface Live { answered: boolean; handInProgress: boolean | null; handNumber: number | null; connections: number | null; issues: string[]; seats: LiveSeat[]; alarmAt: number | null }
 interface HistoryItem { id: string; action: string; outcome: 'ok' | 'failed'; createdAt: number; actor: { id: string; nickname: string | null; role: string | null }; detail: unknown }
-interface DetailData { now: number; tournament: DetailRow; entries: Entry[]; live: Live | null; history: HistoryItem[] }
+interface CoordTable { id: string; broken: boolean; players: number; leaving: number; behind: boolean; hands: number }
+/** A multi-table tournament's coordinator as it answered this load (null: not yet started; false: it did not answer). */
+interface Coordinator { answered: boolean | null; level?: number; paused?: boolean; hands?: number; playersLeft?: number; final?: { table: string; drawn: boolean } | null; tables?: CoordTable[] }
+interface DetailData { now: number; tournament: DetailRow; entries: Entry[]; live: Live | null; coordinator?: Coordinator; history: HistoryItem[] }
 
 type Act = 'close' | 'open' | 'start' | 'cancel' | 'pause' | 'resume' | 'abort' | 'recover';
 /** What each control asks: a reason (required, optional or none) and, to abort, the name typed again. */
@@ -577,6 +591,8 @@ export function TournamentDetailPage() {
   if (r.status === 'closed') actions.push(btn('start', 'gold'), btn('open'), btn('cancel', 'danger'));
   if (r.status === 'running') actions.push(btn(r.pauseRequested ? 'resume' : 'pause', r.pauseRequested ? 'gold' : 'outline'), btn('recover'), btn('abort', 'danger'));
   if ((r.status === 'finished' || r.status === 'aborted') && r.tableId && r.tableStatus && r.tableStatus !== 'closed') actions.push(btn('recover'));
+  // A multi-table one has no single table: its tables are asked again while one is left open or the coordinator was silent.
+  if ((r.status === 'finished' || r.status === 'aborted') && r.mtt && (data.coordinator?.answered === false || !!data.coordinator?.tables?.some((x) => !x.broken))) actions.push(btn('recover'));
   const ended = r.status === 'finished' || r.status === 'cancelled' || r.status === 'aborted';
   return (
     <div className="flex flex-col gap-6">
@@ -640,6 +656,7 @@ export function TournamentDetailPage() {
         <EntriesTable entries={data.entries} running={r.status === 'running'} />
       </Panel>
       {data.live && <LivePanel live={data.live} tableId={r.tableId} tableStatus={r.tableStatus} />}
+      {data.coordinator && data.coordinator.answered !== null && <CoordinatorPanel c={data.coordinator} />}
       <Panel title={t('audit')} actions={<Link to={`/audit?targetType=tournament&targetId=${encodeURIComponent(r.id)}`} className="text-sm text-gold-300 hover:underline" data-testid="tn-audit-link">{t('tnAllHistory')} →</Link>}>
         <HistoryTable items={data.history} />
       </Panel>
@@ -755,6 +772,39 @@ function LivePanel({ live, tableId, tableStatus }: { live: Live; tableId: string
   );
 }
 
+/** A multi-table tournament's tables as its coordinator answered: players seated, moves under way, a table behind. No card. */
+function CoordinatorPanel({ c }: { c: Coordinator }) {
+  const { t } = useT();
+  return (
+    <Panel title={t('tnCoordinator')}>
+      <div className="flex flex-col gap-3 text-sm" data-testid="tn-coordinator" data-answered={c.answered}>
+        {!c.answered ? (
+          <p className="text-danger">{t('tnCoordSilent')}</p>
+        ) : (
+          <>
+            <p>{t('tnCoordLine', { left: c.playersLeft ?? 0, hands: c.hands ?? 0, level: (c.level ?? 0) + 1 })}{c.final?.drawn ? ` · ${t('tnFinalTable')}` : ''}</p>
+            <ul className="divide-y divide-white/5">
+              {(c.tables ?? []).map((x) => (
+                <li key={x.id} className="flex justify-between gap-2 py-1.5" data-testid="tn-coord-table" data-broken={x.broken}>
+                  <span className="flex min-w-0 flex-wrap items-center gap-1">
+                    {x.broken ? <span className="font-mono text-ink-400">{x.id}</span> : <Link to={`/tables/${x.id}`} className="font-mono text-gold-300 hover:underline">{x.id}</Link>}
+                    {x.broken && <Badge>{t('tnTableBroken')}</Badge>}
+                    {c.final?.table === x.id && <Badge tone="gold">{t('tnFinalTable')}</Badge>}
+                    {x.leaving > 0 && <Badge tone="gold">{t('tnLeavingN', { n: x.leaving })}</Badge>}
+                    {x.behind && <Badge tone="red">{t('tnTableBehind')}</Badge>}
+                  </span>
+                  <span className="shrink-0 text-ink-300">{t('tnCoordTableLine', { n: x.players, hands: x.hands })}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-ink-400">{t('tnCoordNote')}</p>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 /** The detail of an operator action as a short line (its reason first). */
 function historyText(d: unknown): string {
   if (!d || typeof d !== 'object') return typeof d === 'string' ? d : '';
@@ -830,14 +880,18 @@ const structureOf = (x: TournamentStructure): TournamentStructure => ({
   minHands: x.minHands,
   requireVerified: x.requireVerified,
   autoStart: x.autoStart,
+  ...(x.format === 'mtt' ? { format: 'mtt' as const, tableSeats: x.tableSeats } : {}),
 });
+
+/** A structure's format, as a line (a Sit & Go, or several tables of so many seats). */
+const formatText = (t: Tr, s: TournamentStructure) => (s.format === 'mtt' ? `${t('tnFormatMtt')} · ${t('tnTableSeatsN', { n: s.tableSeats ?? 0 })}` : t('tnFormatSng'));
 
 export function TournamentTemplatesPage() {
   const { t, locale } = useT();
   const { me } = useAdmin();
   const [status, setStatus] = useState<'active' | 'archived'>('active');
   const [offset, setOffset] = useState(0);
-  const { data, error, loading, reload } = useData<{ templates: TournamentTemplateDto[]; hasMore: boolean }>(`/api/admin/tournament-templates?status=${status}&limit=${PAGE}&offset=${offset}`);
+  const { data, error, loading, reload } = useData<{ templates: TournamentTemplateDto[]; hasMore: boolean; mttEnabled?: boolean }>(`/api/admin/tournament-templates?status=${status}&limit=${PAGE}&offset=${offset}`);
   const [note, setNote] = useState<Note>(null);
   const [editing, setEditing] = useState<TournamentTemplateDto | 'new' | null>(null);
   const [statusAct, setStatusAct] = useState<TournamentTemplateDto | null>(null);
@@ -914,7 +968,7 @@ export function TournamentTemplatesPage() {
           busy={loading}
         />
       )}
-      {editing && <TemplateEditor key={editing === 'new' ? 'new' : `${editing.id}:${editing.version}`} tpl={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onChanged={changed} />}
+      {editing && <TemplateEditor key={editing === 'new' ? 'new' : `${editing.id}:${editing.version}`} tpl={editing === 'new' ? null : editing} mttEnabled={!!data?.mttEnabled} onClose={() => setEditing(null)} onChanged={changed} />}
       {statusAct && <TemplateStatusDialog tpl={statusAct} onClose={() => setStatusAct(null)} onChanged={changed} />}
       {purge && <PurgeDialog kind="tournament_template" id={purge.id} onClose={() => setPurge(null)} onDone={changed} />}
     </div>
@@ -980,6 +1034,8 @@ interface Draft {
   minHands: string;
   requireVerified: boolean;
   autoStart: boolean;
+  format: 'sng' | 'mtt';
+  tableSeats: '6' | '9';
 }
 
 const draftOf = (s: TournamentStructure): Draft => ({
@@ -999,6 +1055,8 @@ const draftOf = (s: TournamentStructure): Draft => ({
   minHands: String(s.minHands),
   requireVerified: s.requireVerified,
   autoStart: s.autoStart,
+  format: s.format ?? 'sng',
+  tableSeats: s.tableSeats === 6 ? '6' : '9',
 });
 
 const structureFrom = (d: Draft): TournamentStructure => ({
@@ -1013,9 +1071,14 @@ const structureFrom = (d: Draft): TournamentStructure => ({
   minHands: Number(d.minHands),
   requireVerified: d.requireVerified,
   autoStart: d.autoStart,
+  ...(d.format === 'mtt' ? { format: 'mtt' as const, tableSeats: d.tableSeats === '6' ? (6 as const) : (9 as const) } : {}),
 });
 
-function TemplateEditor({ tpl, onClose, onChanged }: { tpl: TournamentTemplateDto | null; onClose: () => void; onChanged: (n: Note) => Promise<void> }) {
+/**
+ * A template's form. `mttEnabled` (the server's MTT_ENABLED): the format can be chosen; off, only a Sit & Go is made
+ * (the server refuses a multi-table one either way).
+ */
+function TemplateEditor({ tpl, mttEnabled, onClose, onChanged }: { tpl: TournamentTemplateDto | null; mttEnabled: boolean; onClose: () => void; onChanged: (n: Note) => Promise<void> }) {
   const { t } = useT();
   const { api } = useAdmin();
   const [d, setD] = useState<Draft>(() => draftOf(tpl ? structureOf(tpl) : NEW_TEMPLATE));
@@ -1074,7 +1137,11 @@ function TemplateEditor({ tpl, onClose, onChanged }: { tpl: TournamentTemplateDt
   };
   const range = (r: { min: number; max: number }) => t('refillRange', { min: r.min, max: r.max });
   const secRange = (r: { min: number; max: number }) => t('refillRange', { min: t('tbSeconds', { n: r.min / 1000 }), max: t('tbSeconds', { n: r.max / 1000 }) });
-  const err = (k: string) => (bad.has(k) ? t('refillOutOfRange') : null);
+  // A Sit & Go's seats are up to one table's; a multi-table tournament's up to L.mttCapacity (the schema takes either).
+  const mtt = d.format === 'mtt';
+  const capRange = mtt ? { min: d.tableSeats === '6' ? 7 : 10, max: L.mttCapacity.max } : L.capacity;
+  const capProblem = problem === 'capacity_over_table' || problem === 'mtt_one_table';
+  const err = (k: string) => (bad.has(k) || (k === 'capacity' && capProblem) ? t('refillOutOfRange') : null);
   const num = (k: keyof Draft, label: Key, hint: string, testid: string) => (
     <Field label={t(label)} hint={hint} error={err(k === 'tbInitial' ? 'timeBank.initialMs' : k === 'tbMax' ? 'timeBank.maxMs' : k === 'tbUnit' ? 'timeBank.unitMs' : k === 'tbHands' ? 'timeBank.refillHands' : k === 'tbRefill' ? 'timeBank.refillMs' : k)}>
       {(fid) => <Input id={fid} inputMode="numeric" value={d[k] as string} onChange={set(k)} disabled={k.startsWith('tb') && !d.tbEnabled} data-testid={testid} />}
@@ -1082,6 +1149,7 @@ function TemplateEditor({ tpl, onClose, onChanged }: { tpl: TournamentTemplateDt
   );
   const rows: [Key, (x: TournamentStructure) => string][] = [
     ['name', (x) => x.name],
+    ['tnFormat', (x) => formatText(t, x)],
     ['tnCapacity', (x) => String(x.capacity)],
     ['tnMinPlayers', (x) => String(x.minPlayers)],
     ['tnStartStack', (x) => formatChips(x.startStack)],
@@ -1101,8 +1169,31 @@ function TemplateEditor({ tpl, onClose, onChanged }: { tpl: TournamentTemplateDt
             <div className="sm:col-span-3">
               <Field label={t('name')} hint={range(L.name)} error={err('name')}>{(fid) => <Input id={fid} value={d.name} maxLength={L.name.max} onChange={set('name')} data-testid="tpl-name" />}</Field>
             </div>
-            {num('capacity', 'tnCapacity', range(L.capacity), 'tpl-capacity')}
-            {num('minPlayers', 'tnMinPlayers', range(L.capacity), 'tpl-min-players')}
+            {(mttEnabled || mtt) && (
+              <>
+                <Field label={t('tnFormat')}>
+                  {(fid) => (
+                    <select id={fid} className={selectCls} value={d.format} onChange={(e) => setD({ ...d, format: e.target.value === 'mtt' ? 'mtt' : 'sng' })} data-testid="tpl-format">
+                      <option value="sng">{t('tnFormatSng')}</option>
+                      <option value="mtt">{t('tnFormatMtt')}</option>
+                    </select>
+                  )}
+                </Field>
+                {mtt && (
+                  <Field label={t('tnTableSeats')}>
+                    {(fid) => (
+                      <select id={fid} className={selectCls} value={d.tableSeats} onChange={(e) => setD({ ...d, tableSeats: e.target.value === '6' ? '6' : '9' })} data-testid="tpl-table-seats">
+                        <option value="9">{t('tnTableSeatsN', { n: 9 })}</option>
+                        <option value="6">{t('tnTableSeatsN', { n: 6 })}</option>
+                      </select>
+                    )}
+                  </Field>
+                )}
+                <p className="text-xs text-ink-400 sm:col-span-3" data-testid="tpl-mtt-hint">{t('tplMttHint')}</p>
+              </>
+            )}
+            {num('capacity', 'tnCapacity', range(capRange), 'tpl-capacity')}
+            {num('minPlayers', 'tnMinPlayers', range({ min: L.capacity.min, max: capRange.max }), 'tpl-min-players')}
             {num('startStack', 'tnStartStack', range(L.startStack), 'tpl-start-stack')}
             {num('levelMinutes', 'tnLevelMinutes', range(L.levelMinutes), 'tpl-level-minutes')}
             {num('turnSeconds', 'turnSeconds', range(L.turnSeconds), 'tpl-turn-seconds')}

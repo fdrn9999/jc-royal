@@ -188,6 +188,8 @@ export const tables = sqliteTable(
      * table is opened by a tournament's start (tournaments.table_id) and plays tournament chips only (docs/TOURNAMENT.md).
      */
     roomType: text('room_type', { enum: ['official', 'member', 'tournament'] }).notNull().default('official'),
+    /** A multi-table tournament's table: the tournament (a Sit & Go's table is named by tournaments.table_id instead). */
+    tournamentId: text('tournament_id'),
     /**
      * Table bots (official tables only, and only while the bot policy is on): once ot_min_humans members sit, bots
      * of ot_level join one at a time until ot_fill_to players sit, never more than ot_max bots. With
@@ -204,7 +206,11 @@ export const tables = sqliteTable(
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
-  (t) => [index('tables_status_idx').on(t.status), index('tables_creator_idx').on(t.createdBy, t.status)],
+  (t) => [
+    index('tables_status_idx').on(t.status),
+    index('tables_creator_idx').on(t.createdBy, t.status),
+    index('tables_tournament_idx').on(t.tournamentId).where(sql`tournament_id IS NOT NULL`),
+  ],
 );
 
 /** One row per buy-in → cash-out cycle of a user at a table. */
@@ -1128,6 +1134,9 @@ export const tournamentTemplates = sqliteTable(
     requireVerified: integer('require_verified', { mode: 'boolean' }).notNull().default(false),
     /** Starts by itself when the last seat is taken. */
     autoStart: integer('auto_start', { mode: 'boolean' }).notNull().default(true),
+    /** 'mtt': a multi-table tournament (docs/TOURNAMENT_MTT.md), opened only while MTT_ENABLED is on; `table_seats` 6 or 9. */
+    format: text('format', { enum: ['sng', 'mtt'] }).notNull().default('sng'),
+    tableSeats: integer('table_seats').notNull().default(0),
     status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
     version: integer('version').notNull().default(1),
     createdBy: text('created_by'),
@@ -1166,9 +1175,23 @@ export const tournaments = sqliteTable(
     minHands: integer('min_hands').notNull(),
     requireVerified: integer('require_verified', { mode: 'boolean' }).notNull(),
     autoStart: integer('auto_start', { mode: 'boolean' }).notNull(),
+    /**
+     * 'mtt': played at several tables (tables.tournament_id), seated by its coordinator; `table_seats` at each, and
+     * `tables_left` the open ones as the coordinator last wrote. A Sit & Go has one table (`table_id`) and 0 here.
+     */
+    format: text('format', { enum: ['sng', 'mtt'] }).notNull().default('sng'),
+    tableSeats: integer('table_seats').notNull().default(0),
+    tablesLeft: integer('tables_left'),
+    /**
+     * A members' private Sit & Go (docs/TOURNAMENT.md "비공개 대회"): opened by `host_id`, not listed, and open only to
+     * the host, the friends they invited and whoever has the code. Only the code's SHA-256 is kept (cleared once it ends).
+     */
+    isPrivate: integer('is_private', { mode: 'boolean' }).notNull().default(false),
+    hostId: text('host_id'),
+    joinCodeHash: text('join_code_hash'),
     version: integer('version').notNull().default(1),
     roster: integer('roster').notNull().default(0),
-    /** The table opened at the start (tables.room_type 'tournament'). */
+    /** The table opened at the start (tables.room_type 'tournament'); a multi-table tournament's is NULL. */
     tableId: text('table_id'),
     /** Progress as the room last wrote it: level index, when it ends (running clock) or what was left (stopped clock). */
     level: integer('level').notNull().default(0),
@@ -1196,7 +1219,12 @@ export const tournaments = sqliteTable(
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
-  (t) => [index('tournaments_status_idx').on(t.status, t.createdAt), uniqueIndex('tournaments_table_idx').on(t.tableId)],
+  (t) => [
+    index('tournaments_status_idx').on(t.status, t.createdAt),
+    uniqueIndex('tournaments_table_idx').on(t.tableId),
+    index('tournaments_host_idx').on(t.hostId, t.status).where(sql`host_id IS NOT NULL`),
+    uniqueIndex('tournaments_code_idx').on(t.joinCodeHash).where(sql`join_code_hash IS NOT NULL`),
+  ],
 );
 
 /**
@@ -1216,6 +1244,8 @@ export const tournamentEntries = sqliteTable(
     eliminatedAt: integer('eliminated_at'),
     /** The room's hand number in which the player busted. */
     eliminatedHand: integer('eliminated_hand'),
+    /** A multi-table tournament's table the player sits at, as its coordinator last wrote (seat_index is the seat there). */
+    tableId: text('table_id'),
     updatedAt: integer('updated_at').notNull().default(now),
   },
   (t) => [primaryKey({ columns: [t.tournamentId, t.userId] }), index('tournament_entries_user_idx').on(t.userId, t.status)],

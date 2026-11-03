@@ -15,6 +15,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { OpsCounter, type TimeBankMetric } from '@jc/db';
 import { botView, decideBot, HandEngine, nextButtonSeat, STRATEGY_VERSION, styleFor, type ActResult, type HandRecord, type PersistedHand } from '@jc/poker-engine';
 import {
+  advanceLevel,
   AUTO_REBUY_MAX_TIMES,
   type AutoBuyPolicy,
   type AutoBuyRequest,
@@ -35,6 +36,7 @@ import {
   shownRole,
   TIME_BANK_MIN_USE_MS,
   timeBankRulesFor,
+  TOURNAMENT_FINISH_LINGER_MS,
   tournamentTimeBankRules,
   type ChatMessage,
   type ClientMessage,
@@ -84,6 +86,7 @@ import { tellFriendsSat } from './friend-table';
 import { publishToAll, publishToUsers } from './realtime-publish';
 import { publishToAdmins } from './admin-monitor-publish';
 import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
+import type { MttAnswer, MttReport, MttSeat } from './mtt';
 
 export interface Env {
   DB: D1Database;
@@ -93,6 +96,9 @@ export interface Env {
   REALTIME: DurableObjectNamespace;
   /** The control center's hub (admin-monitor.ts): a room tells the console its counts, and its summary while followed. */
   ADMIN_MONITOR?: DurableObjectNamespace;
+  /** The table rooms (a tournament's coordinator wakes its tables up) and the coordinators (coordinator.ts). */
+  TABLES?: DurableObjectNamespace;
+  TOURNAMENTS?: DurableObjectNamespace;
 }
 
 interface Identity {
@@ -178,6 +184,29 @@ interface SeatState {
   bank?: { ms: number; hands: number } | null;
 }
 
+/**
+ * A multi-table tournament's table (docs/TOURNAMENT_MTT.md): it plays the seats its coordinator gives it and reports
+ * every hand back. The tournament (`RoomState.tourney`) is then the coordinator's, as it last answered.
+ */
+interface RoomMtt {
+  /** The roster revision this table last seated (told with every call). */
+  applied: number;
+  /** This table's hands, and the last one's report until the coordinator has taken it. */
+  seq: number;
+  report: MttReport | null;
+  /** A call is owed (a hand to report, a wake-up, a call that failed): `unfinishedWork` retries it. */
+  due: boolean;
+  /** Answered since the last hand: the next deal may go ahead (not while it is the final table waiting for players). */
+  ready: boolean;
+  hold: boolean;
+  /** The final table, its seats drawn. */
+  final: boolean;
+  /** Tables still open. */
+  tables: number;
+  /** Players this table let go, and to which table (each is shown their own: the page follows them there). */
+  movedTo: Record<string, string>;
+}
+
 /** A word for one player about a top-up or rebuy the room carried out on its own. */
 type Notice = { userId: string; code: NoticeCode; amount?: number };
 
@@ -246,6 +275,8 @@ interface RoomState {
    * then on the room's own state leads, and D1 only brings an operator's pause request and an abort.
    */
   tourney?: TourneyState | null;
+  /** A multi-table tournament's table: what its coordinator last answered (`mttSync`). */
+  mtt?: RoomMtt | null;
 }
 
 const FIRST_HAND_DELAY_MS = 2_500;
@@ -525,11 +556,15 @@ export class TableRoom extends DurableObject<Env> {
 
   // ------------------------------------------------------------------ private tables
 
-  /** Whether a join code hash lets `userId` in: public table, the member room's own host, or the current code. */
+  /**
+   * Whether a join code hash lets `userId` in: public table, the member room's own host, or the current code. A private
+   * tournament's table has no code: its players (also those out of it) watch it, nobody else.
+   */
   private mayEnter(userId: string, codeHash: string | null | undefined): boolean {
     const t = this.table!;
     if (!t.isPrivate) return true;
     if (t.roomType === 'member' && t.createdBy === userId) return true;
+    if (t.roomType === 'tournament') return !!this.room.tourney?.players[userId];
     return !!codeHash && codeHash === t.joinCodeHash;
   }
 
@@ -541,10 +576,10 @@ export class TableRoom extends DurableObject<Env> {
     return this.mayEnter(a.userId, a.codeHash ?? null) || this.room.waitlist.some((w) => w.userId === a.userId);
   }
 
-  /** Private tables without spectators admit only people with the code, besides those already seated. */
+  /** Private tables without spectators (and private tournaments' tables) admit only people with access, besides those already seated. */
   private mustRefuse(a: Identity): boolean {
     const t = this.table!;
-    return t.isPrivate && !t.allowSpectators && this.seatIndexOf(a.userId) === null && !this.hasAccess(a);
+    return t.isPrivate && (!t.allowSpectators || t.roomType === 'tournament') && this.seatIndexOf(a.userId) === null && !this.hasAccess(a);
   }
 
   private refuse(ws: WebSocket) {
@@ -819,6 +854,7 @@ export class TableRoom extends DurableObject<Env> {
               this.takeMaint(maintenance, read);
               // A tournament's pause or resume (from the next hand), or its abort (which comes with the close below).
               await this.takeTourney(t.tournament);
+              if (this.room.mtt?.due) await this.mttSync();
               if (!this.dealsNow()) await this.stopTourneyClock();
               if (t.status === 'closing' && !this.room.closed) await this.beginClose();
               // A room an older build closed before telling D1.
@@ -856,6 +892,13 @@ export class TableRoom extends DurableObject<Env> {
           case 'close':
             await this.beginClose();
             return Response.json({ ok: true, closed: this.room.closed, handInProgress: !!this.hand });
+          case 'mtt-poke':
+            // The tournament's coordinator has something for this table: it calls back now, or once the hand is over.
+            if (this.room.mtt && !this.room.closed) {
+              this.room.mtt.due = true;
+              await this.mttSync();
+            }
+            return Response.json({ ok: true });
           case 'kick':
             return Response.json(
               await this.kick(url.searchParams.get('user') ?? '', url.searchParams.get('reason') === 'suspended' ? 'suspended' : 'disconnected', url.searchParams.get('leave') === '1'),
@@ -1916,8 +1959,12 @@ export class TableRoom extends DurableObject<Env> {
       // places for those who lost their last chip, the winner once one player is left — written to D1 below.
       this.refillTimeBanks(h);
       this.room.tbCount = null;
-      bustOut(tn, h.startingSeats, stacks, now, (id) => this.room.seats.find((s) => s?.userId === id)?.vip);
-      if (tn.status !== 'aborted') tn.dirty = true;
+      // A multi-table tournament's places are its coordinator's: the hand is reported to it (`mttSync`, below).
+      if (this.room.mtt) this.mttReport(h, stacks);
+      else {
+        bustOut(tn, h.startingSeats, stacks, now, (id) => this.room.seats.find((s) => s?.userId === id)?.vip);
+        if (tn.status !== 'aborted') tn.dirty = true;
+      }
       await this.save();
     } else if (firstTime) {
       const stacks = h.finalStacks();
@@ -1975,7 +2022,8 @@ export class TableRoom extends DurableObject<Env> {
     // here, nothing shown depends on D1 having it, and commands sent on seeing it wait in `run` until settle is done.
     this.broadcast(cues);
     for (const r of reacts) for (const s of this.sockets()) this.send(s, r);
-    if (tn) await this.syncTourney();
+    if (this.room.mtt) await this.mttSync();
+    else if (tn) await this.syncTourney();
     else await this.retryUnrecorded();
     // Top-ups that waited for this hand and the automatic policy (rebuy, top-up) happen before busted players stand up.
     const notices = await this.applyTopUps(h.handId);
@@ -2101,7 +2149,15 @@ export class TableRoom extends DurableObject<Env> {
     const now = Date.now();
     const tn = t.roomType === 'tournament' ? (this.room.tourney ?? null) : null;
     let blinds = { sb: t.smallBlind, bb: t.bigBlind };
-    if (tn) {
+    if (tn && this.room.mtt) {
+      // The coordinator's level clock as it last answered: the level its time has reached now, fixed for the hand.
+      if (tn.stoppedAt === null) {
+        const c = advanceLevel({ level: tn.level, levelEndsAt: tn.levelEndsAt }, tn.levels.length, tn.levelMs, now);
+        tn.level = c.level;
+        tn.levelEndsAt = c.levelEndsAt;
+      }
+      blinds = blindsAt(tn.levels, tn.level);
+    } else if (tn) {
       // The level is fixed here for the whole hand: one whose time runs out during it applies from the next deal.
       runClock(tn, now);
       tn.hands += 1;
@@ -2132,6 +2188,9 @@ export class TableRoom extends DurableObject<Env> {
     if (t.handsPaused || this.inMaintenance()) return false;
     if (t.roomType !== 'tournament') return true;
     const tn = this.room.tourney;
+    // A multi-table tournament's table waits for its coordinator's answer after every hand (its seats may change).
+    const m = this.room.mtt;
+    if (m && (!m.ready || m.report || m.hold)) return false;
     return !!tn && tn.status === 'running' && !tn.pauseRequested && this.room.seats.some((s) => !!s && s.phase === 'seated' && s.stack > 0 && !s.sittingOut);
   }
 
@@ -2150,10 +2209,15 @@ export class TableRoom extends DurableObject<Env> {
       if (row.status !== 'running' && row.status !== 'finished' && row.status !== 'aborted') return false;
       const seeded = seedTourney(row, now);
       this.room.tourney = seeded;
+      // A multi-table tournament's table seats its own players where the coordinator dealt them, then asks it (the
+      // coordinator's answer leads from then on: `mttSync`).
+      const mtt = row.format === 'mtt';
+      if (mtt) this.room.mtt = { applied: 0, seq: 0, report: null, due: true, ready: false, hold: false, final: false, tables: 0, movedTo: {} };
       if (seeded.status === 'running') {
         for (const e of row.entries) {
           const stack = e.stack ?? row.startStack;
           if (e.status !== 'playing' || stack <= 0 || this.seatIndexOf(e.userId) !== null) continue;
+          if (mtt && e.tableId !== this.tableId) continue;
           const free = e.seat !== null && e.seat >= 0 && e.seat < this.room.seats.length && !this.room.seats[e.seat] ? e.seat : this.room.seats.findIndex((x) => !x);
           if (free < 0) continue;
           const role = publicRole(e.role);
@@ -2195,7 +2259,8 @@ export class TableRoom extends DurableObject<Env> {
   /** A running tournament whose table deals no hand now (paused, maintenance): its level clock stops until the next deal. */
   private async stopTourneyClock() {
     const tn = this.room.tourney;
-    if (this.table?.roomType !== 'tournament' || tn?.status !== 'running' || (this.hand && !this.hand.isSettled)) return;
+    // (A multi-table tournament's clock is its coordinator's.)
+    if (this.table?.roomType !== 'tournament' || tn?.status !== 'running' || (this.hand && !this.hand.isSettled) || this.room.mtt) return;
     if (!stopClock(tn, Date.now())) return;
     tn.dirty = true;
     await this.save();
@@ -2208,7 +2273,7 @@ export class TableRoom extends DurableObject<Env> {
    */
   private async syncTourney(): Promise<boolean> {
     const tn = this.room.tourney;
-    if (!tn?.dirty || !this.tableId) return true;
+    if (!tn?.dirty || !this.tableId || this.room.mtt) return true;
     const now = Date.now();
     const stacks = this.room.seats.filter((x): x is SeatState => !!x && Object.hasOwn(tn.players, x.userId)).map((x) => ({ userId: x.userId, stack: x.stack }));
     const read = ++this.maintReads;
@@ -2232,6 +2297,144 @@ export class TableRoom extends DurableObject<Env> {
     await this.save();
     if (aborted && !this.room.closing) await this.beginClose();
     return true;
+  }
+
+  /** The hand just settled, for the coordinator: everyone dealt in, and the order the next big blinds reach those left. */
+  private mttReport(h: HandEngine, stacks: Map<string, number>) {
+    const m = this.room.mtt!;
+    m.seq += 1;
+    const bb = h.handView().bbSeat ?? -1;
+    const n = this.room.seats.length;
+    const order: string[] = [];
+    for (let k = 1; k <= n; k++) {
+      const s = this.room.seats[(((bb + k) % n) + n) % n];
+      if (s && s.phase === 'seated' && s.stack > 0) order.push(s.userId);
+    }
+    m.report = {
+      seq: m.seq,
+      stacks: h.startingSeats.map((p) => ({ userId: p.playerId, stack: stacks.get(p.playerId) ?? 0, startStack: p.stack, bank: this.room.seats.find((s) => s?.userId === p.playerId)?.bank ?? null })),
+      order,
+    };
+    m.ready = false;
+    m.due = true;
+  }
+
+  /**
+   * Calls the tournament's coordinator (coordinator.ts) between hands, with the last hand's report and the roster this
+   * table last seated, and seats what it answers. A call that fails stays due (`unfinishedWork` retries it) and the
+   * table deals nothing until one is answered. A table that let players go calls again at once, so they can sit down at
+   * their new table.
+   */
+  private async mttSync(): Promise<boolean> {
+    const m = this.room.mtt;
+    const tn = this.room.tourney;
+    if (!m || !tn || !this.tableId || (this.hand && !this.hand.isSettled)) return false;
+    for (let pass = 0; pass < 3; pass++) {
+      const read = ++this.maintReads;
+      let a: MttAnswer & { seq: number; maintenance?: Maintenance | null };
+      try {
+        const ns = this.env.TOURNAMENTS;
+        if (!ns) throw new Error('no tournament coordinator binding');
+        const res = await ns.get(ns.idFromName(tn.id)).fetch('https://mtt/call', {
+          method: 'POST',
+          headers: { 'x-jc-internal': this.env.INTERNAL_SECRET, 'content-type': 'application/json' },
+          body: JSON.stringify({ tournamentId: tn.id, table: this.tableId, applied: m.applied, report: m.report }),
+        });
+        if (!res.ok) throw new Error(`coordinator: ${res.status}`);
+        a = await res.json();
+      } catch (e) {
+        if (!m.due) {
+          m.due = true;
+          await this.save();
+        }
+        this.fault('tournament coordinator call failed; will retry', e);
+        return false;
+      }
+      const moved = a.moves.length > 0 && a.status === 'running';
+      const cues = this.mttApply(a);
+      await this.save();
+      if (a.maintenance !== undefined && this.takeMaint(a.maintenance, read)) void this.run(() => this.maintenanceChanged());
+      this.broadcast(cues);
+      if ((a.closed || a.status === 'aborted') && !this.room.closing) {
+        await this.beginClose();
+        return true;
+      }
+      if (!moved) break;
+    }
+    await this.afterChange();
+    return true;
+  }
+
+  /** Takes on the coordinator's answer: the tournament as it has it now, and this table's roster (seated as it says). */
+  private mttApply(a: MttAnswer & { seq: number }): TableCue[] {
+    const m = this.room.mtt!;
+    const tn = this.room.tourney!;
+    const now = Date.now();
+    tn.status = a.status;
+    tn.level = a.level;
+    tn.levelEndsAt = a.levelEndsAt;
+    tn.levelLeftMs = a.levelLeftMs;
+    tn.stoppedAt = a.stoppedAt;
+    tn.pauseRequested = a.paused;
+    tn.players = a.players;
+    tn.places = a.places;
+    tn.confirmed = a.places.length;
+    tn.winnerId = a.winnerId;
+    tn.finishedAt = a.finishedAt;
+    tn.hands = a.hands;
+    tn.dirty = false;
+    if (a.status === 'finished') tn.closeAt ??= (a.finishedAt ?? now) + TOURNAMENT_FINISH_LINGER_MS;
+    const cues: TableCue[] = [];
+    // An aborted tournament's seats go with the close; nothing changes at a table already closing.
+    if (a.status !== 'aborted' && !this.room.closing && !this.room.closed) {
+      const next: (SeatState | null)[] = this.room.seats.map(() => null);
+      for (const x of a.seats) {
+        if (!Number.isInteger(x.seat) || x.seat < 0 || x.seat >= next.length || next[x.seat]) continue;
+        next[x.seat] = this.room.seats.find((s) => s?.userId === x.userId) ?? this.mttSeat(tn, x, now);
+      }
+      for (let i = 0; i < next.length; i++) {
+        const before = this.room.seats[i];
+        const after = next[i];
+        if (before?.userId === after?.userId) continue;
+        if (before) cues.push({ kind: 'leave', seatIndex: i });
+        if (after) cues.push({ kind: 'seat', seatIndex: i, nickname: after.nickname });
+      }
+      this.room.seats = next;
+      for (const x of a.seats) delete m.movedTo[x.userId];
+      for (const mv of a.moves) m.movedTo[mv.userId] = mv.to;
+    }
+    m.seq = Math.max(m.seq, a.seq);
+    m.applied = a.rev;
+    m.hold = a.hold;
+    m.final = a.final;
+    m.tables = a.tables;
+    if (m.report && (a.seq >= m.report.seq || a.status !== 'running')) m.report = null;
+    m.ready = !a.hold && !m.report;
+    m.due = false;
+    return cues;
+  }
+
+  /** A player the coordinator moved here: seated with the chips and time bank they brought. */
+  private mttSeat(tn: TourneyState, x: MttSeat, now: number): SeatState {
+    const role = publicRole(x.role);
+    return {
+      userId: x.userId,
+      nickname: x.nickname,
+      avatarUrl: x.avatarUrl,
+      ...(role ? { role } : {}),
+      ...(!role && x.vip ? { vip: x.vip } : {}),
+      stack: x.stack,
+      // Not a table session: nothing of this seat is in the ledger.
+      tableSessionId: `tny:${tn.id}:${x.userId}`,
+      phase: 'seated',
+      buyIn: tn.startStack,
+      sittingOut: false,
+      sitOutSince: null,
+      leaveAfterHand: false,
+      timeouts: 0,
+      joinedAt: now,
+      ...(x.bank ? { bank: { ms: x.bank.ms, hands: x.bank.hands } } : {}),
+    };
   }
 
   /** The tournament as the table shows it to `userId`. */
@@ -2259,6 +2462,9 @@ export class TableRoom extends DurableObject<Env> {
       startStack: tn.startStack,
       places: [...tn.places].sort((x, y) => x.place - y.place).map((p) => ({ nickname: p.nickname, place: p.place, ...(p.vip ? { vip: p.vip } : {}) })),
       you: { status, place: mine?.place ?? null },
+      ...(this.room.mtt
+        ? { mtt: { tables: this.room.mtt.tables, finalTable: this.room.mtt.final, hold: this.room.mtt.hold, movedTo: this.room.mtt.movedTo[userId] ?? null } }
+        : {}),
     };
   }
 
@@ -2864,7 +3070,7 @@ export class TableRoom extends DurableObject<Env> {
    * Work a failed D1 call left behind: a buy-in, leave or cash-out cut short, a close, a finished hand not yet recorded.
    */
   private unfinishedWork(): boolean {
-    if (this.unrecorded.size > 0 || this.room.tourney?.dirty) return true;
+    if (this.unrecorded.size > 0 || this.room.tourney?.dirty || (this.room.mtt?.due && !this.room.closed)) return true;
     if (this.room.closing && !this.room.closed && !(this.hand && !this.hand.isSettled)) return true;
     return this.room.seats.some(
       (s) => s && (s.phase === 'pending' || ((s.phase === 'cashing' || (s.phase === 'seated' && s.leaveAfterHand)) && !this.waitsForHand(s))),
@@ -2877,6 +3083,7 @@ export class TableRoom extends DurableObject<Env> {
       await this.standFolded();
       await this.retryUnrecorded();
       await this.syncTourney();
+      if (this.room.mtt?.due && !this.room.closed) await this.mttSync();
       if (this.room.closing && !this.room.closed) await this.continueClose();
       this.broadcast(cues);
       this.notify(notices);
@@ -3263,6 +3470,8 @@ export class TableRoom extends DurableObject<Env> {
     // A running turn whose alarm is missing or set past its deadline: nothing would time it out.
     if (live && deadline && !h!.isStalled() && (!alarmAt || alarmAt > Math.max(deadline, now) + 1_000)) issues.push('timer_unarmed');
     if (this.room.tourney?.dirty) issues.push('tournament_unsynced');
+    // A multi-table tournament's coordinator not answering: the table deals nothing until it does.
+    if (this.room.mtt?.due && !this.room.closed && !(this.hand && !this.hand.isSettled)) issues.push('tournament_unanswered');
     return issues;
   }
 
