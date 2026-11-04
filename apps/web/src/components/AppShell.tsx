@@ -46,7 +46,7 @@ export function LangToggle() {
 
 export function BalancePill({ amount }: { amount: number }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 font-mono text-sm font-semibold text-gold-300 tabular-nums max-[374px]:gap-1.5 max-[374px]:px-2.5 max-[374px]:text-[13px]" data-testid="balance">
+    <span className="inline-flex items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 font-mono text-sm font-semibold text-gold-300 tabular-nums max-[374px]:gap-1 max-[374px]:px-2 max-[374px]:text-[13px]" data-testid="balance">
       <span className="jc-chip" style={{ ['--chip-size' as string]: '0.9rem', ['--chip-base' as string]: '#9c7414', ['--chip-face' as string]: '#c9a227' }} />
       {formatChips(amount)}
     </span>
@@ -108,7 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh" style={{ background: 'var(--t-bg)' }}>
       <header className="sticky top-0 z-40 border-b border-gold-500/10 bg-ink-950/80 backdrop-blur-md">
-        <div className="relative mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 max-[374px]:gap-2 max-[374px]:px-2.5">
+        <div className="relative mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 max-[374px]:gap-1.5 max-[374px]:px-2">
           <Link to="/" className="-mx-1 shrink-0 px-1" aria-label="JC ROYAL">
             <Logo size={38} withWordmark className="[&>span]:hidden lg:[&>span]:inline" />
           </Link>
@@ -142,8 +142,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               {t('nav.me')}
             </NavLink>
           </nav>
-          {/* Below 375 px a ten-digit wallet, the mail, the bell and the settings fit only with the header's sides
-              a little narrower and the buttons laid out narrower (the wallet stays whole; each is still a 40 px target). */}
+          {/* Below 375 px a ten-digit wallet, the mail, the bell and the settings fit only with the header's sides,
+              the gap after the logo and the wallet's padding a little narrower and the buttons laid out narrower (the
+              wallet stays whole at 13 px; each button is still a 40 px target). At 320 px the settings target then ends
+              about 4 px inside the screen with the widest monospace digits measured (a wider row widens the phone's
+              layout viewport, and the bottom tabs with it). */}
           <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
             {me && <BalancePill amount={me.balance} />}
             {me && (

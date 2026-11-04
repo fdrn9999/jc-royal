@@ -317,6 +317,8 @@ board.post.purge, table.purge, tournament_template.purge
 
 - 운영 데이터에는 돌리지 않는다. 통합 시험(`tests/integration/admin-purge.test.ts`)과 E2E(`tests/e2e/purge.spec.ts`)는 로컬 wrangler D1에서 만든 데이터만 지운다.
 
+## 최초 관리자 생성(부트스트랩)
+
 1. 배포 시크릿을 설정한다: `wrangler secret put ADMIN_BOOTSTRAP_TOKEN --env production -c apps/api/wrangler.jsonc` (16자 이상 무작위 값).
 2. 플레이어 사이트에서 관리자로 쓸 계정을 가입한다.
 3. `POST https://admin.<domain>/api/admin/auth/bootstrap {token, email}`을 호출한다. 슈퍼관리자가 하나도 없을 때만 성공한다.
