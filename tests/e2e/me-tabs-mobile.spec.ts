@@ -6,11 +6,16 @@ const shot = (name: string) => `test-results/me-tabs-${name}.png`;
 type Box = { x: number; y: number; width: number; height: number };
 const box = async (page: Page, testid: string) => (await page.getByTestId(testid).boundingBox()) as Box;
 
-/** What My Page reads for itself (its lists and the cards on its tabs), as opposed to what every page reads. */
+/**
+ * What My Page reads for itself (its lists and the cards on its tabs), as opposed to what every page reads. The presence
+ * beat is not My Page's: every signed-in page sends it on opening and every 30 s after (lib/presence.ts), so a slow run
+ * of this test (CI 2026-11-04: 32 s) saw the next one.
+ */
 function pageLoads(page: Page) {
   const seen: string[] = [];
   page.on('request', (r) => {
     const { pathname } = new URL(r.url());
+    if (pathname === '/api/me/presence/heartbeat') return;
     if (pathname.startsWith('/api/me/') || pathname === '/api/auth/me/sessions') seen.push(pathname);
   });
   return seen;

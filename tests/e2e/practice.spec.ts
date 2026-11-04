@@ -59,12 +59,17 @@ test('free practice: topic, bot level and style, stacks and blinds; results on t
     await page.screenshot({ path: `test-results/practice-setup-${width}.png`, fullPage: true, animations: 'disabled' });
   }
 
-  // Nothing of the practice reaches the server: no socket, and nothing written but the academy's own progress.
+  // Nothing of the practice reaches the server: no socket, and nothing written but the academy's own progress. Every
+  // signed-in page also beats its presence on opening and every 30 s after (lib/presence.ts), whatever it shows, so a
+  // slow run (CI 2026-11-04: 32 s) sees one: it is checked to carry only that this device is here, not counted.
   const sockets: string[] = [];
   const writes: string[] = [];
+  const beats: string[][] = [];
   page.on('websocket', (ws) => sockets.push(ws.url()));
   page.on('request', (r) => {
-    if (r.method() !== 'GET' && !r.url().includes('/api/academy/')) writes.push(`${r.method()} ${r.url()}`);
+    if (r.method() === 'GET' || r.url().includes('/api/academy/')) return;
+    if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/me/presence/heartbeat') beats.push(Object.keys(r.postDataJSON() ?? {}));
+    else writes.push(`${r.method()} ${r.url()}`);
   });
   await page.getByTestId('free-start').tap();
   await expect(page.getByTestId('free-table')).toBeVisible();
@@ -74,6 +79,7 @@ test('free practice: topic, bot level and style, stacks and blinds; results on t
   await playHands(page, 3);
   expect(sockets).toEqual([]);
   expect(writes).toEqual([]);
+  for (const keys of beats) expect(keys.filter((k) => !['conn', 'idleMs', 'visible'].includes(k)), 'a presence beat says more than presence').toEqual([]);
 
   // The results: the topic, said to be math and rules of thumb, kept on this screen only.
   await page.getByTestId('free-summary-open').tap();
