@@ -45,10 +45,14 @@ export function LangToggle() {
 }
 
 export function BalancePill({ amount }: { amount: number }) {
+  const text = formatChips(amount);
+  // From eleven digits (14 characters) the whole number and the buttons beside it no longer fit a 320 px phone (the
+  // header 4 px wider than the screen, measured). Below 375 px the chip in front gives way then, not the number.
+  const long = text.length >= 14;
   return (
     <span className="inline-flex items-center gap-2 rounded-full border border-gold-500/30 bg-gold-500/10 px-3 py-1 font-mono text-sm font-semibold text-gold-300 tabular-nums max-[374px]:gap-1 max-[374px]:px-2 max-[374px]:text-[13px]" data-testid="balance">
-      <span className="jc-chip" style={{ ['--chip-size' as string]: '0.9rem', ['--chip-base' as string]: '#9c7414', ['--chip-face' as string]: '#c9a227' }} />
-      {formatChips(amount)}
+      <span className={long ? 'jc-chip max-[374px]:hidden' : 'jc-chip'} style={{ ['--chip-size' as string]: '0.9rem', ['--chip-base' as string]: '#9c7414', ['--chip-face' as string]: '#c9a227' }} />
+      {text}
     </span>
   );
 }

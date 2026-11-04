@@ -119,3 +119,31 @@ test('mobile: tournaments are a bottom tab of their own, whole on one line besid
   await page.getByRole('link', { name: 'My Page', exact: true }).last().tap({ timeout: 10_000 });
   await expect(page).toHaveURL(/\/me$/);
 });
+
+test('mobile: a wallet of eleven or twelve digits stays whole, and the header and the bottom tabs stay inside the narrowest phones', async ({ browser }) => {
+  const { page } = await signUp(browser, { mobile: true });
+  const id = await page.evaluate(async () => ((await (await fetch('/api/auth/me')).json()) as { id: string }).id);
+  // Each through an adjustment the ledger records, from the balance before it (the books stay balanced).
+  let before = 10_000;
+  for (const [big, shown] of [
+    [12_345_678_901, '12,345,678,901'],
+    [123_456_789_012, '123,456,789,012'],
+  ] as const) {
+    sql(
+      `INSERT INTO chip_ledger (id, user_id, type, amount, balance_after, idempotency_key, memo, created_at) VALUES ('e2e-nav-${big}-${id}', '${id}', 'admin_adjust', ${big - before}, ${big}, 'e2e-nav-${big}-${id}', 'e2e', ${Date.now()}); UPDATE users SET balance = ${big} WHERE id = '${id}'`,
+    );
+    before = big;
+    for (const w of [320, 344, 360]) {
+      await page.setViewportSize({ width: w, height: 740 });
+      await page.goto('/');
+      await expect(page.getByTestId('balance')).toHaveText(shown);
+      // A header wider than the phone widens its layout viewport, and the fixed bottom tabs with it.
+      expect(await widerThanDevice(page), `${shown} ${w}: wider than the screen`).toBe(false);
+      await expect(page.getByTestId('settings-open')).toBeInViewport({ ratio: 1 });
+      const nav = await bottomNav(page);
+      expect(nav.lastRight, `${shown} ${w}: the last tab is off the screen`).toBeLessThanOrEqual(w + 0.5);
+      expect(nav.scrolls, `${shown} ${w}: the row scrolls`).toBe(false);
+      if (w === 320) await page.screenshot({ path: test.info().outputPath(`wallet-${shown.length}-320.png`) });
+    }
+  }
+});
