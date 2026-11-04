@@ -13,6 +13,7 @@ import { roomCall } from '../lib/room';
 import { hasRoomAccess, issueRoomAccess } from '../lib/room-access';
 import { refuseNewGamesInMaintenance } from '../lib/service';
 import { resolveSession } from '../lib/session';
+import { visibleSql } from '../lib/tournament';
 
 type TableRow = typeof schema.tables.$inferSelect;
 
@@ -205,6 +206,11 @@ export const tableRoutes = new Hono<AppEnv>()
     if (!r) fail(404, 'not_found', 'table not found');
     const me = c.var.user!.id;
     const mine = await seatedTables(c, me, r.t.id);
+    // A private tournament's table is its tournament's: not found, the same way, for whoever may not see that (visibleSql).
+    if (r.t.roomType === 'tournament' && r.t.isPrivate && !mine.has(r.t.id)) {
+      const seen = await c.env.DB.prepare(`SELECT 1 AS ok FROM tournaments tn WHERE (tn.table_id = ?1 OR tn.id = ?2) AND ${visibleSql('tn', '?3')} LIMIT 1`).bind(r.t.id, r.t.tournamentId, me).first();
+      if (!seen) fail(404, 'not_found', 'table not found');
+    }
     return c.json(toLobbyDto(r.t, r.host, await badgesFor(c, [r.t.roomType === 'member' ? r.host?.role : null]), participationOf(r.t, me, mine.has(r.t.id))));
   })
   /**

@@ -35,6 +35,7 @@ const ko = {
   achievementsHidden: '이 회원은 업적을 공개하지 않습니다.',
   achievementsNote: '업적은 서버가 기록한 핸드와 토너먼트로만 정해지며 칩 보상은 없습니다. 메이드 핸드는 테이블에 공개된 카드만 셉니다.',
   notYet: '아직',
+  challenges: '도전과제 {n}회 완료 · 진행 점수 {p}',
   stats: '통계',
   statsHidden: '이 회원은 통계를 공개하지 않습니다.',
   hands: '플레이한 핸드',
@@ -56,6 +57,8 @@ const ko = {
   'a.tournament_win.d': '처음으로 토너먼트에서 우승했다',
   'a.streak_7': '7일 연속',
   'a.streak_7.d': '7일 연속으로 접속했다',
+  'a.challenges_10': '도전과제 10개',
+  'a.challenges_10.d': '도전과제를 10번 완료했다',
   board: '시즌 리더보드',
   season: '{season} 시즌',
   prev: '이전 시즌',
@@ -84,6 +87,7 @@ const en: typeof ko = {
   achievementsHidden: 'This player keeps their achievements private.',
   achievementsNote: 'Achievements come only from the hands and tournaments the server recorded, and carry no chips. Made hands count only when shown at the table.',
   notYet: 'Not yet',
+  challenges: 'Challenges completed: {n} · progress points {p}',
   stats: 'Stats',
   statsHidden: 'This player keeps their stats private.',
   hands: 'Hands played',
@@ -105,6 +109,8 @@ const en: typeof ko = {
   'a.tournament_win.d': 'Won a first tournament',
   'a.streak_7': '7-day streak',
   'a.streak_7.d': 'Played on 7 days in a row',
+  'a.challenges_10': 'Ten challenges',
+  'a.challenges_10.d': 'Completed ten challenges',
   board: 'Season leaderboard',
   season: 'Season {season}',
   prev: 'Previous season',
@@ -222,7 +228,7 @@ export function PlayerCardPage() {
               <Empty>{tr('achievementsHidden')}</Empty>
             ) : (
               <>
-                <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="card-achievements">
+                <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="card-achievements">
                   {ACHIEVEMENTS.map((code: AchievementCode) => {
                     const got = card.achievements!.find((a) => a.code === code);
                     return (
@@ -241,6 +247,11 @@ export function PlayerCardPage() {
                     );
                   })}
                 </ul>
+                {card.challenges && (
+                  <p className="mt-3 text-sm text-ink-200" data-testid="card-challenges">
+                    {tr('challenges', { n: card.challenges.completed, p: card.challenges.points })}
+                  </p>
+                )}
                 <p className="mt-3 text-xs text-ink-400">{tr('achievementsNote')}</p>
               </>
             )}

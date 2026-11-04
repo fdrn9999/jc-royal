@@ -37,14 +37,19 @@ import { queuePush } from '../lib/notify';
 import { pick } from '../lib/pick';
 import { roomCall } from '../lib/room';
 import {
+  cancelTournament,
+  coordinatorCall,
+  mttEnabled,
   newTournamentId,
   parseLevels,
   reloadRoom,
+  reloadTournament,
   startTournament,
   TB_COLUMNS,
   timeBankOf,
   TOURNAMENT_ID,
   tournamentChanged,
+  tournamentTold,
   tournamentNotice,
   tournamentNoticeTold,
 } from '../lib/tournament';
@@ -76,9 +81,9 @@ const ROW_COLUMNS = `tn.id, tn.name, tn.status, tn.template_id AS templateId, tn
   tn.pause_changed_at AS pauseChangedAt, tn.paused_at AS pausedAt, tn.players_left AS playersLeft, tn.hands, tn.room_seen_at AS roomSeenAt,
   tn.table_id AS tableId, tt.status AS tableStatus, tn.created_at AS createdAt, tn.started_at AS startedAt,
   COALESCE(tn.finished_at, tn.aborted_at, tn.cancelled_at) AS endedAt, tn.end_reason AS endReason, w.nickname AS winner, tn.version, tn.roster,
-  tn.updated_at AS updatedAt,
+  tn.updated_at AS updatedAt, tn.format, tn.table_seats AS tableSeats, tn.tables_left AS tablesLeft, tn.is_private AS isPrivate, ph.nickname AS privateHost,
   (SELECT COUNT(*) FROM tournament_entries e WHERE e.tournament_id = tn.id AND e.status NOT IN ('unregistered', 'dropped')) AS registered`;
-const ROW_FROM = `tournaments tn LEFT JOIN users w ON w.id = tn.winner_id LEFT JOIN tables tt ON tt.id = tn.table_id`;
+const ROW_FROM = `tournaments tn LEFT JOIN users w ON w.id = tn.winner_id LEFT JOIN tables tt ON tt.id = tn.table_id LEFT JOIN users ph ON ph.id = tn.host_id`;
 
 /** The SQL form of tournamentRecovery (packages/types), for the "needs recovery" filter: 8 bound times, see recoveryBinds. */
 const RECOVERY_SQL = `(
@@ -132,6 +137,8 @@ function rowOf(r: Record<string, unknown>, now: number): AdminTournamentRow {
     winner: (r.winner as string | null) ?? null,
     version: Number(r.version),
     roster: Number(r.roster),
+    ...(r.format === 'mtt' ? { mtt: { tableSeats: Number(r.tableSeats), tablesLeft: num(r.tablesLeft) } } : {}),
+    ...(Number(r.isPrivate) === 1 ? { privateHost: String(r.privateHost ?? '') } : {}),
   };
   const recovery = tournamentRecovery(
     {
@@ -176,7 +183,7 @@ async function refused(db: D1Database, id: string, baseVersion: number): Promise
 
 const TEMPLATE_COLUMNS = `t.id, t.name, t.capacity, t.min_players AS minPlayers, t.start_stack AS startStack, t.levels, t.level_ms AS levelMs,
   t.turn_seconds AS turnSeconds, ${TB_COLUMNS('t')}, t.min_hands AS minHands, t.require_verified AS requireVerified, t.auto_start AS autoStart,
-  t.status, t.version, t.created_at AS createdAt, t.updated_at AS updatedAt, u.nickname AS updatedBy`;
+  t.format, t.table_seats AS tableSeats, t.status, t.version, t.created_at AS createdAt, t.updated_at AS updatedAt, u.nickname AS updatedBy`;
 
 function templateOf(r: Record<string, unknown>): TournamentTemplateDto {
   return {
@@ -192,6 +199,7 @@ function templateOf(r: Record<string, unknown>): TournamentTemplateDto {
     minHands: Number(r.minHands),
     requireVerified: Number(r.requireVerified) === 1,
     autoStart: Number(r.autoStart) === 1,
+    ...(r.format === 'mtt' ? { format: 'mtt' as const, tableSeats: Number(r.tableSeats) === 6 ? (6 as const) : (9 as const) } : {}),
     status: r.status === 'archived' ? 'archived' : 'active',
     version: Number(r.version),
     createdAt: Number(r.createdAt),
@@ -201,7 +209,8 @@ function templateOf(r: Record<string, unknown>): TournamentTemplateDto {
 }
 
 const STRUCTURE_KEYS = ['name', 'capacity', 'minPlayers', 'startStack', 'levels', 'levelMinutes', 'turnSeconds', 'timeBank', 'minHands', 'requireVerified', 'autoStart'] as const;
-const structureOf = (s: TournamentStructure): TournamentStructure => pick(s, STRUCTURE_KEYS);
+/** A structure's settings; the format and seats a table only for a multi-table one (a Sit & Go's reads as it always did). */
+const structureOf = (s: TournamentStructure): TournamentStructure => ({ ...pick(s, STRUCTURE_KEYS), ...(s.format === 'mtt' ? { format: 'mtt' as const, tableSeats: s.tableSeats } : {}) });
 const sameStructure = (a: TournamentStructure, b: TournamentStructure) => JSON.stringify(structureOf(a)) === JSON.stringify(structureOf(b));
 
 async function loadTemplate(db: D1Database, id: string) {
@@ -209,9 +218,10 @@ async function loadTemplate(db: D1Database, id: string) {
   return r ? templateOf(r) : null;
 }
 
-function checkStructure(s: TournamentStructure) {
+function checkStructure(c: Context<AppEnv>, s: TournamentStructure) {
   const problem = tournamentStructureProblem(s);
   if (problem) fail(400, 'tournament_structure_invalid', 'the structure does not hold together', { problem });
+  if (s.format === 'mtt' && !mttEnabled(c.env)) fail(409, 'mtt_disabled', 'multi-table tournaments are not enabled');
 }
 
 /** The values a structure writes, in the order of the template columns from `name` to `auto_start`. */
@@ -232,6 +242,8 @@ const structureBinds = (s: TournamentStructure) => [
   s.minHands,
   s.requireVerified ? 1 : 0,
   s.autoStart ? 1 : 0,
+  s.format === 'mtt' ? 'mtt' : 'sng',
+  s.format === 'mtt' ? (s.tableSeats ?? 0) : 0,
 ];
 
 const TemplateWrite = TournamentStructureSchema.extend({ reason: ReasonSchema });
@@ -317,33 +329,37 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     if (!tpl) fail(404, 'tournament_template_not_found', 'template not found');
     if (tpl.status !== 'active') fail(409, 'tournament_template_archived', 'the template is archived');
     if (tpl.version !== body.templateVersion) fail(409, 'tournament_template_conflict', 'the template changed meanwhile', { template: tpl });
+    if (tpl.format === 'mtt' && !mttEnabled(c.env)) fail(409, 'mtt_disabled', 'multi-table tournaments are not enabled');
     const name = body.name ?? tpl.name;
-    const open = await db.prepare(`SELECT COUNT(*) AS n FROM tournaments WHERE status IN ('registering', 'closed')`).first<{ n: number }>();
+    const open = await db.prepare(`SELECT COUNT(*) AS n FROM tournaments WHERE status IN ('registering', 'closed') AND is_private = 0`).first<{ n: number }>();
     if (body.preview) {
       return c.json({ preview: true, template: tpl, summary: { ...structureOf(tpl), name }, open: Number(open?.n ?? 0), openMax: TOURNAMENT_OPEN_MAX });
     }
     const id = newTournamentId();
     const now = Date.now();
-    const r = await db
-      .prepare(
-        `INSERT INTO tournaments (id, template_id, name, status, capacity, min_players, start_stack, levels, level_ms, turn_seconds,
-                tb_enabled, tb_initial_ms, tb_max_ms, tb_unit_ms, tb_refill_hands, tb_refill_ms, min_hands, require_verified, auto_start,
-                version, roster, level, hands, pause_requested, created_by, created_at, updated_at)
-         SELECT ?1, t.id, ?2, 'registering', t.capacity, t.min_players, t.start_stack, t.levels, t.level_ms, t.turn_seconds,
-                t.tb_enabled, t.tb_initial_ms, t.tb_max_ms, t.tb_unit_ms, t.tb_refill_hands, t.tb_refill_ms, t.min_hands, t.require_verified, t.auto_start,
-                1, 0, 0, 0, 0, ?3, ?4, ?4
-           FROM tournament_templates t
-          WHERE t.id = ?5 AND t.status = 'active' AND t.version = ?6
-            AND (SELECT COUNT(*) FROM tournaments WHERE status IN ('registering', 'closed')) < ?7`,
-      )
-      .bind(id, name, c.var.user!.id, now, tpl.id, tpl.version, TOURNAMENT_OPEN_MAX)
-      .run();
-    if (!r.meta.changes) {
+    const changed = tournamentTold(db, id, now);
+    const [r] = await db.batch([
+      db
+        .prepare(
+          `INSERT INTO tournaments (id, template_id, name, status, capacity, min_players, start_stack, levels, level_ms, turn_seconds,
+                  tb_enabled, tb_initial_ms, tb_max_ms, tb_unit_ms, tb_refill_hands, tb_refill_ms, min_hands, require_verified, auto_start,
+                  format, table_seats, version, roster, level, hands, pause_requested, created_by, created_at, updated_at)
+           SELECT ?1, t.id, ?2, 'registering', t.capacity, t.min_players, t.start_stack, t.levels, t.level_ms, t.turn_seconds,
+                  t.tb_enabled, t.tb_initial_ms, t.tb_max_ms, t.tb_unit_ms, t.tb_refill_hands, t.tb_refill_ms, t.min_hands, t.require_verified, t.auto_start,
+                  t.format, t.table_seats, 1, 0, 0, 0, 0, ?3, ?4, ?4
+             FROM tournament_templates t
+            WHERE t.id = ?5 AND t.status = 'active' AND t.version = ?6
+              AND (SELECT COUNT(*) FROM tournaments WHERE status IN ('registering', 'closed') AND is_private = 0) < ?7`,
+        )
+        .bind(id, name, c.var.user!.id, now, tpl.id, tpl.version, TOURNAMENT_OPEN_MAX),
+      changed.statement,
+    ]);
+    if (!r?.meta.changes) {
       const again = await loadTemplate(db, body.templateId);
       if (!again || again.status !== 'active' || again.version !== body.templateVersion) fail(409, 'tournament_template_conflict', 'the template changed meanwhile', { template: again });
       fail(409, 'tournament_limit', 'too many tournaments are open', { openMax: TOURNAMENT_OPEN_MAX });
     }
-    tournamentChanged(c.env, id, c.executionCtx);
+    tournamentChanged(c.env, id, changed.row, c.executionCtx);
     await audit(c, 'tournament.create', { type: 'tournament', id }, { templateId: tpl.id, templateVersion: tpl.version, name, structure: structureOf(tpl) });
     return c.json({ ok: true, tournament: await loadRow(db, id) });
   })
@@ -380,6 +396,8 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     if (!r) fail(404, 'tournament_not_found', 'tournament not found');
     const row = rowOf(r, now);
     const live = row.tableId && row.tableStatus && row.tableStatus !== 'closed' ? await roomCall(c, row.tableId, 'status') : null;
+    // A multi-table tournament: its coordinator's view (each table's players, the moves under way; no card).
+    const coordinator = row.mtt && row.status !== 'registering' && row.status !== 'closed' && row.status !== 'cancelled' ? await coordinatorCall(c.env, id, 'status') : null;
     const seats = ((live?.seats as (Record<string, unknown> | null)[] | undefined) ?? []).filter((s): s is Record<string, unknown> => !!s);
     const history = await searchAudit(db, { targetType: 'tournament', targetId: id, limit: 50, count: false });
     return c.json({
@@ -420,6 +438,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
             alarmAt: (live?.alarmAt as number | undefined) ?? null,
           }
         : null,
+      ...(row.mtt ? { coordinator: coordinator ? { answered: true, ...coordinator } : { answered: row.status === 'registering' || row.status === 'closed' ? null : false } } : {}),
       history: history.items,
     });
   })
@@ -429,11 +448,13 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     const { action, baseVersion } = await parseBody(c, RegistrationSchema);
     const [from, to] = action === 'close' ? (['registering', 'closed'] as const) : (['closed', 'registering'] as const);
     const now = Date.now();
-    const r = await c.env.DB.prepare(`UPDATE tournaments SET status = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1 AND status = ?4 AND version = ?5`)
-      .bind(id, to, now, from, baseVersion)
-      .run();
-    if (!r.meta.changes) await refused(c.env.DB, id, baseVersion);
-    tournamentChanged(c.env, id, c.executionCtx);
+    const changed = tournamentTold(c.env.DB, id, now);
+    const [r] = await c.env.DB.batch([
+      c.env.DB.prepare(`UPDATE tournaments SET status = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1 AND status = ?4 AND version = ?5`).bind(id, to, now, from, baseVersion),
+      changed.statement,
+    ]);
+    if (!r?.meta.changes) await refused(c.env.DB, id, baseVersion);
+    tournamentChanged(c.env, id, changed.row, c.executionCtx);
     // Reopened with every seat taken: a tournament that starts by itself starts now (as the last registration would have).
     let start = null;
     const t = await loadRow(c.env.DB, id);
@@ -459,28 +480,10 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     const db = c.env.DB;
     const before = await loadRow(db, id);
     if (!before) fail(404, 'tournament_not_found', 'tournament not found');
-    const now = Date.now();
-    const told = tournamentNoticeTold(db, id, 'cancelled', now);
-    const [r, sent] = await db.batch([
-      db
-        .prepare(
-          `UPDATE tournaments SET status = 'cancelled', cancelled_at = ?2, end_reason = 'cancelled', end_note = ?3, ended_by = ?4, version = version + 1, updated_at = ?2
-            WHERE id = ?1 AND status IN ('registering', 'closed') AND version = ?5`,
-        )
-        .bind(id, now, reason, c.var.user!.id, baseVersion),
-      tournamentNotice(db, before, 'cancelled', ['registered'], `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`, now),
-      told.statement,
-    ]);
-    if (!r?.meta.changes) await refused(db, id, baseVersion);
-    told.send(c.env, c.executionCtx, sent);
-    tournamentChanged(c.env, id, c.executionCtx);
-    await queuePush(
-      c.env,
-      [outboxForEntries(db, { tournamentId: id, type: 'tournament_cancel', statuses: ['registered'], prefix: 'tournament_cancel', url: `/tournaments/${id}`, guard: `tn.status = 'cancelled' AND tn.cancelled_at = ${now}`, now, night: isKstNight(now) })],
-      c.executionCtx,
-    );
-    await audit(c, 'tournament.cancel', { type: 'tournament', id }, { reason, from: before.status, registered: before.registered, notified: sent?.meta.changes ?? 0 });
-    return c.json({ ok: true, notified: sent?.meta.changes ?? 0, tournament: await loadRow(db, id) });
+    const res = await cancelTournament(c.env, before, { actorId: c.var.user!.id, reason, baseVersion, ctx: c.executionCtx });
+    if (!res) await refused(db, id, baseVersion);
+    await audit(c, 'tournament.cancel', { type: 'tournament', id }, { reason, from: before.status, registered: before.registered, notified: res!.notified });
+    return c.json({ ok: true, notified: res!.notified, tournament: await loadRow(db, id) });
   })
   /**
    * Pauses a running tournament from the next hand (the hand being played ends as dealt), or resumes it. The level
@@ -504,24 +507,29 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     const now = Date.now();
     const mine = `EXISTS (SELECT 1 FROM tournaments tn WHERE tn.id = ?1 AND tn.status = 'aborted' AND tn.aborted_at = ?2)`;
     const told = tournamentNoticeTold(db, id, 'aborted', now);
-    const [r, stopped, , sent] = await db.batch([
+    const changed = tournamentTold(db, id, now);
+    const [r, , stopped, , sent] = await db.batch([
       db
         .prepare(
           `UPDATE tournaments SET status = 'aborted', aborted_at = ?2, end_reason = 'aborted', end_note = ?3, ended_by = ?4, version = version + 1, updated_at = ?2
             WHERE id = ?1 AND status = 'running' AND version = ?5`,
         )
         .bind(id, now, reason, c.var.user!.id, baseVersion),
+      changed.statement,
       db.prepare(`UPDATE tournament_entries SET status = 'stopped', updated_at = ?2 WHERE tournament_id = ?1 AND status = 'playing' AND ${mine}`).bind(id, now),
       db
-        .prepare(`UPDATE tables SET status = 'closing', entry_blocked = 1, updated_at = ?2 WHERE id = (SELECT table_id FROM tournaments WHERE id = ?1) AND status = 'open' AND ${mine}`)
+        .prepare(
+          `UPDATE tables SET status = 'closing', entry_blocked = 1, updated_at = ?2
+            WHERE (id = (SELECT table_id FROM tournaments WHERE id = ?1) OR tournament_id = ?1) AND status = 'open' AND ${mine}`,
+        )
         .bind(id, now),
       tournamentNotice(db, before, 'aborted', ['stopped', 'eliminated'], `tn.status = 'aborted' AND tn.aborted_at = ${now}`, now),
       told.statement,
     ]);
     if (!r?.meta.changes) await refused(db, id, baseVersion);
     told.send(c.env, c.executionCtx, sent);
-    tournamentChanged(c.env, id, c.executionCtx);
-    const live = await reloadRoom(c.env, before.tableId);
+    tournamentChanged(c.env, id, changed.row, c.executionCtx);
+    const live = before.mtt ? await reloadAll(c.env, id) : await reloadRoom(c.env, before.tableId);
     // Stopped is told as called off (the same switch as a cancel).
     await queuePush(
       c.env,
@@ -548,8 +556,9 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     const { reason } = await parseBody(c, RecoverSchema);
     const before = await loadRow(c.env.DB, id);
     if (!before) fail(404, 'tournament_not_found', 'tournament not found');
-    if (!before.tableId) fail(409, 'tournament_state', 'the tournament has no table', { tournament: brief(before) });
-    const live = await reloadRoom(c.env, before.tableId);
+    if (!before.tableId && !(before.mtt && before.status !== 'registering' && before.status !== 'closed' && before.status !== 'cancelled'))
+      fail(409, 'tournament_state', 'the tournament has no table', { tournament: brief(before) });
+    const live = before.mtt ? await reloadAll(c.env, id) : await reloadRoom(c.env, before.tableId);
     const after = await loadRow(c.env.DB, id);
     await audit(c, 'tournament.recover', { type: 'tournament', id }, { reason: reason ?? null, codes: before.recovery, roomConfirmed: !!live, after: after?.recovery ?? [] });
     if (!live) fail(503, 'room_unavailable', 'the table did not answer; try again');
@@ -560,27 +569,31 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
   .get('/tournament-templates', async (c) => {
     const status = c.req.query('status');
     const { limit, offset } = page(c, 50);
-    const where = status === 'archived' || status === 'active' ? `WHERE t.status = '${status}'` : '';
+    // Multi-table templates are not shown while MTT_ENABLED is off (docs/TOURNAMENT_MTT.md).
+    const mtt = mttEnabled(c.env);
+    const where = [status === 'archived' || status === 'active' ? `t.status = '${status}'` : '', mtt ? '' : `t.format = 'sng'`].filter(Boolean);
     const { results } = await c.env.DB.prepare(
-      `SELECT ${TEMPLATE_COLUMNS} FROM tournament_templates t LEFT JOIN users u ON u.id = t.updated_by ${where} ORDER BY t.status, t.updated_at DESC, t.id LIMIT ?1 OFFSET ?2`,
+      `SELECT ${TEMPLATE_COLUMNS} FROM tournament_templates t LEFT JOIN users u ON u.id = t.updated_by ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY t.status, t.updated_at DESC, t.id LIMIT ?1 OFFSET ?2`,
     )
       .bind(limit + 1, offset)
       .all<Record<string, unknown>>();
-    return c.json({ templates: results.slice(0, limit).map(templateOf), hasMore: results.length > limit });
+    return c.json({ templates: results.slice(0, limit).map(templateOf), hasMore: results.length > limit, mttEnabled: mtt });
   })
   /** A new template. `preview`: the structure as it would be saved (checked), nothing written. */
   .post('/tournament-templates', async (c) => {
     const preview = await isPreview(c);
     const body = await parseBody(c, preview ? TemplatePreview : TemplateWrite);
     const s = structureOf(body);
-    checkStructure(s);
+    checkStructure(c, s);
     if (preview) return c.json({ preview: true, to: s });
     const id = newTournamentId();
     const now = Date.now();
     await c.env.DB.prepare(
       `INSERT INTO tournament_templates (id, name, capacity, min_players, start_stack, levels, level_ms, turn_seconds, tb_enabled, tb_initial_ms, tb_max_ms,
-              tb_unit_ms, tb_refill_hands, tb_refill_ms, min_hands, require_verified, auto_start, status, version, created_by, updated_by, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 'active', 1, ?18, ?18, ?19, ?19)`,
+              tb_unit_ms, tb_refill_hands, tb_refill_ms, min_hands, require_verified, auto_start, format, table_seats, status, version, created_by, updated_by,
+              created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, 'active', 1, ?20, ?20, ?21, ?21)`,
     )
       .bind(id, ...structureBinds(s), c.var.user!.id, now)
       .run();
@@ -596,7 +609,7 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
     const preview = await isPreview(c);
     const body = await parseBody(c, preview ? TemplateUpdatePreview : TemplateUpdate);
     const s = structureOf(body);
-    checkStructure(s);
+    checkStructure(c, s);
     const db = c.env.DB;
     const current = await loadTemplate(db, id);
     if (!current) fail(404, 'tournament_template_not_found', 'template not found');
@@ -611,8 +624,8 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
       .prepare(
         `UPDATE tournament_templates SET name = ?2, capacity = ?3, min_players = ?4, start_stack = ?5, levels = ?6, level_ms = ?7, turn_seconds = ?8,
                 tb_enabled = ?9, tb_initial_ms = ?10, tb_max_ms = ?11, tb_unit_ms = ?12, tb_refill_hands = ?13, tb_refill_ms = ?14, min_hands = ?15,
-                require_verified = ?16, auto_start = ?17, version = version + 1, updated_by = ?18, updated_at = ?19
-          WHERE id = ?1 AND version = ?20`,
+                require_verified = ?16, auto_start = ?17, format = ?18, table_seats = ?19, version = version + 1, updated_by = ?20, updated_at = ?21
+          WHERE id = ?1 AND version = ?22`,
       )
       .bind(id, ...structureBinds(s), c.var.user!.id, now, body.baseVersion)
       .run();
@@ -645,19 +658,34 @@ async function pauseOrResume(c: Context<AppEnv>, pause: boolean) {
   const { baseVersion, reason } = await parseBody(c, VersionSchema);
   const db = c.env.DB;
   const now = Date.now();
-  const r = await db
-    .prepare(
-      `UPDATE tournaments SET pause_requested = ?2, pause_changed_at = ?3, version = version + 1, updated_at = ?3
-        WHERE id = ?1 AND status = 'running' AND pause_requested = ?4 AND version = ?5`,
-    )
-    .bind(id, pause ? 1 : 0, now, pause ? 0 : 1, baseVersion)
-    .run();
-  if (!r.meta.changes) await refused(db, id, baseVersion);
-  tournamentChanged(c.env, id, c.executionCtx);
+  const changed = tournamentTold(db, id, now);
+  const [r] = await db.batch([
+    db
+      .prepare(
+        `UPDATE tournaments SET pause_requested = ?2, pause_changed_at = ?3, version = version + 1, updated_at = ?3
+          WHERE id = ?1 AND status = 'running' AND pause_requested = ?4 AND version = ?5`,
+      )
+      .bind(id, pause ? 1 : 0, now, pause ? 0 : 1, baseVersion),
+    changed.statement,
+  ]);
+  if (!r?.meta.changes) await refused(db, id, baseVersion);
+  tournamentChanged(c.env, id, changed.row, c.executionCtx);
   const t = await loadRow(db, id);
-  const live = await reloadRoom(c.env, t?.tableId ?? null);
+  const live = t ? await reloadTournament(c.env, { id, format: t.mtt ? 'mtt' : 'sng', tableId: t.tableId }) : null;
   // The room says whether a hand is being played (a pause then waits for its end); unanswered: it applies at its next look.
-  const appliesFrom = pause ? (live ? (live.handInProgress ? 'next_hand' : 'now') : 'next_hand') : 'now';
+  // A multi-table tournament's tables each stop after their own hand.
+  const appliesFrom = pause ? (live && !t?.mtt ? (live.handInProgress ? 'next_hand' : 'now') : 'next_hand') : 'now';
   await audit(c, pause ? 'tournament.pause' : 'tournament.resume', { type: 'tournament', id }, { reason: reason ?? null, appliesFrom, roomConfirmed: !!live, level: (t?.level ?? 0) + 1 });
   return c.json({ ok: true, appliesFrom, roomConfirmed: !!live, tournament: t });
+}
+
+/**
+ * A multi-table tournament read again everywhere: its coordinator, then each of its tables still open (an abort's close,
+ * a missed pause). Null when the coordinator did not answer.
+ */
+async function reloadAll(env: AppEnv['Bindings'], id: string) {
+  const live = await reloadTournament(env, { id, format: 'mtt', tableId: null });
+  const { results } = await env.DB.prepare(`SELECT id FROM tables WHERE tournament_id = ?1 AND status != 'closed'`).bind(id).all<{ id: string }>();
+  await Promise.all(results.map((t) => reloadRoom(env, t.id)));
+  return live;
 }

@@ -78,7 +78,11 @@ test('the Me page on a phone keeps nine- and ten-digit amounts inside their boxe
         raiseShare: ratio,
         wtsd: ratio,
         wsd: ratio,
-        positions: j.positions.map((p, i) => ({ ...p, hands: 205_761, vpip: 45_678, pfr: 23_456, net: i % 2 ? 123_456_789 : -123_456_789 })),
+        // A sample counted for BB/100 as large as the hands, the figure the net over it in big blinds of 10.
+        positions: j.positions.map((p, i) => {
+          const net = i % 2 ? 123_456_789 : -123_456_789;
+          return { ...p, hands: 205_761, vpip: 45_678, pfr: 23_456, net, counted: 205_761, bb100: (net / 10 / 205_761) * 100 };
+        }),
       },
     });
   });
@@ -86,7 +90,11 @@ test('the Me page on a phone keeps nine- and ten-digit amounts inside their boxe
     const u = new URL(route.request().url());
     const tz = Number(u.searchParams.get('tz'));
     const today = Math.floor((Date.now() + tz * 60_000) / DAY);
-    const points = [5, 3, 1].map((k, i) => ({ day: new Date((today - k) * DAY).toISOString().slice(0, 10), hands: 12_345, net: i % 2 ? 123_456_789 : -123_456_789 }));
+    const ratio = { n: 4_567, of: 12_345 };
+    const points = [5, 3, 1].map((k, i) => {
+      const net = i % 2 ? 123_456_789 : -123_456_789;
+      return { day: new Date((today - k) * DAY).toISOString().slice(0, 10), hands: 12_345, net, vpip: ratio, pfr: ratio, wtsd: ratio, wsd: ratio, counted: 12_345, bbWon: net / 10 };
+    });
     await route.fulfill({ json: { days: Number(u.searchParams.get('days')), tz, points } });
   });
 
@@ -108,16 +116,26 @@ test('the Me page on a phone keeps nine- and ten-digit amounts inside their boxe
     await expect(page.getByTestId('refill-tables')).toHaveText('0');
     await expect(page.getByTestId('refill-total')).toHaveText('123,456,789');
     await expect(page.getByTestId('me-balance')).toHaveText('123,456,789');
-    const stats = page.getByTestId('stats');
-    await expect(stats).toContainText('9,876,543,210');
-    await expect(stats).toContainText('-123,456,789');
-    await expect(page.getByTestId('stats-pos-BB')).toContainText('+123,456,789');
-    await expect(page.getByTestId('stats-trend-summary')).toBeVisible();
+    await expect(page.getByTestId('me-kpi-hands')).toContainText('1,234,567');
+    await expect(page.getByTestId('me-kpi-winrate')).toContainText('456,789 / 1,234,567');
     await expect(page.getByTestId('ledger')).toContainText('123,456,789');
     expect(await overflowing(page), `${name}: amounts run out of their boxes`).toEqual([]);
     expect(await widerThanDevice(page)).toBe(false);
     await page.getByTestId('refill-card').screenshot({ path: shot(`refill-${name}`) });
+    await page.getByTestId('me-kpis').screenshot({ path: shot(`kpis-${name}`) });
+    // The statistics are on the next tab; what a hidden tab holds has no size to measure, so each is measured open.
+    await page.getByTestId('me-tab-history').click();
+    const stats = page.getByTestId('stats');
+    await expect(stats).toContainText('9,876,543,210');
+    await expect(stats).toContainText('-123,456,789');
+    await expect(page.getByTestId('stats-pos-BB')).toContainText('+123,456,789');
+    await expect(page.getByTestId('stats-pos-bb100-BB')).toContainText('+6000.01');
+    await expect(page.getByTestId('stats-pos-bb100-BB')).toContainText('205,761');
+    await expect(page.getByTestId('stats-trend-summary')).toBeVisible();
+    expect(await overflowing(page), `${name}: amounts run out of their boxes (history)`).toEqual([]);
+    expect(await widerThanDevice(page)).toBe(false);
     await stats.screenshot({ path: shot(`stats-${name}`) });
+    await page.getByTestId('me-tab-dashboard').click();
   };
 
   for (const [w, h] of [

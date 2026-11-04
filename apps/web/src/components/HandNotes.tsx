@@ -102,7 +102,7 @@ export function HandRow({ hand, onChange }: { hand: HandSummaryDto; onChange: (h
       <span className={`shrink-0 font-mono text-sm font-semibold tabular-nums ${hand.net >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}`}>{signed(hand.net)}</span>
       <BookmarkToggle on={hand.bookmarked} busy={busy} onToggle={() => void toggle()} />
       {/* The hand's page goes back here: the list with its filters, where it was. */}
-      <Link to={`/me/hands/${encodeURIComponent(hand.id)}`} state={{ from: pathname + search }} className="jc-tap shrink-0 py-2 text-xs text-gold-300 hover:underline">
+      <Link to={`/me/hands/${encodeURIComponent(hand.id)}`} state={{ from: pathname + search }} className="jc-tap -my-1 -mr-2 inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center text-xs text-gold-300 hover:underline">
         {t('me.viewHand')}
       </Link>
     </li>

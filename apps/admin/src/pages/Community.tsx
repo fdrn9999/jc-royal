@@ -3,7 +3,8 @@ import { useState, type FormEvent } from 'react';
 import { BOARD_TEMPLATES, MESSAGE_TEMPLATES, type MessageCategory } from '../adminTemplates';
 import { useT } from '../i18n';
 import { categoryLabel, contentStatusLabel, type Tr } from '../labels';
-import { ApiError, errText, useAdmin, useData } from '../lib';
+import { ApiError, canDo, errText, useAdmin, useData } from '../lib';
+import { PurgeDialog } from '../purge';
 import { ContentTemplateFields, TemplateMissing, TemplatePreview, TemplateTooLong, useContentTemplate } from '../templateFields';
 import { contentTone, Feedback, ListState, LoadError, Modal, Pager, type Note } from '../ui';
 import { LangBadge } from './Console';
@@ -37,7 +38,9 @@ interface AdminPost {
 
 export function BoardAdminPage() {
   const { t, locale } = useT();
-  const { api } = useAdmin();
+  const { api, me } = useAdmin();
+  // 영구 삭제 is offered to a super admin only (the server refuses anyone else, preview included).
+  const purgeable = canDo(me, 'data.purge');
   const [filter, setFilter] = useState('');
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
@@ -49,6 +52,8 @@ export function BoardAdminPage() {
   const { data, error, loading, reload } = useData<OffsetPage<AdminPost>>(`/api/admin/board/posts?${params}`);
   const [notice, setNotice] = useState<{ id?: string; title: string; body: string } | null>(null);
   const [del, setDel] = useState<AdminPost | null>(null);
+  const [delMode, setDelMode] = useState<'soft' | 'purge'>('soft');
+  const [purge, setPurge] = useState<AdminPost | null>(null);
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
   const tpl = useContentTemplate({
@@ -124,7 +129,8 @@ export function BoardAdminPage() {
               ) : (
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => setStatus(p, 'hidden')}>{t('hide')}</Button>
               )}
-              {p.status !== 'deleted' && <Button size="sm" variant="danger" disabled={busy} onClick={() => { setNote(null); setDel(p); }} data-testid="post-delete">{t('delete')}</Button>}
+              {p.status !== 'deleted' && <Button size="sm" variant="danger" disabled={busy} onClick={() => { setNote(null); setDelMode('soft'); setDel(p); }} data-testid="post-delete">{t('delete')}</Button>}
+              {p.status === 'deleted' && purgeable && <Button size="sm" variant="danger" disabled={busy} onClick={() => { setNote(null); setPurge(p); }} data-testid="post-purge">{t('purgeAction')}</Button>}
             </li>
           ))}
         </ul>
@@ -147,14 +153,59 @@ export function BoardAdminPage() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setDel(null)}>{t('cancel')}</Button>
-            <Button variant="danger" loading={busy} onClick={() => del && void setStatus(del, 'deleted').then(() => setDel(null))} data-testid="post-delete-confirm">
-              {t('delete')}
+            <Button
+              variant="danger"
+              loading={busy}
+              onClick={() => {
+                if (!del) return;
+                // 영구 삭제 goes on to its own steps, starting from what the server says about this post.
+                if (delMode === 'purge') {
+                  setPurge(del);
+                  setDel(null);
+                  return;
+                }
+                void setStatus(del, 'deleted').then(() => setDel(null));
+              }}
+              data-testid="post-delete-confirm"
+            >
+              {t(delMode === 'purge' ? 'purgeContinue' : 'delete')}
             </Button>
           </>
         }
       >
-        <p className="break-words text-sm" data-testid="post-delete-text">{del && t('confirmDeletePost', { title: del.title })}</p>
+        <div className="flex flex-col gap-3 text-sm">
+          <p className="break-words" data-testid="post-delete-text">{del && t(delMode === 'purge' ? 'purgeNext' : 'confirmDeletePost', { title: del.title })}</p>
+          {purgeable && (
+            <fieldset className="flex flex-col gap-2" data-testid="delete-mode">
+              <legend className="mb-1 text-xs font-semibold text-ink-300">{t('deleteMode')}</legend>
+              {(['soft', 'purge'] as const).map((m) => (
+                <label
+                  key={m}
+                  className={`flex min-h-11 cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 ${delMode !== m ? 'border-white/10' : m === 'purge' ? 'border-danger/70 bg-danger/10' : 'border-gold-400/60 bg-white/5'}`}
+                >
+                  <input type="radio" name="delete-mode" value={m} checked={delMode === m} onChange={() => setDelMode(m)} className="mt-0.5 size-4 shrink-0" data-testid={`delete-mode-${m}`} />
+                  <span className="flex min-w-0 flex-col">
+                    <span className={`font-semibold ${m === 'purge' ? 'text-danger' : ''}`}>{t(m === 'soft' ? 'deleteModeSoft' : 'deleteModePurge')}</span>
+                    <span className="text-xs text-ink-400">{t(m === 'soft' ? 'deleteModeSoftHint' : 'deleteModePurgeHint')}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+        </div>
       </Modal>
+      {purge && (
+        <PurgeDialog
+          kind="post"
+          id={purge.id}
+          onClose={() => setPurge(null)}
+          onDone={async (n) => {
+            setPurge(null);
+            setNote(n);
+            await reload();
+          }}
+        />
+      )}
       <Modal
         open={!!notice}
         onClose={() => setNotice(null)}

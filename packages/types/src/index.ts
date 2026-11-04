@@ -19,3 +19,4 @@ export * from './admin-monitor';
 export * from './inbox';
 export * from './ops-log';
 export * from './players';
+export * from './challenges';

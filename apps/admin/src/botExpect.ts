@@ -7,16 +7,16 @@ import type { BotLevel } from '@jc/types';
  * GTO answers or targets: live tables differ in players, sizes and stacks, so a difference is a place to look, not a
  * defect. Measured again with the commands in docs/BOT_AI.md §11 whenever the strategy changes (`STRATEGY_VERSION`).
  */
-export const BOT_EXPECT_SOURCE = { date: '2026-11-02', hands: 518_400, strategy: 'bot-ai-2.0' } as const;
+export const BOT_EXPECT_SOURCE = { date: '2026-11-04', hands: 518_400, strategy: 'bot-ai-2.1' } as const;
 
 export const TENDENCIES = ['vpip', 'pfr', 'threeBet', 'foldTo3Bet', 'cbet', 'foldToCbet', 'wtsd', 'af'] as const;
 export type Tendency = (typeof TENDENCIES)[number];
 
 export const BOT_EXPECT: Record<BotLevel, Record<Tendency, number>> = {
-  easy: { vpip: 0.297, pfr: 0.142, threeBet: 0.022, foldTo3Bet: 0.431, cbet: 0.425, foldToCbet: 0.388, wtsd: 0.562, af: 0.95 },
-  normal: { vpip: 0.255, pfr: 0.155, threeBet: 0.038, foldTo3Bet: 0.45, cbet: 0.461, foldToCbet: 0.593, wtsd: 0.451, af: 2.26 },
-  hard: { vpip: 0.26, pfr: 0.159, threeBet: 0.047, foldTo3Bet: 0.406, cbet: 0.474, foldToCbet: 0.593, wtsd: 0.452, af: 2.19 },
-  expert: { vpip: 0.259, pfr: 0.161, threeBet: 0.052, foldTo3Bet: 0.386, cbet: 0.503, foldToCbet: 0.593, wtsd: 0.449, af: 2.5 },
+  easy: { vpip: 0.297, pfr: 0.142, threeBet: 0.022, foldTo3Bet: 0.431, cbet: 0.425, foldToCbet: 0.388, wtsd: 0.563, af: 0.95 },
+  normal: { vpip: 0.255, pfr: 0.155, threeBet: 0.038, foldTo3Bet: 0.45, cbet: 0.461, foldToCbet: 0.541, wtsd: 0.452, af: 2.2 },
+  hard: { vpip: 0.26, pfr: 0.159, threeBet: 0.047, foldTo3Bet: 0.406, cbet: 0.474, foldToCbet: 0.537, wtsd: 0.454, af: 2.14 },
+  expert: { vpip: 0.259, pfr: 0.161, threeBet: 0.052, foldTo3Bet: 0.386, cbet: 0.503, foldToCbet: 0.519, wtsd: 0.451, af: 2.42 },
 };
 
 /** Fewer chances than this leave a rate unjudged. */

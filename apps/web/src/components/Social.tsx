@@ -1,13 +1,17 @@
-import { BOT_STYLE_TRAITS, BOT_TRAITS, REPORT_REASONS, type BotStyle, type BotTraitTier, type FriendRequestResultDto, type PublicUserDto, type RelationDto, type RelationKind, type ReportReason, type ReportTarget, type SeatView } from '@jc/types';
+import { BOT_STYLE_TRAITS, BOT_TRAITS, REPORT_REASONS, type BotStyle, type BotTraitTier, type FriendRequestResultDto, type HudScope, type PublicUserDto, type RelationDto, type RelationKind, type ReportReason, type ReportTarget, type SeatView } from '@jc/types';
 import { Button, cx, Modal, Spinner } from '@jc/ui';
-import { useEffect, useState, type FormEvent } from 'react';
+import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { lazyPart } from '../lib/lazyPart';
 import { blockUser, setMuted, unblockUser, useMuted } from '../lib/safety';
 import { refreshUnread } from '../lib/unread';
 import { BOT_LEVEL_LABEL, MemberName, RoleBadge, VipBadge, vipOf } from './MemberName';
+
+// A seat's HUD, opened with the card at a table only; its figures and their text load then (game/SeatHud.tsx).
+const SeatHud = lazyPart(() => import('../game/SeatHud').then((m) => m.SeatHud));
 
 export function Avatar({ user, size = 'size-10' }: { user: Pick<PublicUserDto, 'nickname' | 'avatarUrl'>; size?: string }) {
   return (
@@ -127,7 +131,7 @@ export function BlockConfirm({ name, busy, onConfirm, onCancel }: { name: string
  * A table bot's card in place of a player's: what it is and how well it plays. A bot has no profile and takes no
  * friend request, message, block or report (the server refuses them), so the card offers none.
  */
-export function BotCard({ seat, onClose }: { seat: SeatView | null; onClose: () => void }) {
+export function BotCard({ seat, onClose, hud }: { seat: SeatView | null; onClose: () => void; hud?: HudScope }) {
   const { t } = useI18n();
   const level = seat?.bot;
   return (
@@ -144,6 +148,11 @@ export function BotCard({ seat, onClose }: { seat: SeatView | null; onClose: () 
               {seat.botLeaving && <div className="text-xs text-ink-300">{t('bot.leavingTitle')}</div>}
             </div>
           </div>
+          {hud && seat.userId && (
+            <Suspense fallback={null}>
+              <SeatHud userId={seat.userId} scope={hud} />
+            </Suspense>
+          )}
           {seat.botStyle && <BotStyleInfo style={seat.botStyle} />}
           <p className="text-sm leading-relaxed text-ink-200">{t('bot.about')}</p>
           <div className="flex justify-end">
@@ -198,7 +207,7 @@ function BotStyleInfo({ style }: { style: BotStyle }) {
  * a device-local mute for that player's table chat. Staff cannot be blocked, and the super admin cannot be reported
  * (the server refuses both); the card says so instead of offering the button.
  */
-export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user: PublicUserDto | null; onClose: () => void; onReport?: () => void; newTab?: boolean; chatMute?: boolean }) {
+export function PlayerCard({ user, onClose, onReport, newTab, chatMute, hud }: { user: PublicUserDto | null; onClose: () => void; onReport?: () => void; newTab?: boolean; chatMute?: boolean; hud?: HudScope }) {
   const { t, err } = useI18n();
   const { me } = useAuth();
   const [rel, setRel] = useState<RelationKind | null>(null);
@@ -278,6 +287,11 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute }: { user
               {rel === 'blocked' && <div className="text-xs font-semibold text-[#f0a0a2]" data-testid="player-blocked">{t('block.isBlocked')}</div>}
             </div>
           </div>
+          {hud && (
+            <Suspense fallback={null}>
+              <SeatHud userId={user.id} scope={hud} />
+            </Suspense>
+          )}
           {note && <p className="text-sm text-gold-300" role="status">{note}</p>}
           {confirmBlock && <BlockConfirm name={user.nickname} busy={busy} onConfirm={block} onCancel={() => setConfirmBlock(false)} />}
           <div className="flex flex-wrap justify-end gap-2">

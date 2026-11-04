@@ -2,7 +2,7 @@
 // member's card shows only what they chose, never to someone either side blocked; friends are told of a seat at a
 // public table and never of a private one, nor by a member away, invisible or who turned it off; the first achievements
 // come from a hand the server recorded; and the season board ranks finished tournaments, leaving out members who asked.
-import { LEADERBOARD, leaderboardScore, seasonOf, seasonRange, type InboxItemDto, type InboxPageDto, type LeaderboardDto, type PlayerCardDto, type SocialSettingsDto } from '@jc/types';
+import { LEADERBOARD, leaderboardScore, seasonOf, seasonRange, type InboxItemDto, type InboxPageDto, type LeaderboardDto, type PlayerCardDto, type PlayerHudDto, type SocialSettingsDto } from '@jc/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Client, newUser } from '../support/client';
 import { d1 } from '../support/d1';
@@ -11,8 +11,11 @@ import { isMyTurn, TableSocket } from '../support/ws';
 type User = Awaited<ReturnType<typeof newUser>>;
 
 const open: TableSocket[] = [];
-afterEach(() => {
+// Members a test marked as bots, members again after it: no later test finds a bot holding a member's welcome chips.
+const posing: string[] = [];
+afterEach(async () => {
   for (const s of open.splice(0)) s.close();
+  for (const id of posing.splice(0)) await d1(`UPDATE users SET is_bot = 0 WHERE id = '${id}'`);
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -23,6 +26,14 @@ async function until<T>(read: () => Promise<T>, ok: (v: T) => boolean, label: st
     if (ok(v)) return v;
     if (Date.now() > end) throw new Error(`timeout waiting for ${label}; last: ${JSON.stringify(v).slice(0, 400)}`);
   }
+}
+
+/** Fills `key`'s rate-limit window, away from the window's end so the next request falls in it. */
+async function fillWindow(key: string, limit: number) {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < 5_000) await sleep(left + 100);
+  const start = Date.now() - (Date.now() % 60_000);
+  await d1(`INSERT INTO rate_limits (key, window_start, count) VALUES ('${key}', ${start}, ${limit}) ON CONFLICT (key) DO UPDATE SET window_start = excluded.window_start, count = excluded.count`);
 }
 
 const card = (c: Client, id: string) => c.get<PlayerCardDto>(`/api/players/${id}/card`);
@@ -135,6 +146,126 @@ describe('profile card', () => {
   });
 });
 
+describe('table HUD', () => {
+  const hud = (c: Client, id: string, scope?: string) => c.get<PlayerHudDto>(`/api/players/${id}/hud${scope ? `?scope=${scope}` : ''}`);
+  const DAY = 86_400_000;
+  let n = 0;
+  /** A recorded hand of `user` at `table`, with the statistics columns as the server fills them (NULL: no chance). */
+  const row = (table: string, user: string, at: number, cols: Partial<Record<'vpip' | 'pfr' | 'saw_flop' | 'went_to_showdown' | 'pot_won' | 'three_bet' | 'fold_3bet' | 'cbet' | 'fold_cbet' | 'post_bets' | 'post_calls' | 'big_blind', number | null>>) => {
+    const id = `${table}-h${++n}`;
+    const v = { vpip: 0, pfr: 0, saw_flop: 0, went_to_showdown: 0, pot_won: 0, three_bet: null, fold_3bet: null, cbet: null, fold_cbet: null, post_bets: 0, post_calls: 0, big_blind: 10, ...cols };
+    const ks = Object.keys(v) as (keyof typeof v)[];
+    return [
+      `INSERT INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log) VALUES ('${id}', '${table}', ${n}, ${at - 1000}, ${at}, '[]', 20, 'it', '{}')`,
+      `INSERT INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, ended_at, position, ${ks.join(', ')}) VALUES ('${id}', '${user}', 0, '["As","Kd"]', 1000, 1000, 0, 0, ${at}, 'BTN', ${ks.map((k) => v[k] ?? 'NULL').join(', ')})`,
+    ];
+  };
+
+  it('counts the latest hands of the table kind as the statistics do, each ratio over its chances, behind the card setting', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    const tag = Math.random().toString(36).slice(2, 8);
+    const [cash, tn] = [`it-hud-${tag}-c`, `it-hud-${tag}-t`];
+    const now = Date.now();
+    await d1(
+      [
+        `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, status, room_type) VALUES ('${cash}', '${cash}', 6, 5, 10, 200, 2000, 'closed', 'official'), ('${tn}', '${tn}', 6, 5, 10, 200, 2000, 'closed', 'tournament')`,
+        // A raise and a 3-bet, a c-bet, bets and a call after the flop; shown down and won.
+        ...row(cash, a.me.id, now - 4000, { vpip: 1, pfr: 1, saw_flop: 1, went_to_showdown: 1, pot_won: 30, three_bet: 1, cbet: 1, post_bets: 2, post_calls: 1 }),
+        // A call, a 3-bet chance not taken, a c-bet folded to.
+        ...row(cash, a.me.id, now - 3000, { vpip: 1, saw_flop: 1, three_bet: 0, fold_cbet: 1, post_calls: 1 }),
+        // A fold before the flop: in the sample, no chance at anything.
+        ...row(cash, a.me.id, now - 2000, {}),
+        // Recorded before the later figures existed: in the hands, VPIP and PFR, in none of the rest.
+        ...row(cash, a.me.id, now - 1000, { vpip: 1, pfr: 1, post_bets: null, post_calls: null, big_blind: null }),
+        // Older than the HUD's days: left out.
+        ...row(cash, a.me.id, now - 100 * DAY, { vpip: 1, pfr: 1, three_bet: 1 }),
+        // A tournament table's hand: only in the tournament HUD.
+        ...row(tn, a.me.id, now - 500, { vpip: 1, pfr: 1, three_bet: 1 }),
+      ].join('; '),
+    );
+
+    const mine = await hud(a.client, a.me.id);
+    expect(mine.status).toBe(200);
+    expect(mine.body).toEqual({
+      bot: false,
+      scope: 'cash',
+      stats: {
+        hands: 4,
+        vpip: { n: 3, of: 4 },
+        pfr: { n: 2, of: 4 },
+        wtsd: { n: 1, of: 2 },
+        wsd: { n: 1, of: 1 },
+        counted: 3,
+        threeBet: { n: 1, of: 2 },
+        // No 3-bet against an open of theirs: no chance, not 0 of something.
+        foldTo3Bet: { n: 0, of: 0 },
+        cbet: { n: 1, of: 1 },
+        foldToCbet: { n: 1, of: 1 },
+        aggression: { bets: 2, calls: 2 },
+      },
+    });
+    expect((await hud(a.client, a.me.id, 'cash')).body).toEqual(mine.body);
+    expect((await hud(a.client, a.me.id, 'tournament')).body.stats).toMatchObject({ hands: 1, vpip: { n: 1, of: 1 }, threeBet: { n: 1, of: 1 }, counted: 1 });
+    expect((await hud(a.client, a.me.id, 'mtt')).status).toBe(400);
+
+    // Another member: nothing while a keeps statistics private (the default), then the same figures as a's own.
+    const hidden = await hud(b.client, a.me.id);
+    expect(hidden.status).toBe(200);
+    expect(hidden.body).toEqual({ bot: false, scope: 'cash', stats: null });
+    await settings(a, { showStats: true });
+    const shown = await hud(b.client, a.me.id);
+    expect(shown.body).toEqual(mine.body);
+    // Never the hand's cards, chips or anything private.
+    const text = JSON.stringify(shown.body);
+    for (const leak of ['As', 'Kd', a.email, 'balance', 'net', 'won']) expect(text).not.toContain(leak);
+  });
+
+  it('reads as not found the way the card does, and a bot’s is shown and marked as a bot’s', async () => {
+    expect((await new Client().get('/api/players/anyone/hud')).status).toBe(401);
+    const a = await newUser();
+    const b = await newUser();
+    const c = await newUser();
+    const bot = await newUser();
+    for (const u of [a, b, c]) await settings(u, { showStats: true });
+    const notFound = async (viewer: User, id: string) => {
+      const r = await hud(viewer.client, id);
+      expect(r.status, id).toBe(404);
+      expect(r.body).toMatchObject({ error: { code: 'player_not_found' } });
+    };
+    await notFound(a, 'no-such-member');
+    await notFound(a, 'bad id!');
+    expect((await a.client.req('PUT', `/api/blocks/${b.me.id}`)).status).toBe(200);
+    await notFound(b, a.me.id);
+    await notFound(a, b.me.id);
+    expect((await hud(c.client, a.me.id)).status).toBe(200);
+    await d1(`UPDATE users SET status = 'suspended' WHERE id = '${c.me.id}'`);
+    await notFound(a, c.me.id);
+
+    // A bot (suspended as well, so no bot table running meanwhile seats it): its figures with the mark, its card still none.
+    posing.push(bot.me.id);
+    await d1(`UPDATE users SET is_bot = 1, status = 'suspended' WHERE id = '${bot.me.id}'`);
+    const r = await hud(a.client, bot.me.id, 'cash');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ bot: true, scope: 'cash', stats: { hands: 0, vpip: { n: 0, of: 0 } } });
+    expect((await card(a.client, bot.me.id)).status).toBe(404);
+  });
+
+  it('counts each member against their own budget: one who used it up holds up no one else', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    // A table opens a HUD for each seat: a member at a busy one may use up their budget, and only theirs.
+    await fillWindow(`player_card:${a.me.id}`, 120);
+    expect((await hud(a.client, b.me.id)).status).toBe(429);
+    expect((await card(a.client, b.me.id)).status).toBe(429);
+    expect((await hud(b.client, a.me.id)).status).toBe(200);
+    expect((await card(b.client, a.me.id)).status).toBe(200);
+    await fillWindow(`leaderboard:${a.me.id}`, 60);
+    expect((await a.client.get('/api/leaderboard')).status).toBe(429);
+    expect((await b.client.get('/api/leaderboard')).status).toBe(200);
+  });
+});
+
 describe('friend table alerts', () => {
   it('tells accepted friends of a seat at a public table once, shows whether it is still taken, and never strangers', async () => {
     const a = await newUser();
@@ -215,6 +346,7 @@ describe('season leaderboard', () => {
     const { from, to } = seasonRange(season);
     const [p1, p2, p3, p4, quiet, bot] = [await newUser(), await newUser(), await newUser(), await newUser(), await newUser(), await newUser()];
     // Suspended too, so no bot table running meanwhile picks it to sit down.
+    posing.push(bot.me.id);
     await d1(`UPDATE users SET is_bot = 1, status = 'suspended' WHERE id = '${bot.me.id}'`);
     const at = (h: number) => from + h * 3_600_000;
     await finished(`lb-${tag}-1`, at(1), [p1, p2, p3, p4]);

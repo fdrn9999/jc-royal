@@ -11,6 +11,8 @@ export interface Env {
   REALTIME: DurableObjectNamespace;
   /** AdminMonitorHub Durable Object namespace hosted by the game worker (the control center's console sockets, lib/admin-monitor.ts). */
   ADMIN_MONITOR: DurableObjectNamespace;
+  /** TournamentCoordinator Durable Object namespace hosted by the game worker (a multi-table tournament's, docs/TOURNAMENT_MTT.md). */
+  TOURNAMENTS: DurableObjectNamespace;
   ASSETS?: Fetcher;
   ENVIRONMENT: 'development' | 'test' | 'production';
   /** Comma separated list of browser origins allowed to send state-changing requests. */
@@ -44,6 +46,8 @@ export interface Env {
   VAPID_SUBJECT?: string;
   /** Local tests only: pushes go to this http://127.0.0.1 address instead of the push service (ignored in production). */
   PUSH_SINK_URL?: string;
+  /** `1` opens multi-table tournaments (docs/TOURNAMENT_MTT.md): off unless set, and Sit & Gos never depend on it. */
+  MTT_ENABLED?: string;
 }
 
 export interface AuthUser {

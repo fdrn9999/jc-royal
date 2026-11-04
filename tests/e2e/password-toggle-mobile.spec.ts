@@ -6,7 +6,7 @@ test('on a phone: the eye button works by tap, and the account-deletion prompt f
   const { page } = await signUp(browser, { mobile: true });
   const logs: string[] = [];
   page.on('console', (m) => logs.push(m.text()));
-  await page.goto('/me');
+  await page.goto('/me?tab=account');
   const open = page.getByRole('button', { name: /^(회원 탈퇴|Delete account)$/ });
   await open.tap();
   const dialog = page.getByRole('dialog');

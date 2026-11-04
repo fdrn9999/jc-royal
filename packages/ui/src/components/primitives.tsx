@@ -38,6 +38,19 @@ const sizes: Record<Size, string> = {
   lg: 'h-12 px-6 text-base',
 };
 
+/** A button's look, for a link that leads somewhere but should read as one of the buttons beside it. */
+export function buttonClass(variant: Variant = 'gold', size: Size = 'md', className?: string) {
+  // Colours, shadow, opacity and transform ease; size and padding never do, so a bar that changes at a breakpoint
+  // (the icon size's padding) is laid out at once, not squeezing what sits beside it for a moment.
+  return cx(
+    'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition duration-150',
+    'disabled:opacity-45 disabled:cursor-not-allowed active:translate-y-px',
+    variants[variant],
+    sizes[size],
+    className,
+  );
+}
+
 export function Button({
   variant = 'gold',
   size = 'md',
@@ -50,13 +63,7 @@ export function Button({
     <button
       {...rest}
       disabled={rest.disabled || loading}
-      className={cx(
-        'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold tracking-wide transition-all duration-150',
-        'disabled:opacity-45 disabled:cursor-not-allowed active:translate-y-px',
-        variants[variant],
-        sizes[size],
-        className,
-      )}
+      className={buttonClass(variant, size, className)}
     >
       {loading && <Spinner className="size-4" />}
       {children}
@@ -172,6 +179,85 @@ export function Panel({ className, children, title, actions, id }: { className?:
   );
 }
 
+/** The tab an arrow key, Home or End moves to from tab `i` of `n` (round the ends); -1 for any other key. */
+function tabStep(key: string, i: number, n: number) {
+  if (key === 'ArrowRight') return (i + 1) % n;
+  if (key === 'ArrowLeft') return (i + n - 1) % n;
+  if (key === 'Home') return 0;
+  if (key === 'End') return n - 1;
+  return -1;
+}
+
+/**
+ * A row of pill tabs that scrolls sideways when it runs out of room (`className` places the row). Each tab is a 44 px tall
+ * touch target round its pill, so the row looks as before. Arrow keys, Home and End move between the tabs and choose;
+ * only the chosen one is in the tab order. A tab with its own panel names it (`controls`) and gives the panel its `id`
+ * to be labelled by.
+ */
+export function Tabs<K extends string>({
+  value,
+  onChange,
+  items,
+  label,
+  className,
+}: {
+  value: K;
+  onChange: (key: K) => void;
+  items: readonly { key: K; label: ReactNode; testid?: string; id?: string; controls?: string }[];
+  label?: string;
+  className?: string;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  // The chosen tab in sight, however it was chosen (the address, a button elsewhere): only the row scrolls, not the page.
+  useLayoutEffect(() => {
+    const r = row.current;
+    const t = r?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!r || !t) return;
+    const a = r.getBoundingClientRect();
+    const b = t.getBoundingClientRect();
+    if (b.left < a.left) r.scrollLeft -= a.left - b.left;
+    else if (b.right > a.right) r.scrollLeft += b.right - a.right;
+  }, [value]);
+  return (
+    <div ref={row} role="tablist" aria-label={label} className={cx('flex gap-2 overflow-x-auto', className)}>
+      {items.map((it, i) => {
+        const on = it.key === value;
+        return (
+          <button
+            key={it.key}
+            id={it.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            aria-controls={it.controls}
+            tabIndex={on ? 0 : -1}
+            onClick={() => onChange(it.key)}
+            onKeyDown={(e) => {
+              const j = tabStep(e.key, i, items.length);
+              if (j < 0) return;
+              e.preventDefault();
+              onChange(items[j]!.key);
+              row.current?.querySelectorAll<HTMLElement>('[role="tab"]')[j]?.focus();
+            }}
+            data-testid={it.testid}
+            className="jc-tap group flex min-h-11 shrink-0 items-center outline-none"
+          >
+            <span
+              className={cx(
+                'rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors',
+                'group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-gold-400',
+                on ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 group-hover:text-ivory',
+              )}
+            >
+              {it.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Accessible modal: Escape closes, focus moves into the dialog and back. `closeLabel` names the ✕ button in the page's language. */
 export function Modal({ open, onClose, title, children, footer, wide, closeLabel = 'close' }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; closeLabel?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -200,7 +286,8 @@ export function Modal({ open, onClose, title, children, footer, wide, closeLabel
       <div ref={ref} className={cx('jc-panel relative w-full animate-rise rounded-b-none sm:rounded-b-[var(--radius-card)] max-h-[92dvh] overflow-auto', wide ? 'sm:max-w-2xl' : 'sm:max-w-md')}>
         <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
           <h3 className="text-base font-bold tracking-[0.04em] text-gold-300">{title}</h3>
-          <button onClick={onClose} className="rounded p-1 text-ink-300 hover:text-ivory" aria-label={closeLabel}>
+          {/* A 40 px target for a finger, laid out as the 26 px button it was. */}
+          <button onClick={onClose} className="-m-[7px] grid size-10 shrink-0 place-items-center rounded text-ink-300 hover:text-ivory" aria-label={closeLabel}>
             <XIcon />
           </button>
         </div>

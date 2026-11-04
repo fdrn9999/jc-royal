@@ -82,3 +82,30 @@ test('header between the phone layout and a wide window: no wrapped label, nothi
   await page.setViewportSize({ width: 844, height: 700 });
   await page.screenshot({ path: test.info().outputPath('header-844-en.png'), clip: { x: 0, y: 0, width: 844, height: 64 } });
 });
+
+test("header strip on a phone on its side: the current page's link is whole in it, as the phone turns and on each new page", async ({ browser }) => {
+  const { page } = await signUp(browser, { mobile: true });
+  const nav = page.getByTestId('header-nav');
+  const whole = async () => {
+    const n = (await nav.boundingBox())!;
+    const a = (await nav.locator('[aria-current=page]').boundingBox())!;
+    return a.x >= n.x - 0.5 && a.x + a.width <= n.x + n.width + 0.5;
+  };
+  await page.goto('/me');
+  await expect(nav).toBeHidden();
+  // Turned on its side, the strip shows, cut short: the last link, the page's own, was cut in half.
+  for (const [w, h] of [[667, 375], [640, 360]] as const) {
+    await page.setViewportSize({ width: w, height: h });
+    await expect(nav).toBeVisible();
+    expect(await nav.evaluate((s) => s.scrollWidth > s.clientWidth), `${w}px: the strip is cut short`).toBe(true);
+    await expect.poll(whole, `${w}px: 마이페이지 whole`).toBe(true);
+  }
+  await page.screenshot({ path: test.info().outputPath('header-640-me.png'), clip: { x: 0, y: 0, width: 640, height: 64 } });
+  // The first link, then back: each page's link comes whole into the strip, which went to its start meanwhile.
+  await nav.getByRole('link', { name: '로비' }).tap();
+  await expect(page).toHaveURL('/');
+  await expect.poll(whole, 'the lobby whole').toBe(true);
+  await page.goBack();
+  await expect(page).toHaveURL('/me');
+  await expect.poll(whole, 'back on My Page, its link whole').toBe(true);
+});

@@ -155,7 +155,7 @@ export function HandsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-extrabold tracking-[0.04em] jc-gold-text">{t('hands.title')}</h1>
-        <Link to="/me" className="text-sm text-gold-300 hover:underline">
+        <Link to="/me" className="jc-tap -my-2.5 inline-flex min-h-10 items-center text-sm text-gold-300 hover:underline">
           ← {t('nav.me')}
         </Link>
       </div>
@@ -164,11 +164,11 @@ export function HandsPage() {
         actions={
           <div className="flex items-center gap-3">
             {active > 0 && (
-              <button type="button" className="jc-tap py-2 text-xs text-gold-300 hover:underline" onClick={() => setParams(new URLSearchParams(), { replace: true, flushSync: true })} data-testid="hands-reset">
+              <button type="button" className="jc-tap -my-2 inline-flex min-h-10 items-center text-xs text-gold-300 hover:underline" onClick={() => setParams(new URLSearchParams(), { replace: true, flushSync: true })} data-testid="hands-reset">
                 {t('hands.reset')}
               </button>
             )}
-            <button type="button" className="jc-tap rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-ink-200 sm:hidden" aria-expanded={open} aria-controls="hands-filters" onClick={() => setOpen(!open)} data-testid="hands-filters-toggle">
+            <button type="button" className="jc-tap -my-1 min-h-10 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-ink-200 sm:hidden" aria-expanded={open} aria-controls="hands-filters" onClick={() => setOpen(!open)} data-testid="hands-filters-toggle">
               {t('hands.filters')}
               {active > 0 && ` (${active})`}{' '}
               {open ? <ChevronUpIcon className="inline size-3.5 align-[-2px]" /> : <ChevronDownIcon className="inline size-3.5 align-[-2px]" />}

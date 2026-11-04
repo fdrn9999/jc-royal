@@ -443,6 +443,9 @@ export interface PositionStatsDto {
   vpip: number;
   pfr: number;
   net: number;
+  /** Of those hands, the ones with the big blind recorded (see StatsDto.counted), and big blinds won per 100 of them. */
+  counted: number;
+  bb100: number | null;
 }
 
 /**
@@ -453,8 +456,10 @@ export interface StatsDto {
   handsPlayed: number;
   /** Hands where the user won part of a pot: split pots count, getting only uncalled chips back doesn't. */
   handsWon: number;
-  /** handsWon over the hands measured, in percent with one decimal. */
-  winRate: number;
+  /** The period counted: the last 7, 30 or 90 days (cut at the caller's time zone, as the trend), or null for all. */
+  days: TrendDays | null;
+  /** handsWon over the hands measured, in percent with one decimal; null with no hand to measure. */
+  winRate: number | null;
   /** Chips won from pots, without uncalled chips handed back. */
   totalWon: number;
   netChips: number;
@@ -498,13 +503,31 @@ export interface StatsDto {
 }
 
 export const TREND_DAYS = [7, 30, 90] as const;
+export type TrendDays = (typeof TREND_DAYS)[number];
 
 export interface StatsTrendDto {
-  days: (typeof TREND_DAYS)[number];
+  days: TrendDays;
   /** Minutes east of UTC the days were cut at. */
   tz: number;
   /** Days with hands, oldest first ('YYYY-MM-DD' in that time zone); days without hands are left out. */
-  points: { day: string; hands: number; net: number }[];
+  points: StatsTrendPoint[];
+}
+
+/**
+ * One day's hands, with the counts behind the ratios of StatsDto (same columns, same rules) so a period's running figures
+ * can be drawn without estimating: each `of` is 0 on a day with nothing to measure.
+ */
+export interface StatsTrendPoint {
+  day: string;
+  hands: number;
+  net: number;
+  vpip: StatRatio;
+  pfr: StatRatio;
+  wtsd: StatRatio;
+  wsd: StatRatio;
+  /** Hands with the big blind recorded, and big blinds won over them (four decimals). */
+  counted: number;
+  bbWon: number;
 }
 
 export interface HandSummaryDto {

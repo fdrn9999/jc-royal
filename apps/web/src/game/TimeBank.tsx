@@ -17,7 +17,8 @@ const URGENT_MS = 8_000;
  * `column`: in a short screen's column (short.ts) the pill takes its width and wraps instead of widening it. `turn`: a
  * line shown above the bank's own (the column's turn label, so the column is no taller for it), the pill edged in gold.
  * `fallback`: shown instead when this turn has no bank. `chip`: a cell of the raise panel's presets line (ActionBar's
- * `bank`), as high as a preset: the button, what is left over what it adds.
+ * `bank`), as high as a preset: the button, what is left over what it adds. `locked`: the view is not yet the room's (a
+ * connection's recovery, useTableSocket's `synced`), so the turn it shows waits, its bank with it.
  */
 export function TimeBankButton({
   s,
@@ -26,6 +27,7 @@ export function TimeBankButton({
   turn,
   fallback = null,
   chip = false,
+  locked = false,
 }: {
   s: TableView;
   onUse: (handId: string, seq: number, seen: number) => Promise<void>;
@@ -33,6 +35,7 @@ export function TimeBankButton({
   turn?: ReactNode;
   fallback?: ReactNode;
   chip?: boolean;
+  locked?: boolean;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -56,7 +59,7 @@ export function TimeBankButton({
   const added = Math.round((hand.extraMs ?? 0) / 1000);
 
   async function use() {
-    if (!hand || !usable || busy) return;
+    if (!hand || !usable || busy || locked) return;
     setBusy(true);
     try {
       await onUse(hand.id, hand.seq, hand.extraMs ?? 0);
@@ -65,7 +68,7 @@ export function TimeBankButton({
     }
   }
 
-  const tone = cx(usable ? 'bg-gold-500 text-ink-950 hover:bg-gold-400 disabled:opacity-60' : 'bg-white/5 text-ink-400', usable && urgent && !busy && 'jc-pulse-gold');
+  const tone = cx(usable ? 'bg-gold-500 text-ink-950 hover:bg-gold-400 disabled:opacity-60' : 'bg-white/5 text-ink-400', usable && urgent && !busy && !locked && 'jc-pulse-gold');
   const aria = usable ? t('timeBank.useAria', { n: add, left }) : t('timeBank.emptyAria');
 
   if (chip)
@@ -74,7 +77,7 @@ export function TimeBankButton({
         <button
           type="button"
           className={cx('jc-tap flex h-10 min-w-0 flex-1 flex-col items-center justify-center rounded-lg font-bold leading-tight tabular-nums transition-colors', tone)}
-          disabled={!usable || busy}
+          disabled={!usable || busy || locked}
           onClick={() => void use()}
           aria-label={aria}
           data-testid="time-bank-use"
@@ -111,7 +114,7 @@ export function TimeBankButton({
       <button
         type="button"
         className={cx('jc-tap min-h-10 rounded-full px-3.5 font-bold tabular-nums transition-colors', column && 'ml-auto', tone)}
-        disabled={!usable || busy}
+        disabled={!usable || busy || locked}
         onClick={() => void use()}
         aria-label={aria}
         data-testid="time-bank-use"

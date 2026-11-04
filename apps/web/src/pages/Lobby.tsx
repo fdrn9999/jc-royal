@@ -1,5 +1,5 @@
-import type { LobbyTableDto, TournamentSummaryDto } from '@jc/types';
-import { Badge, Button, cx, Empty, formatChips, HourglassIcon, Input, LockIcon, PlayIcon, PlusIcon, RefreshCwIcon, Spinner, SproutIcon, StarIcon, TrophyIcon, UserIcon } from '@jc/ui';
+import { SETTINGS_FAV_MAX, type LobbyTableDto, type TournamentSummaryDto } from '@jc/types';
+import { Badge, Button, cx, Empty, formatChips, HourglassIcon, Input, LockIcon, PlayIcon, PlusIcon, RefreshCwIcon, Spinner, SproutIcon, StarIcon, Tabs, TrophyIcon, UserIcon } from '@jc/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { tutorialComplete, useProgress } from '../academy/progress';
@@ -13,7 +13,7 @@ import { ShareButton } from '../components/Share';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { entryOf, keepCard, latest, lobbyPoller, mergeList, newLobbyLive, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Latest } from '../lib/lobby';
+import { entryOf, keepCard, latest, lobbyPoller, mergeList, newLobbyLive, POLL_MS, RESUME, RESUME_WAIT, useTablePrefs, type Entry, type Latest } from '../lib/lobby';
 import { rememberLobby } from '../lib/lobbyReturn';
 import { setFavourite, useFavourites } from '../lib/prefs';
 import { onMemberVip, withHeardVip, withMemberVip } from '../lib/memberVip';
@@ -24,6 +24,9 @@ import { siteUrl } from '../lib/share';
 type Filter = 'all' | 'fav' | 'recent' | 'beginner' | 'playing' | 'open' | 'empty';
 const FILTERS: Filter[] = ['all', 'fav', 'recent', 'beginner', 'playing', 'open', 'empty'];
 const INPUT_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const;
+// Among the favourites, the tables one can be at now first: one's own seat or place, then a free seat, then a waitlist,
+// then the ones taking no one (entry blocked or closing).
+const FAV_RANK: Record<Entry, number> = { continue: 0, waiting: 0, join: 1, wait: 2, blocked: 3, closing: 3 };
 
 function statusOf(t: LobbyTableDto): 'playing' | 'waiting' | 'empty' {
   if (t.playing) return 'playing';
@@ -297,9 +300,36 @@ function Lobby() {
       }
     });
     if (filter === 'recent') return list.sort((a, b) => visited.get(b.id)! - visited.get(a.id)!);
-    // Favourites first, otherwise in the server's order.
-    return [...list.filter((tb) => favs.has(tb.id)), ...list.filter((tb) => !favs.has(tb.id))];
+    // Favourites first (FAV_RANK among them), otherwise in the server's order.
+    const favFirst = list.filter((tb) => favs.has(tb.id)).sort((a, b) => FAV_RANK[entryOf(a)] - FAV_RANK[entryOf(b)]);
+    return [...favFirst, ...list.filter((tb) => !favs.has(tb.id))];
   }, [tables, q, filter, filters.maxSeats, filters.bigBlind, favs, visited]);
+
+  // Favourites missing from a list read without error (it holds every table open or closing): closed since they were
+  // starred. They stay until the player clears them.
+  const gone = useMemo(() => {
+    if (!tables || error) return [];
+    const ids = new Set(tables.map((tb) => tb.id));
+    return favList.filter((id) => !ids.has(id));
+  }, [tables, error, favList]);
+  // What a star or the clearing did, said for a moment where it is seen and heard: the starred card moves up the list.
+  const [favSaid, setFavSaid] = useState<{ text: string } | null>(null);
+  useEffect(() => {
+    if (!favSaid) return;
+    const h = setTimeout(() => setFavSaid(null), 3_500);
+    return () => clearTimeout(h);
+  }, [favSaid]);
+  function star(tb: LobbyTableDto, on: boolean) {
+    // The account keeps SETTINGS_FAV_MAX, newest first: one more takes the oldest off, and the player is told so.
+    const trims = on && favList.length >= SETTINGS_FAV_MAX;
+    setFavourite(tb.id, on);
+    const said = t(on ? 'lobby.favAdded' : 'lobby.favRemoved', { name: tb.name });
+    setFavSaid({ text: trims ? `${said} ${t('lobby.favTrimmed', { max: SETTINGS_FAV_MAX })}` : said });
+  }
+  function clearGone() {
+    for (const id of gone) setFavourite(id, false);
+    setFavSaid({ text: t('lobby.favCleared', { n: gone.length }) });
+  }
 
   // My seats (quick play asks before finding another) and, with them at the top, my places on waitlists.
   const mine = useMemo(() => (tables ?? []).filter((tb) => entryOf(tb) === 'continue'), [tables]);
@@ -338,7 +368,7 @@ function Lobby() {
             <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('lobby.title')}</h1>
             <p className="mt-1 text-sm text-ink-300">{t('app.virtual')}</p>
           </div>
-          <Button size="sm" variant="outline" className="shrink-0 sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open">
+          <Button size="sm" variant="outline" className="min-h-10 shrink-0 sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open">
             <PlusIcon />
             {t('room.create')}
           </Button>
@@ -371,30 +401,38 @@ function Lobby() {
       <QuickPlayPanel filters={filters} blinds={blinds} onFilters={setFilters} onCreateRoom={() => setCreating(true)} paused={!!paused} mine={mine} />
 
       <div className="flex flex-col gap-2">
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1" role="tablist">
-          {FILTERS.map((f) => {
+        <Tabs
+          className="-mx-4 px-4"
+          value={filter}
+          onChange={(f) => view({ filter: f })}
+          items={FILTERS.map((f) => {
             const n = f === 'fav' || f === 'recent' ? counts[f] : 0;
-            return (
-              <button
-                key={f}
-                role="tab"
-                aria-selected={filter === f}
-                onClick={() => view({ filter: f })}
-                data-testid={`lobby-filter-${f}`}
-                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${filter === f ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/10 text-ink-300 hover:text-ivory'}`}
-              >
-                {f === 'fav' && <StarIcon className="mr-1 inline size-3.5 align-[-2px]" />}
-                {t(`lobby.filter.${f}` as MsgKey)}
-                {n > 0 && <span className="ml-1 tabular-nums opacity-70">{n}</span>}
-              </button>
-            );
+            return {
+              key: f,
+              testid: `lobby-filter-${f}`,
+              label: (
+                <>
+                  {f === 'fav' && <StarIcon className="mr-1 inline size-3.5 align-[-2px]" />}
+                  {t(`lobby.filter.${f}` as MsgKey)}
+                  {n > 0 && <span className="ml-1 tabular-nums opacity-70">{n}</span>}
+                </>
+              ),
+            };
           })}
-        </div>
+        />
         {!any && (
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-300" data-testid="lobby-filtered">
             {t('lobby.filteredBy', { what: filteredBy })}
             <button type="button" className="jc-tap font-semibold text-gold-300 underline underline-offset-2" onClick={() => setFilters(ANY)}>
               {t('quick.reset')}
+            </button>
+          </p>
+        )}
+        {filter === 'fav' && gone.length > 0 && (
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-300" data-testid="lobby-fav-gone">
+            {t('lobby.favGone', { n: gone.length })}
+            <button type="button" className="jc-tap inline-flex min-h-10 items-center px-1 font-semibold text-gold-300 underline underline-offset-2" onClick={clearGone} data-testid="lobby-fav-gone-clear">
+              {t('lobby.favGoneClear')}
             </button>
           </p>
         )}
@@ -423,7 +461,7 @@ function Lobby() {
       {tables && shown.length === 0 && (
         <Empty>
           <span className="flex flex-col items-center gap-3">
-            {filter === 'fav' && counts.fav === 0 ? t('lobby.noFav') : filter === 'recent' && counts.recent === 0 ? t('lobby.noRecent') : t('lobby.none')}
+            {filter === 'fav' && counts.fav === 0 ? t(gone.length > 0 ? 'lobby.noFavOpen' : 'lobby.noFav') : filter === 'recent' && counts.recent === 0 ? t('lobby.noRecent') : t('lobby.none')}
             {narrowed && (
               <Button size="sm" variant="outline" onClick={resetAll} data-testid="lobby-reset">
                 {t('quick.reset')}
@@ -496,7 +534,7 @@ function Lobby() {
                     type="button"
                     aria-pressed={fav}
                     aria-label={t(fav ? 'lobby.unfav' : 'lobby.fav', { name: tb.name })}
-                    onClick={() => setFavourite(tb.id, !fav)}
+                    onClick={() => star(tb, !fav)}
                     className={cx('jc-tap -mr-2 -mt-1.5 grid size-10 place-items-center rounded-lg transition hover:bg-white/5', fav ? 'text-gold-300' : 'text-ink-400 hover:text-ink-200')}
                     data-testid="fav-toggle"
                   >
@@ -570,6 +608,14 @@ function Lobby() {
         })}
       </div>
 
+      {/* Kept in the page (empty, unseen) so its first word is read out too; over the phone's tab bar, under arrivals. */}
+      <p
+        role="status"
+        className={favSaid ? 'pointer-events-none fixed inset-x-4 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-sm rounded-lg border border-gold-500/35 bg-ink-950 px-3 py-2 text-center text-sm text-gold-300 shadow-lg sm:bottom-6' : 'sr-only'}
+        data-testid="lobby-fav-said"
+      >
+        {favSaid?.text}
+      </p>
       <JoinCodeModal table={codeFor?.table ?? null} then={codeFor?.then} onClose={() => setCodeFor(null)} />
       <CreateRoomModal open={creating} onClose={() => setCreating(false)} />
     </div>

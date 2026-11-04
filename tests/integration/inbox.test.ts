@@ -142,7 +142,7 @@ describe('notification inbox', () => {
     await signInAs(u, FIREFOX_LINUX);
     const signIns = of(await inbox(u.client, '?filter=account'), 'security').filter((i) => i.params.event === 'sign_in');
     const fresh = signIns.find((i) => i.params.device === 'Firefox · Linux');
-    expect(fresh).toMatchObject({ readAt: null, href: '/me' });
+    expect(fresh).toMatchObject({ readAt: null, href: '/me?tab=account' });
     // Nothing of the session (its id, the address) is on the item.
     expect(Object.keys(fresh!.params).sort()).toEqual(['device', 'event']);
     await u.client.post('/api/notifications/read', { ids: [fresh!.id] });
@@ -154,7 +154,7 @@ describe('notification inbox', () => {
     // The session that changed it stays signed in (the others end).
     expect((await u.client.post('/api/auth/me/password', { currentPassword: PASSWORD, newPassword: 'changed123!' })).status).toBe(200);
     const sec = of(await inbox(u.client, '?filter=account'), 'security');
-    expect(sec.find((i) => i.params.event === 'password_change')).toMatchObject({ readAt: null, href: '/me' });
+    expect(sec.find((i) => i.params.event === 'password_change')).toMatchObject({ readAt: null, href: '/me?tab=account' });
   });
 
   it('a VIP change by an administrator is an account item; withdrawing takes the member\'s items and those about it', async () => {

@@ -1,5 +1,5 @@
 import { sound } from '@jc/audio';
-import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView } from '@jc/types';
+import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView, TournamentDetailDto } from '@jc/types';
 import {
   ArrowDownIcon,
   ArrowUpFromLineIcon,
@@ -30,6 +30,7 @@ import { LinkShare } from '../components/Share';
 import { ANY, parseQuick, QuickMissNote, useQuickPlay } from '../components/QuickPlay';
 import { HostRoomModal } from '../components/Rooms';
 import type { ReportSubject } from '../components/Social';
+import type { StandingSeat } from '../game/TournamentHud';
 import { ActionHelp, CurrentHandPill, StageNote, useNotesFit } from '../game/BeginnerAids';
 import { BuyInModal, ChatPanel, SettingsModal, TopUpModal } from '../game/Panels';
 import { PreActions } from '../game/PreActions';
@@ -37,7 +38,7 @@ import { TimeBankButton } from '../game/TimeBank';
 import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { legacyMuckStep } from '../game/olderRooms';
 import { ReactionButton, ReactionTray, useReactionSender, useReactionTray } from '../game/Reactions';
-import { recoveryText } from '../game/recoveryText';
+import { RecoveryNote } from '../game/RecoveryNote';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useBoxSize, useTableLayout, useTableStatus } from '../game/TableScene';
 import { RequestError, useTableSocket } from '../game/useTableSocket';
@@ -66,10 +67,15 @@ const HandRankingChart = lazyPart(
   () => <LoadFailed className="py-6" onRetry={() => location.reload()} />,
 );
 // Only tournament tables show these, so they (and their text) stay out of the entry chunk; a tournament table's id
-// starts with sng- (docs/TOURNAMENT.md), which lets the page fetch them before the room's first state arrives.
+// starts with sng- or mtt- (docs/TOURNAMENT.md), which lets the page fetch them before the room's first state arrives.
 const loadTournamentHud = () => import('../game/TournamentHud');
 const TournamentBar = lazyPart(() => loadTournamentHud().then((m) => m.TournamentBar));
 const TournamentResult = lazyPart(() => loadTournamentHud().then((m) => m.TournamentResult));
+
+/** The seated players' stacks for the tournament standings: what every seat shows, nothing more. */
+function standingSeats(s: TableView | null): StandingSeat[] {
+  return (s?.seats ?? []).flatMap((x) => (x.state !== 'empty' && x.nickname ? [{ seatIndex: x.seatIndex, nickname: x.nickname, stack: x.stack, vip: x.vip }] : []));
+}
 
 /** Nobody still in is dealt a hand: everyone left is away, and the level clock waits with them (not an operator's pause). */
 function tournamentStalled(s: TableView): boolean {
@@ -142,7 +148,7 @@ export function TableRoute() {
 export function TablePage() {
   const { id = '' } = useParams();
   useEffect(() => {
-    if (id.startsWith('sng-')) void loadTournamentHud();
+    if (id.startsWith('sng-') || id.startsWith('mtt-')) void loadTournamentHud();
   }, [id]);
   const [params, setParams] = useSearchParams();
   // Sent here by quick play: if the seat is gone on arrival, offer the next table instead of a dead end.
@@ -156,6 +162,38 @@ export function TablePage() {
   const sock = useTableSocket(id);
   const { reopen } = sock;
   const s = sock.state;
+  // A multi-table tournament moved me to another table (between hands; docs/TOURNAMENT_MTT.md): the page follows.
+  const movedTo = s?.tournament?.mtt?.movedTo ?? null;
+  useEffect(() => {
+    if (movedTo && movedTo !== id) nav(`/table/${movedTo}`, { replace: true });
+  }, [movedTo, id, nav]);
+  // The table I was sent to can break and close before I get there (the coordinator sends me on, but that table no
+  // longer lets anyone in), and so can the table I sat at while my connection was down: its socket is refused. The
+  // tournament's record of my table (written as each move completes) says where to go, and a table I pass through says
+  // where next. Asked now and every 5 seconds while this table does not answer, whether or not it answered before, or
+  // once it said it closed; no longer once I am not playing in the tournament.
+  const mttId = /^mtt-(.+)-\d+$/.exec(id)?.[1] ?? null;
+  const stranded = !!mttId && (sock.status === 'reconnecting' || sock.status === 'closed');
+  useEffect(() => {
+    if (!stranded || !mttId) return;
+    const ctl = new AbortController();
+    const look = () =>
+      void api<TournamentDetailDto>(`/api/tournaments/${encodeURIComponent(mttId)}`, { signal: ctl.signal })
+        .then((d) => {
+          if (d.me?.status !== 'playing') {
+            clearInterval(timer);
+            return;
+          }
+          if (d.me.tableId && d.me.tableId !== id) nav(`/table/${d.me.tableId}`, { replace: true });
+        })
+        .catch(() => undefined);
+    const timer = setInterval(look, 5_000);
+    look();
+    return () => {
+      ctl.abort();
+      clearInterval(timer);
+    };
+  }, [stranded, mttId, id, nav]);
   // Table amounts in the player's unit; the wallet balance and the blinds in the header stay in chips.
   const amt = useAmounts(s?.table.bigBlind ?? 0);
   const [codeOpen, setCodeOpen] = useState(false);
@@ -452,6 +490,8 @@ export function TablePage() {
     }
   }
 
+  // The line over the table. A recovery's steps are not in it but in the header (RecoveryNote): what it says of the view
+  // kept meanwhile stays, so the line neither comes nor goes with a drop.
   const banner =
     sock.status === 'locked'
       ? t('table.locked')
@@ -461,13 +501,11 @@ export function TablePage() {
           ? t('table.replaced')
           : sock.status === 'closed'
             ? t('table.closed')
-            : sock.recovery
-              ? recoveryText(locale)(sock.recovery)
-              : sock.status === 'reconnecting'
-              ? t('table.reconnecting')
-              : sock.status === 'connecting' || !s
-                ? t('table.connecting')
-                : s.status === 'closing' || s.status === 'closed'
+            : !s
+              ? sock.status === 'reconnecting'
+                ? t('table.reconnecting')
+                : t('table.connecting')
+              : s.status === 'closing' || s.status === 'closed'
                   ? null
                   : s.maintenance?.active
                     ? t('table.maintenance', { end: when(s.maintenance.endsAt, locale) })
@@ -491,6 +529,8 @@ export function TablePage() {
   // A tournament table: no wallet chips here (no buy-in, top-up, rebuy or waiting list), and its seat is not given up
   // by leaving the screen; the way out goes to the tournament's page.
   const tn = s?.tournament ?? null;
+  // A seat's HUD counts the player's hands at this kind of table.
+  const hudScope = tn ? 'tournament' : 'cash';
   const autoPolicy = s ? seatPolicy(s.you) : null;
   // Standing up folds my hand while I am still in it (not folded, not all in): at once on my turn, else when it comes,
   // so I am asked first. Folded, all in (I stand up once it is settled) or between hands, it folds nothing.
@@ -653,13 +693,20 @@ export function TablePage() {
               )}
             </>
           );
-          // The host opens the room's settings from its name, so the header needs no extra button on a phone.
-          return isHost ? (
-            <button type="button" className="jc-tap min-w-0 rounded-lg px-1.5 py-0.5 text-left hover:bg-white/5" onClick={() => setHosting(true)} aria-label={t('room.manage')} data-testid="room-manage">
-              {title}
-            </button>
-          ) : (
-            <div className="min-w-0">{title}</div>
+          // The host opens the room's settings from its name, so the header needs no extra button on a phone. While the
+          // connection recovers, the name steps aside for its note (the room's settings wait, as the turn does).
+          const away = sock.recovery ? 'invisible' : '';
+          return (
+            <div className="@container relative flex min-w-0 flex-1 items-center self-stretch">
+              {isHost ? (
+                <button type="button" className={cx('jc-tap min-w-0 rounded-lg px-1.5 py-0.5 text-left hover:bg-white/5', away)} onClick={() => setHosting(true)} aria-label={t('room.manage')} data-testid="room-manage">
+                  {title}
+                </button>
+              ) : (
+                <div className={cx('min-w-0', away)}>{title}</div>
+              )}
+              {sock.recovery && <RecoveryNote recovery={sock.recovery} onRetry={sock.status === 'reconnecting' ? sock.reconnect : undefined} />}
+            </div>
           );
         })()}
         <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
@@ -738,7 +785,7 @@ export function TablePage() {
       </header>
       {tn && (
         <Suspense fallback={null}>
-          <TournamentBar tn={tn} />
+          <TournamentBar tn={tn} seats={standingSeats(s)} />
         </Suspense>
       )}
       <div className="z-40">
@@ -746,9 +793,9 @@ export function TablePage() {
       </div>
 
       {banner && (
-        <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status" data-testid="table-banner" data-recovery={sock.recovery ?? undefined}>
+        <div className="z-40 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gold-500/15 px-4 py-2 text-center text-sm text-gold-300" role="status" data-testid="table-line">
           {banner}
-          {sock.status === 'reconnecting' && (
+          {!s && sock.status === 'reconnecting' && (
             <button className="jc-tap rounded-full border border-gold-500/40 px-3 py-1 text-xs font-semibold hover:bg-gold-500/15" onClick={sock.reconnect}>
               {t('table.reconnectNow')}
             </button>
@@ -902,7 +949,7 @@ export function TablePage() {
                 {short ? (
                   <>
                     {/* The column: the label rides in the time bank's pill, so the raise panel still fits a 360px-high screen. */}
-                    <TimeBankButton s={s} onUse={addBankTime} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
+                    <TimeBankButton s={s} onUse={addBankTime} locked={!sock.synced} column turn={<TurnBanner deadline={hand!.deadline} compact />} fallback={<TurnBanner deadline={hand!.deadline} />} />
                     <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column />
                   </>
                 ) : (
@@ -910,7 +957,7 @@ export function TablePage() {
                   // holds both), and puts it in the presets' line while the raise panel is open (ActionBar's `bank`); wider,
                   // it is beside the bar.
                   <div className="pointer-events-none flex w-full shrink-0 flex-col items-center gap-1.5 sm:w-auto sm:flex-row sm:items-end sm:justify-end sm:gap-2">
-                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} chip={chip} />} />
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} locked={!sock.synced} chip={chip} />} />
                   </div>
                 )}
               </>
@@ -1180,12 +1227,13 @@ export function TablePage() {
             onClose={() => setPicked(null)}
             newTab
             chatMute
+            hud={hudScope}
             onReport={() => {
               if (picked) setReporting({ type: 'player', id: picked.id, tableId: id, label: picked.nickname });
               setPicked(null);
             }}
           />
-          <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} />
+          <BotCard seat={pickedBot} onClose={() => setPickedBot(null)} hud={hudScope} />
           <ReportModal subject={reporting} onClose={() => setReporting(null)} />
         </Suspense>
       )}

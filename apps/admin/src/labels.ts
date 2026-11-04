@@ -89,6 +89,7 @@ const auditNames = labeler({
   'board.notice.create': 'auditNoticeCreate',
   'board.notice.update': 'auditNoticeUpdate',
   'board.post.status': 'auditPostStatus',
+  'board.post.purge': 'auditPostPurge',
   'hand.list': 'auditHandList',
   'hand.view_sensitive': 'auditHandView',
   'integrity.review': 'auditIntegrityReview',
@@ -141,6 +142,7 @@ const auditNames = labeler({
   'social.policy': 'auditSocialPolicy',
   'social.view': 'auditSocialView',
   'table.close': 'auditTableClose',
+  'table.purge': 'auditTablePurge',
   'table.create': 'auditTableCreate',
   'table.update': 'auditTableUpdate',
   'table.control': 'auditTableControl',
@@ -161,6 +163,7 @@ const auditNames = labeler({
   'tournament_template.create': 'auditTplCreate',
   'tournament_template.list': 'auditTplList',
   'tournament_template.status': 'auditTplStatus',
+  'tournament_template.purge': 'auditTplPurge',
   'tournament_template.update': 'auditTplUpdate',
   'user.chips': 'auditUserChips',
   'user.chips_duplicate': 'auditChipsDuplicate',
@@ -229,6 +232,7 @@ export const capabilityLabel = labeler({
   'timebank.policy': 'capTimeBankPolicy',
   'social.policy': 'capSocialPolicy',
   'tournament.structure': 'capTournamentStructure',
+  'data.purge': 'capDataPurge',
 });
 /** Console features in the permission table; most are the menu's names. */
 export const featureLabel = labeler({
@@ -286,6 +290,8 @@ export const tableIssueLabel = labeler({
   session_without_seat: 'issueSessionWithoutSeat',
   seat_without_session: 'issueSeatWithoutSession',
   timer_unarmed: 'issueTimerUnarmed',
+  tournament_unsynced: 'issueTournamentUnsynced',
+  tournament_unanswered: 'issueTournamentUnanswered',
 });
 /** Service notices and maintenance windows (the admin service page). */
 export const noticeKindLabel = labeler({ general: 'noticeKindGeneral', urgent: 'noticeKindUrgent', maintenance: 'noticeKindMaintenance' });
@@ -362,6 +368,9 @@ export const tnRecoveryLabel = labeler({
 export const tnEndReasonLabel = labeler({ completed: 'tnStFinished', finished: 'tnStFinished', cancelled: 'tnStCancelled', aborted: 'tnStAborted' });
 /** Why a template's values do not hold together (@jc/types tournamentStructureProblem). */
 export const structureProblemLabel = labeler({
+  capacity_over_table: 'tnPbCapacityOverTable',
+  mtt_table_seats: 'tnPbMttTableSeats',
+  mtt_one_table: 'tnPbMttOneTable',
   min_players_over_capacity: 'tnPbMinPlayers',
   small_blind_not_below_big: 'tnPbSmallBlind',
   levels_decrease: 'tnPbLevelsDecrease',

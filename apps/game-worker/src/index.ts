@@ -2,6 +2,7 @@ export { TableRoom } from './room';
 export { PresenceHub } from './presence';
 export { RealtimeHub } from './realtime';
 export { AdminMonitorHub } from './admin-monitor';
+export { TournamentCoordinator } from './coordinator';
 
 /**
  * The game worker only hosts the TableRoom, PresenceHub, RealtimeHub and AdminMonitorHub Durable Objects. It

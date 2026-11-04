@@ -1,15 +1,16 @@
 import { handLabelKey, NICKNAME_RE, passwordOk, type HandDetailDto, type HandSummaryDto, type LedgerEntryDto, type MeDto, type MyCommentDto, type PostListItemDto, type StatsDto } from '@jc/types';
-import { Badge, Button, Empty, Field, Figure, formatChips, formatDate, inHoleOrder, Input, Modal, Panel, PlayingCard, Stat, type ThemeId } from '@jc/ui';
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { Badge, Button, buttonClass, Empty, Field, Figure, formatChips, formatDate, inHoleOrder, Input, MedalIcon, Modal, Panel, PencilIcon, PlayingCard, Stat, Tabs, UserIcon, type ThemeId } from '@jc/ui';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { BadgeShelf } from '../academy/Badges';
 import { useTr } from '../academy/content';
 import { lessonLinksFor } from '../academy/handLinks';
 import { useBadges } from '../academy/sync';
+import { ChallengesCard } from '../components/Challenges';
 import { HandNotePanel, HandRow } from '../components/HandNotes';
 import { MemberName } from '../components/MemberName';
 import { PasswordInput, PasswordMatch, PasswordRules } from '../components/PasswordFields';
-import { MoreStats, PositionTable, RatioStat, StatDefinitions, StatsTrend } from '../components/PlayStats';
+import { MoreStats, PositionBb100, PositionTable, RatioStat, StatDefinitions, StatsPeriodChoice, StatsTrend, usePeriodStats, type StatsPeriod } from '../components/PlayStats';
 import { NotificationSettings } from '../components/NotificationSettings';
 import { PresenceLabel, PresenceModePicker } from '../components/Presence';
 import { ReferralCard } from '../components/Referral';
@@ -66,11 +67,72 @@ function ledgerLabel(l: LedgerEntryDto): MsgKey {
   return (l.type === 'top_up' && l.memo && AUTO_TOP_UP[l.memo]) || (`ledger.${l.type}` as MsgKey);
 }
 
+/** A panel's link beside its title: a 40 px target for a finger, laid out no taller than the title. */
+const panelLink = 'jc-tap -my-3 inline-flex min-h-10 min-w-10 items-center justify-center text-xs text-gold-300 hover:underline';
+
+const ME_TABS = ['dashboard', 'history', 'activity', 'account'] as const;
+type MeTab = (typeof ME_TABS)[number];
+
+/** One tab of My Page. Another tab hides it rather than removing it: what it loaded, and what is typed in it, stays. */
+function TabPanel({ tab, k, children }: { tab: MeTab; k: MeTab; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={`me-panel-${k}`} aria-labelledby={`me-tab-${k}`} hidden={tab !== k} className="flex flex-col gap-6" data-testid={`me-panel-${k}`}>
+      {children}
+    </div>
+  );
+}
+
+/** The history's statistics over one period: every figure from the same route, counted the same way. */
+function PeriodStats({ ps }: { ps: StatsDto }) {
+  const { t } = useI18n();
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3" data-testid="stats" data-days={ps.days ?? 'all'}>
+      <Stat label={t('me.handsPlayed')} value={formatChips(ps.handsPlayed)} />
+      <Stat label={t('me.handsWon')} value={formatChips(ps.handsWon)} sub={`${t('me.winRate')} ${ps.winRate === null ? '—' : `${ps.winRate}%`}`} />
+      <Stat label={t('me.totalWon')} value={formatChips(ps.totalWon)} sub={t('me.totalWonHint')} />
+      <Stat label={t('me.net')} value={<span className={ps.netChips >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}><Figure>{signed(ps.netChips)}</Figure></span>} />
+      <Stat label={t('me.largestPot')} value={formatChips(ps.largestPot)} sub={t('me.largestPotHint')} />
+      <Stat label={t('me.avgPot')} value={ps.avgPot === null ? '—' : formatChips(ps.avgPot)} sub={t('me.avgPotHint')} />
+      <Stat label={t('me.biggestWin')} value={formatChips(ps.biggestWin)} sub={t('me.biggestWinHint')} />
+      <RatioStat label="VPIP" ratio={ps.vpip} hint={t('me.vpipHint')} testid="stats-vpip" />
+      <RatioStat label="PFR" ratio={ps.pfr} hint={t('me.pfrHint')} testid="stats-pfr" />
+      <RatioStat label={t('me.raiseShare')} ratio={ps.raiseShare} hint={t('me.raiseShareHint')} testid="stats-raise-share" />
+      <RatioStat label={t('me.wtsd')} ratio={ps.wtsd} hint={t('me.wtsdHint')} testid="stats-wtsd" />
+      <RatioStat label={t('me.wsd')} ratio={ps.wsd} hint={t('me.wsdHint')} testid="stats-wsd" />
+      <MoreStats st={ps} />
+      <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{t('me.bestHand')}</div>
+        {ps.bestHand ? (
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <span className="font-semibold text-gold-300">{t(`hand.${handLabelKey(ps.bestHand.rankClass, ps.bestHand.cards)}` as MsgKey)}</span>
+            <span className="flex gap-1">
+              {ps.bestHand.cards.map((c) => (
+                <PlayingCard key={c} card={c as Card} size="2rem" />
+              ))}
+            </span>
+          </div>
+        ) : (
+          <div className="mt-1 text-sm text-ink-400">{t('me.none')}</div>
+        )}
+      </div>
+      <div className="col-span-2 md:col-span-3">
+        <PositionTable positions={ps.positions} />
+      </div>
+      <div className="col-span-2 md:col-span-3">
+        <PositionBb100 positions={ps.positions} />
+      </div>
+    </div>
+  );
+}
+
 export function MePage() {
   const { t, locale, err } = useI18n();
   const { me, setMe, logout } = useAuth();
   const nav = useNavigate();
   const stats = useLoad<StatsDto>('/api/me/stats');
+  // The history's statistics, over the period chosen there (the figures above the tabs stay those of every hand).
+  const [period, setPeriod] = useState<StatsPeriod>('all');
+  const view = usePeriodStats(stats.data, period);
   const badgeCount = useBadges().length;
   const mine = useMyPresence();
   const hands = useLoad<HandSummaryDto[]>('/api/me/hands?limit=15');
@@ -93,6 +155,19 @@ export function MePage() {
   const [delErr, setDelErr] = useState<string | null>(null);
   // Back from a hand opened here: the same place, once what sits above it has loaded.
   useKeptScroll([stats, hands, ledger, myPosts, myComments, sessions].every((x) => x.data !== null || x.error));
+  // The tab is in the address (`?tab=`; none for the dashboard), so a link, a reload and the back button open the same one.
+  const [params, setParams] = useSearchParams();
+  const tab = ME_TABS.find((k) => k === params.get('tab')) ?? 'dashboard';
+  const choose = (k: MeTab) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (k === 'dashboard') n.delete('tab');
+        else n.set('tab', k);
+        return n;
+      },
+      { replace: true, flushSync: true },
+    );
 
   if (!me) return null;
 
@@ -139,102 +214,148 @@ export function MePage() {
     setDelErr(null);
   }
 
+  // The tabs show and hide what is already on the page: each list was read once, above, and every tab stays mounted, so
+  // changing tabs reads nothing again. The lists follow the same events as before.
+  function editProfile() {
+    choose('account');
+    document.getElementById('profile')?.querySelector('input')?.focus();
+  }
+
   const st = stats.data;
+  // A summary figure: a dash once its stats failed to load, an ellipsis while they load.
+  const kpi = (f: (s: StatsDto) => ReactNode) => (st ? f(st) : stats.error ? '—' : '…');
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className="grid size-20 place-items-center overflow-hidden rounded-full border-2 border-gold-500/50 bg-ink-700 text-2xl font-bold text-gold-300">
+      <div className="jc-panel flex flex-col items-center gap-4 p-5 text-center sm:flex-row sm:text-left" data-testid="me-header">
+        <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-gold-500/50 bg-ink-700 text-2xl font-bold text-gold-300">
           {me.avatarUrl ? <img src={me.avatarUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" /> : me.nickname.slice(0, 2)}
         </div>
-        <div className="min-w-0">
-          <h1 className="flex min-w-0 text-2xl font-bold">
+        <div className="flex min-w-0 max-w-full flex-col items-center gap-1 sm:flex-1 sm:items-start">
+          <h1 className="flex min-w-0 max-w-full text-2xl font-bold">
             <MemberName name={me.nickname} vip={me.role === 'user' ? me.vip : undefined} badge />
           </h1>
           {me.role === 'user' && me.vip && (
-            <div className="mt-0.5 text-xs" data-testid="me-vip" data-vip={me.vip}>
+            <div className="text-xs" data-testid="me-vip" data-vip={me.vip}>
               <span className="font-semibold text-ink-100">{t('vip.me', { color: t(`vip.color.${me.vip}`) })}</span>
               <span className="block text-ink-400">{t('vip.meHint')}</span>
             </div>
           )}
-          <div className="text-sm text-ink-300">{me.email}</div>
-          <div className="text-xs text-ink-400">{t('me.memberSince', { date: formatDate(me.createdAt, locale) })}</div>
-          {mine && <PresenceLabel state={mine.state} className="mt-1" />}
-          <Link to={`/players/${me.id}`} className="mt-1 inline-block text-xs font-semibold text-gold-300 hover:underline" data-testid="me-card">{t('social.myCard')}</Link>
-        </div>
-        <div className="sm:ml-auto">
-          <div className="text-[11px] uppercase tracking-[0.14em] text-ink-400">{t('common.balance')}</div>
-          <div className="font-mono text-3xl font-semibold text-gold-300 tabular-nums" data-testid="me-balance">
-            {formatChips(me.balance)}
+          <div className="max-w-full break-all text-sm text-ink-300">{me.email}</div>
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-ink-400 sm:justify-start">
+            <span>{t('me.memberSince', { date: formatDate(me.createdAt, locale) })}</span>
+            {mine && <PresenceLabel state={mine.state} />}
+            {badgeCount > 0 && (
+              <span data-testid="me-badge-count">
+                <Badge>
+                  <MedalIcon className="size-3" aria-hidden />
+                  {t('me.badgeCount', { n: badgeCount })}
+                </Badge>
+              </span>
+            )}
           </div>
+        </div>
+        {/* A phone puts the two under what they act on, side by side and as wide as the card; a wider screen at its end. */}
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0">
+          <Link to={`/players/${me.id}`} className={buttonClass('subtle', 'md', 'min-h-11')} data-testid="me-card">
+            <UserIcon className="size-4" aria-hidden />
+            {t('me.viewProfile')}
+          </Link>
+          <Button variant="subtle" className="min-h-11" onClick={editProfile} data-testid="me-edit-profile">
+            <PencilIcon className="size-4" aria-hidden />
+            {t('me.editProfile')}
+          </Button>
         </div>
       </div>
 
-      <Panel title={t('presence.title')} id="presence">
-        <PresenceModePicker className="max-w-xl" />
-      </Panel>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="me-kpis">
+        <Stat
+          label={t('common.balance')}
+          value={
+            <span className="text-gold-300" data-testid="me-balance">
+              <Figure>{formatChips(me.balance)}</Figure>
+            </span>
+          }
+        />
+        <div className="grid" data-testid="me-kpi-hands">
+          <Stat label={t('me.handsPlayed')} value={kpi((s) => <Figure>{formatChips(s.handsPlayed)}</Figure>)} />
+        </div>
+        {/* No hands, no rate: a dash, not 0%. */}
+        <div className="grid" data-testid="me-kpi-winrate">
+          <Stat
+            label={t('me.winRate')}
+            value={kpi((s) => (s.winRate === null ? '—' : `${s.winRate}%`))}
+            sub={st && st.handsPlayed > 0 ? t('me.ratioOf', { n: formatChips(st.handsWon), of: formatChips(st.handsPlayed) }) : undefined}
+          />
+        </div>
+        <div className="grid" data-testid="me-kpi-bb100">
+          <Stat
+            label="BB/100"
+            value={kpi((s) => (s.bb100 === null ? '—' : <span className={s.bb100 >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}>{`${s.bb100 > 0 ? '+' : ''}${s.bb100.toFixed(2)}`}</span>))}
+            sub={st ? t('me.kpiSample', { n: formatChips(st.counted) }) : undefined}
+          />
+        </div>
+      </div>
 
-      <Panel title={t('notify.title')} id="notifications">
-        <NotificationSettings />
-      </Panel>
+      {/* Inside the page's margins (not edge to edge as the lobby's): every box here keeps its content within it. */}
+      <Tabs
+        label={t('me.tabs')}
+        value={tab}
+        onChange={choose}
+        items={ME_TABS.map((k) => ({ key: k, id: `me-tab-${k}`, controls: `me-panel-${k}`, testid: `me-tab-${k}`, label: t(`me.tab.${k}`) }))}
+      />
 
-      <RefillCard onClaimed={() => void ledger.reload()} />
+      <TabPanel tab={tab} k="dashboard">
+        <RefillCard onClaimed={() => void ledger.reload()} />
+        <ReferralCard onPaid={ledger.reload} />
+        <ChallengesCard />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Panel title={t('me.ledger')}>
+            {ledger.data && ledger.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+            <Failed x={ledger} />
+            <ul className="divide-y divide-white/5" data-testid="ledger">
+              {ledger.data?.map((l) => (
+                <li key={l.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                  <div>
+                    <Badge tone={l.amount >= 0 ? 'green' : 'neutral'}>{t(ledgerLabel(l))}</Badge>
+                    <div className="mt-1 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`font-mono font-semibold tabular-nums ${l.amount >= 0 ? 'text-[#9fd8b6]' : 'text-ink-100'}`}>{signed(l.amount)}</div>
+                    <div className="font-mono text-xs text-ink-400">{formatChips(l.balanceAfter)}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+          <Panel title={t('me.badges')} actions={<Link to="/academy" className={panelLink}>{t('nav.academy')} →</Link>}>
+            {badgeCount > 0 ? <BadgeShelf showLocked={false} /> : <p className="text-sm text-ink-400">{t('me.noBadges')}</p>}
+          </Panel>
+        </div>
+      </TabPanel>
 
-      <ReferralCard onPaid={ledger.reload} />
-
-      <Panel title={t('me.stats')}>
-        {st ? (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3" data-testid="stats">
-            <Stat label={t('me.handsPlayed')} value={formatChips(st.handsPlayed)} />
-            <Stat label={t('me.handsWon')} value={formatChips(st.handsWon)} sub={`${t('me.winRate')} ${st.winRate}%`} />
-            <Stat label={t('me.totalWon')} value={formatChips(st.totalWon)} sub={t('me.totalWonHint')} />
-            <Stat label={t('me.net')} value={<span className={st.netChips >= 0 ? 'text-[#9fd8b6]' : 'text-[#f0a0a2]'}><Figure>{signed(st.netChips)}</Figure></span>} />
-            <Stat label={t('me.largestPot')} value={formatChips(st.largestPot)} sub={t('me.largestPotHint')} />
-            <Stat label={t('me.avgPot')} value={st.avgPot === null ? '—' : formatChips(st.avgPot)} sub={t('me.avgPotHint')} />
-            <Stat label={t('me.biggestWin')} value={formatChips(st.biggestWin)} sub={t('me.biggestWinHint')} />
-            <RatioStat label="VPIP" ratio={st.vpip} hint={t('me.vpipHint')} testid="stats-vpip" />
-            <RatioStat label="PFR" ratio={st.pfr} hint={t('me.pfrHint')} testid="stats-pfr" />
-            <RatioStat label={t('me.raiseShare')} ratio={st.raiseShare} hint={t('me.raiseShareHint')} testid="stats-raise-share" />
-            <RatioStat label={t('me.wtsd')} ratio={st.wtsd} hint={t('me.wtsdHint')} testid="stats-wtsd" />
-            <RatioStat label={t('me.wsd')} ratio={st.wsd} hint={t('me.wsdHint')} testid="stats-wsd" />
-            <MoreStats st={st} />
-            <div className="col-span-2 rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3 md:col-span-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">{t('me.bestHand')}</div>
-              {st.bestHand ? (
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <span className="font-semibold text-gold-300">{t(`hand.${handLabelKey(st.bestHand.rankClass, st.bestHand.cards)}` as MsgKey)}</span>
-                  <span className="flex gap-1">
-                    {st.bestHand.cards.map((c) => (
-                      <PlayingCard key={c} card={c as Card} size="2rem" />
-                    ))}
-                  </span>
-                </div>
+      <TabPanel tab={tab} k="history">
+        <Panel title={t('me.stats')}>
+          {st ? (
+            <div className="flex flex-col gap-3">
+              <StatsPeriodChoice value={period} onChange={setPeriod} />
+              {view.data ? (
+                <PeriodStats ps={view.data} />
+              ) : view.failed ? (
+                <Empty>{t('common.error')}</Empty>
               ) : (
-                <div className="mt-1 text-sm text-ink-400">{t('me.none')}</div>
+                <div className="h-40 animate-pulse rounded-xl bg-ink-850/80" data-testid="stats-loading" />
               )}
-            </div>
-            <div className="col-span-2 md:col-span-3">
-              <PositionTable positions={st.positions} />
-            </div>
-            <div className="col-span-2 md:col-span-3">
-              <StatsTrend />
-            </div>
-            <div className="col-span-2 md:col-span-3">
+              <StatsTrend period={period} />
               <StatDefinitions />
             </div>
-          </div>
-        ) : stats.error ? (
-          <Failed x={stats} />
-        ) : (
-          <Empty>{t('common.loading')}</Empty>
-        )}
-      </Panel>
+          ) : stats.error ? (
+            <Failed x={stats} />
+          ) : (
+            <Empty>{t('common.loading')}</Empty>
+          )}
+        </Panel>
 
-      <Panel title={t('me.badges')} actions={<Link to="/academy" className="text-xs text-gold-300 hover:underline">{t('nav.academy')} →</Link>}>
-        {badgeCount > 0 ? <BadgeShelf showLocked={false} /> : <p className="text-sm text-ink-400">{t('me.noBadges')}</p>}
-      </Panel>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Panel title={t('me.recent')} actions={<Link to="/me/hands" className="jc-tap py-1 text-xs text-gold-300 hover:underline" data-testid="me-all-hands">{t('me.allHands')} →</Link>}>
+        <Panel title={t('me.recent')} actions={<Link to="/me/hands" className={panelLink} data-testid="me-all-hands">{t('me.allHands')} →</Link>}>
           {hands.data && hands.data.length === 0 && <Empty>{t('me.none')}</Empty>}
           <Failed x={hands} />
           <ul className="divide-y divide-white/5">
@@ -243,120 +364,118 @@ export function MePage() {
             ))}
           </ul>
         </Panel>
+      </TabPanel>
 
-        <Panel title={t('me.ledger')}>
-          {ledger.data && ledger.data.length === 0 && <Empty>{t('me.none')}</Empty>}
-          <Failed x={ledger} />
-          <ul className="divide-y divide-white/5" data-testid="ledger">
-            {ledger.data?.map((l) => (
-              <li key={l.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                <div>
-                  <Badge tone={l.amount >= 0 ? 'green' : 'neutral'}>{t(ledgerLabel(l))}</Badge>
-                  <div className="mt-1 text-xs text-ink-400">{formatDate(l.createdAt, locale)}</div>
-                </div>
-                <div className="text-right">
-                  <div className={`font-mono font-semibold tabular-nums ${l.amount >= 0 ? 'text-[#9fd8b6]' : 'text-ink-100'}`}>{signed(l.amount)}</div>
-                  <div className="font-mono text-xs text-ink-400">{formatChips(l.balanceAfter)}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      </div>
+      <TabPanel tab={tab} k="activity">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className={panelLink}>{t('board.write')}</Link>}>
+            {myPosts.data && myPosts.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+            <Failed x={myPosts} />
+            <ul className="divide-y divide-white/5" data-testid="my-posts">
+              {myPosts.data?.map((p) => (
+                <li key={p.id} className="flex items-center gap-3 py-2.5 text-sm">
+                  <Link to={`/board/${p.id}`} className="min-w-0 flex-1 truncate hover:text-gold-300">{p.title}</Link>
+                  {p.commentCount > 0 && <span className="text-xs text-gold-400">[{p.commentCount}]</span>}
+                  <span className="shrink-0 text-xs text-ink-400">{formatDate(p.createdAt, locale)}</span>
+                  <Link to={`/board/${p.id}/edit`} className="jc-tap -my-2.5 inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center text-xs text-gold-300">{t('board.edit')}</Link>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+          <Panel title={t('me.myComments')}>
+            {myComments.data && myComments.data.length === 0 && <Empty>{t('me.none')}</Empty>}
+            <Failed x={myComments} />
+            <ul className="divide-y divide-white/5" data-testid="my-comments">
+              {myComments.data?.map((c) => (
+                <li key={c.id} className="py-2.5 text-sm">
+                  <Link to={`/board/${c.postId}`} className="block truncate text-ink-100 hover:text-gold-300">{c.body}</Link>
+                  <div className="mt-0.5 truncate text-xs text-ink-400">{c.postTitle} · {formatDate(c.createdAt, locale)}</div>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        </div>
+      </TabPanel>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className="text-xs text-gold-300 hover:underline">{t('board.write')}</Link>}>
-          {myPosts.data && myPosts.data.length === 0 && <Empty>{t('me.none')}</Empty>}
-          <Failed x={myPosts} />
-          <ul className="divide-y divide-white/5" data-testid="my-posts">
-            {myPosts.data?.map((p) => (
-              <li key={p.id} className="flex items-center gap-3 py-2.5 text-sm">
-                <Link to={`/board/${p.id}`} className="min-w-0 flex-1 truncate hover:text-gold-300">{p.title}</Link>
-                {p.commentCount > 0 && <span className="text-xs text-gold-400">[{p.commentCount}]</span>}
-                <span className="shrink-0 text-xs text-ink-400">{formatDate(p.createdAt, locale)}</span>
-                <Link to={`/board/${p.id}/edit`} className="shrink-0 text-xs text-gold-300">{t('board.edit')}</Link>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-        <Panel title={t('me.myComments')}>
-          {myComments.data && myComments.data.length === 0 && <Empty>{t('me.none')}</Empty>}
-          <Failed x={myComments} />
-          <ul className="divide-y divide-white/5" data-testid="my-comments">
-            {myComments.data?.map((c) => (
-              <li key={c.id} className="py-2.5 text-sm">
-                <Link to={`/board/${c.postId}`} className="block truncate text-ink-100 hover:text-gold-300">{c.body}</Link>
-                <div className="mt-0.5 truncate text-xs text-ink-400">{c.postTitle} · {formatDate(c.createdAt, locale)}</div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      </div>
+      <TabPanel tab={tab} k="account">
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+          <Panel title={t('me.profile')} id="profile">
+            <form className="flex flex-col gap-4" onSubmit={saveProfile}>
+              <Field label={t('auth.nickname')} hint={t('auth.nicknameHint')}>
+                {(id) => <Input id={id} value={nickname} maxLength={16} onChange={(e) => setNickname(e.target.value.trim())} />}
+              </Field>
+              <Field label={t('me.avatarUrl')}>{(id) => <Input id={id} value={avatarUrl} placeholder="https://" onChange={(e) => setAvatarUrl(e.target.value.trim())} />}</Field>
+              {profileMsg && <p className="text-sm text-gold-300">{profileMsg}</p>}
+              <Button type="submit" disabled={!NICKNAME_RE.test(nickname)}>
+                {t('common.save')}
+              </Button>
+            </form>
+          </Panel>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Panel title={t('me.profile')}>
-          <form className="flex flex-col gap-4" onSubmit={saveProfile}>
-            <Field label={t('auth.nickname')} hint={t('auth.nicknameHint')}>
-              {(id) => <Input id={id} value={nickname} maxLength={16} onChange={(e) => setNickname(e.target.value.trim())} />}
-            </Field>
-            <Field label={t('me.avatarUrl')}>{(id) => <Input id={id} value={avatarUrl} placeholder="https://" onChange={(e) => setAvatarUrl(e.target.value.trim())} />}</Field>
-            {profileMsg && <p className="text-sm text-gold-300">{profileMsg}</p>}
-            <Button type="submit" disabled={!NICKNAME_RE.test(nickname)}>
-              {t('common.save')}
-            </Button>
-          </form>
+          <Panel title={t('me.account')}>
+            <form className="flex flex-col gap-3" onSubmit={changePassword}>
+              <h3 className="text-sm font-semibold">{t('me.changePassword')}</h3>
+              <PasswordInput placeholder={t('me.currentPassword')} aria-label={t('me.currentPassword')} autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+              <PasswordInput id="me-new-password" placeholder={t('auth.newPassword')} aria-label={t('auth.newPassword')} autoComplete="new-password" maxLength={128} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} aria-describedby="me-new-password-rules" />
+              <PasswordRules id="me-new-password-rules" value={pw.next} />
+              <PasswordInput id="me-confirm-password" placeholder={t('auth.passwordConfirm')} aria-label={t('auth.passwordConfirm')} autoComplete="new-password" maxLength={128} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} aria-describedby="me-confirm-password-match" />
+              <PasswordMatch id="me-confirm-password-match" password={pw.next} confirm={pw.confirm} />
+              {pwMsg && <p className="text-sm text-gold-300">{pwMsg}</p>}
+              <Button type="submit" variant="outline" disabled={!pw.current || !passwordOk(pw.next) || pw.confirm !== pw.next}>
+                {t('me.changePassword')}
+              </Button>
+            </form>
+            <div className="jc-divider my-5" />
+            <h3 className="mb-2 text-sm font-semibold">{t('me.sessions')}</h3>
+            <Failed x={sessions} />
+            <ul className="flex flex-col gap-2">
+              {sessions.data?.map((ss) => (
+                <li key={ss.id} className="flex items-center justify-between gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs">
+                  {/* The browser may be cut short to the row; when it was last seen never is. */}
+                  <div className="min-w-0">
+                    <div className="truncate text-ink-300">
+                      {ss.current && <Badge tone="gold" className="mr-2">{t('me.thisDevice')}</Badge>}
+                      {ss.userAgent?.slice(0, 60) ?? '—'}
+                    </div>
+                    <div className="mt-0.5 text-ink-400">{formatDate(ss.lastSeenAt, locale)}</div>
+                  </div>
+                  {!ss.current && (
+                    <button className="jc-tap -my-2 inline-flex min-h-10 shrink-0 items-center px-1 text-gold-300 hover:underline" onClick={async () => { await api(`/api/auth/me/sessions/${ss.id}`, { method: 'DELETE' }); void sessions.reload(); }}>
+                      {t('me.revoke')}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="jc-divider my-5" />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-10"
+                onClick={async () => {
+                  await logout();
+                  nav('/login', { replace: true });
+                }}
+                data-testid="me-logout"
+              >
+                {t('nav.logout')}
+              </Button>
+              <Button variant="danger" size="sm" className="min-h-10" onClick={() => setDeleting(true)}>
+                {t('me.delete')}
+              </Button>
+            </div>
+          </Panel>
+        </div>
+
+        <Panel title={t('presence.title')} id="presence">
+          <PresenceModePicker className="max-w-xl" />
         </Panel>
 
-        <Panel title={t('me.account')}>
-          <form className="flex flex-col gap-3" onSubmit={changePassword}>
-            <h3 className="text-sm font-semibold">{t('me.changePassword')}</h3>
-            <PasswordInput placeholder={t('me.currentPassword')} aria-label={t('me.currentPassword')} autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
-            <PasswordInput id="me-new-password" placeholder={t('auth.newPassword')} aria-label={t('auth.newPassword')} autoComplete="new-password" maxLength={128} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} aria-describedby="me-new-password-rules" />
-            <PasswordRules id="me-new-password-rules" value={pw.next} />
-            <PasswordInput id="me-confirm-password" placeholder={t('auth.passwordConfirm')} aria-label={t('auth.passwordConfirm')} autoComplete="new-password" maxLength={128} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} aria-describedby="me-confirm-password-match" />
-            <PasswordMatch id="me-confirm-password-match" password={pw.next} confirm={pw.confirm} />
-            {pwMsg && <p className="text-sm text-gold-300">{pwMsg}</p>}
-            <Button type="submit" variant="outline" disabled={!pw.current || !passwordOk(pw.next) || pw.confirm !== pw.next}>
-              {t('me.changePassword')}
-            </Button>
-          </form>
-          <div className="jc-divider my-5" />
-          <h3 className="mb-2 text-sm font-semibold">{t('me.sessions')}</h3>
-          <Failed x={sessions} />
-          <ul className="flex flex-col gap-2">
-            {sessions.data?.map((ss) => (
-              <li key={ss.id} className="flex items-center justify-between gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs">
-                <span className="min-w-0 truncate text-ink-300">
-                  {ss.current && <Badge tone="gold" className="mr-2">{t('me.thisDevice')}</Badge>}
-                  {ss.userAgent?.slice(0, 60) ?? '—'} · {formatDate(ss.lastSeenAt, locale)}
-                </span>
-                {!ss.current && (
-                  <button className="shrink-0 text-gold-300 hover:underline" onClick={async () => { await api(`/api/auth/me/sessions/${ss.id}`, { method: 'DELETE' }); void sessions.reload(); }}>
-                    {t('me.revoke')}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-          <div className="jc-divider my-5" />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                await logout();
-                nav('/login', { replace: true });
-              }}
-              data-testid="me-logout"
-            >
-              {t('nav.logout')}
-            </Button>
-            <Button variant="danger" size="sm" onClick={() => setDeleting(true)}>
-              {t('me.delete')}
-            </Button>
-          </div>
+        <Panel title={t('notify.title')} id="notifications">
+          <NotificationSettings />
         </Panel>
-      </div>
+      </TabPanel>
 
       <Modal
         open={deleting}
@@ -380,8 +499,8 @@ export function MePage() {
 export function HandDetailPage() {
   const { id = '' } = useParams();
   const { t, locale } = useI18n();
-  // Back to the list it was opened from (with its filters), or My Page; a lesson opened from here comes back here.
-  const back = useBack(/^\/me(\/hands)?(\?|$)/, '/me');
+  // Back to the list it was opened from (with its filters), or My Page's play history; a lesson opened from here comes back here.
+  const back = useBack(/^\/me(\/hands)?(\?|$)/, '/me?tab=history');
   const here = useLocation().pathname;
   const { data, error, gone, reload } = useLoad<HandDetailDto>(`/api/me/hands/${encodeURIComponent(id)}`);
   const tr = useTr();

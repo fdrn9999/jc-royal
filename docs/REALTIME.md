@@ -194,15 +194,15 @@ API 라우트 ── D1 batch [변경 … , realtime_outbox 행] ── 커밋
 |---|---|---|
 | `wallet.changed` | 관리자 칩 지급·차감, 정합성 정정(기록·되돌리기), 추천 보상 | 그 원장 행이 있을 때 |
 | `account.changed` | 역할 변경, VIP 지정·해제·색 변경 | 같은 batch(VIP는 그 버전으로 저장됐을 때만) |
-| `member.vip.changed` | VIP 색이 다른 회원에게 보이게 바뀔 때 | 커밋 뒤 씀(아래 한계) |
+| `member.vip.changed` | VIP 색이 다른 회원에게 보이게 바뀔 때 | 같은 batch. 그 변경의 `account.changed` 행이 있고, batch 안에서 읽은 보이는 색이 전과 다를 때. 색은 batch 안에서 읽음 |
 | `social.friend.changed` | 친구 요청, 수락 | 요청 행이 생기거나 수락으로 바뀌었을 때 |
 | `social.dm.created` | 1:1 메시지(테이블 초대 포함) | 그 메시지 행이 있을 때. `seq`는 batch 안에서 읽음 |
 | `message.changed` | 관리자 쪽지, 칩 안내, 가입 환영, 정지·해제 안내, 설정 초기화·복원 안내, 신고 처리 결과(신고자·대상), 토너먼트 시작·취소·중단 안내 | 쪽지 행을 쓴 회원에게만 |
 | `inbox.broadcast` | 모든 회원 쪽지함 공지 | 같은 batch |
-| `service.changed` | 공지·점검 생성·변경·삭제 | 커밋 뒤 씀(`rev`를 읽은 뒤) |
-| `tournament.changed` | 토너먼트 변경 전부 | 커밋 뒤 씀 |
+| `service.changed` | 공지·점검 생성·변경·종료·삭제 | 그 공지·점검 행이 바뀌었을 때. `rev`는 batch 안에서 읽음 |
+| `tournament.changed` | API의 토너먼트 변경: 생성, 등록 열기·닫기, 참가·취소, 시작, 시작하며 빠진 참가자, 일시정지·재개, 취소, 중단 | 그 토너먼트(또는 참가자) 행이 바뀌었을 때 |
 
-- **커밋 뒤에 쓰는 것(`outboxAfterCommit`).** 이벤트 내용이 커밋 뒤에야 정해지는 셋(`service.changed`의 `rev`, `member.vip.changed`의 보이는 색, `tournament.changed`)은 커밋 뒤 행을 쓰고 보낸다. 허브가 놓친 것은 다시 보내지만, 커밋과 그 쓰기 사이에 워커가 멈추면 이벤트는 아웃박스 전처럼 사라진다. 행을 못 쓰면 한 번 그냥 보내고, 실패는 `rt_undelivered`로 센다.
+- **내용이 변경 뒤에 정해지는 것.** `service.changed`의 `rev`(공지·점검의 마지막 변경 시각)와 `member.vip.changed`의 보이는 색은 변경이 끝나야 정해진다. 둘 다 변경의 batch 안에서 `fill`로 읽어 행의 이벤트에 넣고, 바로 보내는 이벤트에는 같은 batch가 돌려준 값을 넣는다(공지·점검은 batch의 마지막 문장이 `rev`를 다시 읽고, VIP는 `UPDATE … RETURNING`의 역할·상태로 보이는 색을 계산한다). `tournament.changed`는 내용이 id뿐이라 그대로 쓴다. 예전에는 이 셋을 커밋 뒤 따로 썼다(`outboxAfterCommit`, 지금은 없다). 그래서 커밋과 그 쓰기 사이에 워커가 멈추면 이벤트가 사라졌는데, 이제는 행이 변경과 함께 커밋되어 크론이 보낸다.
 - **아웃박스를 지나지 않는 것과 이유.**
   - 로비 이벤트(`lobby.*`), 룸이 보내는 `wallet.changed`·`tournament.changed`: 인원·좌석은 1초마다 바뀌고 다음 이벤트나 60초 폴링이 덮는다. 룸은 D1 batch를 직접 다루지 않는다.
   - 내가 한 일을 내 다른 기기에 알리는 것: 프로필 저장의 `account.changed`, 무료 리필의 `wallet.changed`, 쪽지 읽기·삭제의 `message.changed`, 대화 읽음 `social.dm.read`, 알림 읽음·로그인·비밀번호 변경의 `notification.changed`.
@@ -211,7 +211,7 @@ API 라우트 ── D1 batch [변경 … , realtime_outbox 행] ── 커밋
   - 로그아웃·정지·비밀번호 변경: 이벤트가 아니라 기존 `/revoke`(두 번 시도)와 허브의 5분 확인이 소켓을 닫는다(3절).
 - **지표.** `rt_outbox_retry`(바로 보내기나 크론이 실패해 다시 기다리는 이벤트), `rt_outbox_failed`(포기: 시도를 다 쓰거나 만료). 아웃박스를 지나지 않는 발행 실패는 그대로 `rt_undelivered`다. 관리 콘솔 대시보드의 운영 칸에 둘 다 지난 1시간 값이 보인다(`ops-rt-outbox-retry`, `ops-rt-outbox-failed`, 포기가 하나라도 있으면 빨간 숫자).
 - **보관.** 끝난 행(`sent`·`failed`·`expired`)은 3일 뒤, 아직 `pending`인 행도 만든 지 3일이 지나면 매일 정리 크론이 지운다. 행에는 회원 id와 이벤트(종류, id, 1:1 메시지의 상대와 `seq` 같은 숫자)만 있고 메시지 본문은 없다(`docs/PRIVACY_OPERATIONS.md`).
-- **테스트.** 단위 테스트 `apps/api/src/lib/realtime-outbox.test.ts`(마이그레이션을 적용한 SQLite와 가짜 허브: 조건, 롤백, 매개변수 번호, 허브별 실패, 재시도·포기·만료·임대, 이전 허브), 통합 테스트 `tests/integration/realtime.test.ts`의 'realtime outbox'(workerd: 지급 행이 `sent`로 끝나고 이벤트가 행과 같다, 반복 지급은 행을 더 쓰지 않는다, 1:1 메시지의 `seq`, 크론이 밀린 행을 보내고 만료된 행은 보내지 않는다).
+- **테스트.** 단위 테스트 `apps/api/src/lib/realtime-outbox.test.ts`(마이그레이션을 적용한 SQLite와 가짜 허브: 조건, 롤백, 매개변수 번호, 허브별 실패, 재시도·포기·만료·임대, 이전 허브), 통합 테스트 `tests/integration/realtime.test.ts`의 'realtime outbox'(workerd: 지급 행이 `sent`로 끝나고 이벤트가 행과 같다, 반복 지급은 행을 더 쓰지 않는다, 1:1 메시지의 `seq`, 크론이 밀린 행을 보내고 만료된 행은 보내지 않는다. VIP: 행이 받은 이벤트와 같고(색 포함) VIP 변경과 같은 시각에 쓰였다, 이미 가진 색이나 정지된 회원의 변경은 행을 쓰지 않는다), `tests/integration/realtime-public.test.ts`(공지·점검과 토너먼트: 행이 받은 이벤트와 같고(`rev` 포함) 그 변경과 같은 시각에 쓰였다, 거절된 두 번째 점검 중지와 다시 한 참가 취소는 이벤트도 행도 없다).
 
 ## 8. 비용
 

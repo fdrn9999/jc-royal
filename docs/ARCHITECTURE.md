@@ -99,7 +99,7 @@
 | 무료 칩·봇·추천 | `refill_claims`, `bot_fund`, `bot_events`, `referral_codes`, `referrals` |
 | 토너먼트 | `tournament_templates`, `tournaments`, `tournament_entries` |
 | 커뮤니티·소셜 | `posts`, `post_hands`, `comments`, `messages`, `friendships`, `user_blocks`, `direct_messages`, `reports`, `report_events` |
-| 아카데미·업적 | `academy_progress`, `academy_gto_progress`(고급 GTO 진도), `user_badges`(아카데미 배지와 `play:` 업적), `academy_stats` |
+| 아카데미·업적·도전과제 | `academy_progress`, `academy_gto_progress`(고급 GTO 진도), `user_badges`(아카데미 배지와 `play:` 업적), `academy_stats`, `challenge_completions`(일일·주간 도전과제 완료, 회원·코드·기간마다 한 행) |
 | 알림·실시간 | `notifications`(알림함), `realtime_outbox`(놓치면 안 되는 실시간 이벤트) |
 | 운영 | `admin_audit_log`, `admin_permissions`, `admin_notes`, `service_notices`, `maintenance_windows`, `ops_metrics`, `ops_alerts`·`ops_events`·`ops_watch`(지속 운영 경고·기록·매분 점검), `active_days`, `daily_stats`, `rate_limits` |
 
@@ -111,7 +111,7 @@
 
 **지속 운영 경고**: 매분 크론이 열린 테이블 룸에 상태를 묻고(`ops_watch`), 규칙에 맞는 상황을 `ops_alerts`(같은 상황은 `dedupe_key`로 한 행, 정상이 되면 해소)와 `ops_events`(발생·해소·관리자 조치의 기록)에 쓴다. 회원 개인정보와 비공개 카드는 쓰지 않는다. 자동 조치는 없다(`docs/CONTROL_CENTER.md`).
 
-**업적·친구 테이블 알림**: 플레이 업적은 게임 워커가 핸드·토너먼트 기록 직후, 연속 접속은 매일 정리 작업이 `packages/db/src/achievementsSql.ts`의 SQL로 `user_badges`에 `INSERT OR IGNORE`한다(기록된 결과만 읽고, 머크한 패는 세지 않는다). 실패해도 핸드 기록은 그대로다. 공개 테이블에 앉으면 룸이 바이인 커밋 뒤 친구에게 알림함 항목을 쓴다(`apps/game-worker/src/friend-table.ts`, 비공개·토너먼트 테이블은 쓰지 않음). 공개 범위는 `docs/SOCIAL.md`.
+**업적·도전과제·친구 테이블 알림**: 플레이 업적은 게임 워커가 핸드·토너먼트 기록 직후, 연속 접속은 매일 정리 작업이 `packages/db/src/achievementsSql.ts`의 SQL로 `user_badges`에 `INSERT OR IGNORE`한다(기록된 결과만 읽고, 머크한 패는 세지 않는다). 실패해도 핸드 기록은 그대로다. 도전과제는 같은 자리에서 `packages/db/src/challengesSql.ts`의 SQL로 그 핸드가 끝난 하루·주를, 회원이 과제를 열 때(`GET /api/me/challenges`) 오늘·이번 주를 다시 판정해 `challenge_completions`에 `INSERT OR IGNORE`한다(칩·원장과 무관, `docs/CHALLENGES.md`). 한국 시간 날짜 계산은 `packages/db/src/days.ts` 하나를 통계와 함께 쓴다. 공개 테이블에 앉으면 룸이 바이인 커밋 뒤 친구에게 알림함 항목을 쓴다(`apps/game-worker/src/friend-table.ts`, 비공개·토너먼트 테이블은 쓰지 않음). 공개 범위는 `docs/SOCIAL.md`.
 
 ## 원본 저장소에서 가져온 것
 

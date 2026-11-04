@@ -44,8 +44,10 @@ describe('admin permission table', () => {
         'PUT /refill/policy',
         'POST /service/maintenance',
         'POST /service/maintenance/:id/stop',
+        'POST /board/posts/:id/purge',
         'POST /tables/:id/close',
         'POST /tables/:id/control',
+        'POST /tables/:id/purge',
         'POST /tables/:id/timer-recover',
         'PUT /time-bank/policy',
         'PUT /social/policy',
@@ -54,6 +56,7 @@ describe('admin permission table', () => {
         'POST /tournament-templates',
         'PUT /tournament-templates/:id',
         'POST /tournament-templates/:id/status',
+        'POST /tournament-templates/:id/purge',
         'POST /users/:id/chips',
         'POST /users/:id/disconnect',
         'POST /users/:id/reset-link',
@@ -82,6 +85,9 @@ describe('admin permission table', () => {
         'POST /tournament-templates',
         'PUT /tournament-templates/:id',
         'POST /tournament-templates/:id/status',
+        'POST /board/posts/:id/purge',
+        'POST /tables/:id/purge',
+        'POST /tournament-templates/:id/purge',
         'GET /security/admins',
         'GET /security/admins/:id',
         'PUT /security/admins/:id/grants',
@@ -90,7 +96,7 @@ describe('admin permission table', () => {
     // A preview skips only the password, so only routes that answer a preview and write nothing are marked.
     const previews = Object.entries(ROUTE_RULES).filter(([, r]) => r.preview).map(([k]) => k);
     expect(previews.sort()).toEqual(
-      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /bots/:id/profile', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/settings/reset', 'POST /users/:id/settings/restore', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend', 'PATCH /users/:id/vip', 'PUT /time-bank/policy', 'PUT /social/policy', 'POST /tournaments', 'POST /tournament-templates', 'PUT /tournament-templates/:id', 'PUT /security/admins/:id/grants'].sort(),
+      ['POST /reports/:id', 'POST /tables/:id/close', 'PUT /bots/:id/profile', 'PUT /bots/policy', 'PUT /referrals/policy', 'PUT /refill/policy', 'POST /users/:id/chips', 'POST /users/:id/disconnect', 'POST /users/:id/role', 'POST /users/:id/settings/reset', 'POST /users/:id/settings/restore', 'POST /users/:id/suspend', 'POST /users/:id/unsuspend', 'PATCH /users/:id/vip', 'PUT /time-bank/policy', 'PUT /social/policy', 'POST /tournaments', 'POST /tournament-templates', 'PUT /tournament-templates/:id', 'PUT /security/admins/:id/grants', 'POST /board/posts/:id/purge', 'POST /tables/:id/purge', 'POST /tournament-templates/:id/purge'].sort(),
     );
     // Deciding a report and opening a tournament ask for no password, so their previews skip nothing; every other preview
     // stands before one.

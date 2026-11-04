@@ -194,7 +194,7 @@ export function PresenceMenu() {
       <button
         ref={btn}
         type="button"
-        className="jc-tap flex min-h-9 items-center gap-1.5 rounded-full border border-white/10 px-2.5 text-xs font-semibold text-ink-200 hover:text-ivory"
+        className="jc-tap flex min-h-10 items-center gap-1.5 rounded-full border border-white/10 px-2.5 text-xs font-semibold text-ink-200 hover:text-ivory"
         aria-expanded={open}
         aria-controls={panel}
         aria-label={state ? `${t('presence.mine')}: ${t(`presence.${state}` as MsgKey)}` : t('presence.mine')}

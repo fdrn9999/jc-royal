@@ -50,10 +50,10 @@ export function LinkShare({ data, label, hint, testId }: { data: ShareData; labe
       <div className="text-xs font-semibold text-ink-300">{label}</div>
       <div className="flex gap-2">
         <Input readOnly value={data.url} className="min-w-0 flex-1 font-mono text-xs" aria-label={label} data-testid={`${testId}-url`} onFocus={(e) => e.target.select()} />
-        <Button variant="outline" size="sm" onClick={async () => setOutcome((await copyText(data.url)) ? 'copied' : 'failed')} data-testid={`${testId}-copy`}>
+        <Button variant="outline" size="sm" className="min-h-10" onClick={async () => setOutcome((await copyText(data.url)) ? 'copied' : 'failed')} data-testid={`${testId}-copy`}>
           {t('share.copy')}
         </Button>
-        <Button variant="outline" size="sm" onClick={async () => setOutcome(await shareLink(data))} data-testid={`${testId}-share`}>
+        <Button variant="outline" size="sm" className="min-h-10" onClick={async () => setOutcome(await shareLink(data))} data-testid={`${testId}-share`}>
           {t('share.share')}
         </Button>
       </div>

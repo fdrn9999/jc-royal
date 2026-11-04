@@ -206,7 +206,7 @@ export function ReferralCard({ onPaid }: { onPaid?: () => unknown }) {
           failed ? (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-[#f3b0b2]">{tr('loadFail')}</span>
-              <Button size="sm" variant="outline" loading={loading} onClick={() => void load()} data-testid="referral-retry">
+              <Button size="sm" variant="outline" className="min-h-10" loading={loading} onClick={() => void load()} data-testid="referral-retry">
                 {tr('retry')}
               </Button>
             </div>
@@ -222,7 +222,7 @@ export function ReferralCard({ onPaid }: { onPaid?: () => unknown }) {
                   {data.code}
                 </div>
               </div>
-              <Button size="sm" variant="outline" onClick={async () => setCopied((await copyText(data.code)) ? 'ok' : 'failed')} data-testid="referral-copy-code">
+              <Button size="sm" variant="outline" className="min-h-10" onClick={async () => setCopied((await copyText(data.code)) ? 'ok' : 'failed')} data-testid="referral-copy-code">
                 {tr('copyCode')}
               </Button>
               <span role="status" aria-live="polite" className={`text-xs ${copied === 'failed' ? 'text-[#f3b0b2]' : 'text-gold-300'}`}>
@@ -284,7 +284,7 @@ export function ReferralCard({ onPaid }: { onPaid?: () => unknown }) {
               )}
             </div>
             <details className="text-sm text-ink-300">
-              <summary className="cursor-pointer text-xs font-semibold text-ink-300">{tr('guide')}</summary>
+              <summary className="jc-tap -my-3 cursor-pointer py-3 text-xs font-semibold text-ink-300">{tr('guide')}</summary>
               <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-xs text-ink-400">
                 <li>{tr('g1')}</li>
                 <li>{tr('g2')}</li>

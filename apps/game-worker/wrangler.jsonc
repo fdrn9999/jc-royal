@@ -18,7 +18,8 @@
       { "name": "TABLES", "class_name": "TableRoom" },
       { "name": "PRESENCE", "class_name": "PresenceHub" },
       { "name": "REALTIME", "class_name": "RealtimeHub" },
-      { "name": "ADMIN_MONITOR", "class_name": "AdminMonitorHub" }
+      { "name": "ADMIN_MONITOR", "class_name": "AdminMonitorHub" },
+      { "name": "TOURNAMENTS", "class_name": "TournamentCoordinator" }
     ]
   },
   // v2: the presence hub (friends' status, memory only; it never writes its storage).
@@ -28,7 +29,8 @@
     { "tag": "v1", "new_sqlite_classes": ["TableRoom"] },
     { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] },
     { "tag": "v3", "new_sqlite_classes": ["RealtimeHub"] },
-    { "tag": "v4", "new_sqlite_classes": ["AdminMonitorHub"] }
+    { "tag": "v4", "new_sqlite_classes": ["AdminMonitorHub"] },
+    { "tag": "v5", "new_sqlite_classes": ["TournamentCoordinator"] }
   ],
   "vars": { "ENVIRONMENT": "development" },
   "observability": { "enabled": true },
@@ -48,14 +50,16 @@
           { "name": "TABLES", "class_name": "TableRoom" },
           { "name": "PRESENCE", "class_name": "PresenceHub" },
           { "name": "REALTIME", "class_name": "RealtimeHub" },
-          { "name": "ADMIN_MONITOR", "class_name": "AdminMonitorHub" }
+          { "name": "ADMIN_MONITOR", "class_name": "AdminMonitorHub" },
+          { "name": "TOURNAMENTS", "class_name": "TournamentCoordinator" }
         ]
       },
       "migrations": [
         { "tag": "v1", "new_sqlite_classes": ["TableRoom"] },
         { "tag": "v2", "new_sqlite_classes": ["PresenceHub"] },
         { "tag": "v3", "new_sqlite_classes": ["RealtimeHub"] },
-        { "tag": "v4", "new_sqlite_classes": ["AdminMonitorHub"] }
+        { "tag": "v4", "new_sqlite_classes": ["AdminMonitorHub"] },
+        { "tag": "v5", "new_sqlite_classes": ["TournamentCoordinator"] }
       ],
       "vars": { "ENVIRONMENT": "production" }
     }

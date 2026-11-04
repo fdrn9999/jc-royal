@@ -11,6 +11,8 @@ export * from './realtime-outbox';
 export * from './inbox';
 export * from './achievements';
 export * from './achievementsSql';
+export * from './challenges';
+export * from './challengesSql';
 export { HAND_STATS_SQL } from './handStats';
 
 export function createDb(d1: D1Database) {

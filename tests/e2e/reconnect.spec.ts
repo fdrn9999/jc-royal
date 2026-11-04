@@ -166,12 +166,16 @@ test('game recovery: until the room sends its state on the new connection, the t
   await expect(banner).toContainText(/현재 핸드 복구 중|Restoring the current hand/);
   await expect(bar).toBeVisible();
   for (const button of await buttons.all()) await expect(button).toBeDisabled();
+  // The time bank asks the room about the turn kept from before too: it waits as well.
+  const bank = a.page.getByTestId('time-bank-use').first();
+  await expect(bank).toBeDisabled();
   await a.page.screenshot({ path: 'test-results/recovery-restoring.png' });
 
   // The room's state arrives: A is told it is back, the buttons open, and the note goes.
   release();
   await expect(banner).toHaveAttribute('data-recovery', 'restored');
   await expect(buttons.first()).toBeEnabled();
+  await expect(bank).toBeEnabled();
   await expect(banner).toBeHidden({ timeout: 5_000 });
   expect(await checkOrCall(a.page)).toBe(true);
 

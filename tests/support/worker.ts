@@ -145,6 +145,8 @@ export const TABLES: TestTable[] = [
   { id: 'it-player-2', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
   { id: 'it-player-priv', maxSeats: 6, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60, isPrivate: true, joinCode: 'player-77' },
   { id: 'it-player-hu', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
+  // Challenges (challenges.test.ts): a heads-up hand whose settlement completes the day's challenge.
+  { id: 'it-chal-hu', maxSeats: 2, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
 async function sha256b64url(s: string) {

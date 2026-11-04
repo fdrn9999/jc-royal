@@ -153,8 +153,10 @@ function hrefOf(r: InboxRowOut, params: InboxItemDto['params']): string | null {
     case 'tournament_invite':
       return r.ref ? `/tournaments/${r.ref}` : '/tournaments';
     case 'vip':
-    case 'security':
       return '/me';
+    // The tab with the password and the signed-in devices.
+    case 'security':
+      return '/me?tab=account';
     case 'notice':
       return typeof params.postId === 'string' ? `/board/${params.postId}` : null;
     case 'maintenance':

@@ -32,6 +32,8 @@ export interface TournamentEntryRow {
   role: string;
   /** The VIP name color the seat shows (only an active ordinary member's: see shownVip). */
   vip?: VipColor;
+  /** A multi-table tournament's table the player sits at (null for a Sit & Go, whose table is the tournament's). */
+  tableId?: string | null;
 }
 
 /** The tournament a table plays, as D1 has it (read with the table: TOURNAMENT_JSON). */
@@ -39,6 +41,10 @@ export interface TournamentRow {
   id: string;
   name: string;
   status: TournamentStatus;
+  /** 'mtt': played at several tables, seated by its coordinator (coordinator.ts). */
+  format: 'sng' | 'mtt';
+  /** Seats at each of a multi-table tournament's tables (0 for a Sit & Go). */
+  tableSeats: number;
   startStack: number;
   levels: BlindLevel[];
   levelMs: number;
@@ -53,18 +59,25 @@ export interface TournamentRow {
   entries: TournamentEntryRow[];
 }
 
-/** The table's tournament as one JSON value (SQL expression over `tables`; null for a cash table). */
-export const TOURNAMENT_JSON = `SELECT json_object('id', tn.id, 'name', tn.name, 'status', tn.status, 'startStack', tn.start_stack,
+/** A tournament as one JSON value (an SQL expression; `where` picks the tournament `tn`). */
+export const tournamentJson = (where: string) => `SELECT json_object('id', tn.id, 'name', tn.name, 'status', tn.status,
+  'format', tn.format, 'tableSeats', tn.table_seats, 'startStack', tn.start_stack,
   'levels', json(tn.levels), 'levelMs', tn.level_ms, 'pauseRequested', tn.pause_requested,
   'tb', json_object('enabled', tn.tb_enabled, 'initialMs', tn.tb_initial_ms, 'maxMs', tn.tb_max_ms, 'unitMs', tn.tb_unit_ms,
     'refillHands', tn.tb_refill_hands, 'refillMs', tn.tb_refill_ms),
   'level', tn.level, 'levelEndsAt', tn.level_ends_at, 'levelLeftMs', tn.level_left_ms, 'pausedAt', tn.paused_at, 'hands', tn.hands,
   'entries', json((SELECT json_group_array(json_object('userId', e.user_id, 'seat', e.seat_index, 'stack', e.stack, 'status', e.status,
       'place', e.place, 'nickname', u.nickname, 'avatarUrl', u.avatar_url, 'role', u.role,
-      'vip', CASE WHEN u.role = 'user' AND u.is_bot = 0 AND u.status = 'active' THEN u.vip_color END))
+      'vip', CASE WHEN u.role = 'user' AND u.is_bot = 0 AND u.status = 'active' THEN u.vip_color END, 'tableId', e.table_id))
     FROM tournament_entries e JOIN users u ON u.id = e.user_id
     WHERE e.tournament_id = tn.id AND e.status IN ('playing', 'eliminated', 'won', 'stopped'))))
-  FROM tournaments tn WHERE tn.table_id = tables.id`;
+  FROM tournaments tn WHERE ${where}`;
+
+/**
+ * The table's tournament (SQL expression over `tables`; null for a cash table): a Sit & Go's table is the tournament's
+ * `table_id`, a multi-table tournament's tables name it in `tournament_id`.
+ */
+export const TOURNAMENT_JSON = tournamentJson('tn.table_id = tables.id OR tn.id = tables.tournament_id');
 
 const STATUSES: readonly TournamentStatus[] = ['registering', 'closed', 'running', 'finished', 'cancelled', 'aborted'];
 
@@ -100,6 +113,7 @@ export function toTournamentRow(raw: unknown): TournamentRow | null {
               avatarUrl: typeof e.avatarUrl === 'string' ? e.avatarUrl : null,
               role: String(e.role ?? 'user'),
               ...(isVipColor(e.vip) ? { vip: e.vip } : {}),
+              tableId: typeof e.tableId === 'string' ? e.tableId : null,
             },
           ]
         : [],
@@ -108,6 +122,8 @@ export function toTournamentRow(raw: unknown): TournamentRow | null {
       id: r.id,
       name: String(r.name ?? ''),
       status: r.status as TournamentStatus,
+      format: r.format === 'mtt' ? 'mtt' : 'sng',
+      tableSeats: Math.max(0, int(r.tableSeats) ?? 0),
       startStack,
       levels: lv,
       levelMs,
@@ -312,11 +328,20 @@ export interface TourneySyncResult {
  * clock, players left and when the room last reported. Every write is the whole state and is conditional on the
  * tournament still running (and, for the clock, on no later hand having been written), so writing it again changes
  * nothing and nothing is written after an abort. Reads back the status, the pause request and the maintenance window.
+ *
+ * `placesFrom` skips places D1 already has (a multi-table tournament's coordinator writes after every hand of every
+ * table); `extra` goes in the same batch, before the tournament's row.
  */
-export async function syncTournament(d1: D1Database, t: TourneyState, stacks: readonly { userId: string; stack: number }[], now: number): Promise<TourneySyncResult> {
+export async function syncTournament(
+  d1: D1Database,
+  t: TourneyState,
+  stacks: readonly { userId: string; stack: number }[],
+  now: number,
+  opts: { placesFrom?: number; extra?: readonly D1PreparedStatement[] } = {},
+): Promise<TourneySyncResult> {
   const running = `EXISTS (SELECT 1 FROM tournaments WHERE id = ?1 AND status = 'running')`;
   const stmts: D1PreparedStatement[] = [];
-  for (const p of t.places) {
+  for (const p of t.places.slice(opts.placesFrom ?? 0)) {
     if (p.userId === t.winnerId) continue;
     stmts.push(
       d1
@@ -336,6 +361,7 @@ export async function syncTournament(d1: D1Database, t: TourneyState, stacks: re
         .bind(t.id, s.userId, s.stack, now),
     );
   }
+  stmts.push(...(opts.extra ?? []));
   const finish = t.status === 'finished' && t.winnerId !== null;
   if (finish) {
     const total = Object.keys(t.players).length * t.startStack;

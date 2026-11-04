@@ -1,15 +1,19 @@
 /**
  * The replay's decision review: the viewer's own decisions in the hand (strategy.ts), each one's situation as it came
- * to them, the choices they had and the one they made, then what can honestly be put beside it. Solver frequencies
- * only from real solver data, with its source; otherwise it says the spot is not supported, and never guesses a
- * frequency. The plain arithmetic of the moment and the academy's example range are marked as for study, not a solver's.
+ * to them, the choices they had and the one they made, then what can honestly be put beside it. First the hand
+ * analysis of the moment (street, pot odds, SPR, effective stack, what the cards made and drew to), with ways to the
+ * action's detail, the hand's note and its lessons, all already on the hand page. Solver frequencies only from real
+ * solver data, with its source; otherwise it says why there is none (no solver connected, a spot not covered, a failed
+ * analysis), and never guesses a frequency. Each part is marked with its kind: math, heuristic, solver or unavailable.
  * Loaded only when opened (HandReplay), under the replay's controls: it lays nothing over the table or the controls.
  */
-import { Badge, cardLabel, cx, inHoleOrder } from '@jc/ui';
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Badge, cardLabel, cx, inHoleOrder, Spinner } from '@jc/ui';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { describeCurrent } from '../academy/content';
 import type { Amounts } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { KindTag } from './AnalysisTag';
 import { oddsRatio } from './potOdds';
 import { spokenAmounts, type ReplayInput, type ReplayLinePart, type ReplayStep } from './replay';
 import {
@@ -18,13 +22,18 @@ import {
   decisionsOf,
   educationalFor,
   handClass,
+  handNow,
+  NOTE_KINDS,
   OPEN_SPOT,
   SOLVER_PROVIDERS,
   solverFor,
+  solverUnavailable,
   sprOf,
   type Choice,
   type Decision,
+  type DrawKind,
   type EducationalNote,
+  type PairKind,
   type SolverAnswer,
 } from './strategy';
 
@@ -61,7 +70,10 @@ export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amou
   const boxRef = useRef<HTMLElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [keep, setKeep] = useState(0);
+  // The hand page's own note and lessons, which the analysis leads to (Me.tsx draws them under the replay).
+  const [targets, setTargets] = useState<Targets>({ note: false, lessons: false });
   useLayoutEffect(() => {
+    setTargets({ note: !!document.getElementById(NOTE_ID), lessons: !!document.querySelector(LESSONS) });
     const el = innerRef.current;
     if (!el || !boxRef.current) return;
     const around = boxRef.current.offsetHeight - el.offsetHeight;
@@ -114,7 +126,7 @@ export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amou
               })}
             </div>
             {current ? (
-              <Spot d={current} hand={hand} a={a} tr={tr} choice={choice} stage={stage(current)} say={say} />
+              <Spot d={current} hand={hand} heroSeat={heroSeat} a={a} tr={tr} choice={choice} stage={stage(current)} say={say} targets={targets} />
             ) : (
               <p className="text-sm text-ink-200" data-testid="replay-strategy-pick">
                 {tr('위에서 내 결정을 고르거나 리플레이를 내 차례로 옮기면, 그 순간의 상황과 전략 정보가 나옵니다.', 'Pick one of your decisions above, or step the replay to your turn, to see that moment and what can be said about it.')}
@@ -122,30 +134,124 @@ export default function StrategyPanel({ hand, steps, heroSeat, index, onGo, amou
             )}
           </>
         )}
-        <p className="text-[11px] leading-4 text-ink-400">
-          {SOLVER_PROVIDERS.length === 0
-            ? tr(
-                '솔버 빈도와 EV는 실제 솔버 데이터가 있는 상황에서만 출처와 함께 보여 줍니다. 지금은 솔버 데이터가 없어 모든 상황이 지원하지 않음으로 나옵니다. 학습용 계산은 단순한 모델이며 정답이 아닙니다.',
-                'Solver frequencies and EV show only where real solver data exists, with its source. There is none yet, so every spot reads as not supported. The study figures are simple models, not the right answer.',
-              )
-            : tr('솔버 빈도와 EV는 실제 솔버 데이터가 있는 상황에서만 출처와 함께 보여 줍니다. 학습용 계산은 단순한 모델이며 정답이 아닙니다.', 'Solver frequencies and EV show only where real solver data exists, with its source. The study figures are simple models, not the right answer.')}
-        </p>
+        <div className="flex flex-col gap-1 text-[11px] leading-4 text-ink-400" data-testid="replay-strategy-legend">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              <KindTag kind="math" tr={tr} /> {tr('기록의 숫자로 셈한 값', 'counted from the record')}
+            </span>
+            <span>
+              <KindTag kind="heuristic" tr={tr} /> {tr('아카데미의 단순한 예시', 'the academy’s simple example')}
+            </span>
+            <span>
+              <KindTag kind="solver" tr={tr} /> {tr('실제 솔버 데이터(출처 표시)', 'real solver data, its source named')}
+            </span>
+            <span>
+              <KindTag kind="unavailable" tr={tr} /> {tr('보여 줄 분석 없음', 'no analysis to show')}
+            </span>
+          </p>
+          <p>
+            {SOLVER_PROVIDERS.length === 0
+              ? tr(
+                  '솔버 빈도와 EV는 실제 솔버 데이터가 있는 상황에서만 출처와 함께 보여 줍니다. 지금은 연결된 솔버가 없어 모든 상황이 솔버 분석 불가로 나옵니다. 학습용 계산은 단순한 모델이며 정답이 아닙니다.',
+                  'Solver frequencies and EV show only where real solver data exists, with its source. No solver is connected yet, so every spot reads as unavailable there. The study figures are simple models, not the right answer.',
+                )
+              : tr('솔버 빈도와 EV는 실제 솔버 데이터가 있는 상황에서만 출처와 함께 보여 줍니다. 학습용 계산은 단순한 모델이며 정답이 아닙니다.', 'Solver frequencies and EV show only where real solver data exists, with its source. The study figures are simple models, not the right answer.')}
+          </p>
+        </div>
       </div>
     </section>
   );
 }
 
 type Tr = (ko: string, en: string) => string;
+/** Whether the hand page around the replay has the hand's note and its lessons to lead to. */
+interface Targets {
+  note: boolean;
+  lessons: boolean;
+}
+const NOTE_ID = 'hand-memo';
+const LESSONS = '[data-testid=hand-lessons]';
 
-/** One decision: the situation, the choices and the one made, the solver's answer or why there is none, the study figures. */
-function Spot({ d, hand, a, tr, choice, stage, say }: { d: Decision; hand: ReplayInput; a: Amounts; tr: Tr; choice: (c: Choice) => string; stage: string; say: (x: ReplayLinePart) => string }) {
-  const { t } = useI18n();
+
+const PAIRS: Record<PairKind, [string, string]> = {
+  over: ['오버페어', 'overpair'],
+  top: ['탑 페어', 'top pair'],
+  second: ['세컨드 페어', 'second pair'],
+  low: ['하위 페어', 'lower pair'],
+  pocket: ['탑 카드 아래 포켓 페어', 'pocket pair under the top card'],
+  board: ['보드에 깔린 페어', 'the board’s own pair'],
+};
+const DRAWS: Record<DrawKind, [string, string]> = {
+  nutFlush: ['넛 플러시 드로우', 'nut flush draw'],
+  flush: ['플러시 드로우', 'flush draw'],
+  straight: ['양방·더블 거트샷 스트레이트 드로우', 'open-ended or double-gutshot straight draw'],
+  gutshot: ['거트샷 스트레이트 드로우', 'gutshot straight draw'],
+  backdoorFlush: ['백도어 플러시 드로우', 'backdoor flush draw'],
+  overcards: ['오버카드 2장', 'two overcards'],
+};
+
+/** The solver's part of a decision: at once where none can be asked, otherwise followed while it is worked out. */
+function useSolver(d: Decision, hand: ReplayInput, heroSeat: number): SolverAnswer | { kind: 'running' } {
+  const ready = solverUnavailable(d);
+  const [found, setFound] = useState<{ d: Decision; answer: SolverAnswer } | null>(null);
+  useEffect(() => {
+    if (solverUnavailable(d)) return;
+    const stop = new AbortController();
+    void solverFor(d, hand, heroSeat, SOLVER_PROVIDERS, { signal: stop.signal }).then((answer) => !stop.signal.aborted && setFound({ d, answer }));
+    return () => stop.abort();
+  }, [d, hand, heroSeat]);
+  return ready ?? (found?.d === d ? found.answer : { kind: 'running' });
+}
+
+/** Brings a part of the page into view and puts the keyboard there (its own focus, or `focus`'s). */
+function goTo(target: Element | null, focus?: HTMLElement | null) {
+  if (!target) return;
+  target.scrollIntoView({ block: 'center' });
+  (focus ?? (target as HTMLElement)).focus?.({ preventScroll: true });
+}
+
+/** A figure of the analysis: its name over its value. */
+function Fig({ label, testid, children }: { label: string; testid?: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] text-ink-400">{label}</dt>
+      <dd className="break-words text-ink-100" data-testid={testid}>
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+/** One decision: the analysis of the moment, the situation, the choices and the one made, the solver's answer or why there is none, the study figures. */
+function Spot({
+  d,
+  hand,
+  heroSeat,
+  a,
+  tr,
+  choice,
+  stage,
+  say,
+  targets,
+}: {
+  d: Decision;
+  hand: ReplayInput;
+  heroSeat: number;
+  a: Amounts;
+  tr: Tr;
+  choice: (c: Choice) => string;
+  stage: string;
+  say: (x: ReplayLinePart) => string;
+  targets: Targets;
+}) {
+  const { t, locale } = useI18n();
   const bb = hand.bigBlind ?? 0;
   // Stacks read in big blinds too where the player reads chips, as a strategy is usually put.
   const deep = (chips: number) => (a.unit !== 'bb' && bb > 0 ? `${a.fmt(chips)} (${Math.round((chips / bb) * 10) / 10} BB)` : a.fmt(chips));
-  const solver = solverFor(d, hand);
+  const solver = useSolver(d, hand, heroSeat);
   const notes = educationalFor(d, hand.bigBlind);
   const cls = handClass(d.cards);
+  const detailRef = useRef<HTMLDivElement>(null);
   const facing = (() => {
     const f = d.facing;
     if (!f) return d.toCall > 0 ? tr(`블라인드 · 콜 ${a.fmt(d.toCall)}`, `The blind · call ${a.fmt(d.toCall)}`) : tr('베팅 없음', 'No bet');
@@ -164,98 +270,145 @@ function Spot({ d, hand, a, tr, choice, stage, say }: { d: Decision; hand: Repla
     const x = hand.actions[k]!;
     return say({ kind: 'act', seat: x.seatIndex, type: x.type, amount: spoken[k]! });
   });
+  // What the cards made then (the starting hand's name before the flop, as the table's hand line says it) and drew to.
+  const now = handNow(d);
+  const made = describeCurrent(d.cards, d.board, locale, t);
+  const madeText = made && [`${made}${now?.pair ? ` (${tr(...PAIRS[now.pair])})` : ''}`, ...(now?.draws ?? []).map((k) => tr(...DRAWS[k]))].join(' + ');
   const row = 'contents [&>dt]:text-ink-400 [&>dd]:min-w-0 [&>dd]:break-words [&>dd]:text-ink-100';
+  const entry = 'jc-tap inline-flex h-9 items-center rounded-md border border-white/10 bg-white/[0.04] px-2.5 text-[11px] font-semibold text-ink-100 hover:bg-white/10';
   return (
     <div className="flex flex-col gap-3" data-testid="replay-strategy-spot">
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-        <div className={row}>
-          <dt>{tr('스트리트', 'Street')}</dt>
-          <dd>
+      <section aria-label={tr('핸드 분석', 'Hand analysis')} className="flex flex-col gap-2 rounded-lg border border-gold-500/25 bg-gold-500/[0.04] px-2.5 py-2" data-testid="replay-analysis">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] font-bold tracking-[0.14em] text-gold-300">{tr('핸드 분석', 'HAND ANALYSIS')}</p>
+          <KindTag kind="math" tr={tr} />
+        </div>
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:grid-cols-4">
+          <Fig label={tr('스트리트', 'Street')}>
             {stage}
             {d.board.length > 0 && ` · ${d.board.map(cardLabel).join(' ')}`}
-          </dd>
-        </div>
-        <div className={row}>
-          <dt>{tr('포지션', 'Position')}</dt>
-          <dd data-testid="replay-strategy-position">
-            {d.position ?? tr('기록으로 알 수 없음', 'Not clear from the record')} · {tr(`${d.dealt}인`, `${d.dealt}-handed`)}
-          </dd>
-        </div>
-        {d.cards && (
-          <div className={row}>
-            <dt>{tr('내 패', 'My hand')}</dt>
-            <dd>
-              {inHoleOrder(d.cards).map(cardLabel).join(' ')}
-              {cls && ` (${cls})`}
-            </dd>
-          </div>
-        )}
-        <div className={row}>
-          <dt>{tr('유효 스택', 'Effective stack')}</dt>
-          <dd>{deep(d.effective)}</dd>
-        </div>
-        <div className={row}>
-          <dt>{t('table.pot')}</dt>
-          <dd>{a.fmt(d.pot)}</dd>
-        </div>
-        <div className={row}>
-          <dt>{tr('상대 베팅', 'Facing')}</dt>
-          <dd>{facing}</dd>
-        </div>
-        <div className={row}>
-          <dt>{tr('팟 오즈', 'Pot odds')}</dt>
-          <dd data-testid="replay-strategy-odds">
+          </Fig>
+          <Fig label={tr('팟 오즈', 'Pot odds')} testid="replay-strategy-odds">
             {price
               ? tr(`${oddsRatio(price)} · 필요 승률 ${price.need}%`, `${oddsRatio(price)} · equity needed ${price.need}%`)
               : d.toCall === 0
                 ? tr('콜할 금액 없음', 'Nothing to call')
                 : tr('기록으로 확정할 수 없어 셈하지 않음(베팅보다 적은 콜 등)', 'Not counted: the record leaves it uncertain (a call short of the bet, say)')}
-          </dd>
+          </Fig>
+          <Fig label="SPR" testid="replay-strategy-spr">
+            {ratio !== null ? tr(`${ratio.toFixed(1)} (스트리트 시작)`, `${ratio.toFixed(1)} (as the street began)`) : tr('플랍부터 셉니다', 'Counted from the flop')}
+          </Fig>
+          <Fig label={tr('유효 스택', 'Effective stack')} testid="replay-analysis-effective">
+            {deep(d.effective)}
+          </Fig>
+        </dl>
+        {madeText && (
+          <p className="text-xs" data-testid="replay-analysis-hand">
+            <span className="text-ink-400">{tr('현재 핸드', 'Hand now')}</span> <span className="font-semibold text-ivory">{madeText}</span>
+          </p>
+        )}
+        <div className="flex flex-wrap gap-1" role="group" aria-label={tr('이어서 보기', 'Go on to')}>
+          <button type="button" className={entry} onClick={() => goTo(detailRef.current)} data-testid="replay-analysis-go-actions">
+            {tr('액션 분석', 'Action analysis')}
+          </button>
+          {targets.note && (
+            <button type="button" className={entry} onClick={() => goTo(document.getElementById(NOTE_ID))} data-testid="replay-analysis-go-note">
+              {tr('핸드 메모', 'Hand note')}
+            </button>
+          )}
+          {targets.lessons ? (
+            <button type="button" className={entry} onClick={() => goTo(document.querySelector(LESSONS), document.querySelector<HTMLElement>(`${LESSONS} a`))} data-testid="replay-analysis-go-academy">
+              {tr('아카데미 연결', 'Academy lessons')}
+            </button>
+          ) : (
+            <Link className={entry} to="/academy/gto" data-testid="replay-analysis-go-academy">
+              {tr('아카데미 연결', 'Academy lessons')}
+            </Link>
+          )}
         </div>
-        <div className={row}>
-          <dt>SPR</dt>
-          <dd data-testid="replay-strategy-spr">{ratio !== null ? tr(`${ratio.toFixed(1)} (스트리트 시작)`, `${ratio.toFixed(1)} (as the street began)`) : tr('플랍부터 셉니다', 'Counted from the flop')}</dd>
-        </div>
-        <div className={row}>
-          <dt>{tr('앞선 액션', 'Before you')}</dt>
-          <dd data-testid="replay-strategy-before">{before.length > 0 ? before.join(' · ') : tr('이 스트리트의 첫 액션', 'First to act on this street')}</dd>
-        </div>
-      </dl>
+      </section>
 
-      <div className="flex flex-col gap-1.5">
-        <p className="text-xs text-ink-400">{tr('선택지', 'Options')}</p>
-        <ul className="flex flex-wrap gap-1" data-testid="replay-strategy-options">
-          {d.options.map((c) => {
-            const freq = solver.kind === 'solver' ? solver.freqs.find((f) => f.choice === c) : undefined;
-            return (
-              <li key={c} className={cx('rounded-md px-2 py-1 text-xs font-semibold', c === d.did ? 'bg-gold-500/20 text-gold-200 ring-1 ring-gold-400/60' : 'bg-white/[0.05] text-ink-200')} data-played={c === d.did || undefined}>
-                {choice(c)}
-                {freq && <span className="ml-1 font-mono tabular-nums">{pct(freq.share)}</span>}
-              </li>
-            );
-          })}
-        </ul>
-        <p className="text-sm font-semibold text-ivory" data-testid="replay-strategy-played">
-          {tr('실제 선택', 'Played')}: {did}
-        </p>
+      <div ref={detailRef} tabIndex={-1} className="flex flex-col gap-3 outline-none" id="replay-strategy-detail" data-testid="replay-strategy-detail">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          <div className={row}>
+            <dt>{tr('포지션', 'Position')}</dt>
+            <dd data-testid="replay-strategy-position">
+              {d.position ?? tr('기록으로 알 수 없음', 'Not clear from the record')} · {tr(`${d.dealt}인`, `${d.dealt}-handed`)}
+            </dd>
+          </div>
+          {d.cards && (
+            <div className={row}>
+              <dt>{tr('내 패', 'My hand')}</dt>
+              <dd>
+                {inHoleOrder(d.cards).map(cardLabel).join(' ')}
+                {cls && ` (${cls})`}
+              </dd>
+            </div>
+          )}
+          <div className={row}>
+            <dt>{t('table.pot')}</dt>
+            <dd>{a.fmt(d.pot)}</dd>
+          </div>
+          <div className={row}>
+            <dt>{tr('상대 베팅', 'Facing')}</dt>
+            <dd>{facing}</dd>
+          </div>
+          <div className={row}>
+            <dt>{tr('앞선 액션', 'Before you')}</dt>
+            <dd data-testid="replay-strategy-before">{before.length > 0 ? before.join(' · ') : tr('이 스트리트의 첫 액션', 'First to act on this street')}</dd>
+          </div>
+        </dl>
+
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-ink-400">{tr('선택지', 'Options')}</p>
+          <ul className="flex flex-wrap gap-1" data-testid="replay-strategy-options">
+            {d.options.map((c) => {
+              const freq = solver.kind === 'solver' ? solver.freqs.find((f) => f.choice === c) : undefined;
+              return (
+                <li key={c} className={cx('rounded-md px-2 py-1 text-xs font-semibold', c === d.did ? 'bg-gold-500/20 text-gold-200 ring-1 ring-gold-400/60' : 'bg-white/[0.05] text-ink-200')} data-played={c === d.did || undefined}>
+                  {choice(c)}
+                  {freq && <span className="ml-1 font-mono tabular-nums">{pct(freq.share)}</span>}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="text-sm font-semibold text-ivory" data-testid="replay-strategy-played">
+            {tr('실제 선택', 'Played')}: {did}
+          </p>
+        </div>
+
+        <SolverBlock answer={solver} played={d.did} tr={tr} choice={choice} />
+        <StudyBlock notes={notes} d={d} a={a} tr={tr} choice={choice} deep={deep} />
       </div>
-
-      <SolverBlock answer={solver} played={d.did} tr={tr} choice={choice} />
-      <StudyBlock notes={notes} d={d} a={a} tr={tr} choice={choice} deep={deep} />
     </div>
   );
 }
 
-function SolverBlock({ answer, played, tr, choice }: { answer: SolverAnswer; played: Choice; tr: Tr; choice: (c: Choice) => string }) {
-  if (answer.kind === 'unsupported') {
+function SolverBlock({ answer, played, tr, choice }: { answer: SolverAnswer | { kind: 'running' }; played: Choice; tr: Tr; choice: (c: Choice) => string }) {
+  if (answer.kind === 'running') {
     return (
-      <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2" data-testid="replay-strategy-solver" data-kind="unsupported">
-        <p className="text-xs font-semibold text-ink-100">{tr('솔버 전략 · 지원하지 않는 상황', 'Solver strategy · spot not supported')}</p>
-        <p className="mt-0.5 text-xs text-ink-300">
-          {answer.reason === 'noPosition'
-            ? tr('기록만으로 포지션을 확정할 수 없어(놓친 블라인드 등) 솔버 상황을 찾지 않습니다.', 'The record does not settle the position (a missed blind, say), so no solver spot is looked up.')
-            : tr('이 상황에 맞는 솔버 데이터가 없습니다. 빈도나 EV를 짐작해 보여 주지 않습니다.', 'There is no solver data for this spot. No frequency or EV is guessed in its place.')}
+      <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2" data-testid="replay-strategy-solver" data-kind="running" aria-live="polite">
+        <Spinner className="size-4 text-info" />
+        <p className="text-xs text-ink-200">{tr('솔버가 이 결정을 분석하는 중입니다.', 'A solver is working on this decision.')}</p>
+      </div>
+    );
+  }
+  if (answer.kind !== 'solver') {
+    const why =
+      answer.kind === 'failed'
+        ? ([tr('분석 실패', 'analysis failed'), tr('솔버가 이 결정을 분석하지 못했습니다(오류 또는 시간 초과). 짐작한 값을 대신 보여 주지 않습니다.', 'The solver could not analyse this decision (an error, or no answer in time). Nothing guessed is shown instead.')] as const)
+        : answer.reason === 'noSolver'
+          ? ([tr('연결된 솔버 없음', 'no solver connected'), tr('연결된 솔버가 없어 이 결정의 솔버 빈도와 EV는 없습니다. 짐작해 보여 주지 않습니다.', 'No solver is connected, so there are no solver frequencies or EV for this decision. None is guessed.')] as const)
+          : answer.reason === 'noPosition'
+            ? ([tr('지원하지 않는 상황', 'spot not supported'), tr('기록만으로 포지션을 확정할 수 없어(놓친 블라인드 등) 솔버 상황을 찾지 않습니다.', 'The record does not settle the position (a missed blind, say), so no solver spot is looked up.')] as const)
+            : ([tr('지원하지 않는 상황', 'spot not supported'), tr('이 상황에 맞는 솔버 데이터가 없습니다. 빈도나 EV를 짐작해 보여 주지 않습니다.', 'There is no solver data for this spot. No frequency or EV is guessed in its place.')] as const);
+    return (
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2" data-testid="replay-strategy-solver" data-kind={answer.kind} data-reason={answer.kind === 'unsupported' ? answer.reason : undefined}>
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-ink-100">
+          <KindTag kind="unavailable" tr={tr} />
+          {tr(`솔버 분석 불가 · ${why[0]}`, `Solver analysis unavailable · ${why[0]}`)}
         </p>
+        <p className="mt-0.5 text-xs text-ink-300">{why[1]}</p>
       </div>
     );
   }
@@ -263,7 +416,10 @@ function SolverBlock({ answer, played, tr, choice }: { answer: SolverAnswer; pla
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-info/40 bg-info/10 px-2.5 py-2" data-testid="replay-strategy-solver" data-kind="solver">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-ink-100">{tr('솔버 전략', 'Solver strategy')}</p>
+        <p className="flex items-center gap-2 text-xs font-semibold text-ink-100">
+          <KindTag kind="solver" tr={tr} />
+          {tr('솔버 전략', 'Solver strategy')}
+        </p>
         <Badge tone="blue">{answer.source}</Badge>
       </div>
       <ul className="flex flex-col gap-1">
@@ -289,7 +445,6 @@ function SolverBlock({ answer, played, tr, choice }: { answer: SolverAnswer; pla
     </div>
   );
 }
-
 function StudyBlock({ notes, d, a, tr, choice, deep }: { notes: EducationalNote[]; d: Decision; a: Amounts; tr: Tr; choice: (c: Choice) => string; deep: (chips: number) => string }) {
   const { t } = useI18n();
   const link = 'font-semibold text-gold-300 underline decoration-dotted underline-offset-2 hover:text-gold-200';
@@ -304,7 +459,10 @@ function StudyBlock({ notes, d, a, tr, choice, deep }: { notes: EducationalNote[
       ) : (
         <ul className="flex flex-col gap-1.5 text-xs text-ink-200">
           {notes.map((n) => (
-            <li key={n.kind} data-testid={`replay-strategy-note-${n.kind}`}>
+            <li key={n.kind} className="flex flex-col gap-0.5" data-testid={`replay-strategy-note-${n.kind}`}>
+              <span>
+                <KindTag kind={NOTE_KINDS[n.kind]} tr={tr} />
+              </span>
               {n.kind === 'potOdds' && (
                 <>
                   <p>{t('odds.line', { pot: a.fmt(n.odds.pot), call: a.fmt(n.odds.toCall), ratio: oddsRatio(n.odds), need: n.odds.need })}</p>

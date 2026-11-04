@@ -404,6 +404,7 @@ export const authRoutes = new Hono<AppEnv>()
       db.delete(schema.academyProgress).where(eq(schema.academyProgress.userId, me.id)),
       db.delete(schema.academyGtoProgress).where(eq(schema.academyGtoProgress.userId, me.id)),
       db.delete(schema.userBadges).where(eq(schema.userBadges.userId, me.id)),
+      db.delete(schema.challengeCompletions).where(eq(schema.challengeCompletions.userId, me.id)),
       db.delete(schema.passwordResets).where(eq(schema.passwordResets.userId, me.id)),
       // Administrators' internal notes about the member (sanction reasons stay in the audit log).
       db.delete(schema.adminNotes).where(eq(schema.adminNotes.userId, me.id)),

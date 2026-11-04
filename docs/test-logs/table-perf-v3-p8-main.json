@@ -1,0 +1,3350 @@
+{
+  "label": "v3-p8-main",
+  "when": "2026-11-04T05:36:20.666Z",
+  "commit": "5dfd551",
+  "dirty": true,
+  "chrome": "156.0.8078.80",
+  "cpu": "AMD Ryzen 7 6800HS with Radeon Graphics          ×16",
+  "note": "Chrome emulation on one PC (headless), not phones. phone = 390×844 DPR 3, 4× CPU throttling; slowphone = 375×667 DPR 2, 6×.",
+  "style": null,
+  "runs": [
+    {
+      "table": "e2e-nine",
+      "seats": 9,
+      "profile": "phone",
+      "cpuThrottle": 4,
+      "play": {
+        "seconds": 40.2,
+        "frames": {
+          "all": {
+            "n": 2250,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 18.9,
+            "max": 52.9,
+            "over34": 4,
+            "over50": 2,
+            "over100": 0
+          },
+          "hand": {
+            "n": 1941,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 18.9,
+            "max": 52.9,
+            "over34": 4,
+            "over50": 2,
+            "over100": 0
+          },
+          "between": {
+            "n": 309,
+            "fps": 55.9,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19.2,
+            "max": 28.8,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 1,
+          "totalMs": 63,
+          "max": 63,
+          "p95": 63
+        },
+        "longAnimationFrames": {
+          "n": 3,
+          "blockingMs": 17.7,
+          "styleLayoutMs": 35.6,
+          "forcedLayoutMs": 47,
+          "topInvokers": [
+            [
+              "event-listener:MessagePort.onmessage",
+              83
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 204,
+            "perSec": 5.1,
+            "renderedMean": 14.5,
+            "renderedP95": 70,
+            "renderedMax": 119,
+            "renderedPerSec": 73.8
+          },
+          "hand": {
+            "n": 189,
+            "perSec": 5.5,
+            "renderedMean": 12.8,
+            "renderedP95": 70,
+            "renderedMax": 119,
+            "renderedPerSec": 69.5
+          },
+          "between": {
+            "n": 15,
+            "perSec": 2.7,
+            "renderedMean": 36.9,
+            "renderedP95": 84,
+            "renderedMax": 84,
+            "renderedPerSec": 100.2
+          },
+          "hookMs": 18.7
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            770
+          ],
+          [
+            "?",
+            461
+          ],
+          [
+            "span.inline-flex",
+            350
+          ],
+          [
+            "div.jc-card",
+            272
+          ],
+          [
+            "span.absolute",
+            149
+          ],
+          [
+            "button.inline-flex",
+            102
+          ],
+          [
+            "div.absolute",
+            89
+          ],
+          [
+            "#seat-N",
+            87
+          ],
+          [
+            "#member-name",
+            87
+          ],
+          [
+            "#bot-badge",
+            79
+          ],
+          [
+            "#table",
+            75
+          ],
+          [
+            "#flights",
+            75
+          ],
+          [
+            "div.fixed",
+            34
+          ],
+          [
+            "a.block",
+            34
+          ],
+          [
+            "#sitout-toggle",
+            34
+          ],
+          [
+            "#hand-chart-open",
+            34
+          ]
+        ],
+        "ws": {
+          "in": 28,
+          "inBytes": 91459,
+          "out": 2,
+          "outBytes": 210,
+          "states": 26,
+          "stateBytes": 91367,
+          "kinds": {
+            "state": 26,
+            "ack": 2
+          },
+          "outKinds": {
+            "action": 2
+          },
+          "stateAvgBytes": 3514,
+          "statesPerSec": 0.6
+        },
+        "receiveToCommit": {
+          "n": 26,
+          "p50": 9.7,
+          "p95": 28,
+          "max": 63.4
+        },
+        "receiveToFrame": {
+          "n": 26,
+          "p50": 10.4,
+          "p95": 17.3,
+          "max": 19.5
+        },
+        "ack": {
+          "action:fold": {
+            "n": 2,
+            "p50": 40.7,
+            "max": 40.7
+          }
+        },
+        "browser": {
+          "layouts": 68,
+          "layoutsPerSec": 1.7,
+          "styleRecalcs": 1037,
+          "styleRecalcsPerSec": 25.8,
+          "layoutMs": 177.3,
+          "styleMs": 652.6,
+          "scriptMs": 906.2,
+          "taskMs": 4425.5,
+          "mainThreadBusy": "11%",
+          "heapMB": [
+            5.4,
+            6.8
+          ],
+          "nodes": [
+            657,
+            678
+          ],
+          "listeners": [
+            281,
+            261
+          ]
+        },
+        "acted": 3
+      },
+      "panel": {
+        "seconds": 4.6,
+        "frames": {
+          "all": {
+            "n": 258,
+            "fps": 56.1,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 18.9,
+            "max": 19.2,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 258,
+            "fps": 56.1,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 18.9,
+            "max": 19.2,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 1,
+          "blockingMs": 0,
+          "styleLayoutMs": 0.3,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 34,
+            "perSec": 7.4,
+            "renderedMean": 3.1,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 23.3
+          },
+          "hand": {
+            "n": 34,
+            "perSec": 7.4,
+            "renderedMean": 3.1,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 23.3
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 2.4
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            60
+          ],
+          [
+            "#time-bank",
+            18
+          ],
+          [
+            "span.absolute",
+            18
+          ],
+          [
+            "#action-bar",
+            6
+          ],
+          [
+            "#turn-banner",
+            5
+          ]
+        ],
+        "ws": {
+          "in": 0,
+          "inBytes": 0,
+          "out": 0,
+          "outBytes": 0,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {},
+          "outKinds": {},
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 11,
+          "layoutsPerSec": 2.4,
+          "styleRecalcs": 274,
+          "styleRecalcsPerSec": 59.6,
+          "layoutMs": 16.8,
+          "styleMs": 108.5,
+          "scriptMs": 119.2,
+          "taskMs": 764.6,
+          "mainThreadBusy": "16.6%",
+          "heapMB": [
+            7,
+            6.9
+          ],
+          "nodes": [
+            664,
+            672
+          ],
+          "listeners": [
+            267,
+            267
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-nine",
+      "seats": 9,
+      "profile": "slowphone",
+      "cpuThrottle": 6,
+      "play": {
+        "seconds": 40.2,
+        "frames": {
+          "all": {
+            "n": 2229,
+            "fps": 55.4,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19.2,
+            "max": 106.8,
+            "over34": 13,
+            "over50": 5,
+            "over100": 1
+          },
+          "hand": {
+            "n": 1613,
+            "fps": 55.3,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19.2,
+            "max": 106.8,
+            "over34": 11,
+            "over50": 4,
+            "over100": 1
+          },
+          "between": {
+            "n": 616,
+            "fps": 55.7,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.2,
+            "max": 52.2,
+            "over34": 2,
+            "over50": 1,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 4,
+          "totalMs": 336,
+          "max": 99,
+          "p95": 99
+        },
+        "longAnimationFrames": {
+          "n": 5,
+          "blockingMs": 174.8,
+          "styleLayoutMs": 149.6,
+          "forcedLayoutMs": 73,
+          "topInvokers": [
+            [
+              "event-listener:MessagePort.onmessage",
+              181
+            ],
+            [
+              "event-listener:DOMWindow.onpointerdown",
+              28
+            ],
+            [
+              "event-listener:DIV#root.onclick",
+              17
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 186,
+            "perSec": 4.6,
+            "renderedMean": 17.4,
+            "renderedP95": 70,
+            "renderedMax": 121,
+            "renderedPerSec": 80.4
+          },
+          "hand": {
+            "n": 159,
+            "perSec": 5.5,
+            "renderedMean": 13.8,
+            "renderedP95": 70,
+            "renderedMax": 121,
+            "renderedPerSec": 75.2
+          },
+          "between": {
+            "n": 27,
+            "perSec": 2.4,
+            "renderedMean": 38.5,
+            "renderedP95": 77,
+            "renderedMax": 84,
+            "renderedPerSec": 94
+          },
+          "hookMs": 27.6
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            854
+          ],
+          [
+            "?",
+            519
+          ],
+          [
+            "span.inline-flex",
+            342
+          ],
+          [
+            "div.jc-card",
+            342
+          ],
+          [
+            "span.absolute",
+            125
+          ],
+          [
+            "button.inline-flex",
+            111
+          ],
+          [
+            "#seat-N",
+            104
+          ],
+          [
+            "#member-name",
+            104
+          ],
+          [
+            "#bot-badge",
+            94
+          ],
+          [
+            "div.absolute",
+            93
+          ],
+          [
+            "#table",
+            79
+          ],
+          [
+            "#flights",
+            79
+          ],
+          [
+            "div.fixed",
+            37
+          ],
+          [
+            "a.block",
+            37
+          ],
+          [
+            "#sitout-toggle",
+            37
+          ],
+          [
+            "#hand-chart-open",
+            37
+          ]
+        ],
+        "ws": {
+          "in": 25,
+          "inBytes": 84691,
+          "out": 1,
+          "outBytes": 105,
+          "states": 24,
+          "stateBytes": 84645,
+          "kinds": {
+            "state": 24,
+            "ack": 1
+          },
+          "outKinds": {
+            "action": 1
+          },
+          "stateAvgBytes": 3527,
+          "statesPerSec": 0.6
+        },
+        "receiveToCommit": {
+          "n": 24,
+          "p50": 13.6,
+          "p95": 32.8,
+          "max": 100.2
+        },
+        "receiveToFrame": {
+          "n": 24,
+          "p50": 7.2,
+          "p95": 15.9,
+          "max": 17.5
+        },
+        "ack": {
+          "action:fold": {
+            "n": 1,
+            "p50": 111.4,
+            "max": 111.4
+          }
+        },
+        "browser": {
+          "layouts": 75,
+          "layoutsPerSec": 1.9,
+          "styleRecalcs": 1226,
+          "styleRecalcsPerSec": 30.5,
+          "layoutMs": 367.3,
+          "styleMs": 1153.4,
+          "scriptMs": 1394.8,
+          "taskMs": 7671.2,
+          "mainThreadBusy": "19.1%",
+          "heapMB": [
+            5.3,
+            6.8
+          ],
+          "nodes": [
+            610,
+            671
+          ],
+          "listeners": [
+            255,
+            273
+          ]
+        },
+        "acted": 2
+      },
+      "panel": {
+        "seconds": 4.8,
+        "frames": {
+          "all": {
+            "n": 268,
+            "fps": 55.5,
+            "p50": 17.8,
+            "p95": 18.6,
+            "p99": 34.7,
+            "max": 36,
+            "over34": 3,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 268,
+            "fps": 55.5,
+            "p50": 17.8,
+            "p95": 18.6,
+            "p99": 34.7,
+            "max": 36,
+            "over34": 3,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 2,
+          "blockingMs": 0,
+          "styleLayoutMs": 0.8,
+          "forcedLayoutMs": 18,
+          "topInvokers": [
+            [
+              "event-listener:DIV#root.onclick",
+              29
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 36,
+            "perSec": 7.5,
+            "renderedMean": 3,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 22.6
+          },
+          "hand": {
+            "n": 36,
+            "perSec": 7.5,
+            "renderedMean": 3,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 22.6
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 3.6
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            60
+          ],
+          [
+            "span.absolute",
+            20
+          ],
+          [
+            "#time-bank",
+            18
+          ],
+          [
+            "#action-bar",
+            6
+          ],
+          [
+            "#turn-banner",
+            5
+          ]
+        ],
+        "ws": {
+          "in": 1,
+          "inBytes": 12,
+          "out": 1,
+          "outBytes": 12,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {
+            "pong": 1
+          },
+          "outKinds": {
+            "ping": 1
+          },
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 12,
+          "layoutsPerSec": 2.5,
+          "styleRecalcs": 291,
+          "styleRecalcsPerSec": 60.3,
+          "layoutMs": 58,
+          "styleMs": 157.8,
+          "scriptMs": 201.5,
+          "taskMs": 1262.5,
+          "mainThreadBusy": "26.2%",
+          "heapMB": [
+            6.8,
+            6.8
+          ],
+          "nodes": [
+            671,
+            679
+          ],
+          "listeners": [
+            273,
+            273
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-nine",
+      "seats": 9,
+      "profile": "desktop",
+      "cpuThrottle": 1,
+      "play": {
+        "seconds": 40.5,
+        "frames": {
+          "all": {
+            "n": 2288,
+            "fps": 56.5,
+            "p50": 17.6,
+            "p95": 18.5,
+            "p99": 19,
+            "max": 19.3,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 1976,
+            "fps": 56.4,
+            "p50": 17.6,
+            "p95": 18.6,
+            "p99": 19,
+            "max": 19.3,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 312,
+            "fps": 56.5,
+            "p50": 17.7,
+            "p95": 18.3,
+            "p99": 18.8,
+            "max": 19.1,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 0,
+          "blockingMs": 0,
+          "styleLayoutMs": 0,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 220,
+            "perSec": 5.4,
+            "renderedMean": 14.7,
+            "renderedP95": 73,
+            "renderedMax": 119,
+            "renderedPerSec": 79.9
+          },
+          "hand": {
+            "n": 207,
+            "perSec": 5.9,
+            "renderedMean": 12.9,
+            "renderedP95": 73,
+            "renderedMax": 119,
+            "renderedPerSec": 76.5
+          },
+          "between": {
+            "n": 13,
+            "perSec": 2.4,
+            "renderedMean": 42.9,
+            "renderedP95": 81,
+            "renderedMax": 81,
+            "renderedPerSec": 101.1
+          },
+          "hookMs": 4
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            736
+          ],
+          [
+            "div.jc-card",
+            560
+          ],
+          [
+            "?",
+            459
+          ],
+          [
+            "span.inline-flex",
+            372
+          ],
+          [
+            "span.absolute",
+            153
+          ],
+          [
+            "div.absolute",
+            108
+          ],
+          [
+            "button.inline-flex",
+            96
+          ],
+          [
+            "#table",
+            87
+          ],
+          [
+            "#seat-N",
+            87
+          ],
+          [
+            "#member-name",
+            87
+          ],
+          [
+            "#flights",
+            87
+          ],
+          [
+            "#bot-badge",
+            80
+          ],
+          [
+            "div.fixed",
+            32
+          ],
+          [
+            "a.block",
+            32
+          ],
+          [
+            "#sitout-toggle",
+            32
+          ],
+          [
+            "#hand-chart-open",
+            32
+          ]
+        ],
+        "ws": {
+          "in": 26,
+          "inBytes": 87589,
+          "out": 1,
+          "outBytes": 105,
+          "states": 25,
+          "stateBytes": 87543,
+          "kinds": {
+            "state": 25,
+            "ack": 1
+          },
+          "outKinds": {
+            "action": 1
+          },
+          "stateAvgBytes": 3502,
+          "statesPerSec": 0.6
+        },
+        "receiveToCommit": {
+          "n": 25,
+          "p50": 2,
+          "p95": 3.7,
+          "max": 13.4
+        },
+        "receiveToFrame": {
+          "n": 25,
+          "p50": 6.6,
+          "p95": 17.3,
+          "max": 17.7
+        },
+        "ack": {
+          "action:fold": {
+            "n": 1,
+            "p50": 17,
+            "max": 17
+          }
+        },
+        "browser": {
+          "layouts": 79,
+          "layoutsPerSec": 1.9,
+          "styleRecalcs": 1078,
+          "styleRecalcsPerSec": 26.6,
+          "layoutMs": 41.5,
+          "styleMs": 176.4,
+          "scriptMs": 210.8,
+          "taskMs": 1127.7,
+          "mainThreadBusy": "2.8%",
+          "heapMB": [
+            5.3,
+            6.7
+          ],
+          "nodes": [
+            626,
+            665
+          ],
+          "listeners": [
+            260,
+            262
+          ]
+        },
+        "acted": 2
+      },
+      "panel": {
+        "seconds": 4.5,
+        "frames": {
+          "all": {
+            "n": 253,
+            "fps": 56.7,
+            "p50": 17.6,
+            "p95": 18.3,
+            "p99": 18.7,
+            "max": 19,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 253,
+            "fps": 56.7,
+            "p50": 17.6,
+            "p95": 18.3,
+            "p99": 18.7,
+            "max": 19,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 0,
+          "blockingMs": 0,
+          "styleLayoutMs": 0,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 31,
+            "perSec": 6.9,
+            "renderedMean": 3.2,
+            "renderedP95": 8,
+            "renderedMax": 8,
+            "renderedPerSec": 22.2
+          },
+          "hand": {
+            "n": 31,
+            "perSec": 6.9,
+            "renderedMean": 3.2,
+            "renderedP95": 8,
+            "renderedMax": 8,
+            "renderedPerSec": 22.2
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 0.4
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            48
+          ],
+          [
+            "#time-bank",
+            24
+          ],
+          [
+            "span.absolute",
+            18
+          ],
+          [
+            "#turn-banner",
+            4
+          ],
+          [
+            "span.inline-flex",
+            3
+          ],
+          [
+            "#table",
+            1
+          ],
+          [
+            "#flights",
+            1
+          ]
+        ],
+        "ws": {
+          "in": 0,
+          "inBytes": 0,
+          "out": 0,
+          "outBytes": 0,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {},
+          "outKinds": {},
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 11,
+          "layoutsPerSec": 2.5,
+          "styleRecalcs": 280,
+          "styleRecalcsPerSec": 62.8,
+          "layoutMs": 7.1,
+          "styleMs": 49.3,
+          "scriptMs": 25.8,
+          "taskMs": 225.8,
+          "mainThreadBusy": "5.1%",
+          "heapMB": [
+            6.8,
+            6.8
+          ],
+          "nodes": [
+            685,
+            693
+          ],
+          "listeners": [
+            283,
+            283
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-phones",
+      "seats": 6,
+      "profile": "phone",
+      "cpuThrottle": 4,
+      "play": {
+        "seconds": 40.1,
+        "frames": {
+          "all": {
+            "n": 2248,
+            "fps": 56.1,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19,
+            "max": 36,
+            "over34": 2,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 1693,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19.1,
+            "max": 36,
+            "over34": 2,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 555,
+            "fps": 56.2,
+            "p50": 17.9,
+            "p95": 18.4,
+            "p99": 18.8,
+            "max": 19.3,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 1,
+          "totalMs": 56,
+          "max": 56,
+          "p95": 56
+        },
+        "longAnimationFrames": {
+          "n": 2,
+          "blockingMs": 7.4,
+          "styleLayoutMs": 31.5,
+          "forcedLayoutMs": 39,
+          "topInvokers": [
+            [
+              "event-listener:MessagePort.onmessage",
+              75
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 195,
+            "perSec": 4.9,
+            "renderedMean": 15.6,
+            "renderedP95": 71,
+            "renderedMax": 101,
+            "renderedPerSec": 75.7
+          },
+          "hand": {
+            "n": 169,
+            "perSec": 5.6,
+            "renderedMean": 11.9,
+            "renderedP95": 70,
+            "renderedMax": 101,
+            "renderedPerSec": 66.7
+          },
+          "between": {
+            "n": 26,
+            "perSec": 2.6,
+            "renderedMean": 39.2,
+            "renderedP95": 77,
+            "renderedMax": 77,
+            "renderedPerSec": 103.3
+          },
+          "hookMs": 16.8
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            758
+          ],
+          [
+            "?",
+            467
+          ],
+          [
+            "div.jc-card",
+            388
+          ],
+          [
+            "span.inline-flex",
+            350
+          ],
+          [
+            "span.absolute",
+            128
+          ],
+          [
+            "button.inline-flex",
+            105
+          ],
+          [
+            "div.absolute",
+            103
+          ],
+          [
+            "#table",
+            80
+          ],
+          [
+            "#flights",
+            80
+          ],
+          [
+            "#seat-N",
+            74
+          ],
+          [
+            "#member-name",
+            74
+          ],
+          [
+            "#bot-badge",
+            64
+          ],
+          [
+            "div.fixed",
+            35
+          ],
+          [
+            "a.block",
+            35
+          ],
+          [
+            "#sitout-toggle",
+            35
+          ],
+          [
+            "#hand-chart-open",
+            35
+          ]
+        ],
+        "ws": {
+          "in": 23,
+          "inBytes": 57988,
+          "out": 2,
+          "outBytes": 214,
+          "states": 21,
+          "stateBytes": 57896,
+          "kinds": {
+            "state": 21,
+            "ack": 2
+          },
+          "outKinds": {
+            "action": 2
+          },
+          "stateAvgBytes": 2757,
+          "statesPerSec": 0.5
+        },
+        "receiveToCommit": {
+          "n": 21,
+          "p50": 10.3,
+          "p95": 24.9,
+          "max": 56.4
+        },
+        "receiveToFrame": {
+          "n": 21,
+          "p50": 11.4,
+          "p95": 16.6,
+          "max": 17.4
+        },
+        "ack": {
+          "action:fold": {
+            "n": 2,
+            "p50": 41.3,
+            "max": 41.3
+          }
+        },
+        "browser": {
+          "layouts": 81,
+          "layoutsPerSec": 2,
+          "styleRecalcs": 1208,
+          "styleRecalcsPerSec": 30.1,
+          "layoutMs": 172.2,
+          "styleMs": 671.4,
+          "scriptMs": 896.1,
+          "taskMs": 4578.5,
+          "mainThreadBusy": "11.4%",
+          "heapMB": [
+            5.6,
+            6.7
+          ],
+          "nodes": [
+            528,
+            519
+          ],
+          "listeners": [
+            258,
+            249
+          ]
+        },
+        "acted": 4
+      },
+      "panel": {
+        "seconds": 4.6,
+        "frames": {
+          "all": {
+            "n": 259,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 18.8,
+            "max": 19.3,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 259,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 18.8,
+            "max": 19.3,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 1,
+          "blockingMs": 0,
+          "styleLayoutMs": 0.4,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 34,
+            "perSec": 7.4,
+            "renderedMean": 3.1,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 23.2
+          },
+          "hand": {
+            "n": 34,
+            "perSec": 7.4,
+            "renderedMean": 3.1,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 23.1
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 2.1
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            60
+          ],
+          [
+            "#time-bank",
+            18
+          ],
+          [
+            "span.absolute",
+            18
+          ],
+          [
+            "#action-bar",
+            6
+          ],
+          [
+            "#turn-banner",
+            5
+          ]
+        ],
+        "ws": {
+          "in": 0,
+          "inBytes": 0,
+          "out": 0,
+          "outBytes": 0,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {},
+          "outKinds": {},
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 12,
+          "layoutsPerSec": 2.6,
+          "styleRecalcs": 282,
+          "styleRecalcsPerSec": 61,
+          "layoutMs": 33,
+          "styleMs": 103.7,
+          "scriptMs": 126.2,
+          "taskMs": 755.1,
+          "mainThreadBusy": "16.3%",
+          "heapMB": [
+            6.8,
+            6.8
+          ],
+          "nodes": [
+            556,
+            564
+          ],
+          "listeners": [
+            260,
+            260
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-phones",
+      "seats": 6,
+      "profile": "slowphone",
+      "cpuThrottle": 6,
+      "play": {
+        "seconds": 40.1,
+        "frames": {
+          "all": {
+            "n": 2218,
+            "fps": 55.3,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19.2,
+            "max": 177.9,
+            "over34": 15,
+            "over50": 8,
+            "over100": 1
+          },
+          "hand": {
+            "n": 1295,
+            "fps": 54.9,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19.4,
+            "max": 177.9,
+            "over34": 12,
+            "over50": 6,
+            "over100": 1
+          },
+          "between": {
+            "n": 923,
+            "fps": 55.8,
+            "p50": 17.9,
+            "p95": 18.5,
+            "p99": 19.1,
+            "max": 53.4,
+            "over34": 3,
+            "over50": 2,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 5,
+          "totalMs": 407,
+          "max": 176,
+          "p95": 176
+        },
+        "longAnimationFrames": {
+          "n": 8,
+          "blockingMs": 200.7,
+          "styleLayoutMs": 124.8,
+          "forcedLayoutMs": 187,
+          "topInvokers": [
+            [
+              "event-listener:MessagePort.onmessage",
+              354
+            ],
+            [
+              "event-listener:DOMWindow.onpointerdown",
+              30
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 177,
+            "perSec": 4.4,
+            "renderedMean": 19.2,
+            "renderedP95": 67,
+            "renderedMax": 95,
+            "renderedPerSec": 84.6
+          },
+          "hand": {
+            "n": 131,
+            "perSec": 5.6,
+            "renderedMean": 13.7,
+            "renderedP95": 65,
+            "renderedMax": 95,
+            "renderedPerSec": 76.2
+          },
+          "between": {
+            "n": 46,
+            "perSec": 2.8,
+            "renderedMean": 34.7,
+            "renderedP95": 75,
+            "renderedMax": 78,
+            "renderedPerSec": 96.5
+          },
+          "hookMs": 33.4
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            956
+          ],
+          [
+            "?",
+            570
+          ],
+          [
+            "span.inline-flex",
+            392
+          ],
+          [
+            "div.jc-card",
+            180
+          ],
+          [
+            "div.absolute",
+            136
+          ],
+          [
+            "button.inline-flex",
+            129
+          ],
+          [
+            "#seat-N",
+            104
+          ],
+          [
+            "#member-name",
+            104
+          ],
+          [
+            "span.absolute",
+            103
+          ],
+          [
+            "#bot-badge",
+            91
+          ],
+          [
+            "#table",
+            83
+          ],
+          [
+            "#flights",
+            83
+          ],
+          [
+            "div.fixed",
+            43
+          ],
+          [
+            "a.block",
+            43
+          ],
+          [
+            "#sitout-toggle",
+            43
+          ],
+          [
+            "#hand-chart-open",
+            43
+          ]
+        ],
+        "ws": {
+          "in": 26,
+          "inBytes": 61170,
+          "out": 3,
+          "outBytes": 321,
+          "states": 22,
+          "stateBytes": 60870,
+          "kinds": {
+            "state": 22,
+            "ack": 3,
+            "event": 1
+          },
+          "outKinds": {
+            "action": 3
+          },
+          "stateAvgBytes": 2767,
+          "statesPerSec": 0.5
+        },
+        "receiveToCommit": {
+          "n": 22,
+          "p50": 16.9,
+          "p95": 63.2,
+          "max": 178.7
+        },
+        "receiveToFrame": {
+          "n": 22,
+          "p50": 12.1,
+          "p95": 18.3,
+          "max": 18.4
+        },
+        "ack": {
+          "action:fold": {
+            "n": 3,
+            "p50": 93.8,
+            "max": 110.4
+          }
+        },
+        "browser": {
+          "layouts": 84,
+          "layoutsPerSec": 2.1,
+          "styleRecalcs": 1503,
+          "styleRecalcsPerSec": 37.5,
+          "layoutMs": 336.6,
+          "styleMs": 1317.3,
+          "scriptMs": 1461.2,
+          "taskMs": 7761.6,
+          "mainThreadBusy": "19.3%",
+          "heapMB": [
+            5.2,
+            6.7
+          ],
+          "nodes": [
+            502,
+            505
+          ],
+          "listeners": [
+            248,
+            243
+          ]
+        },
+        "acted": 4
+      },
+      "panel": {
+        "seconds": 4.8,
+        "frames": {
+          "all": {
+            "n": 267,
+            "fps": 55.8,
+            "p50": 17.7,
+            "p95": 18.5,
+            "p99": 19.3,
+            "max": 36.5,
+            "over34": 2,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 267,
+            "fps": 55.8,
+            "p50": 17.7,
+            "p95": 18.5,
+            "p99": 19.3,
+            "max": 36.5,
+            "over34": 2,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 2,
+          "blockingMs": 0,
+          "styleLayoutMs": 1,
+          "forcedLayoutMs": 19,
+          "topInvokers": [
+            [
+              "event-listener:DIV#root.onclick",
+              31
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 36,
+            "perSec": 7.6,
+            "renderedMean": 3,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 22.9
+          },
+          "hand": {
+            "n": 36,
+            "perSec": 7.5,
+            "renderedMean": 3,
+            "renderedP95": 10,
+            "renderedMax": 10,
+            "renderedPerSec": 22.8
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 2.7
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            60
+          ],
+          [
+            "span.absolute",
+            19
+          ],
+          [
+            "#time-bank",
+            18
+          ],
+          [
+            "#action-bar",
+            6
+          ],
+          [
+            "#turn-banner",
+            5
+          ],
+          [
+            "?",
+            1
+          ]
+        ],
+        "ws": {
+          "in": 0,
+          "inBytes": 0,
+          "out": 0,
+          "outBytes": 0,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {},
+          "outKinds": {},
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 12,
+          "layoutsPerSec": 2.5,
+          "styleRecalcs": 287,
+          "styleRecalcsPerSec": 60.2,
+          "layoutMs": 56.2,
+          "styleMs": 144.5,
+          "scriptMs": 192.1,
+          "taskMs": 1241.9,
+          "mainThreadBusy": "26.1%",
+          "heapMB": [
+            6.9,
+            6.8
+          ],
+          "nodes": [
+            538,
+            546
+          ],
+          "listeners": [
+            250,
+            250
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-phones",
+      "seats": 6,
+      "profile": "desktop",
+      "cpuThrottle": 1,
+      "play": {
+        "seconds": 40.5,
+        "frames": {
+          "all": {
+            "n": 2287,
+            "fps": 56.5,
+            "p50": 17.7,
+            "p95": 18.5,
+            "p99": 19,
+            "max": 19.6,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 1462,
+            "fps": 56.5,
+            "p50": 17.7,
+            "p95": 18.5,
+            "p99": 18.9,
+            "max": 19.6,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 825,
+            "fps": 56.5,
+            "p50": 17.7,
+            "p95": 18.4,
+            "p99": 19.1,
+            "max": 19.4,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 0,
+          "blockingMs": 0,
+          "styleLayoutMs": 0,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 188,
+            "perSec": 4.6,
+            "renderedMean": 17.3,
+            "renderedP95": 73,
+            "renderedMax": 101,
+            "renderedPerSec": 80.2
+          },
+          "hand": {
+            "n": 156,
+            "perSec": 6,
+            "renderedMean": 13.2,
+            "renderedP95": 73,
+            "renderedMax": 101,
+            "renderedPerSec": 79.8
+          },
+          "between": {
+            "n": 32,
+            "perSec": 2.2,
+            "renderedMean": 36.9,
+            "renderedP95": 75,
+            "renderedMax": 79,
+            "renderedPerSec": 80.9
+          },
+          "hookMs": 4.6
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            842
+          ],
+          [
+            "?",
+            516
+          ],
+          [
+            "div.jc-card",
+            378
+          ],
+          [
+            "span.inline-flex",
+            351
+          ],
+          [
+            "span.absolute",
+            119
+          ],
+          [
+            "button.inline-flex",
+            114
+          ],
+          [
+            "div.absolute",
+            108
+          ],
+          [
+            "#seat-N",
+            92
+          ],
+          [
+            "#member-name",
+            92
+          ],
+          [
+            "#table",
+            79
+          ],
+          [
+            "#flights",
+            79
+          ],
+          [
+            "#bot-badge",
+            79
+          ],
+          [
+            "div.fixed",
+            38
+          ],
+          [
+            "a.block",
+            38
+          ],
+          [
+            "#sitout-toggle",
+            38
+          ],
+          [
+            "#hand-chart-open",
+            38
+          ]
+        ],
+        "ws": {
+          "in": 23,
+          "inBytes": 57867,
+          "out": 2,
+          "outBytes": 214,
+          "states": 21,
+          "stateBytes": 57775,
+          "kinds": {
+            "state": 21,
+            "ack": 2
+          },
+          "outKinds": {
+            "action": 2
+          },
+          "stateAvgBytes": 2751,
+          "statesPerSec": 0.5
+        },
+        "receiveToCommit": {
+          "n": 21,
+          "p50": 2.1,
+          "p95": 7.1,
+          "max": 14
+        },
+        "receiveToFrame": {
+          "n": 21,
+          "p50": 9.6,
+          "p95": 16.1,
+          "max": 17.2
+        },
+        "ack": {
+          "action:fold": {
+            "n": 2,
+            "p50": 18.1,
+            "max": 18.1
+          }
+        },
+        "browser": {
+          "layouts": 80,
+          "layoutsPerSec": 2,
+          "styleRecalcs": 1508,
+          "styleRecalcsPerSec": 37.2,
+          "layoutMs": 41,
+          "styleMs": 211.3,
+          "scriptMs": 204.4,
+          "taskMs": 1161.5,
+          "mainThreadBusy": "2.9%",
+          "heapMB": [
+            5.6,
+            6.7
+          ],
+          "nodes": [
+            470,
+            569
+          ],
+          "listeners": [
+            240,
+            265
+          ]
+        },
+        "acted": 4
+      },
+      "panel": {
+        "seconds": 4.5,
+        "frames": {
+          "all": {
+            "n": 253,
+            "fps": 56.7,
+            "p50": 17.6,
+            "p95": 18.4,
+            "p99": 18.9,
+            "max": 19.1,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 253,
+            "fps": 56.7,
+            "p50": 17.6,
+            "p95": 18.4,
+            "p99": 18.9,
+            "max": 19.1,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 0,
+          "blockingMs": 0,
+          "styleLayoutMs": 0,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 28,
+            "perSec": 6.3,
+            "renderedMean": 3.3,
+            "renderedP95": 8,
+            "renderedMax": 8,
+            "renderedPerSec": 20.9
+          },
+          "hand": {
+            "n": 28,
+            "perSec": 6.3,
+            "renderedMean": 3.3,
+            "renderedP95": 8,
+            "renderedMax": 8,
+            "renderedPerSec": 20.8
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 0.4
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            48
+          ],
+          [
+            "#time-bank",
+            24
+          ],
+          [
+            "span.absolute",
+            17
+          ],
+          [
+            "#turn-banner",
+            4
+          ]
+        ],
+        "ws": {
+          "in": 1,
+          "inBytes": 12,
+          "out": 1,
+          "outBytes": 12,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {
+            "pong": 1
+          },
+          "outKinds": {
+            "ping": 1
+          },
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 11,
+          "layoutsPerSec": 2.5,
+          "styleRecalcs": 282,
+          "styleRecalcsPerSec": 63.3,
+          "layoutMs": 6.2,
+          "styleMs": 24.4,
+          "scriptMs": 23,
+          "taskMs": 164.5,
+          "mainThreadBusy": "3.7%",
+          "heapMB": [
+            6.7,
+            6.7
+          ],
+          "nodes": [
+            569,
+            577
+          ],
+          "listeners": [
+            265,
+            265
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-sound",
+      "seats": 2,
+      "profile": "phone",
+      "cpuThrottle": 4,
+      "play": {
+        "seconds": 40.5,
+        "frames": {
+          "all": {
+            "n": 2264,
+            "fps": 55.9,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.1,
+            "max": 54.4,
+            "over34": 3,
+            "over50": 1,
+            "over100": 0
+          },
+          "hand": {
+            "n": 480,
+            "fps": 55.6,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.1,
+            "max": 54.4,
+            "over34": 3,
+            "over50": 1,
+            "over100": 0
+          },
+          "between": {
+            "n": 1784,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.2,
+            "max": 19.7,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 1,
+          "totalMs": 58,
+          "max": 58,
+          "p95": 58
+        },
+        "longAnimationFrames": {
+          "n": 2,
+          "blockingMs": 11,
+          "styleLayoutMs": 0.4,
+          "forcedLayoutMs": 18,
+          "topInvokers": [
+            [
+              "event-listener:MessagePort.onmessage",
+              35
+            ],
+            [
+              "event-listener:DOMWindow.onpointerdown",
+              23
+            ],
+            [
+              "event-listener:DIV#root.onclick",
+              15
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 151,
+            "perSec": 3.7,
+            "renderedMean": 26.1,
+            "renderedP95": 66,
+            "renderedMax": 69,
+            "renderedPerSec": 97.4
+          },
+          "hand": {
+            "n": 64,
+            "perSec": 7.4,
+            "renderedMean": 14.7,
+            "renderedP95": 64,
+            "renderedMax": 66,
+            "renderedPerSec": 109.2
+          },
+          "between": {
+            "n": 87,
+            "perSec": 2.7,
+            "renderedMean": 34.5,
+            "renderedP95": 69,
+            "renderedMax": 69,
+            "renderedPerSec": 94.2
+          },
+          "hookMs": 19.5
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            1130
+          ],
+          [
+            "?",
+            681
+          ],
+          [
+            "span.inline-flex",
+            480
+          ],
+          [
+            "div.absolute",
+            234
+          ],
+          [
+            "div.jc-card",
+            178
+          ],
+          [
+            "button.inline-flex",
+            165
+          ],
+          [
+            "#table",
+            99
+          ],
+          [
+            "#flights",
+            99
+          ],
+          [
+            "#seat-N",
+            89
+          ],
+          [
+            "#member-name",
+            89
+          ],
+          [
+            "#bot-badge",
+            70
+          ],
+          [
+            "div.fixed",
+            55
+          ],
+          [
+            "a.block",
+            55
+          ],
+          [
+            "#sitout-toggle",
+            55
+          ],
+          [
+            "#hand-chart-open",
+            55
+          ],
+          [
+            "#leave",
+            55
+          ]
+        ],
+        "ws": {
+          "in": 20,
+          "inBytes": 24960,
+          "out": 6,
+          "outBytes": 636,
+          "states": 14,
+          "stateBytes": 24684,
+          "kinds": {
+            "state": 14,
+            "ack": 6
+          },
+          "outKinds": {
+            "action": 6
+          },
+          "stateAvgBytes": 1763,
+          "statesPerSec": 0.3
+        },
+        "receiveToCommit": {
+          "n": 14,
+          "p50": 17.4,
+          "p95": 35.4,
+          "max": 35.4
+        },
+        "receiveToFrame": {
+          "n": 14,
+          "p50": 7.7,
+          "p95": 19.3,
+          "max": 19.3
+        },
+        "ack": {
+          "action:fold": {
+            "n": 6,
+            "p50": 47.3,
+            "max": 88.7
+          }
+        },
+        "browser": {
+          "layouts": 120,
+          "layoutsPerSec": 3,
+          "styleRecalcs": 2191,
+          "styleRecalcsPerSec": 54.1,
+          "layoutMs": 140.7,
+          "styleMs": 1051.2,
+          "scriptMs": 947.9,
+          "taskMs": 4879.8,
+          "mainThreadBusy": "12.1%",
+          "heapMB": [
+            5.3,
+            6.7
+          ],
+          "nodes": [
+            405,
+            352
+          ],
+          "listeners": [
+            244,
+            237
+          ]
+        },
+        "acted": 7
+      },
+      "panel": {
+        "seconds": 4.6,
+        "frames": {
+          "all": {
+            "n": 258,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.7,
+            "p99": 19.1,
+            "max": 19.3,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 258,
+            "fps": 56,
+            "p50": 17.9,
+            "p95": 18.7,
+            "p99": 19.1,
+            "max": 19.3,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 1,
+          "blockingMs": 0,
+          "styleLayoutMs": 1.6,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 34,
+            "perSec": 7.4,
+            "renderedMean": 3.5,
+            "renderedP95": 11,
+            "renderedMax": 11,
+            "renderedPerSec": 25.8
+          },
+          "hand": {
+            "n": 34,
+            "perSec": 7.4,
+            "renderedMean": 3.5,
+            "renderedP95": 11,
+            "renderedMax": 11,
+            "renderedPerSec": 25.8
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 2
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            60
+          ],
+          [
+            "#time-bank",
+            18
+          ],
+          [
+            "span.absolute",
+            18
+          ],
+          [
+            "span.pointer-events-none",
+            12
+          ],
+          [
+            "#action-bar",
+            6
+          ],
+          [
+            "#turn-banner",
+            5
+          ]
+        ],
+        "ws": {
+          "in": 0,
+          "inBytes": 0,
+          "out": 0,
+          "outBytes": 0,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {},
+          "outKinds": {},
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 12,
+          "layoutsPerSec": 2.6,
+          "styleRecalcs": 279,
+          "styleRecalcsPerSec": 60.5,
+          "layoutMs": 29.3,
+          "styleMs": 113.4,
+          "scriptMs": 109,
+          "taskMs": 674.9,
+          "mainThreadBusy": "14.6%",
+          "heapMB": [
+            6.7,
+            6.6
+          ],
+          "nodes": [
+            407,
+            415
+          ],
+          "listeners": [
+            241,
+            241
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-sound",
+      "seats": 2,
+      "profile": "slowphone",
+      "cpuThrottle": 6,
+      "play": {
+        "seconds": 40.5,
+        "frames": {
+          "all": {
+            "n": 2241,
+            "fps": 55.3,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.4,
+            "max": 141.8,
+            "over34": 18,
+            "over50": 5,
+            "over100": 2
+          },
+          "hand": {
+            "n": 521,
+            "fps": 53.4,
+            "p50": 17.8,
+            "p95": 18.7,
+            "p99": 36.1,
+            "max": 141.8,
+            "over34": 14,
+            "over50": 5,
+            "over100": 2
+          },
+          "between": {
+            "n": 1720,
+            "fps": 55.9,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.1,
+            "max": 36,
+            "over34": 4,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 3,
+          "totalMs": 277,
+          "max": 139,
+          "p95": 139
+        },
+        "longAnimationFrames": {
+          "n": 7,
+          "blockingMs": 163,
+          "styleLayoutMs": 115.3,
+          "forcedLayoutMs": 158,
+          "topInvokers": [
+            [
+              "event-listener:MessagePort.onmessage",
+              282
+            ],
+            [
+              "event-listener:DOMWindow.onpointerdown",
+              28
+            ],
+            [
+              "event-listener:DIV#root.onclick",
+              18
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 147,
+            "perSec": 3.6,
+            "renderedMean": 26.2,
+            "renderedP95": 66,
+            "renderedMax": 69,
+            "renderedPerSec": 95.1
+          },
+          "hand": {
+            "n": 61,
+            "perSec": 6.3,
+            "renderedMean": 14.8,
+            "renderedP95": 64,
+            "renderedMax": 66,
+            "renderedPerSec": 92.7
+          },
+          "between": {
+            "n": 86,
+            "perSec": 2.8,
+            "renderedMean": 34.3,
+            "renderedP95": 69,
+            "renderedMax": 69,
+            "renderedPerSec": 95.8
+          },
+          "hookMs": 32.2
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            1082
+          ],
+          [
+            "?",
+            662
+          ],
+          [
+            "span.inline-flex",
+            479
+          ],
+          [
+            "div.absolute",
+            236
+          ],
+          [
+            "div.jc-card",
+            182
+          ],
+          [
+            "button.inline-flex",
+            159
+          ],
+          [
+            "#table",
+            98
+          ],
+          [
+            "#flights",
+            98
+          ],
+          [
+            "#seat-N",
+            92
+          ],
+          [
+            "#member-name",
+            92
+          ],
+          [
+            "#bot-badge",
+            64
+          ],
+          [
+            "div.fixed",
+            53
+          ],
+          [
+            "a.block",
+            53
+          ],
+          [
+            "#sitout-toggle",
+            53
+          ],
+          [
+            "#hand-chart-open",
+            53
+          ],
+          [
+            "#leave",
+            53
+          ]
+        ],
+        "ws": {
+          "in": 19,
+          "inBytes": 24878,
+          "out": 5,
+          "outBytes": 534,
+          "states": 14,
+          "stateBytes": 24648,
+          "kinds": {
+            "state": 14,
+            "ack": 5
+          },
+          "outKinds": {
+            "action": 5
+          },
+          "stateAvgBytes": 1761,
+          "statesPerSec": 0.3
+        },
+        "receiveToCommit": {
+          "n": 14,
+          "p50": 32.5,
+          "p95": 139.6,
+          "max": 139.6
+        },
+        "receiveToFrame": {
+          "n": 14,
+          "p50": 9.9,
+          "p95": 15.2,
+          "max": 15.2
+        },
+        "ack": {
+          "action:fold": {
+            "n": 5,
+            "p50": 91.7,
+            "max": 103.6
+          }
+        },
+        "browser": {
+          "layouts": 124,
+          "layoutsPerSec": 3.1,
+          "styleRecalcs": 2155,
+          "styleRecalcsPerSec": 53.2,
+          "layoutMs": 340.2,
+          "styleMs": 1642.6,
+          "scriptMs": 1490.4,
+          "taskMs": 8510.7,
+          "mainThreadBusy": "21%",
+          "heapMB": [
+            5.2,
+            6.6
+          ],
+          "nodes": [
+            346,
+            352
+          ],
+          "listeners": [
+            236,
+            237
+          ]
+        },
+        "acted": 9
+      },
+      "panel": {
+        "seconds": 4.8,
+        "frames": {
+          "all": {
+            "n": 267,
+            "fps": 55.4,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.4,
+            "max": 53.3,
+            "over34": 2,
+            "over50": 1,
+            "over100": 0
+          },
+          "hand": {
+            "n": 267,
+            "fps": 55.4,
+            "p50": 17.9,
+            "p95": 18.6,
+            "p99": 19.4,
+            "max": 53.3,
+            "over34": 2,
+            "over50": 1,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 2,
+          "blockingMs": 0,
+          "styleLayoutMs": 1,
+          "forcedLayoutMs": 17,
+          "topInvokers": [
+            [
+              "event-listener:DIV#root.onclick",
+              28
+            ]
+          ]
+        },
+        "commits": {
+          "all": {
+            "n": 36,
+            "perSec": 7.5,
+            "renderedMean": 3.3,
+            "renderedP95": 11,
+            "renderedMax": 11,
+            "renderedPerSec": 25.2
+          },
+          "hand": {
+            "n": 36,
+            "perSec": 7.5,
+            "renderedMean": 3.3,
+            "renderedP95": 11,
+            "renderedMax": 11,
+            "renderedPerSec": 24.9
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 2.9
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            60
+          ],
+          [
+            "span.absolute",
+            19
+          ],
+          [
+            "#time-bank",
+            18
+          ],
+          [
+            "span.pointer-events-none",
+            12
+          ],
+          [
+            "#action-bar",
+            6
+          ],
+          [
+            "#turn-banner",
+            5
+          ]
+        ],
+        "ws": {
+          "in": 0,
+          "inBytes": 0,
+          "out": 0,
+          "outBytes": 0,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {},
+          "outKinds": {},
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 12,
+          "layoutsPerSec": 2.5,
+          "styleRecalcs": 289,
+          "styleRecalcsPerSec": 60.6,
+          "layoutMs": 49.1,
+          "styleMs": 139.3,
+          "scriptMs": 180.9,
+          "taskMs": 1113.9,
+          "mainThreadBusy": "23.4%",
+          "heapMB": [
+            6.7,
+            6.6
+          ],
+          "nodes": [
+            406,
+            414
+          ],
+          "listeners": [
+            240,
+            240
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    },
+    {
+      "table": "e2e-sound",
+      "seats": 2,
+      "profile": "desktop",
+      "cpuThrottle": 1,
+      "play": {
+        "seconds": 40,
+        "frames": {
+          "all": {
+            "n": 2264,
+            "fps": 56.6,
+            "p50": 17.7,
+            "p95": 18.4,
+            "p99": 18.8,
+            "max": 19.4,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 489,
+            "fps": 56.6,
+            "p50": 17.7,
+            "p95": 18.4,
+            "p99": 18.6,
+            "max": 19,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 1775,
+            "fps": 56.6,
+            "p50": 17.7,
+            "p95": 18.3,
+            "p99": 18.9,
+            "max": 19.4,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 0,
+          "blockingMs": 0,
+          "styleLayoutMs": 0,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 161,
+            "perSec": 4,
+            "renderedMean": 25.1,
+            "renderedP95": 66,
+            "renderedMax": 69,
+            "renderedPerSec": 100.9
+          },
+          "hand": {
+            "n": 71,
+            "perSec": 8.2,
+            "renderedMean": 14.5,
+            "renderedP95": 64,
+            "renderedMax": 66,
+            "renderedPerSec": 119
+          },
+          "between": {
+            "n": 90,
+            "perSec": 2.9,
+            "renderedMean": 33.4,
+            "renderedP95": 69,
+            "renderedMax": 69,
+            "renderedPerSec": 95.9
+          },
+          "hookMs": 5.3
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            1152
+          ],
+          [
+            "?",
+            695
+          ],
+          [
+            "span.inline-flex",
+            490
+          ],
+          [
+            "div.absolute",
+            234
+          ],
+          [
+            "div.jc-card",
+            186
+          ],
+          [
+            "button.inline-flex",
+            168
+          ],
+          [
+            "#table",
+            104
+          ],
+          [
+            "#flights",
+            104
+          ],
+          [
+            "#seat-N",
+            93
+          ],
+          [
+            "#member-name",
+            93
+          ],
+          [
+            "#bot-badge",
+            72
+          ],
+          [
+            "div.fixed",
+            56
+          ],
+          [
+            "a.block",
+            56
+          ],
+          [
+            "#sitout-toggle",
+            56
+          ],
+          [
+            "#hand-chart-open",
+            56
+          ],
+          [
+            "#leave",
+            56
+          ]
+        ],
+        "ws": {
+          "in": 21,
+          "inBytes": 26733,
+          "out": 6,
+          "outBytes": 642,
+          "states": 15,
+          "stateBytes": 26457,
+          "kinds": {
+            "state": 15,
+            "ack": 6
+          },
+          "outKinds": {
+            "action": 6
+          },
+          "stateAvgBytes": 1764,
+          "statesPerSec": 0.4
+        },
+        "receiveToCommit": {
+          "n": 15,
+          "p50": 2.8,
+          "p95": 23.6,
+          "max": 23.6
+        },
+        "receiveToFrame": {
+          "n": 15,
+          "p50": 8.5,
+          "p95": 16.5,
+          "max": 16.5
+        },
+        "ack": {
+          "action:fold": {
+            "n": 6,
+            "p50": 26.9,
+            "max": 30.4
+          }
+        },
+        "browser": {
+          "layouts": 129,
+          "layoutsPerSec": 3.2,
+          "styleRecalcs": 2271,
+          "styleRecalcsPerSec": 56.7,
+          "layoutMs": 51,
+          "styleMs": 273.8,
+          "scriptMs": 233,
+          "taskMs": 1270.1,
+          "mainThreadBusy": "3.2%",
+          "heapMB": [
+            5.3,
+            6.7
+          ],
+          "nodes": [
+            346,
+            352
+          ],
+          "listeners": [
+            236,
+            237
+          ]
+        },
+        "acted": 9
+      },
+      "panel": {
+        "seconds": 4.5,
+        "frames": {
+          "all": {
+            "n": 255,
+            "fps": 56.9,
+            "p50": 17.5,
+            "p95": 18.3,
+            "p99": 18.9,
+            "max": 18.9,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "hand": {
+            "n": 255,
+            "fps": 56.9,
+            "p50": 17.5,
+            "p95": 18.3,
+            "p99": 18.9,
+            "max": 18.9,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          },
+          "between": {
+            "n": 0,
+            "fps": null,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null,
+            "over34": 0,
+            "over50": 0,
+            "over100": 0
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": null,
+          "p95": null
+        },
+        "longAnimationFrames": {
+          "n": 0,
+          "blockingMs": 0,
+          "styleLayoutMs": 0,
+          "forcedLayoutMs": 0,
+          "topInvokers": []
+        },
+        "commits": {
+          "all": {
+            "n": 30,
+            "perSec": 6.7,
+            "renderedMean": 3.5,
+            "renderedP95": 9,
+            "renderedMax": 9,
+            "renderedPerSec": 23.6
+          },
+          "hand": {
+            "n": 30,
+            "perSec": 6.7,
+            "renderedMean": 3.5,
+            "renderedP95": 9,
+            "renderedMax": 9,
+            "renderedPerSec": 23.6
+          },
+          "between": {
+            "n": 0,
+            "perSec": null,
+            "renderedMean": 0,
+            "renderedP95": null,
+            "renderedMax": null,
+            "renderedPerSec": null
+          },
+          "hookMs": 0
+        },
+        "renderedBy": [
+          [
+            "svg.lucide",
+            48
+          ],
+          [
+            "#time-bank",
+            24
+          ],
+          [
+            "span.absolute",
+            18
+          ],
+          [
+            "span.pointer-events-none",
+            12
+          ],
+          [
+            "#turn-banner",
+            4
+          ]
+        ],
+        "ws": {
+          "in": 0,
+          "inBytes": 0,
+          "out": 0,
+          "outBytes": 0,
+          "states": 0,
+          "stateBytes": 0,
+          "kinds": {},
+          "outKinds": {},
+          "stateAvgBytes": 0,
+          "statesPerSec": 0
+        },
+        "receiveToCommit": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "receiveToFrame": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "ack": {},
+        "browser": {
+          "layouts": 11,
+          "layoutsPerSec": 2.5,
+          "styleRecalcs": 280,
+          "styleRecalcsPerSec": 62.4,
+          "layoutMs": 5.8,
+          "styleMs": 29,
+          "scriptMs": 23.7,
+          "taskMs": 163.9,
+          "mainThreadBusy": "3.7%",
+          "heapMB": [
+            6.7,
+            6.6
+          ],
+          "nodes": [
+            407,
+            415
+          ],
+          "listeners": [
+            241,
+            241
+          ]
+        }
+      },
+      "trace": null,
+      "errors": []
+    }
+  ]
+}

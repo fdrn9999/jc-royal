@@ -34,7 +34,7 @@ import type { AppEnv } from '../env';
 import { adminMonitorPublish } from '../lib/admin-monitor';
 import { audit } from '../lib/audit';
 import { fail, isPreview, parseBody } from '../lib/http';
-import { outboxToAll, outboxToUsers, realtimeOutboxAfter, realtimeOutboxSend } from '../lib/realtime';
+import { outboxToAll, outboxToUsers, realtimeOutboxSend } from '../lib/realtime';
 import { refreshVipEverywhere } from '../lib/room';
 
 interface Row {
@@ -115,32 +115,41 @@ export const adminVipRoutes = new Hono<AppEnv>()
     // The member's own pages read their account again (the color shown on their name); nothing else in the event. Its
     // outbox row is written only if the change was.
     const own = outboxToUsers([id], { scope: 'user', type: 'account.changed' }, now);
+    // Other members' open pages that show this name: the shown color only (nothing while the member is suspended), and
+    // only when it changed, so a change to a suspended member's says nothing to anyone. Its row is written in the same
+    // batch, with the color as the change left it: only if the change was (the row above is there), and only if that
+    // color is not the one shown before.
+    const before = shownVip({ role: vip.member.role, status: vip.member.status, isBot: vip.member.isBot, vipColor: from }) ?? null;
+    const SHOWN = `SELECT CASE WHEN role = 'user' AND is_bot = 0 AND status = 'active' THEN vip_color END FROM users WHERE id = ?`;
+    const seen = outboxToAll({ scope: 'service', type: 'member.vip.changed', resourceId: id, revision: vip.version + 1, payload: { vip: null } }, now);
     // Only from the version the request named, and only onto an account that may carry it (ending one always).
     const [saved] = await db.batch([
       db
         .prepare(
           `UPDATE users SET vip_color = ?2, vip_version = vip_version + 1, vip_changed_at = ?3, vip_changed_by = ?4, updated_at = ?3
             WHERE id = ?1 AND vip_version = ?5 AND (?2 IS NULL OR (role = 'user' AND is_bot = 0 AND status != 'deleted'))
-            RETURNING vip_version`,
+            RETURNING vip_version, role, status, is_bot`,
         )
         .bind(id, to, now, c.var.user!.id, vip.version),
       realtimeOutboxStatement(db, own, IF_CHANGED),
       // The member's bell: the color now (null: no longer VIP), never who changed it or why. The account event above
       // makes their pages read it.
       inboxStatement(db, id, { kind: 'vip', key: 'vip', params: { color: to }, now }, IF_CHANGED),
+      realtimeOutboxStatement(
+        db,
+        seen,
+        { sql: `EXISTS (SELECT 1 FROM realtime_outbox WHERE id = ?) AND (${SHOWN}) IS NOT ?`, params: [own.id, id, before] },
+        { path: '$.payload.vip', sql: SHOWN, params: [id] },
+      ),
     ]);
-    const done = saved?.results[0] as { vip_version: number } | undefined;
+    const done = saved?.results[0] as { vip_version: number; role: string; status: string; is_bot: number } | undefined;
     if (!done) fail(409, 'vip_conflict', 'the VIP state changed while saving', { vip: await load(c, id) });
-    realtimeOutboxSend(c, [own]);
+    // What other players see now, as the batch wrote it (the room never reads more than this).
+    const shown = shownVip({ role: done.role, status: done.status, isBot: done.is_bot, vipColor: to }) ?? null;
+    realtimeOutboxSend(c, shown !== before ? [own, { ...seen, event: { ...seen.event, payload: { vip: shown } } as typeof seen.event }] : [own]);
     await audit(c, 'user.vip', target, { from, to, reason, change: from === null ? 'assign' : to === null ? 'remove' : 'color', version: done.vip_version });
     const after = await load(c, id);
     adminMonitorPublish(c, { type: 'admin.monitor.changed', kind: 'vip', resourceId: id, revision: after.version });
-    // What other players see (nothing while the member is suspended); the room never reads more than this.
-    const shown = shownVip({ role: after.member.role, status: after.member.status, isBot: after.member.isBot, vipColor: after.color }) ?? null;
-    // Other members' open pages that show this name: the shown color only, and only when it changed (a suspended
-    // member's stays hidden, so a change to theirs says nothing to anyone).
-    const before = shownVip({ role: vip.member.role, status: vip.member.status, isBot: vip.member.isBot, vipColor: from }) ?? null;
-    if (shown !== before) realtimeOutboxAfter(c, [outboxToAll({ scope: 'service', type: 'member.vip.changed', resourceId: id, revision: after.version, payload: { vip: shown } })]);
     const rooms = await refreshVipEverywhere(c.env, id, shown);
     return c.json({ changed: true, vip: after, tables: rooms.tables, reached: rooms.reached } satisfies AdminVipResultDto);
   });

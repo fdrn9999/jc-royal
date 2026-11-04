@@ -1,4 +1,4 @@
-import { expect, type Browser, type Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type Page, type WebSocketRoute } from '@playwright/test';
 import { answerAll, CARD_ANSWERS } from './academy-helpers';
 import { setAccountPrefs, setRange, signUp, standUp, test } from './helpers';
 
@@ -348,4 +348,193 @@ test('beginner notes and the coach tip scroll in the band: small phones keep the
       await ctx.close();
     });
   }
+});
+
+/**
+ * The connection's word (RecoveryNote) shows in the header over the table's name, out of the table's flow: a drop, the
+ * retries, the recovery of the hand and the note's going move nothing. On two, six and nine seats, on the phones upright
+ * and on their side, a tablet's size and desktops (Chrome emulation, one player among bots): at each step, once the table
+ * holds still, its box, every seat's anchor and the dock's band are where they were before the drop (to a pixel's
+ * fraction), and the note stays in the header and covers none of the seats, the board, the pot, the bets, the turn's
+ * controls, the wallet or the header's buttons. Each drop comes on my turn: the band is fullest then.
+ */
+const RECOVERY_SCREENS = [
+  { touch: true, sizes: [[320, 568], [360, 640], [390, 844], [430, 932], [667, 375], [812, 375]] },
+  { touch: false, sizes: [[1024, 768], [1440, 900], [1920, 1080]] },
+] as const;
+const RECOVERY_TABLES = ['e2e-rc2', 'e2e-rc6', 'e2e-rc9'];
+
+interface Frame {
+  table: Box;
+  seats: Record<string, { x: number; y: number }>;
+  dock: { y: number; h: number };
+}
+
+/** Once the table holds still: its box, each seat's anchor (its place's left and top in the table, as laid out) and the dock's band. */
+async function frameOf(p: Page): Promise<Frame> {
+  expect(await settledTable(p)).not.toBeNull();
+  return p.evaluate(() => {
+    const r = (el: Element) => el.getBoundingClientRect();
+    const t = r(document.querySelector('[data-testid=table]')!);
+    const seats: Record<string, { x: number; y: number }> = {};
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-testid=table] [data-testid^="seat-"][data-state]'))) {
+      const parent = el.offsetParent ? r(el.offsetParent) : t;
+      const cs = getComputedStyle(el);
+      seats[el.dataset.testid!] = { x: parent.left + parseFloat(cs.left), y: parent.top + parseFloat(cs.top) };
+    }
+    const d = r(document.querySelector('[data-testid=table-stack]')!);
+    return { table: { x: t.left, y: t.top, w: t.width, h: t.height }, seats, dock: { y: d.top, h: d.height } };
+  });
+}
+
+/**
+ * What of the game and of the controls the connection's note covers, each pair by the smaller side they share (px), and
+ * how far it reaches out of the header. The note's own button and what is hidden under it on purpose (the table's name)
+ * do not count. Every line of it on screen is read whole: none is cut short.
+ */
+function bannerCovers(p: Page): Promise<string[]> {
+  return p.evaluate(() => {
+    const noteEl = document.querySelector('[data-testid=table-banner]');
+    if (!noteEl) return ['no note'];
+    const pill = noteEl.firstElementChild!.getBoundingClientRect();
+    const out: string[] = [];
+    const head = document.querySelector('header')!.getBoundingClientRect();
+    for (const k of ['top', 'left'] as const) if (head[k] - pill[k] > 1) out.push(`note out of the header at the ${k} by ${Math.round(head[k] - pill[k])}px`);
+    for (const k of ['bottom', 'right'] as const) if (pill[k] - head[k] > 1) out.push(`note out of the header at the ${k} by ${Math.round(pill[k] - head[k])}px`);
+    const sel =
+      '[data-testid=table] [data-testid^="seat-"][data-state], [data-testid=board], [data-testid=pot], [data-testid^="bet-"], [data-testid=action-bar], [data-testid=time-bank], [data-testid=pre-actions], [data-testid=wallet], header a[href], header button';
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
+      if (noteEl.contains(el) || getComputedStyle(el).visibility === 'hidden') continue;
+      const b = el.getBoundingClientRect();
+      if (b.width < 1 || b.height < 1) continue;
+      const shared = Math.min(Math.min(pill.right, b.right) - Math.max(pill.left, b.left), Math.min(pill.bottom, b.bottom) - Math.max(pill.top, b.top));
+      if (shared > 0.5) out.push(`note over ${el.dataset.testid ?? el.getAttribute('aria-label') ?? el.tagName} by ${Math.round(shared)}px`);
+    }
+    // What only a screen reader gets sits in a box a pixel wide; the lines on screen hold their whole text.
+    const shown = (el: Element) => {
+      for (let e: Element | null = el; e && e !== noteEl; e = e.parentElement) if (e.getBoundingClientRect().width <= 1) return false;
+      return true;
+    };
+    for (const el of Array.from(noteEl.querySelectorAll<HTMLElement>('span'))) {
+      if (el.children.length || !el.textContent?.trim() || !shown(el)) continue;
+      if (el.scrollWidth - el.clientWidth > 0.5 || el.scrollHeight - el.clientHeight > 0.5) out.push(`note's line cut: ${el.textContent} (${el.clientWidth}px of ${el.scrollWidth}px)`);
+    }
+    return out;
+  });
+}
+
+type Signed = Awaited<ReturnType<BrowserContext['storageState']>>;
+
+/** On one table and one kind of screen, signed in as `state` (whose account reads `lang`): through a drop, its retries, the recovery and the note's going at each size. */
+async function throughDrops(browser: Browser, state: Signed, nickname: string, table: string, group: { touch: boolean; sizes: readonly (readonly [number, number])[] }, lang: 'ko' | 'en' = 'ko') {
+  const [w0, h0] = group.sizes[0]!;
+  const ctx = await browser.newContext({ storageState: state, viewport: { width: w0, height: h0 }, isMobile: group.touch, hasTouch: group.touch, reducedMotion: 'reduce' });
+  const p = await ctx.newPage();
+  // While `offline` is set new connections hang as with no network; a connection made while `held` is set reaches the
+  // room, but nothing the room sends gets through until it is released.
+  let offline: Promise<void> | null = null;
+  let online = () => {};
+  let held: Promise<void> | null = null;
+  let release = () => {};
+  const sockets: WebSocketRoute[] = [];
+  await p.routeWebSocket(/\/ws\/tables\//, async (ws) => {
+    sockets.push(ws);
+    if (offline) await offline;
+    const server = ws.connectToServer();
+    const gate = held;
+    server.onMessage(async (m) => {
+      if (gate) await gate;
+      ws.send(m);
+    });
+    ws.onMessage((m) => server.send(m));
+  });
+  await sitDown(p, table, nickname);
+  await expect(p.locator('html')).toHaveAttribute('lang', lang);
+  const banner = p.getByTestId('table-banner');
+
+  for (const [w, h] of group.sizes) {
+    const name = `${table}-${w}x${h}`;
+    await p.setViewportSize({ width: w, height: h });
+    await expect(banner).toHaveCount(0);
+    // The note's tightest room: my turn, with the action bar and the time bank in the band.
+    await expect(p.getByTestId('action-bar')).toBeVisible({ timeout: 120_000 });
+    const base = await frameOf(p);
+    const shot = (what: string) => p.screenshot({ path: test.info().outputPath(`${name}-${what}.png`) });
+    const same = async (what: string) => {
+      const at = await frameOf(p);
+      for (const k of ['x', 'y', 'w', 'h'] as const) expect(Math.abs(at.table[k] - base.table[k]), `${name} ${what}: table ${k} ${at.table[k]} (before: ${base.table[k]})`).toBeLessThan(0.5);
+      // A bot may leave or take a seat meanwhile: the seats there both times (mine among them) are held to their places.
+      const both = Object.entries(at.seats).filter(([id]) => base.seats[id]);
+      expect(both.length, `${name} ${what}: seats there before and now`).toBeGreaterThan(0);
+      for (const [id, s] of both)
+        for (const k of ['x', 'y'] as const) expect(Math.abs(s[k] - base.seats[id]![k]), `${name} ${what}: ${id} ${k} ${s[k]} (before: ${base.seats[id]![k]})`).toBeLessThan(0.5);
+      for (const k of ['y', 'h'] as const) expect(Math.abs(at.dock[k] - base.dock[k]), `${name} ${what}: dock ${k} ${at.dock[k]} (before: ${base.dock[k]})`).toBeLessThan(0.5);
+    };
+
+    // The network drops: the note says so, and the retry hangs.
+    held = null;
+    offline = new Promise((r) => (online = r));
+    const before = sockets.length;
+    await sockets.at(-1)!.close({ code: 4000, reason: 'network lost' });
+    await expect(banner).toHaveAttribute('data-recovery', /^(reconnecting|offline)$/);
+    await expect.poll(() => sockets.length).toBeGreaterThan(before);
+    await same('reconnecting');
+    expect(await bannerCovers(p), `${name} reconnecting`).toEqual([]);
+    // While it retries the note is a button: a thumb's size, 44 × 44 px at least, wherever a finger lands on it.
+    if ((await banner.getAttribute('data-recovery')) === 'reconnecting') {
+      const hit = await p.getByTestId('reconnect-now').evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        const s = getComputedStyle(el, '::before');
+        const before = s.content !== 'none' && s.position === 'absolute' ? { top: parseFloat(s.top), bottom: parseFloat(s.bottom) } : { top: 0, bottom: 0 };
+        return { w: b.width, h: b.height - Math.min(0, before.top) - Math.min(0, before.bottom) };
+      });
+      expect(hit.w, `${name}: the retry's width`).toBeGreaterThanOrEqual(44);
+      expect(hit.h, `${name}: the retry's height`).toBeGreaterThanOrEqual(44);
+    }
+    await shot('reconnecting');
+
+    // Back online, the room's state held back: the page shows the hand it had, locked.
+    held = new Promise((r) => (release = r));
+    offline = null;
+    online();
+    await expect(banner).toHaveAttribute('data-recovery', /^(restoring|syncing)$/);
+    await same('restoring');
+    expect(await bannerCovers(p), `${name} restoring`).toEqual([]);
+    await shot('restoring');
+
+    // The state comes in: the note says I am back, then goes.
+    release();
+    await expect(banner).toHaveAttribute('data-recovery', 'restored');
+    await same('restored');
+    expect(await bannerCovers(p), `${name} restored`).toEqual([]);
+    await shot('restored');
+    await expect(banner).toHaveCount(0, { timeout: 5_000 });
+    await same('note gone');
+    await shot('note-gone');
+    await act(p, 'check');
+  }
+
+  await standUp(p);
+  await expect(p.getByTestId('left-next')).toBeVisible({ timeout: 60_000 });
+  await ctx.close();
+}
+
+test('the table keeps its size and place through a drop, the retries, the recovery and its note going', async ({ browser }) => {
+  test.setTimeout(1_500_000);
+  const { page, nickname } = await signUp(browser);
+  const state = await page.context().storageState();
+  await page.close();
+
+  for (const table of RECOVERY_TABLES)
+    for (const group of RECOVERY_SCREENS) await test.step(`${table} ${group.touch ? 'touch' : 'desktop'}`, () => throughDrops(browser, state, nickname, table, group));
+});
+
+/** The note's words are each language's own: English ones are longer, and on the narrowest phones they too are read whole. */
+test('in English too, the connection note fits the narrowest phones whole and moves nothing', async ({ browser }) => {
+  test.setTimeout(300_000);
+  const { page, nickname } = await signUp(browser);
+  expect(await page.evaluate(async () => (await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'en' }) })).status)).toBe(200);
+  const state = await page.context().storageState();
+  await page.close();
+  await throughDrops(browser, state, nickname, 'e2e-rc2', { touch: true, sizes: [[320, 568], [360, 640]] }, 'en');
 });

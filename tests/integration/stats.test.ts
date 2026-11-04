@@ -62,11 +62,14 @@ async function store(rec: HandRecord, users: string[], opts: { log?: string } = 
 const results = (rec: HandRecord) => ({ won: rec.players.map((p) => p.won), net: rec.players.map((p) => p.net), potTotal: rec.potTotal });
 const stats = async (u: { client: Client }) => (await u.client.get('/api/me/stats')).body as StatsDto;
 
-/** Every position in order, zeros except the ones given. */
-const positions = (given: Partial<Record<Position, [hands: number, vpip: number, pfr: number, net: number]>>) =>
+/**
+ * Every position in order, zeros except the ones given. `counted` is the hands with the big blind recorded (10 in every
+ * hand here): BB/100 is over those, and none without them.
+ */
+const positions = (given: Partial<Record<Position, [hands: number, vpip: number, pfr: number, net: number, counted?: number]>>) =>
   POSITIONS.map((position) => {
-    const [hands, vpip, pfr, net] = given[position] ?? [0, 0, 0, 0];
-    return { position, hands, vpip, pfr, net };
+    const [hands, vpip, pfr, net, counted = 0] = given[position] ?? [0, 0, 0, 0];
+    return { position, hands, vpip, pfr, net, counted, bb100: counted > 0 ? (net / 10 / counted) * 100 : null };
   });
 
 describe('play statistics', () => {
@@ -115,6 +118,7 @@ describe('play statistics', () => {
     // Before: "biggest pot" was MAX(won), 300 for u0 (the main pot only) and 200 for u1 (its own chips back); a hand
     // counted as won when chips came back, so u1 had 2 wins (the side pot hand was a loss of 300).
     expect(await stats(u0)).toEqual({
+      days: null, // every hand: no period asked for
       handsPlayed: 4,
       handsWon: 3,
       winRate: 75,
@@ -203,8 +207,8 @@ describe('play statistics', () => {
     });
   });
 
-  it('net chips by day for the last 7, 30 or 90 days, cut at the caller’s time zone', async () => {
-    const [u, other] = await Promise.all([newUser(), newUser()]);
+  it('net chips and the counts behind the ratios by day, and every statistic, for the last 7, 30 or 90 days, cut at the caller’s time zone', async () => {
+    const [u, other, none] = await Promise.all([newUser(), newUser(), newUser()]);
     const DAY = 86_400_000;
     const HOUR = 3_600_000;
     const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
@@ -215,15 +219,21 @@ describe('play statistics', () => {
     // Heads-up, u raises and the big blind folds: +10 for u every hand.
     const base = await play([1000, 1000], [['p0', 'raise', 40], ['p1', 'fold']]);
     for (const [k, t] of times.entries()) await store({ ...base, handId: `${base.handId}-t${k}`, startedAt: t - 1_000, endedAt: t }, [u.me.id, other.me.id]);
+    await d1(HAND_STATS_SQL);
 
     const trend = async (qs: string) => (await u.client.get(`/api/me/stats/trend${qs}`)).body as StatsTrendDto;
+    /**
+     * A day of these hands: u raised every one (VPIP and PFR in each), none saw a flop (nothing to measure for the
+     * showdown figures, so 0 of 0), and none has the big blind recorded (no BB/100 sample).
+     */
+    const point = (day: string, hands: number) => ({ day, hands, net: 10 * hands, vpip: { n: hands, of: hands }, pfr: { n: hands, of: hands }, wtsd: { n: 0, of: 0 }, wsd: { n: 0, of: 0 }, counted: 0, bbWon: 0 });
     /** The same days worked out from the local dates as text. */
     const expected = (days: number, tz: number) => {
       const local = (t: number) => iso(t + tz * 60_000);
       const from = local(now - (days - 1) * DAY);
       const by = new Map<string, number>();
       for (const t of times) if (local(t) >= from) by.set(local(t), (by.get(local(t)) ?? 0) + 1);
-      return [...by].sort(([a], [b]) => a.localeCompare(b)).map(([day, hands]) => ({ day, hands, net: 10 * hands }));
+      return [...by].sort(([a], [b]) => a.localeCompare(b)).map(([day, hands]) => point(day, hands));
     };
 
     for (const [days, tz] of [[7, 0], [30, 0], [90, 0], [7, 60], [7, -60], [90, 540]] as const) {
@@ -233,22 +243,52 @@ describe('play statistics', () => {
     expect(days7.find((p) => p.day === iso(start7))).toMatchObject({ hands: 1 }); // the first moment of the window counts
     expect(days7.find((p) => p.day === iso(start7 - 1))).toBeUndefined(); // the moment before doesn't
     expect(days7.filter((p) => p.day === iso(midnight3) || p.day === iso(midnight3 - DAY))).toHaveLength(2); // either side of midnight
-    expect((await trend('?days=7&tz=60')).points).toContainEqual({ day: iso(midnight3), hands: 2, net: 20 }); // 00:30 and 01:30
-    expect((await trend('?days=7&tz=-60')).points).toContainEqual({ day: iso(midnight3 - DAY), hands: 2, net: 20 }); // 22:30 and 23:30
+    expect((await trend('?days=7&tz=60')).points).toContainEqual(point(iso(midnight3), 2)); // 00:30 and 01:30
+    expect((await trend('?days=7&tz=-60')).points).toContainEqual(point(iso(midnight3 - DAY), 2)); // 22:30 and 23:30
     expect((await trend('?days=30&tz=0')).points.map((p) => p.day)).toContain(iso(now - 20 * DAY));
     expect((await trend('?days=30&tz=0')).points.map((p) => p.day)).not.toContain(iso(now - 60 * DAY));
     expect((await trend('?days=90&tz=0')).points.map((p) => p.day)).toContain(iso(now - 60 * DAY));
     expect((await trend('?days=90&tz=0')).points.map((p) => p.day)).not.toContain(iso(now - 120 * DAY));
     // Defaults: 30 days, UTC.
     expect(await trend('')).toEqual({ days: 30, tz: 0, points: expected(30, 0) });
-    // The other player's days are their own.
-    expect((await other.client.get('/api/me/stats/trend?days=7&tz=0')).body.points.every((p: { net: number }) => p.net < 0)).toBe(true);
+    // The other player's days are their own: the big blind folded every hand (dealt in, not in the pot).
+    const theirs = (await other.client.get('/api/me/stats/trend?days=7&tz=0')).body as StatsTrendDto;
+    expect(theirs.points.length).toBeGreaterThan(0);
+    for (const p of theirs.points) expect(p).toMatchObject({ net: -10 * p.hands, vpip: { n: 0, of: p.hands }, pfr: { n: 0, of: p.hands } });
+
+    // Every statistic over a period counts the hands of the trend's days: from the first moment of the first day in the
+    // caller's time zone. Without `days`, every hand.
+    const period = async (qs: string) => (await u.client.get(`/api/me/stats${qs}`)).body as StatsDto;
+    for (const [days, tz] of [[7, 0], [30, 0], [90, 0], [7, 60], [7, -60], [90, 540]] as const) {
+      const n = expected(days, tz).reduce((a, p) => a + p.hands, 0);
+      expect(await period(`?days=${days}&tz=${tz}`), `${days} days at ${tz}`).toMatchObject({
+        days,
+        handsPlayed: n,
+        handsWon: n,
+        winRate: 100,
+        netChips: 10 * n,
+        vpip: { n, of: n },
+        pfr: { n, of: n },
+        wtsd: { n: 0, of: 0 },
+        counted: 0,
+        bb100: null,
+        positions: positions({ BTN: [n, n, n, 10 * n] }),
+      });
+    }
+    expect((await period('?days=7&tz=0')).handsPlayed).toBe(4); // now, either side of midnight, the window's first moment
+    expect(await period('')).toMatchObject({ days: null, handsPlayed: times.length, netChips: 10 * times.length });
+    // A period without hands: nothing measured is a dash, not 0%.
+    expect((await none.client.get('/api/me/stats?days=7&tz=0')).body).toMatchObject({ days: 7, handsPlayed: 0, winRate: null, avgPot: null, vpip: { n: 0, of: 0 }, bb100: null, positions: positions({}) });
 
     for (const qs of ['?days=14', '?days=x', '?days=7&tz=900', '?days=7&tz=-721', '?days=7&tz=1.5', '?days=7&tz=abc']) {
-      const r = await u.client.get(`/api/me/stats/trend${qs}`);
-      expect(r.status, qs).toBe(400);
-      expect(r.body.error.code, qs).toBe('bad_request');
+      for (const path of ['/api/me/stats/trend', '/api/me/stats']) {
+        const r = await u.client.get(`${path}${qs}`);
+        expect(r.status, `${path}${qs}`).toBe(400);
+        expect(r.body.error.code, `${path}${qs}`).toBe('bad_request');
+      }
     }
+    // A time zone that can't be read is refused even for every hand.
+    expect((await u.client.get('/api/me/stats?tz=abc')).status).toBe(400);
     // Only for the signed-in user themself.
     for (const p of ['/api/me/stats', '/api/me/stats/trend']) expect((await new Client().get(p)).status, p).toBe(401);
   });
@@ -348,9 +388,9 @@ describe('play statistics from a real table', () => {
       // The later figures are written right after, in one batch for every player of the hand.
       if (sb.vpip.of > 0 && sb.counted > 0) break;
     }
-    expect(sb).toMatchObject({ handsPlayed: 1, vpip: { n: 1, of: 1 }, pfr: { n: 0, of: 1 }, wtsd: { n: 1, of: 1 }, wsd: { of: 1 }, positions: positions({ BTN: [1, 1, 0, sb!.netChips] }) });
+    expect(sb).toMatchObject({ handsPlayed: 1, vpip: { n: 1, of: 1 }, pfr: { n: 0, of: 1 }, wtsd: { n: 1, of: 1 }, wsd: { of: 1 }, positions: positions({ BTN: [1, 1, 0, sb!.netChips, 1] }) });
     const sbb = await stats(bb);
-    expect(sbb).toMatchObject({ handsPlayed: 1, vpip: { n: 0, of: 1 }, pfr: { n: 0, of: 1 }, wtsd: { n: 1, of: 1 }, wsd: { of: 1 }, positions: positions({ BB: [1, 0, 0, sbb.netChips] }) });
+    expect(sbb).toMatchObject({ handsPlayed: 1, vpip: { n: 0, of: 1 }, pfr: { n: 0, of: 1 }, wtsd: { n: 1, of: 1 }, wsd: { of: 1 }, positions: positions({ BB: [1, 0, 0, sbb.netChips, 1] }) });
     // A pot of 20 went to one of them or was split; nothing came back uncalled.
     expect(sb!.totalWon + sbb.totalWon).toBe(20);
     expect(sb!.handsWon + sbb.handsWon).toBeGreaterThanOrEqual(1);

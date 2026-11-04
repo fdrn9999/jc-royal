@@ -21,3 +21,26 @@ const en: Record<Recovery, string> = {
 };
 
 export const recoveryText = createTranslator({ ko, en });
+
+/** The same in a word or two and what follows from it, for a header too narrow for the sentence: each fits the 320px phone's (RecoveryNote). */
+type Brief = Record<Recovery, readonly [head: string, then?: string]>;
+
+const koBrief: Brief = {
+  offline: ['오프라인', '연결 확인'],
+  reconnecting: ['연결 끊김', '재연결 중'],
+  syncing: ['동기화 중', '액션 잠금'],
+  restoring: ['핸드 복구', '액션 잠금'],
+  restored: ['복귀 완료'],
+  failed: ['복구 실패', '재시도 중'],
+};
+
+const enBrief: Brief = {
+  offline: ['Offline', 'Waiting'],
+  reconnecting: ['Dropped', 'Retrying'],
+  syncing: ['Syncing', 'Locked'],
+  restoring: ['Restoring', 'Locked'],
+  restored: ['Rejoined'],
+  failed: ['Failed', 'Retrying'],
+};
+
+export const recoveryBrief = (locale: 'ko' | 'en') => (r: Recovery) => (locale === 'en' ? enBrief : koBrief)[r];

@@ -126,6 +126,7 @@ const BY_CODE: Record<string, Key> = {
   tournament_started: 'errTnStarted',
   tournament_not_ready: 'errTnNotReady',
   tournament_limit: 'errTnLimit',
+  mtt_disabled: 'errMttDisabled',
   tournament_name_mismatch: 'errTnNameMismatch',
   tournament_structure_invalid: 'errTnStructure',
   tournament_table: 'errTnTable',
@@ -142,6 +143,10 @@ const BY_CODE: Record<string, Key> = {
   vip_conflict: 'errVipConflict',
   vip_staff: 'errVipStaff',
   vip_deleted: 'errVipDeleted',
+  purge_changed: 'errPurgeChanged',
+  purge_blocked: 'errPurgeBlocked',
+  purge_confirm: 'errPurgeConfirm',
+  purge_failed: 'errPurgeFailed',
 };
 
 /** A failed request in the console's language (the API's own messages are English). */

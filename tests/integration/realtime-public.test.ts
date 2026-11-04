@@ -35,6 +35,11 @@ async function sock(client: Client, tableId: string, opts: Parameters<typeof Tab
   return s;
 }
 
+/** An event's outbox row as D1 keeps it, and when it was written. */
+const stored = async (eventId: string) => (await d1<{ event: string; created: number }>(`SELECT event, created_at AS created FROM realtime_outbox WHERE id = '${eventId}'`))[0];
+const rows = async (type: RealtimeEvent['type'], resourceId?: string) =>
+  Number((await d1<{ n: number }>(`SELECT count(*) AS n FROM realtime_outbox WHERE type = '${type}'${resourceId ? ` AND json_extract(event, '$.resourceId') = '${resourceId}'` : ''}`))[0]!.n);
+
 const about = (s: RealtimeSocket, id: string) => s.events.filter((e) => 'resourceId' in e && e.resourceId === id);
 const count = (s: RealtimeSocket, type: RealtimeEvent['type'], id?: string) => s.events.filter((e) => e.type === type && (!id || ('resourceId' in e && e.resourceId === id))).length;
 
@@ -187,6 +192,11 @@ describe('realtime service status', () => {
     expect(e1.payload.spreadMs).toBe(Math.min(30_000, Math.max(0, members - 20) * 10));
     // nothing in it but the revision and the spread: the notice is read from the status
     expect(JSON.stringify(e1)).not.toContain('실시간 상태 공지');
+    // Its outbox row is the notice's own batch's (a worker stopped after the commit leaves it for the cron): the event as
+    // it arrived, rev included, written at the notice's clock.
+    const r1 = await stored(e1.eventId);
+    expect(JSON.parse(r1!.event)).toEqual(e1);
+    expect(r1!.created).toBe((await d1<{ t: number }>(`SELECT updated_at AS t FROM service_notices WHERE id = '${noticeId}'`))[0]!.t);
 
     // A maintenance window planned ahead and then stopped: each a change.
     const startsAt = Date.now() + HOUR;
@@ -200,6 +210,14 @@ describe('realtime service status', () => {
     expect((await admin.post(`/api/admin/service/maintenance/${mwId}/stop`, { reason: 'realtime test done' })).status).toBe(200);
     await s.until(() => count(s, 'service.changed') >= 3, 15_000, 'stopped service.changed');
     expect(((await m.client.get('/api/service/status')).body as { maintenance: unknown }).maintenance).toBeNull();
+    const e3 = s.events.filter((e) => e.type === 'service.changed').at(-1)!;
+    expect(JSON.parse((await stored(e3.eventId))!.event)).toEqual(e3);
+    // A stop refused (it is over already) changes nothing: no event, and no row for one.
+    const heard = count(s, 'service.changed');
+    const written = await rows('service.changed');
+    expect((await admin.post(`/api/admin/service/maintenance/${mwId}/stop`, { reason: 'realtime test again' })).status).toBe(409);
+    expect(await rows('service.changed')).toBe(written);
+    await quiet(s, 'service.changed', heard);
   });
 });
 
@@ -239,14 +257,19 @@ describe('realtime tournaments', () => {
     expect(opened.scope).toBe('lobby');
     // the id only: the page reads the tournament itself
     expect(Object.keys(opened).sort()).toEqual(['eventId', 'occurredAt', 'resourceId', 'scope', 'type']);
+    // its outbox row is the opening's own batch's, at the tournament's clock
+    const told = await stored(opened.eventId);
+    expect(JSON.parse(told!.event)).toEqual(opened);
+    expect(told!.created).toBe((await d1<{ t: number }>(`SELECT created_at AS t FROM tournaments WHERE id = '${id}'`))[0]!.t);
 
     expect((await m.client.post(`/api/tournaments/${id}/register`)).body).toMatchObject({ ok: true, started: false });
     await st.until(() => count(st, 'tournament.changed', id) === 2, 15_000, 'registration');
     expect((await m.client.post(`/api/tournaments/${id}/unregister`)).status).toBe(200);
     await st.until(() => count(st, 'tournament.changed', id) === 3, 15_000, 'unregistration');
-    // unregistering again changes no row: nothing is announced
+    // unregistering again changes no row: nothing is announced, and no event row is written
     await m.client.post(`/api/tournaments/${id}/unregister`);
     await quiet(st, 'tournament.changed', 3, id);
+    expect(await rows('tournament.changed', id)).toBe(3);
 
     const t = (await admin.get(`/api/admin/tournaments/${id}`)).body.tournament;
     expect((await admin.post(`/api/admin/tournaments/${id}/cancel`, { baseVersion: t.version, reason: 'realtime test' })).status).toBe(200);
