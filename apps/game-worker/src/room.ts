@@ -2388,9 +2388,12 @@ export class TableRoom extends DurableObject<Env> {
     // An aborted tournament's seats go with the close; nothing changes at a table already closing.
     if (a.status !== 'aborted' && !this.room.closing && !this.room.closed) {
       const next: (SeatState | null)[] = this.room.seats.map(() => null);
+      // A seat this room has played keeps its state; the first answer after the room sat down from D1 (`takeTourney`)
+      // seats everyone as the coordinator has them, chips too (D1's may be a hand behind).
+      const fresh = m.applied === 0;
       for (const x of a.seats) {
         if (!Number.isInteger(x.seat) || x.seat < 0 || x.seat >= next.length || next[x.seat]) continue;
-        next[x.seat] = this.room.seats.find((s) => s?.userId === x.userId) ?? this.mttSeat(tn, x, now);
+        next[x.seat] = (!fresh && this.room.seats.find((s) => s?.userId === x.userId)) || this.mttSeat(tn, x, now);
       }
       for (let i = 0; i < next.length; i++) {
         const before = this.room.seats[i];

@@ -230,6 +230,21 @@ describe('permanent removal', () => {
     expect(again.body.removed).toMatchObject({ comments: 2 });
   });
 
+  it('sees a comment edited after the preview that leaves their count and the latest time as they were', async () => {
+    const p = await post(2);
+    const [older, newer] = await d1<{ id: string }>(`SELECT id FROM comments WHERE post_id = '${p.id}' ORDER BY created_at, rowid`);
+    await d1(`UPDATE comments SET updated_at = CASE id WHEN '${older!.id}' THEN 100 ELSE 200 END WHERE post_id = '${p.id}'`);
+    await reauth();
+    const plan = await preview('post', p.id);
+    // An edit that took its time before the preview and was written after it.
+    await d1(`UPDATE comments SET body = '미리보기 뒤에 고친 댓글', updated_at = 150 WHERE id = '${older!.id}'`);
+    const r = await purge('post', p.id, plan);
+    expect(r.status).toBe(409);
+    expect(code(r)).toBe('purge_changed');
+    expect(await n(`comments WHERE post_id = '${p.id}'`)).toBe(2);
+    expect(newer).toBeDefined();
+  });
+
   it('names what keeps a record and removes nothing: an open report, a table still open, a table with sessions, a template in use', async () => {
     await reauth();
     const p = await post();

@@ -11,8 +11,11 @@ import { isMyTurn, TableSocket } from '../support/ws';
 type User = Awaited<ReturnType<typeof newUser>>;
 
 const open: TableSocket[] = [];
-afterEach(() => {
+// Members a test marked as bots, members again after it: no later test finds a bot holding a member's welcome chips.
+const posing: string[] = [];
+afterEach(async () => {
   for (const s of open.splice(0)) s.close();
+  for (const id of posing.splice(0)) await d1(`UPDATE users SET is_bot = 0 WHERE id = '${id}'`);
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -23,6 +26,14 @@ async function until<T>(read: () => Promise<T>, ok: (v: T) => boolean, label: st
     if (ok(v)) return v;
     if (Date.now() > end) throw new Error(`timeout waiting for ${label}; last: ${JSON.stringify(v).slice(0, 400)}`);
   }
+}
+
+/** Fills `key`'s rate-limit window, away from the window's end so the next request falls in it. */
+async function fillWindow(key: string, limit: number) {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < 5_000) await sleep(left + 100);
+  const start = Date.now() - (Date.now() % 60_000);
+  await d1(`INSERT INTO rate_limits (key, window_start, count) VALUES ('${key}', ${start}, ${limit}) ON CONFLICT (key) DO UPDATE SET window_start = excluded.window_start, count = excluded.count`);
 }
 
 const card = (c: Client, id: string) => c.get<PlayerCardDto>(`/api/players/${id}/card`);
@@ -232,11 +243,26 @@ describe('table HUD', () => {
     await notFound(a, c.me.id);
 
     // A bot (suspended as well, so no bot table running meanwhile seats it): its figures with the mark, its card still none.
+    posing.push(bot.me.id);
     await d1(`UPDATE users SET is_bot = 1, status = 'suspended' WHERE id = '${bot.me.id}'`);
     const r = await hud(a.client, bot.me.id, 'cash');
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ bot: true, scope: 'cash', stats: { hands: 0, vpip: { n: 0, of: 0 } } });
     expect((await card(a.client, bot.me.id)).status).toBe(404);
+  });
+
+  it('counts each member against their own budget: one who used it up holds up no one else', async () => {
+    const a = await newUser();
+    const b = await newUser();
+    // A table opens a HUD for each seat: a member at a busy one may use up their budget, and only theirs.
+    await fillWindow(`player_card:${a.me.id}`, 120);
+    expect((await hud(a.client, b.me.id)).status).toBe(429);
+    expect((await card(a.client, b.me.id)).status).toBe(429);
+    expect((await hud(b.client, a.me.id)).status).toBe(200);
+    expect((await card(b.client, a.me.id)).status).toBe(200);
+    await fillWindow(`leaderboard:${a.me.id}`, 60);
+    expect((await a.client.get('/api/leaderboard')).status).toBe(429);
+    expect((await b.client.get('/api/leaderboard')).status).toBe(200);
   });
 });
 
@@ -320,6 +346,7 @@ describe('season leaderboard', () => {
     const { from, to } = seasonRange(season);
     const [p1, p2, p3, p4, quiet, bot] = [await newUser(), await newUser(), await newUser(), await newUser(), await newUser(), await newUser()];
     // Suspended too, so no bot table running meanwhile picks it to sit down.
+    posing.push(bot.me.id);
     await d1(`UPDATE users SET is_bot = 1, status = 'suspended' WHERE id = '${bot.me.id}'`);
     const at = (h: number) => from + h * 3_600_000;
     await finished(`lb-${tag}-1`, at(1), [p1, p2, p3, p4]);

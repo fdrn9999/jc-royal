@@ -231,7 +231,7 @@ export function StatDefinitions() {
   const { t, locale } = useI18n();
   return (
     <details className="group rounded-xl border border-white/5 bg-ink-850/80 px-4 py-3" data-testid="stats-definitions">
-      <summary className="jc-tap flex min-h-8 cursor-pointer list-none items-center justify-between text-sm font-semibold text-ink-300 hover:text-ivory">
+      <summary className="jc-tap -my-1 flex min-h-10 cursor-pointer list-none items-center justify-between text-sm font-semibold text-ink-300 hover:text-ivory">
         {t('me.defs')}
         <ChevronDownIcon className="size-4 text-ink-400 transition group-open:rotate-180" />
       </summary>

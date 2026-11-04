@@ -92,7 +92,7 @@ export function NotificationSettings() {
           </h3>
           <p className="text-xs text-ink-400">{t('notify.accountHint')}</p>
         </div>
-        <label className="flex cursor-pointer items-start gap-3 text-sm">
+        <label className="flex min-h-10 cursor-pointer items-start gap-3 text-sm">
           <input type="checkbox" className={box} checked={s.service} disabled={saving} onChange={(e) => void change({ service: e.target.checked })} data-testid="notify-service" />
           <span className="flex flex-col gap-0.5">
             <span className="font-semibold text-ink-100">{t('notify.service')}</span>
@@ -244,7 +244,7 @@ function DevicePush({ service, available, rev }: { service: boolean; available: 
         {failed ? (
           <p role="alert" className="flex flex-wrap items-center gap-2 text-xs text-danger">
             {t('notify.loadFailed')}
-            <button type="button" className="jc-tap min-h-8 rounded-md border border-white/10 px-2 font-semibold text-ink-200 hover:text-ivory" onClick={() => void load()}>
+            <button type="button" className="jc-tap min-h-10 rounded-md border border-white/10 px-2 font-semibold text-ink-200 hover:text-ivory" onClick={() => void load()}>
               {t('common.retry')}
             </button>
           </p>

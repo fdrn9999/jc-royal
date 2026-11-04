@@ -208,6 +208,16 @@ export function Tabs<K extends string>({
   className?: string;
 }) {
   const row = useRef<HTMLDivElement>(null);
+  // The chosen tab in sight, however it was chosen (the address, a button elsewhere): only the row scrolls, not the page.
+  useLayoutEffect(() => {
+    const r = row.current;
+    const t = r?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!r || !t) return;
+    const a = r.getBoundingClientRect();
+    const b = t.getBoundingClientRect();
+    if (b.left < a.left) r.scrollLeft -= a.left - b.left;
+    else if (b.right > a.right) r.scrollLeft += b.right - a.right;
+  }, [value]);
   return (
     <div ref={row} role="tablist" aria-label={label} className={cx('flex gap-2 overflow-x-auto', className)}>
       {items.map((it, i) => {
@@ -276,7 +286,8 @@ export function Modal({ open, onClose, title, children, footer, wide, closeLabel
       <div ref={ref} className={cx('jc-panel relative w-full animate-rise rounded-b-none sm:rounded-b-[var(--radius-card)] max-h-[92dvh] overflow-auto', wide ? 'sm:max-w-2xl' : 'sm:max-w-md')}>
         <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
           <h3 className="text-base font-bold tracking-[0.04em] text-gold-300">{title}</h3>
-          <button onClick={onClose} className="rounded p-1 text-ink-300 hover:text-ivory" aria-label={closeLabel}>
+          {/* A 40 px target for a finger, laid out as the 26 px button it was. */}
+          <button onClick={onClose} className="-m-[7px] grid size-10 shrink-0 place-items-center rounded text-ink-300 hover:text-ivory" aria-label={closeLabel}>
             <XIcon />
           </button>
         </div>

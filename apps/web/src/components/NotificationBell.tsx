@@ -16,6 +16,13 @@ function PanelNote({ k }: { k: 'common.loading' | 'common.loadFailed' }) {
 }
 
 /**
+ * The header's round icon buttons (mail, bell, settings): a 40 px target for a finger, laid out as the 36 px button they
+ * were (32 px below 375 px, where a ten-digit wallet leaves no more room) with their edges in the 8 px gaps beside them,
+ * so two never share a spot.
+ */
+export const iconButton = 'grid size-10 shrink-0 place-items-center rounded-full text-ink-200 hover:text-ivory -mx-0.5 max-[374px]:-mx-1';
+
+/**
  * The header's bell: unread items counted on it (`count`, the counters' `notifications`, drawn by the header's own
  * `badge`), and a panel (not a dialog) of the newest under it; outside it or Escape closes it. The panel hangs from the
  * header's row (AppShell's positioned container), not from the button, so it opens below the header however tall the
@@ -50,7 +57,7 @@ export function NotificationBell({ count, badge }: { count: number; badge: React
       <button
         ref={btn}
         type="button"
-        className="relative rounded-full p-2 text-ink-200 hover:text-ivory max-[374px]:p-1.5"
+        className={`${iconButton} relative`}
         aria-expanded={open}
         aria-controls={panel}
         aria-label={count ? t('inbox.bellUnread', { n: count }) : t('inbox.title')}

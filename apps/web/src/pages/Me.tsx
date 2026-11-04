@@ -67,6 +67,9 @@ function ledgerLabel(l: LedgerEntryDto): MsgKey {
   return (l.type === 'top_up' && l.memo && AUTO_TOP_UP[l.memo]) || (`ledger.${l.type}` as MsgKey);
 }
 
+/** A panel's link beside its title: a 40 px target for a finger, laid out no taller than the title. */
+const panelLink = 'jc-tap -my-3 inline-flex min-h-10 min-w-10 items-center justify-center text-xs text-gold-300 hover:underline';
+
 const ME_TABS = ['dashboard', 'history', 'activity', 'account'] as const;
 type MeTab = (typeof ME_TABS)[number];
 
@@ -324,7 +327,7 @@ export function MePage() {
               ))}
             </ul>
           </Panel>
-          <Panel title={t('me.badges')} actions={<Link to="/academy" className="text-xs text-gold-300 hover:underline">{t('nav.academy')} →</Link>}>
+          <Panel title={t('me.badges')} actions={<Link to="/academy" className={panelLink}>{t('nav.academy')} →</Link>}>
             {badgeCount > 0 ? <BadgeShelf showLocked={false} /> : <p className="text-sm text-ink-400">{t('me.noBadges')}</p>}
           </Panel>
         </div>
@@ -352,7 +355,7 @@ export function MePage() {
           )}
         </Panel>
 
-        <Panel title={t('me.recent')} actions={<Link to="/me/hands" className="jc-tap py-1 text-xs text-gold-300 hover:underline" data-testid="me-all-hands">{t('me.allHands')} →</Link>}>
+        <Panel title={t('me.recent')} actions={<Link to="/me/hands" className={panelLink} data-testid="me-all-hands">{t('me.allHands')} →</Link>}>
           {hands.data && hands.data.length === 0 && <Empty>{t('me.none')}</Empty>}
           <Failed x={hands} />
           <ul className="divide-y divide-white/5">
@@ -365,7 +368,7 @@ export function MePage() {
 
       <TabPanel tab={tab} k="activity">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className="text-xs text-gold-300 hover:underline">{t('board.write')}</Link>}>
+          <Panel title={t('me.myPosts')} actions={<Link to="/board/write" className={panelLink}>{t('board.write')}</Link>}>
             {myPosts.data && myPosts.data.length === 0 && <Empty>{t('me.none')}</Empty>}
             <Failed x={myPosts} />
             <ul className="divide-y divide-white/5" data-testid="my-posts">
@@ -374,7 +377,7 @@ export function MePage() {
                   <Link to={`/board/${p.id}`} className="min-w-0 flex-1 truncate hover:text-gold-300">{p.title}</Link>
                   {p.commentCount > 0 && <span className="text-xs text-gold-400">[{p.commentCount}]</span>}
                   <span className="shrink-0 text-xs text-ink-400">{formatDate(p.createdAt, locale)}</span>
-                  <Link to={`/board/${p.id}/edit`} className="shrink-0 text-xs text-gold-300">{t('board.edit')}</Link>
+                  <Link to={`/board/${p.id}/edit`} className="jc-tap -my-2.5 inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center text-xs text-gold-300">{t('board.edit')}</Link>
                 </li>
               ))}
             </ul>
@@ -428,12 +431,16 @@ export function MePage() {
             <ul className="flex flex-col gap-2">
               {sessions.data?.map((ss) => (
                 <li key={ss.id} className="flex items-center justify-between gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs">
-                  <span className="min-w-0 truncate text-ink-300">
-                    {ss.current && <Badge tone="gold" className="mr-2">{t('me.thisDevice')}</Badge>}
-                    {ss.userAgent?.slice(0, 60) ?? '—'} · {formatDate(ss.lastSeenAt, locale)}
-                  </span>
+                  {/* The browser may be cut short to the row; when it was last seen never is. */}
+                  <div className="min-w-0">
+                    <div className="truncate text-ink-300">
+                      {ss.current && <Badge tone="gold" className="mr-2">{t('me.thisDevice')}</Badge>}
+                      {ss.userAgent?.slice(0, 60) ?? '—'}
+                    </div>
+                    <div className="mt-0.5 text-ink-400">{formatDate(ss.lastSeenAt, locale)}</div>
+                  </div>
                   {!ss.current && (
-                    <button className="shrink-0 text-gold-300 hover:underline" onClick={async () => { await api(`/api/auth/me/sessions/${ss.id}`, { method: 'DELETE' }); void sessions.reload(); }}>
+                    <button className="jc-tap -my-2 inline-flex min-h-10 shrink-0 items-center px-1 text-gold-300 hover:underline" onClick={async () => { await api(`/api/auth/me/sessions/${ss.id}`, { method: 'DELETE' }); void sessions.reload(); }}>
                       {t('me.revoke')}
                     </button>
                   )}
@@ -445,6 +452,7 @@ export function MePage() {
               <Button
                 variant="outline"
                 size="sm"
+                className="min-h-10"
                 onClick={async () => {
                   await logout();
                   nav('/login', { replace: true });
@@ -453,7 +461,7 @@ export function MePage() {
               >
                 {t('nav.logout')}
               </Button>
-              <Button variant="danger" size="sm" onClick={() => setDeleting(true)}>
+              <Button variant="danger" size="sm" className="min-h-10" onClick={() => setDeleting(true)}>
                 {t('me.delete')}
               </Button>
             </div>

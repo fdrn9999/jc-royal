@@ -1,5 +1,5 @@
 import { sound } from '@jc/audio';
-import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView } from '@jc/types';
+import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView, TournamentDetailDto } from '@jc/types';
 import {
   ArrowDownIcon,
   ArrowUpFromLineIcon,
@@ -167,6 +167,33 @@ export function TablePage() {
   useEffect(() => {
     if (movedTo && movedTo !== id) nav(`/table/${movedTo}`, { replace: true });
   }, [movedTo, id, nav]);
+  // The table I was sent to can break and close before I get there (the coordinator sends me on, but that table no
+  // longer lets anyone in), and so can the table I sat at while my connection was down: its socket is refused. The
+  // tournament's record of my table (written as each move completes) says where to go, and a table I pass through says
+  // where next. Asked now and every 5 seconds while this table does not answer, whether or not it answered before, or
+  // once it said it closed; no longer once I am not playing in the tournament.
+  const mttId = /^mtt-(.+)-\d+$/.exec(id)?.[1] ?? null;
+  const stranded = !!mttId && (sock.status === 'reconnecting' || sock.status === 'closed');
+  useEffect(() => {
+    if (!stranded || !mttId) return;
+    const ctl = new AbortController();
+    const look = () =>
+      void api<TournamentDetailDto>(`/api/tournaments/${encodeURIComponent(mttId)}`, { signal: ctl.signal })
+        .then((d) => {
+          if (d.me?.status !== 'playing') {
+            clearInterval(timer);
+            return;
+          }
+          if (d.me.tableId && d.me.tableId !== id) nav(`/table/${d.me.tableId}`, { replace: true });
+        })
+        .catch(() => undefined);
+    const timer = setInterval(look, 5_000);
+    look();
+    return () => {
+      ctl.abort();
+      clearInterval(timer);
+    };
+  }, [stranded, mttId, id, nav]);
   // Table amounts in the player's unit; the wallet balance and the blinds in the header stay in chips.
   const amt = useAmounts(s?.table.bigBlind ?? 0);
   const [codeOpen, setCodeOpen] = useState(false);

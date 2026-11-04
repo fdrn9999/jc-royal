@@ -230,6 +230,13 @@ describe('solverFor: solver frequencies only from real solver data, always with 
     // Still running after the time it may take: given up, never shown half done.
     expect(await solverFor(call, h, 0, [provider(answer, { running: 1000 })], { ...now, pollMs: 1000, timeoutMs: 5000 })).toEqual({ kind: 'failed' });
     expect(await solverFor(call, h, 0, [throws, provider(answer)], now)).toEqual({ kind: 'solver', ...answer });
+    // A call that never comes back: given up once its time is out, or once the review closes.
+    const hangs: SolverProvider = { id: 'h', analyze: async () => 'job-1', getStatus: () => new Promise<SolverStatus>(() => {}), getResult: async () => answer };
+    expect(await solverFor(call, h, 0, [hangs], { ...now, timeoutMs: 50 })).toEqual({ kind: 'failed' });
+    expect(await solverFor(call, h, 0, [hangs, provider(answer)], { ...now, timeoutMs: 50 })).toEqual({ kind: 'solver', ...answer });
+    const closing = new AbortController();
+    setTimeout(() => closing.abort(), 20);
+    expect(await solverFor(call, h, 0, [hangs], { ...now, signal: closing.signal })).toEqual({ kind: 'failed' });
     // Stopped (the review closed): no answer taken.
     const stop = new AbortController();
     stop.abort();

@@ -7,7 +7,7 @@ import { useI18n } from '../lib/i18n';
 import { useTopOnNewPage } from '../lib/scroll';
 import { useUnread } from '../lib/unread';
 import { Arrivals } from './Arrivals';
-import { NotificationBell } from './NotificationBell';
+import { iconButton, NotificationBell } from './NotificationBell';
 import { PresenceMenu } from './Presence';
 import { ServiceBanner } from './ServiceBanner';
 
@@ -15,12 +15,12 @@ import { ServiceBanner } from './ServiceBanner';
 export function LegalLinks({ className = '' }: { className?: string }) {
   const { t } = useI18n();
   return (
-    <nav className={`flex items-center justify-center gap-3 text-[11px] text-ink-400 ${className}`} aria-label={`${t('legal.privacy')} / ${t('legal.terms')}`}>
-      <Link to="/privacy" className="py-1 font-semibold hover:text-ivory">
+    <nav className={`flex items-center justify-center gap-2 text-[11px] text-ink-400 ${className}`} aria-label={`${t('legal.privacy')} / ${t('legal.terms')}`}>
+      <Link to="/privacy" className="inline-flex min-h-10 items-center px-1 font-semibold hover:text-ivory">
         {t('legal.privacy')}
       </Link>
       <span aria-hidden>·</span>
-      <Link to="/terms" className="py-1 hover:text-ivory">
+      <Link to="/terms" className="inline-flex min-h-10 items-center px-1 hover:text-ivory">
         {t('legal.terms')}
       </Link>
     </nav>
@@ -28,14 +28,15 @@ export function LegalLinks({ className = '' }: { className?: string }) {
 }
 
 // Named in both languages, so someone who cannot read the page's language still finds the way to the other; and not
-// "언어" / "Language", the settings dialog's language field, which this switch stays in the page under.
+// "언어" / "Language", the settings dialog's language field, which this switch stays in the page under. Each half takes a
+// 40 px tap, the pill drawn no taller.
 export function LangToggle() {
   const { locale } = useI18n();
   const { chooseLocale } = useAuth();
   return (
     <div className="flex rounded-full border border-white/10 p-0.5 text-[11px] font-semibold" role="group" aria-label="한국어 / English">
       {(['ko', 'en'] as const).map((l) => (
-        <button key={l} onClick={() => chooseLocale(l)} className={`rounded-full px-2.5 py-1 transition ${locale === l ? 'bg-gold-500 text-ink-950' : 'text-ink-300 hover:text-ivory'}`} aria-pressed={locale === l}>
+        <button key={l} onClick={() => chooseLocale(l)} className={`relative min-w-10 rounded-full px-2.5 py-1 transition before:absolute before:inset-x-0 before:inset-y-[min(0px,calc((100%_-_40px)/2))] before:content-[''] ${locale === l ? 'bg-gold-500 text-ink-950' : 'text-ink-300 hover:text-ivory'}`} aria-pressed={locale === l}>
           {l === 'ko' ? '한국어' : 'EN'}
         </button>
       ))}
@@ -103,12 +104,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tab = ({ isActive }: { isActive: boolean }) =>
     `relative flex-1 whitespace-nowrap px-[3px] py-3 text-center text-[length:clamp(11px,3.62vw,13px)] leading-5 font-semibold ${isActive ? "text-gold-300 after:absolute after:inset-x-[18%] after:top-0 after:h-0.5 after:rounded-full after:bg-gold-400 after:content-['']" : 'text-ink-300'}`;
   const link = ({ isActive }: { isActive: boolean }) =>
-    `shrink-0 whitespace-nowrap px-2 py-2 text-sm font-semibold tracking-wide transition lg:px-3 ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
+    `shrink-0 whitespace-nowrap px-2 py-2.5 text-sm font-semibold tracking-wide transition lg:px-3 ${isActive ? 'text-gold-300' : 'text-ink-300 hover:text-ivory'}`;
   return (
     <div className="min-h-dvh" style={{ background: 'var(--t-bg)' }}>
       <header className="sticky top-0 z-40 border-b border-gold-500/10 bg-ink-950/80 backdrop-blur-md">
-        <div className="relative mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 max-[374px]:gap-2">
-          <Link to="/" className="shrink-0" aria-label="JC ROYAL">
+        <div className="relative mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 max-[374px]:gap-2 max-[374px]:px-2.5">
+          <Link to="/" className="-mx-1 shrink-0 px-1" aria-label="JC ROYAL">
             <Logo size={38} withWordmark className="[&>span]:hidden lg:[&>span]:inline" />
           </Link>
           {/* Between the phone layout and a wide window the wordmark, language switch and logout (both also in the
@@ -141,28 +142,28 @@ export function AppShell({ children }: { children: ReactNode }) {
               {t('nav.me')}
             </NavLink>
           </nav>
-          {/* Below 375 px a ten-digit wallet, the mail, the bell and the settings fit only drawn a little closer together
-              (the buttons stay 32 px, the wallet whole). */}
-          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3 max-[374px]:gap-1">
+          {/* Below 375 px a ten-digit wallet, the mail, the bell and the settings fit only with the header's sides
+              a little narrower and the buttons laid out narrower (the wallet stays whole; each is still a 40 px target). */}
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
             {me && <BalancePill amount={me.balance} />}
             {me && (
-              <Link to="/messages" className="relative rounded-full p-2 text-ink-200 hover:text-ivory max-[374px]:p-1.5" aria-label={`${t('nav.messages')}${unread ? ` (${unread})` : ''}`} data-testid="inbox-link">
+              <Link to="/messages" className={`${iconButton} relative`} aria-label={`${t('nav.messages')}${unread ? ` (${unread})` : ''}`} data-testid="inbox-link">
                 <MailIcon className="size-5" />
-                <CountBadge n={unread} testId="unread-badge" className="absolute -right-0.5 -top-0.5" />
+                <CountBadge n={unread} testId="unread-badge" className="absolute right-0 top-0" />
               </Link>
             )}
-            {me && <NotificationBell count={notifications} badge={<CountBadge n={notifications} testId="bell-badge" className="absolute -right-0.5 -top-0.5" />} />}
+            {me && <NotificationBell count={notifications} badge={<CountBadge n={notifications} testId="bell-badge" className="absolute right-0 top-0" />} />}
             {me && (
               <span className="hidden lg:inline">
                 <PresenceMenu />
               </span>
             )}
             <span className="hidden xl:inline"><LangToggle /></span>
-            <button type="button" className="rounded-full p-2 text-ink-200 hover:text-ivory max-[374px]:p-1.5" onClick={() => setSettings(true)} aria-label={t('settings.title')} data-testid="settings-open">
+            <button type="button" className={iconButton} onClick={() => setSettings(true)} aria-label={t('settings.title')} data-testid="settings-open">
               <SettingsIcon className="size-5" />
             </button>
             {me && (
-              <button className="hidden whitespace-nowrap text-sm text-ink-300 hover:text-ivory lg:inline" onClick={signOut}>
+              <button className="hidden min-h-10 items-center whitespace-nowrap text-sm text-ink-300 hover:text-ivory lg:inline-flex" onClick={signOut}>
                 {t('nav.logout')}
               </button>
             )}

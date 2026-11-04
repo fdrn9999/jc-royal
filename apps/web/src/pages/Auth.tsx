@@ -71,10 +71,10 @@ export function LoginPage() {
           {t('auth.login')}
         </Button>
         <div className="flex items-center justify-between text-sm">
-          <Link to="/register" className="text-gold-300 hover:underline">
+          <Link to="/register" className="jc-tap -my-2.5 inline-flex min-h-10 items-center text-gold-300 hover:underline">
             {t('nav.register')}
           </Link>
-          <Link to="/reset" className="text-ink-300 hover:text-ivory">
+          <Link to="/reset" className="jc-tap -my-2.5 inline-flex min-h-10 items-center text-ink-300 hover:text-ivory">
             {t('auth.forgot')}
           </Link>
         </div>

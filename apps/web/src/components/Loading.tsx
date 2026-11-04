@@ -21,7 +21,7 @@ export function LoadFailed({ onRetry, className = 'py-10', testId = 'load-failed
   return (
     <div className={cx('flex flex-col items-center gap-3 text-center', className)} role="alert" data-testid={testId}>
       <p className="text-sm text-ink-200">{t('common.loadFailed')}</p>
-      <Button size="sm" variant="outline" onClick={onRetry} data-testid={`${testId}-retry`}>
+      <Button size="sm" variant="outline" className="min-h-10" onClick={onRetry} data-testid={`${testId}-retry`}>
         {t('common.retry')}
       </Button>
     </div>

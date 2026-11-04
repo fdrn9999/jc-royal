@@ -61,7 +61,7 @@ export function MessagesPage() {
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('msg.title')}</h1>
-        <Button size="sm" variant="subtle" onClick={async () => { await api('/api/messages/read-all', { body: {} }); await load(); }}>{t('msg.readAll')}</Button>
+        <Button size="sm" variant="subtle" className="min-h-10" onClick={async () => { await api('/api/messages/read-all', { body: {} }); await load(); }}>{t('msg.readAll')}</Button>
       </div>
       <p className="text-xs text-ink-400">{t('msg.oneWay')}</p>
       {!list ? failed ? <LoadFailed onRetry={() => void load()} /> : <Loading /> : list.length === 0 ? <Empty>{t('msg.empty')}</Empty> : (

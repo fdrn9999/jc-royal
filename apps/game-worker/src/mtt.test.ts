@@ -233,6 +233,96 @@ describe('MTT seating', () => {
     expect([a, b, c].map((id) => mttAnswer(s, id).seats.length)).toEqual([4, 5, 5]);
   });
 
+  it('sends a player on, from the table they left and from the one they were sent to, when that one breaks first', () => {
+    const e = (userId: string, tableId: string, seat: number): TournamentEntryRow => ({ userId, seat, stack: 1000, status: 'playing', place: null, nickname: userId, avatarUrl: null, role: 'user', tableId });
+    // 6 / 3 / 4 at 6 seats: a sends one to b.
+    const entries = [
+      ...Array.from({ length: 6 }, (_, i) => e(`u${i + 1}`, 'a', i)),
+      ...Array.from({ length: 3 }, (_, i) => e(`u${i + 7}`, 'b', i)),
+      ...Array.from({ length: 4 }, (_, i) => e(`u${i + 10}`, 'c', i)),
+    ];
+    const s = mttSeed(row(entries), [{ id: 'a', open: true }, { id: 'b', open: true }, { id: 'c', open: true }], 6, T0);
+    mttClock(s, true, T0);
+    mttCall(s, { table: 'a', applied: 0 }, T0 + 1000, rng(20));
+    const sent = mttAnswer(s, 'a');
+    expect(sent.moves).toEqual([{ userId: 'u1', to: 'b' }]);
+    // Before a says it let u1 go, a bust at b leaves 12, which two tables seat: b breaks, u1 is sent to c instead.
+    const report: MttReport = { seq: 1, stacks: [{ userId: 'u7', stack: 2000, startStack: 1000 }, { userId: 'u8', stack: 0, startStack: 1000 }, { userId: 'u9', stack: 1000, startStack: 1000 }], order: ['u7', 'u8', 'u9'] };
+    expect(mttCall(s, { table: 'b', applied: 0, report }, T0 + 2000, rng(21))).toContain('a');
+    expect(s.players.u1!.moving?.to).toBe('c');
+    // b tells anyone who already went there; a tells u1 again before u1 leaves it.
+    expect(mttAnswer(s, 'b').moves).toContainEqual({ userId: 'u1', to: 'c' });
+    mttCall(s, { table: 'a', applied: sent.rev }, T0 + 3000, rng(22));
+    expect(s.players.u1!.table).toBe('a');
+    const again = mttAnswer(s, 'a');
+    expect(again.moves).toContainEqual({ userId: 'u1', to: 'c' });
+    // Once a applied that, u1 joins c.
+    mttCall(s, { table: 'a', applied: again.rev }, T0 + 4000, rng(23));
+    expect(s.players.u1!.table).toBe('c');
+    expect(mttAnswer(s, 'c').seats.map((x) => x.userId)).toContain('u1');
+  });
+
+  it('sends a player on again when the table they were sent on to breaks too, from every table they were sent to', () => {
+    const e = (userId: string, tableId: string, seat: number): TournamentEntryRow => ({ userId, seat, stack: 1000, status: 'playing', place: null, nickname: userId, avatarUrl: null, role: 'user', tableId });
+    const at = (table: string, from: number, n: number) => Array.from({ length: n }, (_, i) => e(`u${from + i}`, table, i));
+    const report = (seq: number, out: string[], keep: string[]): MttReport => ({
+      seq,
+      stacks: [...out.map((userId) => ({ userId, stack: 0, startStack: 1000 })), ...keep.map((userId) => ({ userId, stack: 1000, startStack: 1000 }))],
+      order: [...keep, ...out],
+    });
+    const ids = (from: number, n: number) => Array.from({ length: n }, (_, i) => `u${from + i}`);
+    // 9 / 6 / 7 / 7 at 9 seats: a sends one to b.
+    const s = mttSeed(row([...at('a', 1, 9), ...at('b', 10, 6), ...at('c', 16, 7), ...at('d', 23, 7)], { tableSeats: 9 }), ['a', 'b', 'c', 'd'].map((id) => ({ id, open: true })), 9, T0);
+    mttClock(s, true, T0);
+    mttCall(s, { table: 'a', applied: 0 }, T0 + 1000, rng(30));
+    const sent = mttAnswer(s, 'a');
+    expect(sent.moves).toEqual([{ userId: 'u1', to: 'b' }]);
+    // Before a lets u1 go: two out at b, b breaks and sends u1 on to c.
+    mttCall(s, { table: 'b', applied: 0, report: report(1, ['u14', 'u15'], ids(10, 4)) }, T0 + 2000, rng(31));
+    expect(s.players.u1!.moving?.to).toBe('c');
+    // Three out at d, then six at c: c breaks too, and u1 is sent on to d.
+    mttCall(s, { table: 'd', applied: 0, report: report(1, ids(27, 3), ids(23, 4)) }, T0 + 3000, rng(32));
+    mttCall(s, { table: 'c', applied: 0, report: report(1, ids(17, 6), ['u16']) }, T0 + 4000, rng(33));
+    expect(s.players.u1!.moving?.to).toBe('d');
+    // Whichever table u1 already went to tells them where to now; so does a, which they have not left.
+    for (const t of ['a', 'b', 'c']) expect(mttAnswer(s, t).moves, t).toContainEqual({ userId: 'u1', to: 'd' });
+    mttCall(s, { table: 'a', applied: mttAnswer(s, 'a').rev }, T0 + 5000, rng(34));
+    expect(s.players.u1!.table).toBe('d');
+    expect(mttAnswer(s, 'd').seats.map((x) => x.userId)).toContain('u1');
+  });
+
+  it('closes a broken table once its own players are sent on, whoever was still on the way to it: the record says where they are', () => {
+    const e = (userId: string, tableId: string, seat: number): TournamentEntryRow => ({ userId, seat, stack: 1000, status: 'playing', place: null, nickname: userId, avatarUrl: null, role: 'user', tableId });
+    const at = (table: string, from: number, n: number) => Array.from({ length: n }, (_, i) => e(`u${from + i}`, table, i));
+    const report = (seq: number, out: string[], keep: string[]): MttReport => ({
+      seq,
+      stacks: [...out.map((userId) => ({ userId, stack: 0, startStack: 1000 })), ...keep.map((userId) => ({ userId, stack: 1000, startStack: 1000 }))],
+      order: [...keep, ...out],
+    });
+    const ids = (from: number, n: number) => Array.from({ length: n }, (_, i) => `u${from + i}`);
+    // 9 / 6 / 7 / 7 at 9 seats: a sends u1 to b and lets them go (their page heads for b).
+    const s = mttSeed(row([...at('a', 1, 9), ...at('b', 10, 6), ...at('c', 16, 7), ...at('d', 23, 7)], { tableSeats: 9 }), ['a', 'b', 'c', 'd'].map((id) => ({ id, open: true })), 9, T0);
+    mttClock(s, true, T0);
+    mttCall(s, { table: 'a', applied: 0 }, T0 + 1000, rng(40));
+    expect(mttAnswer(s, 'a').moves).toEqual([{ userId: 'u1', to: 'b' }]);
+    mttCall(s, { table: 'a', applied: mttAnswer(s, 'a').rev }, T0 + 1100, rng(41));
+    expect(s.players.u1!.table).toBe('b');
+    // Two out at b: b breaks, and everyone it holds, u1 too, is sent on.
+    mttCall(s, { table: 'b', applied: mttAnswer(s, 'b').rev, report: report(1, ['u14', 'u15'], ['u1', ...ids(10, 4)]) }, T0 + 2000, rng(42));
+    expect(s.players.u1!.moving).toBeTruthy();
+    expect(mttAnswer(s, 'b')).toMatchObject({ closed: false });
+    expect(mttAnswer(s, 'b').moves).toContainEqual({ userId: 'u1', to: s.players.u1!.moving!.to });
+    // b lets them go and closes, though u1 never got there: no table tells u1 where now (a let them go, b is closed),
+    // and the record (D1's `table_id`, from `touched`) does.
+    mttCall(s, { table: 'b', applied: mttAnswer(s, 'b').rev }, T0 + 2100, rng(43));
+    expect(mttAnswer(s, 'b').closed).toBe(true);
+    const now = s.players.u1!.table;
+    expect(['a', 'c', 'd']).toContain(now);
+    expect(s.touched).toContain('u1');
+    for (const t of ['a', 'c', 'd'].filter((t) => t !== now)) expect(mttAnswer(s, t).moves.map((m) => m.userId), t).not.toContain('u1');
+    expect(mttAnswer(s, now).seats.map((x) => x.userId)).toContain('u1');
+  });
+
   it('built again from D1, seats anyone left at a closing table or in a taken seat at an open one', () => {
     const e = (userId: string, tableId: string, seat: number, status = 'playing'): TournamentEntryRow => ({
       userId,

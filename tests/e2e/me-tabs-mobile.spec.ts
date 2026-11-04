@@ -37,6 +37,16 @@ async function eachTab(page: Page, name: string, tap: boolean) {
   expect(cut, `${name}: a figure runs out of its tile`).toEqual([]);
 }
 
+/** The tab is wholly in sight in its row (which scrolls sideways on a narrow phone), as it stands: nothing scrolled to it. */
+async function inRow(page: Page, testid: string, name: string) {
+  const seen = await page.getByTestId(testid).evaluate((t) => {
+    const r = t.closest('[role="tablist"]')!.getBoundingClientRect();
+    const b = t.getBoundingClientRect();
+    return b.left >= r.left - 0.5 && b.right <= r.right + 0.5;
+  });
+  expect(seen, `${name}: ${testid} out of sight in its row`).toBe(true);
+}
+
 /** On a phone held upright the two buttons sit under the avatar and name, side by side; from 640 wide, at the header's end. */
 async function headerLayout(page: Page, name: string, stacked: boolean) {
   const header = await box(page, 'me-header');
@@ -106,6 +116,13 @@ test('My Page: a header with its actions, four figures and four tabs that fit ev
   await page.getByTestId('me-edit-profile').tap();
   await expect(page).toHaveURL('/me?tab=account');
   await expect(page.locator('#profile input').first()).toBeFocused();
+  // The tab it opened is in sight in its row; so is one the address opens, on the narrowest phone too.
+  await inRow(page, 'me-tab-account', '390x844 edit');
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('/me?tab=account');
+  await expect(page.getByTestId('me-tab-account')).toHaveAttribute('aria-selected', 'true');
+  await inRow(page, 'me-tab-account', '320x568 address');
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.getByTestId('me-card').tap();
   await expect(page).toHaveURL(/\/players\/[\w-]+$/);
   await page.context().close();

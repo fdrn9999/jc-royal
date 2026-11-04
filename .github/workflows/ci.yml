@@ -47,7 +47,13 @@ jobs:
     runs-on: ubuntu-latest
     # Its own runner: Playwright's web server builds the apps and tests/e2e/server.mjs starts from a fresh local state,
     # so it needs nothing from the test job.
+    # In two shards, each its own runner and fresh state, in the same file order: on 2026-11-04 PR #50 (214 E2E tests)
+    # took 84.9 minutes in one job, and PRs #51-#56 (216-228 tests) ran out of 90 minutes at test 186-198.
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -59,11 +65,12 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: E2E (Playwright)
-        run: pnpm test:e2e
+        run: pnpm test:e2e --shard=${{ matrix.shard }}/2
       - uses: actions/upload-artifact@v4
-        if: failure()
+        # Cancelled too: a run stopped by the time limit leaves no failure summary in the log.
+        if: failure() || cancelled()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: playwright-report
           retention-days: 7
 

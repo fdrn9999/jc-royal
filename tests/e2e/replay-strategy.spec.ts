@@ -152,7 +152,6 @@ test('replay decision review: opened under the controls at every size, it moves 
     await p.getByTestId('replay-strategy-decision-2').click();
     await expect(p.getByTestId('replay-strategy-note-betSize').locator('[data-analysis]')).toHaveAttribute('data-analysis', 'math');
     await expect(p.getByTestId('replay-strategy-note-spr').locator('[data-analysis]')).toHaveAttribute('data-analysis', 'math');
-    await p.screenshot({ path: test.info().outputPath(`review-${sc.name}-${locale}.png`), fullPage: true });
     // The analysis leads on to what the hand page already has, each brought into view with the keyboard there: the
     // decision's detail, the hand's note and its lessons. The step line, the table and the controls stay where they were.
     await p.getByTestId('replay-analysis-go-actions').click();
@@ -165,6 +164,10 @@ test('replay decision review: opened under the controls at every size, it moves 
     await expect(p.getByTestId('hand-lessons').locator('a').first()).toBeFocused();
     await expect(p.getByTestId('hand-lessons')).toBeInViewport();
     expect(await areas(p), `${where}: after the ways on`).toEqual(before);
+    // Captured once every check against the areas as first measured is done: on Windows the bundled Chromium (headless
+    // shell) draws the generic monospace face in Courier New instead of Consolas after a full-page capture, which moves
+    // the step line's monospace count a pixel (CDP getPlatformFontsForNode; a reload brings Consolas back).
+    await p.screenshot({ path: test.info().outputPath(`review-${sc.name}-${locale}.png`), fullPage: true });
 
     // A step that is not a decision: the review says to pick one, and keeps its height.
     await p.getByTestId('replay-next').click();

@@ -57,7 +57,7 @@ interface CardRow {
  * everywhere): the answer never tells which. A table bot is returned for the HUD to mark; the card refuses it.
  */
 async function cardSubject(c: Context<AppEnv>, me: string, id: string): Promise<CardRow> {
-  await rateLimit(c, 'player_card', 120, 60_000);
+  await rateLimit(c, `player_card:${me}`, 120, 60_000);
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) notFound();
   const u = await c.env.DB.prepare(
     `SELECT id, nickname, avatar_url AS avatarUrl, role, status, is_bot AS isBot, vip_color AS vipColor,
@@ -144,7 +144,7 @@ export const playerRoutes = new Hono<AppEnv>()
 /** The season leaderboard (see LEADERBOARD in @jc/types): `?season=YYYY-MM`, this month by default. */
 export const leaderboardRoutes = new Hono<AppEnv>().use('*', requireUser).get('/', async (c) => {
   const me = c.var.user!.id;
-  await rateLimit(c, 'leaderboard', 60, 60_000);
+  await rateLimit(c, `leaderboard:${me}`, 60, 60_000);
   const q = c.req.query('season');
   const season = q === undefined ? seasonOf(Date.now()) : SeasonSchema.safeParse(q).success ? q : fail(400, 'invalid_season', 'season is YYYY-MM');
   const { from, to } = seasonRange(season);

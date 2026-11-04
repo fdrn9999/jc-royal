@@ -368,7 +368,7 @@ function Lobby() {
             <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('lobby.title')}</h1>
             <p className="mt-1 text-sm text-ink-300">{t('app.virtual')}</p>
           </div>
-          <Button size="sm" variant="outline" className="shrink-0 sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open">
+          <Button size="sm" variant="outline" className="min-h-10 shrink-0 sm:hidden" disabled={!!paused} onClick={() => setCreating(true)} data-testid="room-create-open">
             <PlusIcon />
             {t('room.create')}
           </Button>

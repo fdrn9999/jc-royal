@@ -299,6 +299,32 @@ export interface SolverWait {
 
 const pause = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
+/** What `call` comes back with, or a failure once `ms` have gone by or `signal` stops it: a call that never answers holds nothing up. */
+function bounded<T>(call: Promise<T>, ms: number, signal?: AbortSignal): Promise<T> {
+  return new Promise<T>((done, fail) => {
+    const end = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
+    };
+    const stop = () => {
+      end();
+      fail(new Error('stopped'));
+    };
+    const timer = setTimeout(stop, Math.max(0, ms));
+    signal?.addEventListener('abort', stop, { once: true });
+    call.then(
+      (v) => {
+        end();
+        done(v);
+      },
+      (e: unknown) => {
+        end();
+        fail(e);
+      },
+    );
+  });
+}
+
 /**
  * The first provider's usable answer for the decision, or why there is none. A provider that covers no such spot, or
  * answers with something unusable, passes it on to the next; one that fails (an error, a failed status, no answer in
@@ -312,10 +338,13 @@ export async function solverFor(d: Decision, hand: ReplayInput, heroSeat: number
   let failed = false;
   for (const p of providers) {
     if (signal?.aborted) return { kind: 'failed' };
+    // Each call too: one that never comes back fails once the provider's time is out (or the review closes).
+    const until = Date.now() + timeoutMs;
+    const ask = <T>(call: () => Promise<T>) => bounded(call(), until - Date.now(), signal);
     try {
-      const job = await p.analyze(req);
+      const job = await ask(() => p.analyze(req));
       if (job === null) continue;
-      let status = await p.getStatus(job);
+      let status = await ask(() => p.getStatus(job));
       for (let waited = 0; status === 'queued' || status === 'running'; waited += pollMs) {
         if (signal?.aborted) return { kind: 'failed' };
         if (waited >= timeoutMs) {
@@ -323,11 +352,11 @@ export async function solverFor(d: Decision, hand: ReplayInput, heroSeat: number
           break;
         }
         await sleep(pollMs);
-        status = await p.getStatus(job);
+        status = await ask(() => p.getStatus(job));
       }
       if (status === 'failed') failed = true;
       if (status !== 'done') continue;
-      const r = await p.getResult(job);
+      const r = await ask(() => p.getResult(job));
       if (r && usable(r, d)) return { kind: 'solver', ...r };
     } catch {
       failed = true;

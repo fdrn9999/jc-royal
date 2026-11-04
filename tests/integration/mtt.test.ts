@@ -150,7 +150,10 @@ describe('a multi-table tournament (MTT_ENABLED on)', () => {
         if (m.t !== 'state') return;
         const s = m.state as TableView;
         if (s.you.seatIndex !== null) leaks.push(`${t}: the watcher is seated`);
+        // No card while someone is to act; after that, only one the settled hand's showdown turned over, at that seat.
         if (s.hand && s.hand.actorSeat !== null && s.seats.some((x) => x.holeCards?.length)) leaks.push(`${t}: hole cards seen while hand ${s.hand.id} is in play`);
+        const turned = new Map((s.hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x.cards.join()]));
+        for (const x of s.seats) if (x.holeCards?.length && turned.get(x.seatIndex) !== x.holeCards.join()) leaks.push(`${t}: seat ${x.seatIndex}'s cards seen outside the showdown of hand ${s.hand?.id ?? '-'}`);
         if (s.tournament?.mtt?.finalTable) finalSeen = true;
       });
     }
@@ -172,6 +175,48 @@ describe('a multi-table tournament (MTT_ENABLED on)', () => {
     // Everyone goes all in on their turn, and follows the tournament to a new table when moved.
     let on = true;
     const moves: string[] = [];
+    // A move followed as the page follows it (Table.tsx): to the table named. That table may have broken and closed
+    // before the player got there, and its socket is then refused; the page then goes where the tournament has them
+    // (`me.tableId`), which says where next if they are still on the way. Each refusal is kept with what the table's
+    // own route answered; a player who gets to no table is stuck.
+    const refused: string[] = [];
+    const stuck: string[] = [];
+    const following: Promise<void>[] = [];
+    const follow = async (s: Seat, first: string) => {
+      let to = first;
+      try {
+        for (let i = 0; i < 20; i++) {
+          try {
+            const ws = await TableSocket.open(s.p.c, to, { base });
+            sockets.push(ws);
+            s.ws = ws;
+            s.table = to;
+            return;
+          } catch {
+            const t = await s.p.c.get(`/api/tables/${to}`);
+            refused.push(`${s.p.nickname}: ${to} (${t.status} ${(t.body as { status?: string } | null)?.status ?? '-'})`);
+          }
+          // An answer without the player's entry is no answer: not "out of the tournament".
+          const r = await s.p.c.get(`/api/tournaments/${id}`);
+          const me = r.status === 200 ? (r.body as TournamentDetailDto).me : undefined;
+          if (!me) {
+            stuck.push(`${s.p.nickname} at ${to}: the tournament answered ${r.status} without the entry`);
+            s.done = true;
+            return;
+          }
+          if (me.status !== 'playing') {
+            s.done = true;
+            return;
+          }
+          if (me.tableId && me.tableId !== to) to = me.tableId;
+          else await sleep(1000);
+        }
+        stuck.push(`${s.p.nickname} at ${to}`);
+      } catch (e) {
+        stuck.push(`${s.p.nickname} at ${to}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      s.done = true;
+    };
     const loop = (async () => {
       while (on) {
         for (const s of seats) {
@@ -182,13 +227,7 @@ describe('a multi-table tournament (MTT_ENABLED on)', () => {
             s.busy = true;
             moves.push(`${s.p.nickname}: ${s.table} -> ${to}`);
             s.ws.close();
-            void TableSocket.open(s.p.c, to, { base })
-              .then((ws) => {
-                sockets.push(ws);
-                s.ws = ws;
-                s.table = to;
-              })
-              .finally(() => (s.busy = false));
+            following.push(follow(s, to).finally(() => (s.busy = false)));
             continue;
           }
           if (st.tournament && st.tournament.you.status !== 'playing') {
@@ -230,6 +269,8 @@ describe('a multi-table tournament (MTT_ENABLED on)', () => {
     } finally {
       on = false;
       await loop;
+      // A follow still under way when the tournament ended is waited for: its outcome counts below.
+      await Promise.all(following);
       clearInterval(seatCheck);
     }
 
@@ -237,6 +278,9 @@ describe('a multi-table tournament (MTT_ENABLED on)', () => {
     expect([...totals]).toEqual([13 * 200]);
     expect(leaks).toEqual([]);
     expect(doubled).toEqual([]);
+    // Every move got the player to a table (a refusal on the way is the page's case above, not a failure).
+    expect(stuck, `refused: ${refused.join('; ') || 'none'}`).toEqual([]);
+    console.info(`mtt: ${moves.length} moves, ${refused.length} refused${refused.length ? `: ${refused.join('; ')}` : ''}`);
     // Players went out, so tables were balanced or broken: some moved, and the last of them was the final table.
     expect(moves.length).toBeGreaterThan(0);
     expect(finalSeen).toBe(true);

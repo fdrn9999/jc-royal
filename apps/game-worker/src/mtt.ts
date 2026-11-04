@@ -32,8 +32,11 @@ export interface MttPlayer {
   out: boolean;
   /** The time bank they had after their table's last hand (it goes with them to the next table). */
   bank?: MttBank | null;
-  /** Leaving `table` for `to`: done once `table` says it applied roster `rev`, the first without them. */
-  moving?: { to: string; seat: number; rev: number } | null;
+  /**
+   * Leaving `table` for `to`: done once `table` says it applied roster `rev`, the first without them (or, sent on, the
+   * first to say where to now). `via`: the tables they were sent to before, each of which broke first.
+   */
+  moving?: { to: string; seat: number; rev: number; via?: string[] } | null;
 }
 
 export interface MttTable {
@@ -320,6 +323,7 @@ function plan(s: MttState, tb: MttTable, now: number, rand: Rand, wake: Set<stri
   const open = openTables(s);
   const left = live(s).length;
   const marked: MttPlayer[] = [];
+  const sentOn: MttPlayer[] = [];
   if (open.length > 1 && left <= (open.length - 1) * s.seats) {
     const target = smallest(s, n);
     if (target !== tb.id) {
@@ -334,8 +338,10 @@ function plan(s: MttState, tb: MttTable, now: number, rand: Rand, wake: Set<stri
       const to = rest.map((t) => ({ id: t.id, free: freeSeats(s, t.id) })).sort((a, b) => b.free.length - a.free.length || (a.id < b.id ? -1 : 1))[0];
       if (!to || to.free.length === 0) break;
       const seat = to.free[rand(to.free.length)]!;
-      if (p.moving) p.moving = { ...p.moving, to: to.id, seat };
-      else {
+      if (p.moving) {
+        p.moving = { ...p.moving, to: to.id, seat, via: [...(p.moving.via ?? []), tb.id] };
+        sentOn.push(p);
+      } else {
         p.moving = { to: to.id, seat, rev: 0 };
         marked.push(p);
       }
@@ -369,6 +375,13 @@ function plan(s: MttState, tb: MttTable, now: number, rand: Rand, wake: Set<stri
   if (marked.length) {
     bump(tb, now);
     for (const p of marked) p.moving!.rev = tb.rev;
+  }
+  // The table a player sent on is still leaving tells them where to now, and they leave it once it has.
+  for (const src of new Set(sentOn.map((p) => p.table))) {
+    const from = s.tables[src]!;
+    bump(from, now);
+    for (const p of sentOn) if (p.table === src) p.moving!.rev = from.rev;
+    wake.add(src);
   }
 }
 
@@ -430,7 +443,8 @@ export function mttAnswer(s: MttState, table: string): MttAnswer {
             ...(p.bank ? { bank: p.bank } : {}),
           }))
       : [],
-    moves: ps.filter((p) => !p.out && p.table === table && p.moving).map((p) => ({ userId: p.userId, to: p.moving!.to })),
+    // Its own players on their way, and any sent on from it while on their way here (they may have come already).
+    moves: ps.filter((p) => !p.out && p.moving && (p.table === table || p.moving.via?.includes(table))).map((p) => ({ userId: p.userId, to: p.moving!.to })),
     rev: tb?.rev ?? 0,
     closed: !tb || (tb.broken && !ps.some((p) => !p.out && p.table === table)),
     hold: s.final?.table === table && !s.final.drawn,

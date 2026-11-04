@@ -74,7 +74,8 @@ const OPEN_REPORTS = `SELECT 1 FROM reports WHERE status = 'open' AND ((target_t
 async function readPost(DB: D1Database, id: string): Promise<Read | null> {
   const [post, kids, links, open, closed, live, gone, logged] = await DB.batch([
     DB.prepare(`SELECT title, body, author_id AS authorId, status, is_notice AS isNotice, comment_count AS commentCount, created_at AS createdAt, updated_at AS updatedAt FROM posts WHERE id = ?`).bind(id),
-    DB.prepare(`SELECT COUNT(*) AS n, COALESCE(MAX(updated_at), 0) AS last FROM comments WHERE post_id = ?`).bind(id),
+    // Every change to a comment sets its updated_at to the time: the sum moves with any, the latest alone may not.
+    DB.prepare(`SELECT COUNT(*) AS n, COALESCE(MAX(updated_at), 0) AS last, COALESCE(SUM(updated_at), 0) AS total FROM comments WHERE post_id = ?`).bind(id),
     DB.prepare(`SELECT COUNT(*) AS n FROM post_hands WHERE post_id = ?`).bind(id),
     DB.prepare(`SELECT COUNT(*) AS n FROM (${OPEN_REPORTS})`).bind(id, id),
     DB.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status != 'open' AND ((target_type = 'post' AND target_id = ?) OR (target_type = 'comment' AND target_id IN (SELECT id FROM comments WHERE post_id = ?)))`).bind(id, id),
@@ -84,8 +85,8 @@ async function readPost(DB: D1Database, id: string): Promise<Read | null> {
   ]);
   const p = post?.results[0] as { title: string; body: string; authorId: string; status: string; isNotice: number; commentCount: number; createdAt: number; updatedAt: number } | undefined;
   if (!p) return null;
-  const k = kids?.results[0] as { n: number; last: number };
-  const state = { status: p.status, updatedAt: p.updatedAt, commentCount: p.commentCount, comments: k.n, lastComment: k.last, hands: count(links) };
+  const k = kids?.results[0] as { n: number; last: number; total: number };
+  const state = { status: p.status, updatedAt: p.updatedAt, commentCount: p.commentCount, comments: k.n, lastComment: k.last, commentTimes: k.total, hands: count(links) };
   return {
     label: p.title,
     state,
@@ -108,10 +109,11 @@ async function readPost(DB: D1Database, id: string): Promise<Read | null> {
     guard: [
       `EXISTS (SELECT 1 FROM posts WHERE id = ? AND status = ? AND updated_at = ? AND comment_count = ?)
        AND (SELECT COUNT(*) FROM comments WHERE post_id = ?) = ? AND (SELECT COALESCE(MAX(updated_at), 0) FROM comments WHERE post_id = ?) = ?
+       AND (SELECT COALESCE(SUM(updated_at), 0) FROM comments WHERE post_id = ?) = ?
        AND (SELECT COUNT(*) FROM post_hands WHERE post_id = ?) = ?
        AND NOT EXISTS (${OPEN_REPORTS})
        AND NOT EXISTS (SELECT 1 FROM service_notices WHERE post_id = ? AND deleted_at IS NULL)`,
-      [id, p.status, p.updatedAt, p.commentCount, id, k.n, id, k.last, id, state.hands, id, id, id],
+      [id, p.status, p.updatedAt, p.commentCount, id, k.n, id, k.last, id, k.total, id, state.hands, id, id, id],
     ],
     deletes: [
       [`DELETE FROM comments WHERE post_id = ?`, [id]],

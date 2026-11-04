@@ -311,7 +311,7 @@ export function TournamentsPage() {
           <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{tr('title')}</h1>
           <p className="mt-1 text-sm text-ink-300">{tr('subtitle')}</p>
         </div>
-        <Link to="/leaderboard" className="jc-tap inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gold-500/40 px-3 py-2 text-xs font-semibold text-gold-300 hover:bg-gold-500/10" data-testid="tn-leaderboard">
+        <Link to="/leaderboard" className="jc-tap inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gold-500/40 px-3 py-2 text-xs font-semibold text-gold-300 hover:bg-gold-500/10" data-testid="tn-leaderboard">
           <TrophyIcon className="size-4" />
           {t('player.leaderboard')}
         </Link>
@@ -330,10 +330,10 @@ export function TournamentsPage() {
       )}
 
       <div className="flex flex-wrap gap-2" data-testid="tn-private-actions">
-        <Button size="sm" variant="outline" onClick={() => setCreating(true)} data-testid="tn-private-open">
+        <Button size="sm" variant="outline" className="min-h-10" onClick={() => setCreating(true)} data-testid="tn-private-open">
           {tr('private.open')}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setJoining(true)} data-testid="tn-join-open">
+        <Button size="sm" variant="outline" className="min-h-10" onClick={() => setJoining(true)} data-testid="tn-join-open">
           {tr('private.join')}
         </Button>
       </div>

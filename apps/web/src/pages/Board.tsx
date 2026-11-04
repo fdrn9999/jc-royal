@@ -173,7 +173,7 @@ export function PostPage() {
   if (!post) return failed ? <LoadFailed onRetry={() => void load()} /> : <Loading />;
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/board" className="text-sm text-gold-300 hover:underline">← {t('board.title')}</Link>
+      <Link to="/board" className="jc-tap -my-2.5 inline-flex min-h-10 items-center self-start text-sm text-gold-300 hover:underline">← {t('board.title')}</Link>
       <article className="jc-panel p-5 sm:p-6">
         <header className="mb-4 border-b border-white/5 pb-4">
           <h1 className={`text-xl sm:text-2xl ${post.isNotice ? 'font-extrabold text-gold-300' : 'font-bold'}`} data-testid="post-title">

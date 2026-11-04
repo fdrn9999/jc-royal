@@ -182,6 +182,11 @@ describe('private tournaments', () => {
     const refused = await TableSocket.open(outsider.client, T, { noState: true });
     sockets.push(refused);
     expect(await refused.waitClose()).toBe(4003);
+    // Nor read its table's card (the name and size are the tournament's): not found, as for no such table.
+    const tableCard = await outsider.client.get(`/api/tables/${T}`);
+    expect(tableCard.status).toBe(404);
+    expect(JSON.stringify(tableCard.body)).not.toContain(id);
+    expect((await b.client.get(`/api/tables/${T}`)).status).toBe(200);
 
     const ws = await Promise.all([a, b, c].map((u) => TableSocket.open(u.client, T)));
     sockets.push(...ws);

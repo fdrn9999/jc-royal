@@ -94,7 +94,7 @@ export function NotificationsPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-extrabold tracking-[0.04em] jc-gold-text">{t('inbox.title')}</h1>
-        <Button size="sm" variant="subtle" onClick={() => void readAll()} disabled={!items?.some((i) => !i.readAt)} data-testid="inbox-read-all">
+        <Button size="sm" variant="subtle" className="min-h-10" onClick={() => void readAll()} disabled={!items?.some((i) => !i.readAt)} data-testid="inbox-read-all">
           {tr('readAll')}
         </Button>
       </div>
@@ -108,7 +108,7 @@ export function NotificationsPage() {
           onChange={(k) => choose(k, unreadOnly)}
           items={TABS.map((k) => ({ key: k, testid: `inbox-tab-${k}`, label: tr(`f.${k}`) }))}
         />
-        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-ink-300">
+        <label className="flex min-h-10 shrink-0 cursor-pointer items-center gap-2 text-xs text-ink-300">
           <input type="checkbox" className="accent-gold-500" checked={unreadOnly} onChange={(e) => choose(tab, e.target.checked)} data-testid="inbox-unread-only" />
           {tr('unreadOnly')}
         </label>

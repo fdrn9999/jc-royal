@@ -63,15 +63,15 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
         </span>
       </label>
       <div className="flex flex-col gap-1 px-4 py-3">
-        <label className="flex cursor-pointer items-center gap-3 py-1.5 text-sm text-ink-200">
+        <label className="flex min-h-10 cursor-pointer items-center gap-3 text-sm text-ink-200">
           <input type="checkbox" className={box} checked={value.age14} onChange={(e) => onChange({ ...value, age14: e.target.checked })} />
           <span>
             <Required />
             {t('consent.age14')}
           </span>
         </label>
-        <div className="flex items-center gap-3 py-1.5">
-          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-sm text-ink-200">
+        <div className="flex min-h-10 items-center gap-3">
+          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 self-stretch text-sm text-ink-200">
             <input type="checkbox" className={box} checked={value.privacy} onChange={(e) => onChange({ ...value, privacy: e.target.checked })} />
             <span>
               <Required />
@@ -83,7 +83,7 @@ export function SignupConsent({ value, onChange }: { value: Agreements; onChange
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             aria-controls={noticeId}
-            className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-ink-300 underline-offset-2 hover:text-gold-300 hover:underline focus-visible:text-gold-300 focus-visible:outline-none"
+            className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md px-2 text-xs font-semibold text-ink-300 underline-offset-2 hover:text-gold-300 hover:underline focus-visible:text-gold-300 focus-visible:outline-none"
           >
             {open ? t('consent.hide') : t('consent.view')}
           </button>
