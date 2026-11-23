@@ -97,6 +97,9 @@ describe('replayLog', () => {
       pots: null,
       returned: { seatIndex: 0, amount: 200 },
     });
+    // The minimum raise the hand was played under: told only for a hand recorded under twice the highest bet.
+    expect(replayLog(JSON.stringify({ actions: [], minRaise: "double" }), [row(0, 0), row(1, 0)]).minRaise).toBe("double");
+    expect(replayLog(JSON.stringify({ actions: [], minRaise: "anything" }), [row(0, 0), row(1, 0)])).not.toHaveProperty("minRaise");
   });
 
   it('gives the blinds the hand was dealt at, stored with it', () => {

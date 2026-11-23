@@ -82,15 +82,16 @@ describe('blinds, positions and betting rules', () => {
     }
   });
 
-  it('minimum raise is one big blind over the current bet, then the size of the last raise', async () => {
+  it('minimum raise is to double the highest bet of the street (JC ROYAL rule), two big blinds to open', async () => {
     const h = start([1000, 1000, 1000], { button: 0 });
     expect(h.legalOptions('p0')).toContainEqual({ type: 'raise', min: 20, max: 1000 });
     expect((await h.act('p0', { type: 'raise', amount: 15 }, nextIntent(), 2000)).ok).toBe(false);
     await must(h, 'p0', 'raise', 30);
-    // last raise was +20 → min re-raise to 50
-    expect(h.legalOptions('p1').find((o) => o.type === 'raise')).toMatchObject({ min: 50 });
+    // The standard rule would allow 50 (30 + the last raise of 20): here it is double the bet, 60.
+    expect(h.legalOptions('p1').find((o) => o.type === 'raise')).toMatchObject({ min: 60 });
+    expect((await h.act('p1', { type: 'raise', amount: 50 }, nextIntent(), 2000)).ok).toBe(false);
     await must(h, 'p1', 'raise', 100);
-    expect(h.legalOptions('p2').find((o) => o.type === 'raise')).toMatchObject({ min: 170 });
+    expect(h.legalOptions('p2').find((o) => o.type === 'raise')).toMatchObject({ min: 200 });
   });
 
   it('a short all-in does not reopen raising for players who already acted', async () => {

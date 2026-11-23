@@ -131,7 +131,13 @@ test('reports: a post, a comment and a player at the table; the author card offe
   await chat.press('Enter');
   await a.page.goto('/table/e2e-social');
   await expect(a.page.getByText('수상한 채팅')).toBeVisible();
-  await expect(b.page.locator('[data-testid^=seat-pick-]')).toHaveCount(0); // never my own seat
+  // My own seat opens my own card (my HUD), where there is nobody to report.
+  await expect(b.page.locator('[data-testid^=seat-pick-]')).toHaveCount(1);
+  await b.page.locator('[data-testid^=seat-pick-]').click();
+  await expect(b.page.getByTestId('player-card')).toContainText(b.nickname);
+  await expect(b.page.getByTestId('player-card').getByTestId('player-report')).toHaveCount(0);
+  await b.page.keyboard.press('Escape');
+  await expect(b.page.getByTestId('player-card')).toHaveCount(0);
   await a.page.locator('[data-testid^=seat-pick-]').first().click();
   await expect(a.page.getByTestId('player-card')).toContainText(b.nickname);
   await a.page.getByTestId('player-report').click();

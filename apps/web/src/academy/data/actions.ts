@@ -38,7 +38,7 @@ export const ACTIONS: { type: ActionType; ko: string; en: string; what: L; when:
     en: 'Raise',
     what: l('이미 있는 베팅보다 금액을 높입니다.', 'Increase an existing bet.'),
     when: l('베팅이 있고 더 크게 걸고 싶을 때.', 'There is a bet and you want to make it bigger.'),
-    note: l('직전 베팅(또는 레이즈)이 올린 만큼 이상 더 올려야 합니다. 예) 10 → 30 으로 올렸다면 다음 레이즈는 최소 50. 최대는 남은 스택 전부입니다.', 'You must raise by at least as much as the last bet or raise added. E.g. after 10 → 30 the next raise is to at least 50. The maximum is your whole stack.'),
+    note: l('JC ROYAL에서는 지금 걸린 가장 큰 베팅의 2배 이상으로 올려야 합니다. 예) 10 → 30 으로 올렸다면 다음 레이즈는 최소 60. 최대는 남은 스택 전부입니다(스택이 모자라면 올인은 언제나 가능).', 'At JC ROYAL a raise must make it at least double the biggest bet so far. E.g. after 10 → 30 the next raise is to at least 60. The maximum is your whole stack (going all-in for less is always allowed).'),
   },
   {
     type: 'allin',

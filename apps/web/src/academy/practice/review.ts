@@ -55,6 +55,7 @@ export function replayOf(rec: HandRecord, hero: number, number: number, maxSeats
     buttonSeat: rec.buttonSeat,
     pots: null,
     returned: null,
+    minRaise: rec.minRaise ?? null,
     actions: rec.actions.map((a) => ({ seatIndex: a.seatIndex, stage: a.stage, type: a.type, amount: a.amount })),
     players: rec.players.map((p) => ({ seatIndex: p.seatIndex, nickname: '', holeCards: p.seatIndex === hero ? [...p.holeCards] : null, stackStart: p.stackStart, net: p.net, won: p.won, rankClass: p.rankClass, bestFive: null })),
   };

@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ActionBar } from '../src/game/ActionBar';
 import { captionFace, lineFace, wrapPoints } from '../src/game/amountFit';
+import { HandEngine } from '@jc/poker-engine';
+import { commitAction } from '../src/game/actionSafety';
 import { amounts, type Amounts } from '../src/lib/amount';
 import { I18nProvider } from '../src/lib/i18n';
 
@@ -136,5 +138,39 @@ describe('the action bar', () => {
     const tip = new RegExp(`<span[^>]*id="${tipId}"[^>]*>`).exec(html)?.[0] ?? '';
     expect(tip).toContain('role="tooltip"');
     expect(textOf(html, 'action-dock-tip')).toBe('베팅 금액 조절R');
+  });
+});
+
+describe('the minimum raise (twice the highest bet of the street), from the engine to the bar', () => {
+  /** Blinds 50/100, three seats: the first to act opens to 250 (2.5 BB); what the next player may do. */
+  async function afterOpen() {
+    const hand = HandEngine.start({
+      handId: 'min-raise-ui',
+      rules: { maxSeats: 6, smallBlind: 50, bigBlind: 100, turnMs: 20_000 },
+      seats: [0, 1, 2].map((i) => ({ playerId: `p${i}`, seatIndex: i, stack: 10_000, displayName: `P${i}` })),
+      buttonSeat: 0,
+      now: 1_000,
+    });
+    const first = hand.actorId()!;
+    expect(hand.legalOptions(first).find((o) => o.type === 'raise')).toMatchObject({ min: 200 });
+    expect((await hand.act(first, { type: 'raise', amount: 250 }, 'open', 2_000)).ok).toBe(true);
+    const legal = hand.legalOptions(hand.actorId()!);
+    const state = { table: { bigBlind: 100 }, you: { seatIndex: 1, legal }, seats: [{ seatIndex: 1, stack: 9_950, streetBet: 50 }, { seatIndex: 0, stack: 9_750, streetBet: 250 }], hand: { seq: 3, potTotal: 400 } } as unknown as TableView;
+    return { legal, state };
+  }
+  const html = (state: TableView, unit?: Amounts) => renderToStaticMarkup(h(I18nProvider, null, h(ActionBar, { state, onAct: () => true, busy: false, column: false, amounts: unit })));
+
+  it('after an open to 2.5 BB the bar starts at 5 BB (500), in chips and in big blinds', async () => {
+    const { legal, state } = await afterOpen();
+    expect(legal.find((o) => o.type === 'raise')).toMatchObject({ min: 500 });
+    expect(textOf(html(state), 'action-commit')).toBe('레이즈 500');
+    expect(textOf(html(state, amounts('bb', 100)), 'action-commit')).toBe('레이즈 5 BB (500)');
+  });
+
+  it('4 BB is not sent (the server would refuse it), 5 BB is', async () => {
+    const { legal } = await afterOpen();
+    for (const to of [300, 350, 400, 450, 499]) expect(commitAction(legal, to)).toBeNull();
+    expect(commitAction(legal, 500)).toEqual({ type: 'raise', amount: 500 });
+    expect(commitAction(legal, 1_000)).toEqual({ type: 'raise', amount: 1_000 });
   });
 });

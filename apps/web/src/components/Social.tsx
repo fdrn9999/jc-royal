@@ -219,7 +219,8 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute, hud }: {
     setRel(null);
     setNote(null);
     setConfirmBlock(false);
-    if (!user) return;
+    // My own card (my seat at a table): nobody to befriend, mute, block or report.
+    if (!user || user.id === me?.id) return;
     let live = true;
     void api<RelationDto>(`/api/friends/${user.id}/relation`)
       .then((r) => live && setRel(r.relation))
@@ -227,7 +228,7 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute, hud }: {
     return () => {
       live = false;
     };
-  }, [user]);
+  }, [user, me?.id]);
 
   async function run(fn: () => Promise<void>) {
     setBusy(true);
@@ -292,10 +293,11 @@ export function PlayerCard({ user, onClose, onReport, newTab, chatMute, hud }: {
               <SeatHud userId={user.id} scope={hud} />
             </Suspense>
           )}
+          {hud && self && <p className="text-xs text-ink-400" data-testid="hud-self-note">{t('hud.selfNote')}</p>}
           {note && <p className="text-sm text-gold-300" role="status">{note}</p>}
           {confirmBlock && <BlockConfirm name={user.nickname} busy={busy} onConfirm={block} onCancel={() => setConfirmBlock(false)} />}
           <div className="flex flex-wrap justify-end gap-2">
-            {onReport && user.role !== 'super_admin' && (
+            {onReport && !self && user.role !== 'super_admin' && (
               <Button variant="ghost" className="mr-auto text-[#f0a0a2]" onClick={onReport} data-testid="player-report">
                 {t('report.action')}
               </Button>

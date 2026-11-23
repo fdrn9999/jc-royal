@@ -78,7 +78,7 @@ test('academy: hand comparison (engine-judged), drag sorting, hold’em streets,
 
   await p.goto('/academy/actions?step=1');
   await p.locator('[data-situation=facing]').click();
-  await expect(p.getByTestId('legal-list')).toContainText('raise 50');
+  await expect(p.getByTestId('legal-list')).toContainText('raise 60'); // a bet of 30 to answer: the minimum raise is twice the bet
   await p.waitForTimeout(400); // the ActionBar ignores taps right after it appears
   await p.getByTestId('action-bar').getByRole('button', { name: /^(콜|Call)/ }).click();
   await expect(p.getByTestId('demo-said')).toContainText('20');

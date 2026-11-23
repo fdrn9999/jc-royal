@@ -1,3 +1,25 @@
+diff --git a/dist/chunk-ENZA3NKL.js b/dist/chunk-ENZA3NKL.js
+index 0e9a96e15a25fb5e2d01d1e28519c5f6d27fe74d..2154a7660c087321e8530e49e82621d3d62819da 100644
+--- a/dist/chunk-ENZA3NKL.js
++++ b/dist/chunk-ENZA3NKL.js
+@@ -219,7 +219,7 @@ function determineLegalOptions(input) {
+     baseIncrement,
+     lastRaiseSize
+   });
+-  const reopenAllowed = lastActedHighestContribution === void 0 || highestContribution - lastActedHighestContribution >= minimumRaiseSize;
++  const reopenAllowed = lastActedHighestContribution === void 0 || highestContribution - lastActedHighestContribution >= minimumRaiseSize && (minPolicy !== "double-highest-bet" || lastActedHighestContribution <= 0 || highestContribution >= lastActedHighestContribution * 2);
+   const raisesRemaining = resolveRaisesRemaining(
+     config.maxRaisesPerRound,
+     raisesThisRound
+@@ -236,7 +236,7 @@ function determineLegalOptions(input) {
+     baseIncrement,
+     bigBlind: config.bigBlind
+   });
+-  let minRaiseTo = rawMinRaiseTo;
++  let minRaiseTo = minPolicy === "double-highest-bet" && highestContribution > 0 ? Math.max(rawMinRaiseTo, highestContribution * 2) : rawMinRaiseTo;
+   if (minRaiseTo > effectiveStack) {
+     minRaiseTo = effectiveStack;
+   }
 diff --git a/dist/chunk-G7UTOEPN.js b/dist/chunk-G7UTOEPN.js
 index f017a967f3342557b6e32dc20a8e7ce5db943318..486cccdd619e306e8d8d12c492678046e09a54f3 100644
 --- a/dist/chunk-G7UTOEPN.js
@@ -24,3 +46,16 @@ index 9f19a14536434205f67f8e82c36ef1104c0ef124..827f690b169c08a6e801a9b9714ddff4
    const actorOrder = deriveTurnOrderActors(round, snapshot.seating);
    const pendingEliminations = new Set(snapshot.flags.pendingEliminations);
    const eligiblePlayers = actorOrder.filter((playerId) => {
+diff --git a/dist/types/index.d.ts b/dist/types/index.d.ts
+index 174de5d42477eebba45c556d1d052240243eb388..ad2e9907cd9549c7cfed77a8a0edada9fa021206 100644
+--- a/dist/types/index.d.ts
++++ b/dist/types/index.d.ts
+@@ -25,7 +25,7 @@ interface AnteLevel {
+ interface RuleSetDescriptor {
+     readonly streets: readonly HandStage[];
+     readonly postingOrder: readonly ('small-blind' | 'big-blind' | 'straddle' | 'ante')[];
+-    readonly minRaisePolicy: 'double-last-bet' | 'fixed-increment' | 'pot-limit';
++    readonly minRaisePolicy: 'double-last-bet' | 'double-highest-bet' | 'fixed-increment' | 'pot-limit';
+     readonly maxRaisePolicy?: 'pot' | 'all-in';
+     readonly cardDistribution: DistributionRule;
+     readonly showdownOrdering: 'high-card' | 'lowball' | 'hi-lo';

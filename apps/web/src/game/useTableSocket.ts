@@ -1,4 +1,4 @@
-import type { ActionType, AutoBuyRequest, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ReactionId, ServerMessage, TableCue, TableView } from '@jc/types';
+import type { ActionType, AutoBuyRequest, Card, ChatMessage, ClientMessage, ErrorCode, NoticeCode, PreActionKind, ReactionId, ServerMessage, TableCue, TableView } from '@jc/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { keepSeats } from './keepSeats';
 import { Heartbeat, Outbox, type Outgoing } from './link';
@@ -69,6 +69,14 @@ export interface TableSocketApi {
   preAct: (kind: PreActionKind | null) => void;
   /** True while an action is in flight (until the next state arrives). */
   acting: boolean;
+  /**
+   * Rabbit hunting: the cards that would have come in the hand shown now (settled before the river), once I asked for
+   * them and the room answered; null otherwise. For my eyes only, and gone with the hand: an answer about another
+   * hand is never shown.
+   */
+  rabbit: Card[] | null;
+  /** Asks the room for them (offered while `you.canRabbit`). Asked twice, sent once. */
+  hunt: () => void;
   /** Skip the backoff wait and reconnect now (no-op while connected). */
   reconnect: () => void;
   /**
@@ -91,6 +99,8 @@ interface Waiting {
   reject?: (e: RequestError) => void;
   /** An action: the hand and seq it was taken on. */
   turn?: string;
+  /** A refusal is not said (a rabbit hunt asked as the next hand was dealt: its button is gone with the hand). */
+  quiet?: boolean;
 }
 
 /** Refusals of a command sent again that only mean its first copy did the work, or its moment passed. */
@@ -114,6 +124,9 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const [lastError, setLastError] = useState<TableSocketApi['lastError']>(null);
   const [lastNotice, setLastNotice] = useState<TableSocketApi['lastNotice']>(null);
   const [acting, setActing] = useState(false);
+  const [rabbit, setRabbit] = useState<{ handId: string; cards: Card[] } | null>(null);
+  /** The hand whose rabbit hunt is asked for and not answered yet. */
+  const hunting = useRef<string | null>(null);
   const [synced, setSynced] = useState(false);
   const syncedRef = useRef(false);
   const [failures, setFailures] = useState(0);
@@ -148,6 +161,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
     /** The connection ended for good: nothing waiting will be answered. */
     const failAll = () => {
       for (const o of box.drain()) o.h.reject?.(new RequestError('internal', 'connection closed'));
+      hunting.current = null;
       sentFor.current = null;
       setActing(false);
     };
@@ -165,6 +179,7 @@ export function useTableSocket(tableId: string): TableSocketApi {
     /** No answer in time: a request fails; anything else gives up quietly (the caller then fetches the state). */
     const expire = (o: Outgoing<ClientMessage, Waiting>) => {
       o.h.reject?.(new RequestError('internal', 'no answer'));
+      if (o.h.quiet) hunting.current = null;
       if (o.h.turn && sentFor.current === o.h.turn) {
         sentFor.current = null;
         setActing(false);
@@ -218,6 +233,8 @@ export function useTableSocket(tableId: string): TableSocketApi {
             stateRef.current = view;
             setState(view);
             setActing(false);
+            // A rabbit hunt belongs to the hand it was asked for: the next deal takes it away.
+            setRabbit((r) => (r && r.handId !== m.state.hand?.id ? null : r));
             // An action whose turn has passed was applied or overtaken: either way nothing is waiting for it.
             const turn = m.state.hand ? `${m.state.hand.id}:${m.state.hand.seq}` : null;
             for (const o of box.values()) if (o.h.turn && o.h.turn !== turn) box.take(o.id);
@@ -246,6 +263,14 @@ export function useTableSocket(tableId: string): TableSocketApi {
           case 'ack':
             box.take(m.reqId)?.h.resolve?.();
             return;
+          case 'rabbit': {
+            box.take(m.reqId);
+            if (hunting.current === m.handId) hunting.current = null;
+            // An answer that comes after its hand (the next was dealt meanwhile) is dropped.
+            const h = stateRef.current?.hand;
+            if (h?.id === m.handId && h.stage === 'settled') setRabbit({ handId: m.handId, cards: m.cards });
+            return;
+          }
           case 'error': {
             sentFor.current = null;
             setActing(false);
@@ -258,8 +283,11 @@ export function useTableSocket(tableId: string): TableSocketApi {
               return;
             }
             const o = m.reqId ? box.take(m.reqId) : undefined;
+            if (o?.h.quiet) hunting.current = null;
             if (o?.h.reject) o.h.reject(new RequestError(m.code, m.message));
-            else if (!(o && o.sends > 1 && RESENT_OK.has(m.code)) && m.code !== 'join_code_required') {
+            else if (o?.h.quiet) {
+              /* nothing to say */
+            } else if (!(o && o.sends > 1 && RESENT_OK.has(m.code)) && m.code !== 'join_code_required') {
               // (For a missing join code the page asks for it instead: `locked` or `you.needsCode`.)
               setLastError({ code: m.code, message: m.message, at: Date.now() });
             }
@@ -465,6 +493,16 @@ export function useTableSocket(tableId: string): TableSocketApi {
     [box],
   );
 
+  const hunt = useCallback(() => {
+    const h = stateRef.current?.hand;
+    if (!h || h.stage !== 'settled' || !syncedRef.current || hunting.current === h.id) return;
+    const reqId = rid();
+    const msg: ClientMessage = { t: 'rabbit', reqId, handId: h.id };
+    if (!raw(msg)) return;
+    hunting.current = h.id;
+    box.add(reqId, msg, { quiet: true }, Date.now());
+  }, [box]);
+
   // The table keeps track of the cues it has played (CueLayer); they leave the queue with the next batch. Taken out at
   // once, they drew the whole page a second time before the frame that brought them was painted (TEST_REPORT).
   const consumeCues = useCallback((upToId: number) => {
@@ -482,5 +520,8 @@ export function useTableSocket(tableId: string): TableSocketApi {
     back,
   });
 
-  return { status, state, chat, cues, consumeCues, reactions, lastError, lastNotice, request, send, act, preAct, acting, reconnect, reopen, synced, recovery };
+  // Only with the hand it belongs to: never over another hand's board.
+  const hunted = rabbit && state?.hand?.id === rabbit.handId && state.hand.stage === 'settled' ? rabbit.cards : null;
+
+  return { status, state, chat, cues, consumeCues, reactions, lastError, lastNotice, request, send, act, preAct, acting, rabbit: hunted, hunt, reconnect, reopen, synced, recovery };
 }

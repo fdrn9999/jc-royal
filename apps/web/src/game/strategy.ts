@@ -123,10 +123,11 @@ export function decisionsOf(hand: ReplayInput, steps: readonly ReplayStep[], her
       const on = (street.get(me.seatIndex) ?? 0) + added;
       const allIn = a.type === 'allin' || (left > 0 && added >= left);
       const did: Choice = FOLDS.has(a.type) ? 'fold' : added === 0 ? 'check' : on <= top ? 'call' : top === 0 ? 'bet' : 'raise';
-      // After acting, the viewer may raise again only once the bet has grown by a full raise: an all-in short of one
+      // After acting, the viewer may raise again only once the bet has grown by a full raise (to at least double the bet
+      // they acted on, where the hand was played under that minimum raise: `minRaise`): an all-in short of one
       // leaves them to call or fold. Facing a lone all-in the table still offers a raise, and so does this.
       const acted = actedAt.get(me.seatIndex);
-      const reopened = acted === undefined || top - acted >= Math.max(raiseSize, bb);
+      const reopened = acted === undefined || (top - acted >= Math.max(raiseSize, bb) && (hand.minRaise !== 'double' || acted <= 0 || top >= acted * 2));
       out.push({
         step: steps.findIndex((x) => x.kind === 'action' && x.actions[0] === a),
         action: k,

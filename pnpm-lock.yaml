@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   poker-engine-ts@0.1.3:
-    hash: ae433a51ded7ce671bd49143152ec09214cb801c1e209556bf1215b85ce1d9af
+    hash: b02968262ea7e1c2d977c436f68dcde41287192397b395b88b9360f3faaf0836
     path: patches/poker-engine-ts@0.1.3.patch
 
 importers:
@@ -214,7 +214,7 @@ importers:
         version: link:../types
       poker-engine-ts:
         specifier: 0.1.3
-        version: 0.1.3(patch_hash=ae433a51ded7ce671bd49143152ec09214cb801c1e209556bf1215b85ce1d9af)(react@19.3.0)
+        version: 0.1.3(patch_hash=b02968262ea7e1c2d977c436f68dcde41287192397b395b88b9360f3faaf0836)(react@19.3.0)
     devDependencies:
       '@jc/config':
         specifier: workspace:*
@@ -2781,7 +2781,7 @@ snapshots:
     dependencies:
       playwright-core: 1.64.0
 
-  poker-engine-ts@0.1.3(patch_hash=ae433a51ded7ce671bd49143152ec09214cb801c1e209556bf1215b85ce1d9af)(react@19.3.0):
+  poker-engine-ts@0.1.3(patch_hash=b02968262ea7e1c2d977c436f68dcde41287192397b395b88b9360f3faaf0836)(react@19.3.0):
     dependencies:
       '@noble/hashes': 2.4.0
     optionalDependencies:

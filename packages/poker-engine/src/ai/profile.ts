@@ -80,6 +80,8 @@ export interface HandFacts {
   shown: { seat: number; hole: readonly Card[] }[];
   /** Seats that went to a showdown. */
   showdown: readonly number[];
+  /** The hand was played under the minimum raise of twice the highest bet (`HandRecord.minRaise`). */
+  doubleRaise?: boolean;
 }
 
 /** A bet or raise bigger than the pot. */
@@ -128,7 +130,7 @@ export function handCounters(f: HandFacts): Map<number, Counters> {
           steal = !st.limpers.length && isStealPos(seats.pos.get(e.seat));
         }
       } else if (e.level === 1 && once(e.seat, 'l1')) {
-        if (couldRaise(e.seat, e.toCall, st, f.bigBlind)) {
+        if (couldRaise(e.seat, e.toCall, st, f.bigBlind, f.doubleRaise === true)) {
           c.threeBetOpp++;
           if (e.kind === 'raise') c.threeBet++;
         }
@@ -137,7 +139,7 @@ export function handCounters(f: HandFacts): Map<number, Counters> {
           if (e.kind === 'fold') c.bbFoldToSteal++;
         }
       } else if (e.level === 2 && once(e.seat, 'l2')) {
-        if (couldRaise(e.seat, e.toCall, st, f.bigBlind)) {
+        if (couldRaise(e.seat, e.toCall, st, f.bigBlind, f.doubleRaise === true)) {
           c.fourBetOpp++;
           if (e.kind === 'raise') c.fourBet++;
         }
@@ -199,13 +201,14 @@ export function handCounters(f: HandFacts): Map<number, Counters> {
 
 /**
  * A player could re-raise: chips beyond the call, raising still open to them (the engine's rule: after they acted, the
- * bet must have grown by a full raise — at least the largest raise on the street and a big blind), and another player
+ * bet must have grown by a full raise — at least the largest raise on the street and a big blind, and to at least
+ * double the bet they last acted on where the hand was played under that minimum raise), and another player
  * still in with chips to answer it.
  */
-function couldRaise(seat: number, toCall: number, st: WalkState, bigBlind: number): boolean {
+function couldRaise(seat: number, toCall: number, st: WalkState, bigBlind: number, doubleRaise: boolean): boolean {
   if ((st.stack.get(seat) ?? 0) <= toCall) return false;
   const acted = st.actedAt.get(seat);
-  if (acted !== undefined && st.bet - acted < Math.max(st.raiseSize, bigBlind)) return false;
+  if (acted !== undefined && (st.bet - acted < Math.max(st.raiseSize, bigBlind) || (doubleRaise && acted > 0 && st.bet < acted * 2))) return false;
   for (const [s, chips] of st.stack) if (s !== seat && chips > 0 && !st.folded.has(s)) return true;
   return false;
 }

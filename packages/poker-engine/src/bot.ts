@@ -116,6 +116,7 @@ export function handFactsOf(rec: HandRecord, bigBlind: number): HandFacts {
     board: [...rec.board],
     shown: rec.players.filter((p) => p.shown).map((p) => ({ seat: p.seatIndex, hole: [...p.holeCards] })),
     showdown: rec.players.filter((p) => p.wentToShowdown).map((p) => p.seatIndex),
+    doubleRaise: rec.minRaise === 'double',
   };
 }
 
