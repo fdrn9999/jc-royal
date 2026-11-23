@@ -15,6 +15,7 @@ import type { ActionType, Card, HandResultView, HandStage, HandView, LegalOption
 import {
   ENGINE_VERSION,
   SessionManager,
+  applyCommunityDistribution,
   collectFoldedPlayers,
   dealHoleCards,
   deriveRoundComputation,
@@ -148,6 +149,11 @@ export interface HandRecord {
   pots: HandPotRecord[] | null;
   players: HandPlayerRecord[];
   actions: PublicActionRecord[];
+  /**
+   * `'double'` when the hand was played under the minimum raise of twice the highest bet (hands dealt since
+   * 2026-11-23); absent for a hand dealt under the earlier rule, which is read as it was played.
+   */
+  minRaise?: 'double';
 }
 
 export interface SeatHandInfo {
@@ -172,7 +178,7 @@ export function buildSessionConfig(rules: HandRules): SessionConfig {
     ruleSet: {
       streets: ['preflop', 'flop', 'turn', 'river', 'showdown'],
       postingOrder: ['small-blind', 'big-blind'],
-      minRaisePolicy: 'double-last-bet',
+      minRaisePolicy: 'double-highest-bet',
       showdownOrdering: 'high-card',
       cardDistribution: { holeCardsPerPlayer: 2, burnPerStreet: [1, 1, 1], communityReveal: [0, 3, 1, 1] },
     },
@@ -645,6 +651,28 @@ export class HandEngine {
     return c && c.length ? ([...c] as Card[]) : null;
   }
 
+  /**
+   * Rabbit hunting: the community cards that would have come had a hand that ended before the river been played on.
+   * They are read from the deck as it lies, the way the engine deals a street (`applyCommunityDistribution`: a card
+   * burned before the flop, the turn and the river): nothing is shuffled or drawn anew, and nothing of the hand is
+   * changed, its snapshot, result and record are as they were. Null while the hand is being played (the cards to come
+   * are told to nobody before it is settled) and where there is nothing to show (the board is complete).
+   */
+  rabbitHunt(): Card[] | null {
+    if (!this.isSettled) return null;
+    const config = this.manager.session.config;
+    let ledger = this.snapshot.cards;
+    const cards: Card[] = [];
+    for (const stage of ['flop', 'turn', 'river'] as const) {
+      const c = ledger.community;
+      if (stage === 'flop' ? c.flop?.length : c[stage]) continue;
+      const dealt = applyCommunityDistribution({ ledger, config, stage, timestamp: 0 });
+      ledger = dealt.ledger;
+      cards.push(...(dealt.revealedCards as Card[]));
+    }
+    return cards.length ? cards : null;
+  }
+
   /** Seat-level info for a viewer. Hidden cards are never included for other players. */
   seatInfo(viewerId: string | null, autoMuck: ReadonlySet<string> = new Set()): Map<number, SeatHandInfo> {
     const s = this.snapshot;
@@ -831,6 +859,7 @@ export class HandEngine {
       pots: this.potBreakdown(payouts),
       players,
       actions: this.publicActions(),
+      ...(this.manager.session.config.ruleSet.minRaisePolicy === 'double-highest-bet' ? { minRaise: 'double' as const } : {}),
     };
   }
 

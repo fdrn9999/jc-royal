@@ -25,12 +25,13 @@ export type ReplayRow = SettlementRow & { stackStart?: number };
 export function replayLog(
   eventLog: string,
   rows: ReplayRow[],
-): Pick<HandReplayFields, 'actions' | 'buttonSeat' | 'smallBlind' | 'bigBlind' | 'pots' | 'returned'> {
-  const log = JSON.parse(eventLog) as { actions: HandReplayFields['actions']; button?: unknown; blinds?: unknown; pots?: unknown };
+): Pick<HandReplayFields, 'actions' | 'buttonSeat' | 'smallBlind' | 'bigBlind' | 'pots' | 'returned' | 'minRaise'> {
+  const log = JSON.parse(eventLog) as { actions: HandReplayFields['actions']; button?: unknown; blinds?: unknown; pots?: unknown; minRaise?: unknown };
   const actions = log.actions.map((a) => ({ seatIndex: a.seatIndex, stage: a.stage, type: a.type, amount: a.amount }));
   return {
     actions,
     buttonSeat: typeof log.button === 'number' ? log.button : null,
+    ...(log.minRaise === 'double' ? { minRaise: 'double' as const } : {}),
     ...replayBlinds(log.blinds, actions, rows),
     ...replaySettlement(Array.isArray(log.pots) ? (log.pots as HandPotDto[]) : null, rows),
   };

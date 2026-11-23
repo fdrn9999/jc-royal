@@ -842,6 +842,8 @@ export function TablePage() {
                 canSit={!seated && s.you.canSit}
                 onSit={setBuySeat}
                 onSeatClick={onSeatClick}
+                pickSelf
+                rabbit={sock.rabbit}
                 onShow={onShow}
                 showOnCards={short}
                 reactions={reactions}
@@ -969,6 +971,18 @@ export function TablePage() {
             {s && reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={short} />}
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
+                {/* Rabbit hunting: offered once a hand I was dealt into ended before the river, until the next is dealt.
+                    The cards go to the board's empty places (TableScene); here, what they are. */}
+                {s.you.canRabbit && !sock.rabbit && (
+                  <Button size="sm" variant="outline" className="min-h-10" onClick={sock.hunt} data-testid="rabbit-hunt">
+                    <span aria-hidden>🐇</span> {t('table.rabbit')}
+                  </Button>
+                )}
+                {sock.rabbit && (
+                  <span className="text-center text-xs text-gold-300" role="status" data-testid="rabbit-note">
+                    <span className="font-bold tracking-[0.08em]">RABBIT HUNT</span> · {t('table.rabbitNote')}
+                  </span>
+                )}
                 {arrival && (
                   // Why the seat or the waitlist I came for is not there, and what next, as the status line's first so the
                   // table above keeps its size; the waitlist button, when that is next, is the line's own (below).

@@ -1199,7 +1199,28 @@ export class TableRoom extends DurableObject<Env> {
         }
         return this.ack(ws, msg.reqId);
       }
+      case 'rabbit': {
+        // Rabbit hunting: the cards the deck held for the rest of the board of the hand that just ended before the
+        // river (settled, the next not dealt), to the player who asks and nobody else. Read from the kept hand, so the
+        // same every time and after a restart; nothing is written: no state, no result, no record, no deck, no chips.
+        // While a hand is played `isSettled` is false: the cards to come are told to nobody.
+        const i = this.seatIndexOf(a.userId);
+        if (i === null) throw new CommandError('forbidden', 'not seated');
+        const h = this.hand;
+        if (!h || !h.isSettled || this.room.settledHandId !== h.handId || msg.handId !== h.handId) {
+          throw new CommandError('conflict', 'no finished hand to rabbit hunt');
+        }
+        if (!this.dealtInAt(h, a.userId, i)) throw new CommandError('forbidden', 'not dealt in');
+        const cards = h.rabbitHunt();
+        if (!cards) throw new CommandError('conflict', 'the board is complete');
+        return this.send(ws, { t: 'rabbit', reqId: msg.reqId, handId: h.handId, cards });
+      }
     }
+  }
+
+  /** The hand dealt this player in at the seat they hold now. */
+  private dealtInAt(h: HandEngine, userId: string, seatIndex: number): boolean {
+    return !!h.holeCardsOf(userId) && h.startingSeats.find((p) => p.playerId === userId)?.seatIndex === seatIndex;
   }
 
   private remember(reqId: string) {
@@ -3596,6 +3617,8 @@ export class TableRoom extends DurableObject<Env> {
           !!h!.holeCardsOf(a.userId) &&
           h!.startingSeats.find((p) => p.playerId === a.userId)?.seatIndex === mySeat &&
           !revealed.has(mySeat),
+        // The same conditions as the `rabbit` command.
+        canRabbit: isSeated && !!h?.isSettled && this.room.settledHandId === h.handId && this.dealtInAt(h, a.userId, mySeat) && !!h.rabbitHunt(),
         // Only the viewer's own bank, never anyone else's.
         timeBank: isSeated ? this.bankOf(a.userId) : null,
       },

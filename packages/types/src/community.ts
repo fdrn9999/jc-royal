@@ -103,6 +103,11 @@ export interface HandReplayFields {
    */
   returned: { seatIndex: number; amount: number } | null;
   actions: { seatIndex: number; stage: string; type: string; amount: number }[];
+  /**
+   * `'double'` for a hand played under the minimum raise of twice the highest bet; absent or null for a hand recorded
+   * under the earlier rule (the options a replay reads off the record follow the rule the hand was played under).
+   */
+  minRaise?: 'double' | null;
 }
 
 /** A finished hand as shown in a hand review: board, actions and only the cards the author may show. */

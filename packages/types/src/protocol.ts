@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PublicRole } from './social';
 import type { VipColor } from './vip';
+import type { Card } from './cards';
 import type { TableCue, TableView } from './table';
 
 /**
@@ -135,6 +136,12 @@ export const ClientMessageSchema = z.discriminatedUnion('t', [
    */
   z.object({ t: z.literal('show'), reqId: ReqId, card: z.union([z.literal(0), z.literal(1), z.literal('both')]) }),
   /**
+   * Rabbit hunting: asks for the community cards that would have come in the hand `handId`, which ended before the
+   * river and is settled, the next not dealt. Answered to the asker alone with a `rabbit` message; nothing of the
+   * table changes. Any other hand, or one still played, is refused.
+   */
+  z.object({ t: z.literal('rabbit'), reqId: ReqId, handId: z.string().min(1).max(128) }),
+  /**
    * Adds time from the player's time bank to their current turn. `seq` and `seen` (HandView.seq and HandView.extraMs, 0
    * when absent) are what the player saw: a second tap sent before the first one's result was shown adds nothing.
    */
@@ -234,6 +241,11 @@ export type ServerMessage =
   /** A quick reaction, to everyone at the table; `seatIndex` and `userId` are the sender's when the room took it. */
   | { t: 'react'; seatIndex: number; userId: string; reaction: ReactionId; at: number }
   | { t: 'ack'; reqId: string }
+  /**
+   * The answer to a `rabbit` request, to the asker alone: the cards the deck held for the rest of the board of the
+   * settled hand `handId`, in the order they would have come (after the cards already on the board). For show only.
+   */
+  | { t: 'rabbit'; reqId: string; handId: string; cards: Card[] }
   | { t: 'error'; code: ErrorCode; message: string; reqId?: string }
   | { t: 'notice'; code: NoticeCode; amount?: number }
   | { t: 'replaced' }

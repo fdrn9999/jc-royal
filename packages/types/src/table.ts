@@ -211,6 +211,11 @@ export interface TableView {
      */
     canShow?: boolean;
     /**
+     * The seated viewer may ask for the rabbit hunt of the hand that just ended (the `rabbit` command): dealt in at
+     * this seat, the hand over before the river. Absent from older rooms.
+     */
+    canRabbit?: boolean;
+    /**
      * The seated viewer's own time bank: ms left, and hands dealt in since the last refill. Null before their first hand
      * here or where there is none; nobody else's bank is ever shown. Absent from older rooms.
      */

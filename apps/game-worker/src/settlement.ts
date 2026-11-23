@@ -295,6 +295,7 @@ export async function recordHand(
     button: rec.buttonSeat ?? null,
     blinds: rec.blinds ?? null,
     pots: rec.pots ?? null,
+    ...(rec.minRaise ? { minRaise: rec.minRaise } : {}),
     engine: await gzipBase64(JSON.stringify(engineLog)),
   });
   const policy = opts.botPolicy ? [d1.prepare(`SELECT (${BOT_POLICY_ON}) AS botPolicyOn`)] : [];

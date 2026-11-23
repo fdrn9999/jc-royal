@@ -255,6 +255,8 @@ export const TableScene = memo(function TableScene({
   onSit,
   onSeatClick,
   onShow,
+  pickSelf = false,
+  rabbit = null,
   showOnCards = false,
   reactions,
   nextIn,
@@ -275,6 +277,13 @@ export const TableScene = memo(function TableScene({
   onSeatClick?: (seat: SeatView) => void;
   /** Shows my first card, my second or both after the hand (the real table only; offered while `you.canShow`). */
   onShow?: (card: 0 | 1) => void;
+  /** My own plate opens my card too (the real table: my own HUD). Else only the other players' do. */
+  pickSelf?: boolean;
+  /**
+   * Rabbit hunting (the real table only): the cards that would have come after this settled hand's board, shown in the
+   * board's empty places and marked as such. They are no part of the hand: no result, hand name or highlight reads them.
+   */
+  rabbit?: readonly Card[] | null;
   /** The show-card buttons lie on my cards instead of above them (a short screen keeps no room there: short.ts). */
   showOnCards?: boolean;
   /** Quick reactions showing now (the real table only), each at its sender's seat while that player still sits there. */
@@ -322,6 +331,9 @@ export const TableScene = memo(function TableScene({
   // Chips already gathered in the middle; after settlement they have been paid out.
   const collected = staged?.pot ?? collectedOf(s);
   const boardShown = staged?.board ?? hand?.board.length ?? 0;
+  // Rabbit cards only once the settled hand's own board and result are all shown.
+  const dealt = hand?.board.length ?? 0;
+  const hunted = rabbit?.length && hand?.stage === 'settled' && result && boardShown === dealt && dealt + rabbit.length <= 5 ? rabbit : null;
   // The board cards drawn last time (this hand's): the ones drawn now for the first time are the ones that turn.
   const drawn = useRef({ hand: '', n: 0 });
   const before = drawn.current.hand === hand?.id ? drawn.current.n : 0;
@@ -386,9 +398,23 @@ export const TableScene = memo(function TableScene({
         <div className="flex shrink-0 items-center justify-center [&>*]:pointer-events-auto" style={{ height: plan.potRowH }} data-testid="pot">
           {collected > 0 && <ChipStack amount={collected} size={`${plan.potChip}px`} text={amounts.fmt(collected, true)} />}
         </div>
-        <div className="pointer-events-auto flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
+        <div className="pointer-events-auto relative flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
+          {hunted && (
+            // On the board's own edge, so the cards under it are never taken for the hand's.
+            <span className="pointer-events-none absolute -top-2 right-1 z-10 rounded-full bg-gold-400 px-1.5 text-[9px] font-bold leading-4 tracking-[0.08em] text-ink-950 shadow" data-testid="rabbit-label">
+              RABBIT HUNT
+            </span>
+          )}
           {Array.from({ length: 5 }, (_, i) => {
             const c = i < boardShown ? (hand?.board[i] as Card | undefined) : undefined;
+            const r = hunted && i >= dealt ? hunted[i - dealt] : undefined;
+            // One after another, in the order they would have come; dimmed and ringed, never the winning five.
+            if (!c && r)
+              return (
+                <div key={`${hand!.id}-rabbit-${r}`} className="rounded-[calc(var(--card-size)*0.12)] opacity-80 outline-2 outline-offset-1 outline-dashed outline-gold-400/80" style={{ ['--card-size' as string]: boardSize }} data-testid="rabbit-card" data-card={r}>
+                  <BoardCard card={r} size={boardSize} animate={reducedMotion ? false : 'flip'} delay={(i - dealt) * 220} />
+                </div>
+              );
             // A staged card turns when it is drawn; cards drawn at once (a street that arrived unstaged) one after another.
             return c ? (
               <BoardCard
@@ -462,7 +488,7 @@ export const TableScene = memo(function TableScene({
               still={arrival?.still ?? null}
               canSit={canSit}
               onSit={handlersOf(seat.seatIndex).sit}
-              onPick={onSeatClick && seat.userId && seat.seatIndex !== mySeat ? handlersOf(seat.seatIndex).pick : undefined}
+              onPick={onSeatClick && seat.userId && (pickSelf || seat.seatIndex !== mySeat) ? handlersOf(seat.seatIndex).pick : undefined}
               onShow={onShow && seat.seatIndex === mySeat && s.you.canShow ? show : undefined}
               showOver={showOnCards}
               reveal={spots?.get(seat.seatIndex) ?? null}
