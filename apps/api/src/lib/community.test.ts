@@ -133,6 +133,7 @@ describe('replayPlayer', () => {
     postBets: null,
     postCalls: null,
     bigBlind: null,
+    tournamentId: null,
     ...o,
   });
   const user = { nickname: 'x', role: 'user', status: 'active', isBot: false, vipColor: null };

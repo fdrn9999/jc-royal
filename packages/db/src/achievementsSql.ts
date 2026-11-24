@@ -35,7 +35,7 @@ export const ACHIEVEMENT_HAND_SQL: readonly string[] = [
   // Counted only until it is there, and never more than 100 rows a member.
   `${INSERT} SELECT hp.user_id, 'play:hands_100', hp.ended_at FROM hand_players hp ${MEMBER}
     WHERE hp.hand_id = ?1 AND NOT EXISTS (SELECT 1 FROM user_badges b WHERE b.user_id = hp.user_id AND b.badge = 'play:hands_100')
-      AND (SELECT COUNT(*) FROM (SELECT 1 FROM hand_players x WHERE x.user_id = hp.user_id LIMIT 100)) >= 100`,
+      AND (SELECT COUNT(*) FROM (SELECT 1 FROM hand_players x WHERE x.user_id = hp.user_id AND x.tournament_id IS NULL LIMIT 100)) >= 100`,
 ];
 
 /** The winner of a finished tournament (`?1`); not of a private one, which is no official record (docs/TOURNAMENT.md "비공개 대회"). */

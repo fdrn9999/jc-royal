@@ -491,7 +491,7 @@ const admin = new Hono<AppEnv>()
     const [ledger, seats, hands, sessions, history] = await Promise.all([
       seeLedger ? c.var.db.select().from(schema.chipLedger).where(eq(schema.chipLedger.userId, id)).orderBy(desc(schema.chipLedger.createdAt)).limit(50) : [],
       c.var.db.select().from(schema.tableSessions).where(and(eq(schema.tableSessions.userId, id), eq(schema.tableSessions.status, 'seated'))),
-      DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1`).bind(id).first<{ n: number; net: number }>(),
+      DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(net), 0) AS net FROM hand_players WHERE user_id = ?1 AND tournament_id IS NULL`).bind(id).first<{ n: number; net: number }>(),
       // Sign-ins only: no token, address or browser string.
       c.var.db
         .select({ kind: S.kind, createdAt: S.createdAt, lastSeenAt: S.lastSeenAt, expiresAt: S.expiresAt })
@@ -566,7 +566,7 @@ const admin = new Hono<AppEnv>()
       DB.prepare(
         `SELECT CAST((ended_at + ?2) / 86400000 AS INTEGER) AS day, COUNT(*) AS hands, COALESCE(SUM(net), 0) AS net,
                 SUM(CASE WHEN net > 0 THEN 1 ELSE 0 END) AS wins, SUM(CASE WHEN went_to_showdown THEN 1 ELSE 0 END) AS showdowns
-           FROM hand_players WHERE user_id = ?1 AND ended_at >= ?3 GROUP BY day`,
+           FROM hand_players WHERE user_id = ?1 AND ended_at >= ?3 AND tournament_id IS NULL GROUP BY day`,
       ).bind(id, shift, since),
       DB.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT table_id) AS tables, COALESCE(SUM(buy_in), 0) AS buyIn FROM table_sessions WHERE user_id = ?1 AND created_at >= ?2`).bind(id, since),
     ]);

@@ -55,6 +55,8 @@ export interface TournamentRow {
   levelLeftMs: number | null;
   pausedAt: number | null;
   hands: number;
+  /** Its hands are recorded (tournaments.record_hands, fixed when it was opened). */
+  recordHands: boolean;
   /** Entries that took part (playing, eliminated, won, stopped), with what the seat shows. */
   entries: TournamentEntryRow[];
 }
@@ -66,6 +68,7 @@ export const tournamentJson = (where: string) => `SELECT json_object('id', tn.id
   'tb', json_object('enabled', tn.tb_enabled, 'initialMs', tn.tb_initial_ms, 'maxMs', tn.tb_max_ms, 'unitMs', tn.tb_unit_ms,
     'refillHands', tn.tb_refill_hands, 'refillMs', tn.tb_refill_ms),
   'level', tn.level, 'levelEndsAt', tn.level_ends_at, 'levelLeftMs', tn.level_left_ms, 'pausedAt', tn.paused_at, 'hands', tn.hands,
+  'recordHands', tn.record_hands,
   'entries', json((SELECT json_group_array(json_object('userId', e.user_id, 'seat', e.seat_index, 'stack', e.stack, 'status', e.status,
       'place', e.place, 'nickname', u.nickname, 'avatarUrl', u.avatar_url, 'role', u.role,
       'vip', CASE WHEN u.role = 'user' AND u.is_bot = 0 AND u.status = 'active' THEN u.vip_color END, 'tableId', e.table_id))
@@ -141,6 +144,7 @@ export function toTournamentRow(raw: unknown): TournamentRow | null {
       levelLeftMs: int(r.levelLeftMs),
       pausedAt: int(r.pausedAt),
       hands: Math.max(0, int(r.hands) ?? 0),
+      recordHands: r.recordHands === 1,
       entries,
     };
   } catch {
@@ -194,6 +198,44 @@ export interface TourneyState {
   tb: TournamentTimeBank;
   /** Progress D1 does not have yet (retried until it does). */
   dirty: boolean;
+  /** 'sng' or 'mtt' (absent in a state kept by an older build: its hands are not recorded). */
+  format?: 'sng' | 'mtt';
+  /** Its hands go to the hand history (tournaments.record_hands; absent: not recorded). */
+  record?: boolean;
+}
+
+/**
+ * What a recorded tournament hand was dealt under (hands.tournament, as JSON): tournament chips throughout, never
+ * wallet chips. `hand` is the tournament's own count of hands (a Sit & Go's; a multi-table tournament's tables count
+ * theirs in hands.hand_number), `left` how many were still in when it was dealt (a Sit & Go's).
+ */
+export interface TournamentHandMeta {
+  format: 'sng' | 'mtt';
+  level: number;
+  sb: number;
+  bb: number;
+  hand: number | null;
+  left: number | null;
+  startStack: number;
+}
+
+/** The tournament a settled hand is recorded under; null when this tournament's hands are not recorded. */
+export function tournamentHandMeta(t: TourneyState, sb: number, bb: number, multi: boolean): { id: string; meta: TournamentHandMeta } | null {
+  if (!t.record) return null;
+  const at = t.levels.findIndex((l) => l.sb === sb && l.bb === bb);
+  return {
+    id: t.id,
+    meta: {
+      format: t.format ?? (multi ? 'mtt' : 'sng'),
+      level: at >= 0 ? at : t.level,
+      sb,
+      bb,
+      hand: multi ? null : t.hands,
+      // (Read before the hand's own places are taken: those it was dealt to count as in.)
+      left: multi ? null : playersLeft(t),
+      startStack: t.startStack,
+    },
+  };
 }
 
 /** The room's tournament state from D1, the first time the room meets its tournament (or after losing its storage). */
@@ -228,6 +270,8 @@ export function seedTourney(row: TournamentRow, now: number): TourneyState {
     closeAt: status === 'running' ? null : now,
     tb: row.tb,
     dirty: false,
+    format: row.format,
+    ...(row.recordHands ? { record: true } : {}),
   };
 }
 

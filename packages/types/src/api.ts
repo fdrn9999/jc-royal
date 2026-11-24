@@ -544,8 +544,13 @@ export interface HandSummaryDto {
   rankClass: string | null;
   /** The member's seat position, or null where the hand's statistics were not worked out (see handStats.ts). */
   position: Position | null;
-  /** The table's big blind now (blinds are not stored per hand). */
+  /** The table's big blind now; a tournament hand's is the level's it was dealt at. */
   bigBlind: number;
+  /**
+   * Set for a tournament's hand: its tournament, format and blind level (from 0). The hand's chips (pot, net, won) are
+   * then tournament chips, not the member's own. Absent for a cash hand.
+   */
+  tournament?: { id: string; format: 'sng' | 'mtt'; level: number };
   /** The member's own note on the hand: never shown to anyone else. */
   bookmarked: boolean;
   tags: HandTag[];

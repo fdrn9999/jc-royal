@@ -179,7 +179,7 @@ export const tableRoutes = new Hono<AppEnv>()
       fail(409, 'insufficient_balance', 'not enough chips for any matching table', { minBuyIn: Math.min(...matches.map((r) => r.t.minBuyIn)), balance: me.balance });
     }
 
-    const played = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM (SELECT 1 FROM hand_players WHERE user_id = ?1 LIMIT ?2)')
+    const played = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM (SELECT 1 FROM hand_players WHERE user_id = ?1 AND tournament_id IS NULL LIMIT ?2)')
       .bind(me.id, NEWCOMER_HANDS)
       .first<{ n: number }>();
     const newcomer = (played?.n ?? 0) < NEWCOMER_HANDS;

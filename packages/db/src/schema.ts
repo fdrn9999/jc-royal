@@ -254,6 +254,13 @@ export const hands = sqliteTable(
     eventLog: text('event_log').notNull(),
     /** Table bots dealt in, so statistics can keep hands with bots apart from hands among members only. */
     bots: integer('bots').notNull().default(0),
+    /**
+     * A tournament's hand (docs/TOURNAMENT.md "대회 핸드 기록"): the tournament, and what the hand was dealt under as
+     * JSON (format, level, blinds, the tournament's hand number, players left). NULL for a cash table's hand. Its
+     * stacks and nets are tournament chips: never wallet chips, never in the chip ledger.
+     */
+    tournamentId: text('tournament_id'),
+    tournament: text('tournament'),
   },
   (t) => [index('hands_table_idx').on(t.tableId, t.endedAt)],
 );
@@ -301,6 +308,8 @@ export const handPlayers = sqliteTable(
     postCalls: integer('post_calls'),
     /** The hand's big blind, for BB/100; set together with the counts above, so it marks a row as counted. */
     bigBlind: integer('big_blind'),
+    /** The hand's tournament (hands.tournament_id), NULL for a cash hand: what keeps tournament chips out of cash figures. */
+    tournamentId: text('tournament_id'),
   },
   (t) => [
     primaryKey({ columns: [t.handId, t.userId] }),
@@ -1221,6 +1230,11 @@ export const tournaments = sqliteTable(
     pausedAt: integer('paused_at'),
     playersLeft: integer('players_left'),
     hands: integer('hands').notNull().default(0),
+    /**
+     * Whether its hands are recorded (hand history, replay, tournament statistics): fixed when it is opened, from
+     * TOURNAMENT_HANDS_ENABLED, so a tournament is recorded whole or not at all.
+     */
+    recordHands: integer('record_hands', { mode: 'boolean' }).notNull().default(false),
     /** When the room last wrote its progress (a silent room is shown as needing recovery). */
     roomSeenAt: integer('room_seen_at'),
     startedAt: integer('started_at'),

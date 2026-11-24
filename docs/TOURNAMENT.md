@@ -10,7 +10,7 @@
 | 등록·등록 취소·시작·진행·탈락·종료, 순위와 결과 화면, 친구 초대, 회원이 여는 비공개 대회(아래 "비공개 대회") | 리바이·애드온, 늦은 등록, 비공개 MTT |
 | 관리자의 템플릿·개별 대회·진행 제어(마감·시작·취소·일시정지·재개·운영 중단·복구) | 참가비·상금·환급, 칩 보상 |
 | 대회 전용 시간 은행(템플릿에서 정함) | 봇 참가, 앤티 |
-| | 대회 핸드의 핸드 기록·리플레이·플레이어 통계 |
+| 대회 핸드의 핸드 기록·리플레이·대회 통계(아래 "대회 핸드 기록", 기본 꺼짐) | |
 
 토너먼트 칩은 그 대회 안에서만 쓰는 숫자다. 지갑·칩 원장(`chip_ledger`)·테이블 세션(`table_sessions`)과 이어지지 않는다. 대회 테이블에서는 바이인·충전·자동 리바이·캐시아웃이 일어나지 않으며, 룸은 대회 좌석에 대해 원장을 부르는 경로를 막는다(`cashOutSeat`가 대회 좌석이면 아무것도 하지 않음).
 
@@ -220,7 +220,19 @@ registering ⇄ closed ──start──▶ running ──1명 남음──▶ f
 
 대회 테이블의 `state`는 `roomType: 'tournament'`이고 최상위 `tournament`(`packages/types/src/tournament.ts` `TournamentTableView`)에 대회 id·이름·상태, 레벨과 블라인드, 다음 레벨, 시계(`levelEndsAt` 또는 멈춘 동안 `levelLeftMs`), 일시정지, 생존·참가 인원, 시작 스택, 정해진 순위, 보는 사람의 처지(`you`: 진행 중·탈락·우승·중단·관전)를 담는다. 좌석 스택은 대회 칩이다. 착석·일어서기·충전·리바이·대기열 명령은 `tournament_table`로 거절된다. 카드 공개 규칙은 일반 테이블과 같다.
 
+## 대회 핸드 기록
+
+대회 핸드는 처음에 기록하지 않았다(핸드 기록·리플레이·통계 없음). 그래서 HUD의 대회 범위(`GET /api/players/:id/hud?scope=tournament`)가 셀 핸드가 없어 언제나 0이었다(`docs/V4_PLATFORM_AUDIT.md` 2절). V4부터는 다음과 같이 기록한다.
+
+- **켜기**: api 환경 변수 `TOURNAMENT_HANDS_ENABLED`가 `'1'`일 때 **그 뒤에 여는** 대회(관리자가 템플릿에서 여는 대회, 회원이 여는 비공개 대회, MTT)가 `tournaments.record_hands = 1`을 받는다. 기본은 꺼짐이다. 대회는 열릴 때 받은 값을 끝까지 쓴다: 한 대회의 핸드는 모두 기록되거나 하나도 기록되지 않는다. 이미 있는 대회와 지난 대회의 핸드는 바뀌지 않고, 기록하지 않은 지난 핸드를 지어내지 않는다.
+- **무엇을**: 캐시 핸드와 같은 `hands`·`hand_players` 줄에 `tournament_id`를 붙이고, `hands.tournament`(JSON)에 `format`(`sng`/`mtt`), `level`(0부터, 그 핸드를 돌린 블라인드의 레벨), `sb`, `bb`, `hand`(대회의 손 번호. MTT 테이블은 null), `left`(그 핸드를 돌릴 때 남은 인원. MTT 테이블은 null), `startStack`을 둔다. 자리별 시작·끝 스택, 포지션, 통계 칸은 캐시 핸드와 같다. 탈락은 끝 스택 0과 `tournament_entries`의 순위로 읽는다.
+- **한 번만**: 룸은 핸드 결과와 함께 기록을 자기 저장소에 두고 D1에 들어갈 때까지 다시 시도한다(캐시 핸드와 같은 길). D1이 잠시 안 되거나 서버가 다시 떠도 빠지지 않고, `INSERT OR IGNORE`라 두 번 들어가지 않는다. 대회 진행(순위·레벨·테이블 이동)은 핸드 기록을 기다리지 않는다.
+- **칩과 떨어져 있다**: 지갑과 `chip_ledger`를 쓰지 않는다. 대회 핸드의 팟·손익은 대회 칩이다. 캐시 전용 수치 — 내 통계(`/api/me/stats`, 추이), 프로필 카드, 관리자의 회원 손익, 추천 보상 조건, 신규 회원 판정, 대회 참가 조건(`min_hands`), 업적, 챌린지 — 는 대회 핸드를 세지 않는다(`hand_players.tournament_id IS NULL`).
+- **보이는 곳**: 내 핸드 기록 목록(`GET /api/me/hands`)에 `tournament: { id, format, level }`과 그 레벨의 빅 블라인드가 실리고 화면에 "대회 칩" 표시가 붙는다. 리플레이는 캐시 핸드와 같은 규칙으로 열린다(쇼다운에서 보인 카드만). HUD의 대회 범위가 이 핸드를 센다. 표본이 없으면 비율은 0%가 아니라 "—"다.
+
 ## 배포 순서
+
+대회 핸드 기록: 마이그레이션 `0045_tournament_hands`(칸 네 개를 더하기만 한다: `hands.tournament_id`, `hands.tournament`, `hand_players.tournament_id`, `tournaments.record_hands` 기본 0) → game-worker → api. 플래그를 켜기 전에는 아무 대회도 기록하지 않으므로 순서가 바뀌어도 깨지지 않는다. 플래그가 켜진 채 api가 먼저 올라가 앞 버전 game-worker의 룸이 대회를 시작했더라도, 새 game-worker의 룸은 D1의 `record_hands`를 다시 읽어 그때부터 기록한다(그 앞의 핸드는 없는 채로 남고 지어내지 않는다). `TOURNAMENT_HANDS_ENABLED`는 game-worker가 올라간 뒤에 켠다.
 
 마이그레이션 `0026_tournaments` → game-worker → api(web 포함) → admin. 0026은 새 테이블 세 개(`tournament_templates`, `tournaments`, `tournament_entries`)와 인덱스를 만들고 기본 템플릿 하나(6인, 1,500칩, 5분 레벨 13단계, 턴 20초, 시간 은행은 0025 정책 1판과 같은 값, 정원이 차면 자동 시작)를 넣는다. 기존 테이블은 바뀌지 않는다(`tables.room_type`에 SQL 제약이 없어 `tournament`가 그대로 들어간다). 이 템플릿 값은 개발 기본값이며 운영 값은 정하지 않았다. 배포만으로는 대회가 열리지 않는다: 운영자가 대회를 만들어야 한다. 이전 game-worker는 대회 좌석·레벨을 모르므로 **game-worker가 새 버전이 되기 전에는 대회를 만들거나 시작하지 않는다**(이 혼합 상태의 동작은 확인하지 않았다). 되돌릴 때는 진행 중인 대회를 먼저 운영 중단한 뒤 내린다. 이전 api·admin은 새 테이블을 읽지 않으며, 테이블은 남겨 둔다.
 

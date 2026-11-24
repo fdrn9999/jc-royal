@@ -86,7 +86,7 @@ import { LobbyFeed, placesMoved, placesOf } from './lobby-feed';
 import { tellFriendsSat } from './friend-table';
 import { publishToAll, publishToUsers } from './realtime-publish';
 import { publishToAdmins } from './admin-monitor-publish';
-import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, type TournamentRow, type TourneyState } from './tournament';
+import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, syncTournament, tournamentHandMeta, type TournamentHandMeta, type TournamentRow, type TourneyState } from './tournament';
 import type { MttAnswer, MttReport, MttSeat } from './mtt';
 
 export interface Env {
@@ -338,6 +338,8 @@ interface UnrecordedHand {
   timeBank?: Partial<Record<TimeBankMetric, number>>;
   /** The bots' play summed up to this hand, per day, for the statistics (absent: none). */
   botStats?: BotStatsFlush[];
+  /** A tournament's hand: its tournament and what it was dealt under (absent: a cash hand). */
+  tournament?: { id: string; meta: TournamentHandMeta };
 }
 
 /** A chat line's id from its sender and request id: a line sent again is recognised without storing anything more. */
@@ -1989,17 +1991,25 @@ export class TableRoom extends DurableObject<Env> {
       this.room.lastRabbit = null;
       this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
       this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
-      // A tournament hand is not recorded (no hand history, statistics or replay): its result is the tournament's —
-      // places for those who lost their last chip, the winner once one player is left — written to D1 below.
+      // A tournament hand's result is the tournament's — places for those who lost their last chip, the winner once one
+      // player is left — written to D1 below. Its record (hand history, replay, tournament statistics) is kept only by
+      // a tournament opened with hand recording on, the way a cash hand's is: with the result until D1 has it. Nothing
+      // of it touches a wallet or the chip ledger: these are tournament chips.
       this.refillTimeBanks(h);
       this.room.tbCount = null;
+      const recorded = tournamentHandMeta(tn, h.rules.smallBlind, h.rules.bigBlind, !!this.room.mtt);
       // A multi-table tournament's places are its coordinator's: the hand is reported to it (`mttSync`, below).
       if (this.room.mtt) this.mttReport(h, stacks);
       else {
         bustOut(tn, h.startingSeats, stacks, now, (id) => this.room.seats.find((s) => s?.userId === id)?.vip);
         if (tn.status !== 'aborted') tn.dirty = true;
       }
-      await this.save();
+      if (recorded) {
+        const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
+        const entry: UnrecordedHand = { handNumber: this.room.handNumber, record: h.record(now, this.muckOf(h)), log: h.persist(), tournament: recorded };
+        await this.save({ [key]: entry });
+        this.unrecorded.add(key);
+      } else await this.save();
     } else if (firstTime) {
       const stacks = h.finalStacks();
       // A seat already 'cashing' is a player who folded and left mid-hand whose cash-out is still to go through: it pays
@@ -2059,7 +2069,8 @@ export class TableRoom extends DurableObject<Env> {
     for (const r of reacts) for (const s of this.sockets()) this.send(s, r);
     if (this.room.mtt) await this.mttSync();
     else if (tn) await this.syncTourney();
-    else await this.retryUnrecorded();
+    // (A tournament's hands too, when it records them: after its places, which are what the tournament waits for.)
+    await this.retryUnrecorded();
     // Top-ups that waited for this hand and the automatic policy (rebuy, top-up) happen before busted players stand up.
     const notices = await this.applyTopUps(h.handId);
     // Seats players folded and left during the hand were not offered to the waitlist then (`standUp`): they are below.
@@ -2279,6 +2290,13 @@ export class TableRoom extends DurableObject<Env> {
       return true;
     }
     let changed = false;
+    // What the tournament was opened with, for a state kept by a worker from before hand recording (it had no such
+    // field): its hands are recorded from here on.
+    if (row.recordHands && !tn.record) {
+      tn.record = true;
+      tn.format ??= row.format;
+      changed = true;
+    }
     if (tn.status === 'running' && tn.pauseRequested !== row.pauseRequested) {
       tn.pauseRequested = row.pauseRequested;
       changed = true;
@@ -3121,9 +3139,10 @@ export class TableRoom extends DurableObject<Env> {
     try {
       const { cues, notices } = await this.recoverPendingSeats();
       await this.standFolded();
-      await this.retryUnrecorded();
+      // A tournament's places and table moves first: they are what its players wait for, its hands' records are not.
       await this.syncTourney();
       if (this.room.mtt?.due && !this.room.closed) await this.mttSync();
+      await this.retryUnrecorded();
       if (this.room.closing && !this.room.closed) await this.continueClose();
       this.broadcast(cues);
       this.notify(notices);
@@ -3142,7 +3161,7 @@ export class TableRoom extends DurableObject<Env> {
       const read = ++this.maintReads;
       try {
         const r = u
-          ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log, { bots: u.bots ?? 0, botPolicy: !!this.table?.bots.enabled, timeBank: u.timeBank, botStats: u.botStats })
+          ? await recordHand(this.env.DB, this.tableId!, u.handNumber, u.record, u.log, { bots: u.bots ?? 0, botPolicy: !!this.table?.bots.enabled, timeBank: u.timeBank, botStats: u.botStats, tournament: u.tournament })
           : undefined;
         if (r && this.takeMaint(r.maintenance, read)) void this.run(() => this.maintenanceChanged());
         // Bots switched on or off service-wide: `schedule` seats them or sends them away.

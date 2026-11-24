@@ -355,7 +355,7 @@ export async function settleReferral(env: Env, id: string, opts: { now?: number;
       db
         .prepare(
           `SELECT COUNT(*) AS n FROM (SELECT 1 FROM hand_players
-            WHERE user_id = (SELECT invitee_id FROM referrals WHERE id = ?1 AND status = 'pending' AND min_hands > 0) LIMIT ?2)`,
+            WHERE user_id = (SELECT invitee_id FROM referrals WHERE id = ?1 AND status = 'pending' AND min_hands > 0) AND tournament_id IS NULL LIMIT ?2)`,
         )
         .bind(id, REFERRAL_LIMITS.minHands.max),
       db
@@ -562,7 +562,7 @@ export async function referralMe(env: Env, userId: string, origin: string): Prom
       .prepare(
         `SELECT r.status, r.invitee_status AS side, r.invitee_amount AS amount, r.invitee_paid_at AS paidAt, r.failure_code AS failure, r.min_hands AS minHands,
                 r.created_at AS createdAt, ${nickname('i')} AS nickname,
-                (SELECT COUNT(*) FROM (SELECT 1 FROM hand_players WHERE user_id = ?1 LIMIT ?2)) AS hands
+                (SELECT COUNT(*) FROM (SELECT 1 FROM hand_players WHERE user_id = ?1 AND tournament_id IS NULL LIMIT ?2)) AS hands
            FROM referrals r LEFT JOIN users i ON i.id = r.referrer_id WHERE r.invitee_id = ?1`,
       )
       .bind(userId, REFERRAL_LIMITS.minHands.max),

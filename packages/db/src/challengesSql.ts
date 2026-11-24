@@ -53,13 +53,13 @@ const PLAYED = `te.status IN ('playing', 'eliminated', 'won', 'stopped')`;
 function events(counts: ChallengeRule['counts'], user: string, from: string, to: string): string {
   switch (counts) {
     case 'hands':
-      return `SELECT x.ended_at AS at FROM hand_players x WHERE x.user_id = ${user} AND x.ended_at >= ${from} AND x.ended_at < ${to}`;
+      return `SELECT x.ended_at AS at FROM hand_players x WHERE x.user_id = ${user} AND x.ended_at >= ${from} AND x.ended_at < ${to} AND x.tournament_id IS NULL`;
     case 'showdowns':
-      return `SELECT x.ended_at AS at FROM hand_players x WHERE x.user_id = ${user} AND x.ended_at >= ${from} AND x.ended_at < ${to} AND x.went_to_showdown = 1`;
+      return `SELECT x.ended_at AS at FROM hand_players x WHERE x.user_id = ${user} AND x.ended_at >= ${from} AND x.ended_at < ${to} AND x.tournament_id IS NULL AND x.went_to_showdown = 1`;
     case 'days':
       return `SELECT at FROM (
         SELECT (SELECT MIN(x.ended_at) FROM hand_players x
-                 WHERE x.user_id = ${user} AND x.ended_at >= ${from} + k.column1 * ${STATS_DAY} AND x.ended_at < MIN(${to}, ${from} + (k.column1 + 1) * ${STATS_DAY})) AS at
+                 WHERE x.user_id = ${user} AND x.ended_at >= ${from} + k.column1 * ${STATS_DAY} AND x.ended_at < MIN(${to}, ${from} + (k.column1 + 1) * ${STATS_DAY}) AND x.tournament_id IS NULL) AS at
           FROM (VALUES (0), (1), (2), (3), (4), (5), (6)) k
       ) WHERE at IS NOT NULL`;
     case 'tournaments':

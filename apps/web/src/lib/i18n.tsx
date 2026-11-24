@@ -600,6 +600,7 @@ const ko = {
   'hands.potNote': '팟 크기는 그 테이블의 지금 빅 블라인드로 셉니다.',
   'hands.memoMark': '메모 있음',
   'hands.bookmark': '북마크',
+  'hands.tournament': '대회 칩',
   'hands.tags.review': '복습',
   'hands.tags.bluff': '블러프',
   'hands.tags.hardCall': '어려운 콜',
