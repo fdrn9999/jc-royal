@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { checkOrCall, signUp, test, widerThanDevice } from './helpers';
+import { checkOrCall, expectHudBars, signUp, test, widerThanDevice } from './helpers';
 
 /** The card sits inside the screen and nothing scrolls sideways. */
 async function fits(page: Page, el: Locator) {
@@ -103,6 +103,7 @@ test('free practice: topic, bot level and style, stacks and blinds; results on t
   await expect(myHud).toHaveAttribute('data-kind', 'practice');
   await expect(myHud).toHaveAttribute('data-bot', 'false');
   await expect(myHud.getByTestId('seat-hud-hands')).toContainText('3');
+  await expect.poll(() => expectHudBars(myHud)).toBe(3);
   for (const [width, height] of [[320, 568], [390, 844]] as const) {
     await page.setViewportSize({ width, height });
     await fits(page, summary);
@@ -126,6 +127,7 @@ test('free practice: topic, bot level and style, stacks and blinds; results on t
   await expect(hud.getByTestId('seat-hud-hands')).toContainText('3');
   await hud.getByTestId('seat-hud-more').tap();
   await expect(hud.getByTestId('seat-hud-notes')).toContainText('연습은 기록으로 남지 않습니다');
+  await expect.poll(() => expectHudBars(hud)).toBe(8);
   for (const [width, height] of [[320, 568], [390, 844], [1440, 900]] as const) {
     await page.setViewportSize({ width, height });
     await expect(bot).toBeInViewport();

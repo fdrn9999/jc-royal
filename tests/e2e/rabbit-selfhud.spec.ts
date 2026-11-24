@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import type { PlayerHudDto } from '@jc/types';
-import { signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
+import { expectHudBars, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
 /** The pick button on the seat of the member named `nickname` (it carries their name). */
 const seatOf = (page: Page, nickname: string) => page.locator(`[data-testid^="seat-pick-"][aria-label="${nickname}"]`);
@@ -54,7 +54,11 @@ test('rabbit hunting: after a fold before the flop, the five cards that would ha
   await b.page.getByTestId('rabbit-hunt').click();
   await expect(b.page.getByTestId('rabbit-card')).toHaveCount(5);
   await expect(a.page.getByTestId('rabbit-label')).toHaveText('RABBIT HUNT');
-  await expect(a.page.getByTestId('rabbit-note')).toContainText('RABBIT HUNT');
+  await expect(a.page.getByTestId('rabbit-note')).toContainText('래빗헌팅 결과');
+  // The rabbit is the icon set's, on the cards' mark and on the note: no emoji anywhere on the table.
+  await expect(a.page.getByTestId('rabbit-label').locator('svg.lucide-rabbit')).toHaveCount(1);
+  await expect(a.page.getByTestId('rabbit-note').locator('svg.lucide-rabbit')).toHaveCount(1);
+  expect(await a.page.getByTestId('table-stack').innerText()).not.toContain('🐇');
   await expect(a.page.getByTestId('rabbit-note')).toContainText('실제 게임 결과에는 영향을 주지 않습니다.');
   await expect(ask).toHaveCount(0);
   // Five different cards, none of them one I hold; the stacks as the hand left them.
@@ -119,12 +123,19 @@ test('my own HUD: my seat opens my own figures, private or not, and nobody else�
   const cells = { vpip: 'seat-hud-vpip', pfr: 'seat-hud-pfr', threeBet: 'seat-hud-3bet', foldTo3Bet: 'seat-hud-fold-3bet', cbet: 'seat-hud-cbet', foldToCbet: 'seat-hud-fold-cbet', wtsd: 'seat-hud-wtsd', wsd: 'seat-hud-wsd' } as const;
   for (const [key, id] of Object.entries(cells) as [keyof typeof cells, string][]) await expect(hud.getByTestId(id), id).toContainText(`${dto.stats![key].n}/${dto.stats![key].of}`);
   await expect(hud.getByTestId('seat-hud-af')).toBeVisible();
+  // My own figures have the same bars as anybody's, each as far as its hands say.
+  for (const [key, id] of Object.entries(cells) as [keyof typeof cells, string][]) {
+    const { n, of } = dto.stats![key];
+    await expect(hud.getByTestId(`${id}-bar`), id).toHaveAttribute('data-fill', of === 0 ? 'none' : String(Math.round((n / of) * 1000) / 10));
+  }
+  await expect.poll(() => expectHudBars(hud)).toBe(8);
   for (const [width, height] of [[390, 844], [320, 568]] as const) {
     await a.page.setViewportSize({ width, height });
     expect(await widerThanDevice(a.page)).toBe(false);
     const box = (await hud.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await expect.poll(() => expectHudBars(hud)).toBe(8);
     await a.page.screenshot({ path: `test-results/selfhud-${width}.png`, animations: 'disabled' });
   }
   await a.page.setViewportSize({ width: 390, height: 844 });

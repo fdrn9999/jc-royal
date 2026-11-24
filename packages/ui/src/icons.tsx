@@ -44,6 +44,7 @@ export {
   PinIcon,
   PlayIcon,
   PlusIcon,
+  RabbitIcon,
   RefreshCwIcon,
   RotateCcwIcon,
   SendHorizontalIcon,

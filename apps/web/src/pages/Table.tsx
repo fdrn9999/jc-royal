@@ -15,7 +15,9 @@ import {
   Modal,
   PauseIcon,
   PlayIcon,
+  RabbitIcon,
   SettingsIcon,
+  Spinner,
   TrophyIcon,
   XIcon,
 } from '@jc/ui';
@@ -24,6 +26,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { updateProgress, useProgress } from '../academy/progress';
 import { ActionBar } from '../game/ActionBar';
+import { RabbitPanel } from '../game/RabbitPanel';
 import { seatPolicy } from '../game/autoBuy';
 import { JoinCodeModal } from '../components/JoinCode';
 import { LinkShare } from '../components/Share';
@@ -220,6 +223,9 @@ export function TablePage() {
   const reactions = useMemo(() => (reactOn ? sock.reactions.filter((r) => !hiddenChat.has(r.userId)) : []), [reactOn, sock.reactions, hiddenChat]);
   const [toast, setToast] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // My rabbit hunt: of the hand on the table (its button and the board), or of the hand before (a panel of its own).
+  const huntHere = sock.rabbitHunt && !sock.rabbitHunt.late && sock.rabbitHunt.handId === s?.hand?.id ? sock.rabbitHunt : null;
+  const huntBefore = sock.rabbitHunt?.late ? sock.rabbitHunt : null;
   const [topUpOpen, setTopUpOpen] = useState(false);
   // Standing up mid-hand folds it, so the player says so first, beside the button (no dialog over the game).
   const [leaveAsk, setLeaveAsk] = useState(false);
@@ -874,8 +880,11 @@ export function TablePage() {
           >
             {/* Passing word over the band's top, not a line of it: a toast (an error) shows over what is there; a notice
                 makes way for it, and for the raise panel, the reaction tray and the help, which need the band then. */}
-            {(toast || notice) && (
+            {(toast || notice || huntBefore) && (
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-center gap-1 px-2 pt-1 sm:items-end sm:px-6">
+                {/* The hand before's rabbit hunt, answered (or not) after the next was dealt: beside the game, never on
+                    its board. */}
+                {huntBefore && <RabbitPanel hunt={huntBefore} onRetry={sock.huntAgain} onClose={sock.endHunt} narrow={short} className={STEP_ASIDE} />}
                 {toast && (
                   <div className="max-w-md rounded-lg border border-danger/40 bg-ink-950/95 px-3 py-1 text-xs text-[#f3b0b2] shadow-lg sm:py-2 sm:text-sm" role="alert">
                     {toast}
@@ -973,14 +982,29 @@ export function TablePage() {
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
                 {/* Rabbit hunting: offered once a hand I was dealt into ended before the river, until the next is dealt.
                     The cards go to the board's empty places (TableScene); here, what they are. */}
-                {s.you.canRabbit && !sock.rabbit && (
-                  <Button size="sm" variant="outline" className="min-h-10" onClick={sock.hunt} data-testid="rabbit-hunt">
-                    <span aria-hidden>🐇</span> {t('table.rabbit')}
+                {s.you.canRabbit && (!huntHere || huntHere.phase === 'requesting' || huntHere.phase === 'error') && (
+                  // Asked: busy until the room answers. Failed on the way: the same button asks again.
+                  <Button size="sm" variant="outline" className="min-h-10" disabled={huntHere?.phase === 'requesting'} aria-busy={huntHere?.phase === 'requesting'} onClick={sock.hunt} data-testid="rabbit-hunt" data-phase={huntHere?.phase ?? 'idle'}>
+                    {huntHere?.phase === 'requesting' ? <Spinner className="size-4" /> : <RabbitIcon />}
+                    {t(huntHere?.phase === 'requesting' ? 'table.rabbitAsking' : huntHere?.phase === 'error' ? 'table.rabbitRetry' : 'table.rabbit')}
                   </Button>
                 )}
+                {huntHere?.phase === 'error' && (
+                  <span className="text-center text-xs text-[#f3b0b2]" role="status" data-testid="rabbit-failed">
+                    {t('table.rabbitFailed')}
+                  </span>
+                )}
+                {huntHere?.phase === 'expired' && (
+                  <span className="inline-flex items-center gap-1.5 text-center text-xs text-ink-300" role="status" data-testid="rabbit-expired">
+                    <RabbitIcon className="size-4" />
+                    {t('table.rabbitExpired')}
+                  </span>
+                )}
                 {sock.rabbit && (
-                  <span className="text-center text-xs text-gold-300" role="status" data-testid="rabbit-note">
-                    <span className="font-bold tracking-[0.08em]">RABBIT HUNT</span> · {t('table.rabbitNote')}
+                  <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5 text-center text-xs text-gold-300" role="status" data-testid="rabbit-note">
+                    <RabbitIcon className="size-4" />
+                    <span className="font-bold">{t('table.rabbitResult')}</span>
+                    <span>{t('table.rabbitNote')}</span>
                   </span>
                 )}
                 {arrival && (

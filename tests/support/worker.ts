@@ -69,7 +69,7 @@ export const TABLES: TestTable[] = [
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-show-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Rabbit hunting after a hand that ended before the river, and the minimum raise (double the highest bet) as the
   // room enforces it on amounts sent straight over the socket.
-  ...Array.from({ length: 3 }, (_, i) => ({ id: `it-rabbit-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `it-rabbit-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   ...Array.from({ length: 2 }, (_, i) => ({ id: `it-minraise-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   // Operations dashboard: connection counters, a room failure and an action sent again.
   ...Array.from({ length: 3 }, (_, i) => ({ id: `it-ops-${i}`, maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),

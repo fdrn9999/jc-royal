@@ -31,11 +31,12 @@ async function runCron(base: string) {
 /**
  * An administrator closes or pauses these; at the third a buy-in's outcome is unknown; at the fourth the time bank is
  * used across a restart; at the fifth an automatic top-up waits out a crash (heads-up, long turns so the clock never
- * acts); at the last a player who folded and left mid-hand is paid across a crash while the others play on.
+ * acts), and at the sixth a rabbit hunt is asked across one; at the last a player who folded and left mid-hand is paid
+ * across a crash while the others play on.
  */
 const tables = [
   ...TABLES,
-  ...['it-restart-close', 'it-restart-pause', 'it-restart-pending', 'it-restart-tb', 'it-restart-auto'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
+  ...['it-restart-close', 'it-restart-pause', 'it-restart-pending', 'it-restart-tb', 'it-restart-auto', 'it-restart-rabbit'].map((id) => ({ id, maxSeats: 2 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 })),
   { id: 'it-restart-fold', maxSeats: 6 as const, sb: 5, bb: 10, min: 100, max: 1000, turnSeconds: 60 },
 ];
 
@@ -781,5 +782,63 @@ describe('server restart recovery', () => {
     expect(detail.diagnosis.issues).not.toContain('timer_unarmed');
     a.close();
     b.close();
+  }, 240_000);
+
+  it('a rabbit hunt is the same after the server died: asked of the settled hand before the crash, and of the hand before once the next was dealt after it', async () => {
+    if (!worker) {
+      await prepareState(state, tables);
+      worker = await startWorker(port, state);
+    }
+    const base = worker.url;
+    const id = 'it-restart-rabbit';
+    const ca = await user('qa', base);
+    const cb = await user('qb', base);
+    let a = await TableSocket.open(ca, id, { base });
+    let b = await TableSocket.open(cb, id, { base });
+    const ask = async (w: TableSocket, handId: string) => {
+      const reqId = `rb-${crypto.randomUUID()}`;
+      const answer = w.waitNext((m) => (m.t === 'rabbit' || m.t === 'error') && m.reqId === reqId, 15_000, 'rabbit');
+      w.send({ t: 'rabbit', reqId, handId });
+      return answer;
+    };
+    expect(await a.request({ t: 'sit', seatIndex: 0, buyIn: 500 })).toMatchObject({ t: 'ack' });
+    expect(await b.request({ t: 'sit', seatIndex: 1, buyIn: 500 })).toMatchObject({ t: 'ack' });
+    await a.waitState(live, 15_000, 'hand start');
+    await b.waitState((s) => live(s) && s.hand!.id === a.state!.hand!.id);
+    const handId = a.state!.hand!.id;
+    // Folded before the flop: the five cards its deck held.
+    await (isMyTurn(a.state!) ? a : b).act('fold');
+    await a.waitState((s) => s.hand?.id === handId && s.hand.stage === 'settled', 15_000, 'settled');
+    const told = (await ask(a, handId)) as Extract<ServerMessage, { t: 'rabbit' }>;
+    expect(told).toMatchObject({ t: 'rabbit', handId });
+    expect(told.cards).toHaveLength(5);
+    a.close();
+    b.close();
+
+    // The server dies with the hand settled, the next not dealt.
+    await worker.stop();
+    worker = await startWorker(port, state);
+    a = await TableSocket.open(ca, id, { base });
+    b = await TableSocket.open(cb, id, { base });
+    // The next hand is dealt after the restart: the one before it still answers, the same cards, from the deck it had.
+    const next = await a.waitState((s) => live(s) && s.hand!.id !== handId, 30_000, 'next hand');
+    const dealtBy = Date.now();
+    expect(await ask(a, handId)).toMatchObject({ t: 'rabbit', handId, cards: told.cards });
+    expect(await ask(b, handId)).toMatchObject({ t: 'rabbit', handId, cards: told.cards });
+    expect(await ask(a, next.hand!.id)).toMatchObject({ t: 'error', code: 'conflict' });
+    a.close();
+    b.close();
+
+    // It dies again, the next hand being played: what was kept of the hand before was saved with the deal, and so was
+    // its time. Within it the same cards are answered; past it (a slow restart) it is refused, never other cards.
+    await worker.stop();
+    worker = await startWorker(port, state);
+    a = await TableSocket.open(ca, id, { base });
+    expect(a.state!.hand).toMatchObject({ id: next.hand!.id });
+    const again = await ask(a, handId);
+    if (Date.now() < dealtBy + 20_000) expect(again).toMatchObject({ t: 'rabbit', handId, cards: told.cards });
+    else if (again.t === 'rabbit') expect(again).toMatchObject({ handId, cards: told.cards });
+    else expect(again).toMatchObject({ t: 'error', code: 'conflict' });
+    a.close();
   }, 240_000);
 });

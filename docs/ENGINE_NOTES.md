@@ -61,7 +61,7 @@ JC ROYAL은 `poker-engine-ts@0.1.3`(MIT)을 게임 규칙의 **유일한 판단 
 - 홀수 칩: 엔진 정산 규칙을 따른다(스플릿 25 → 12/13, 결정적).
 - 숏 올인 재오픈 제한: 엔진 규칙 그대로 적용한다(이미 행동한 플레이어는 콜/폴드만 가능).
 - 최소 레이즈(2026-11-23, 의도한 커스텀 규칙): **최소 레이즈 금액(raise-to) = 그 스트리트의 현재 최고 베팅액 × 2**. 엔진 패치의 `minRaisePolicy: 'double-highest-bet'`(`patches/poker-engine-ts@0.1.3.patch`)로, 표준 규칙(최고액 + 직전 레이즈 폭)과 최고액 × 2 중 큰 값이다. 자발적 베팅이 없으면 종전 최소 오픈 그대로(BB 100 → 200, 플랍 뒤 첫 베팅은 BB). 예: 250 → 500, 500 → 1000, 플랍 300 → 600. 최소에 못 미치는 숏 올인은 낼 수 있지만, 이미 행동한 플레이어의 레이즈를 다시 열려면 표준의 풀 레이즈이면서 그 플레이어가 행동한 금액의 2배 이상이어야 한다. 정책은 핸드의 세션 설정에 저장되므로 배포 때 진행 중이던 핸드는 시작한 규칙으로 끝난다. 핸드 기록에는 이 규칙으로 진행한 핸드에만 `minRaise: 'double'`이 붙고(`HandRecord.minRaise` → `hands.event_log`의 `minRaise` → 리플레이 DTO `HandReplayFields.minRaise`), 표시가 없는 이전 기록은 리플레이의 선택지 해석과 통계 집계(리레이즈 기회)에서 종전 규칙(풀 레이즈)으로 읽는다. 금액 자체는 기록 그대로다. DB 마이그레이션은 없다(JSON 필드). `legalOptions`의 `min`이 유일한 기준이고 서버 검증·액션 바(`window_.min`)·봇(`ai/profile.ts`)·기록 해석(`apps/web/src/game/strategy.ts`)이 그것을 따른다. 시험: `test/min-raise.test.ts`, `tests/integration/rabbit.test.ts`(소켓으로 보낸 불법 금액 거절), `apps/web/test/action-bar.test.ts`.
-- 래빗헌팅: `HandEngine.rabbitHunt()`가 정산된 핸드의 덱에서 나머지 커뮤니티 카드를 읽기만 한다(`docs/WEBSOCKET_PROTOCOL.md` '래빗헌팅'). 시험: `test/rabbit-hunt.test.ts`.
+- 래빗헌팅: `HandEngine.rabbitHunt()`가 정산된 핸드의 덱에서 나머지 커뮤니티 카드를 읽기만 한다(`docs/WEBSOCKET_PROTOCOL.md` '래빗헌팅'). 룸은 다음 핸드를 돌릴 때 떠나는 핸드의 이 답을 한 번 읽어 20초 동안 적어 둔다(`apps/game-worker/src/rabbit.ts`). 엔진은 바꾸지 않았고, 새 섞기·난수도 없으며 다음 핸드의 덱과는 무관하다. 시험: `test/rabbit-hunt.test.ts`, `apps/game-worker/src/rabbit.test.ts`.
 
 ## 테스트 (`pnpm --filter @jc/poker-engine test`)
 
