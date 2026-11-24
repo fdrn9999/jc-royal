@@ -205,6 +205,12 @@ describe('table HUD', () => {
         aggression: { bets: 2, calls: 2 },
       },
     });
+    // What the HUD's bars are filled from: in every share never more than there were chances, never less than none.
+    for (const key of ['vpip', 'pfr', 'wtsd', 'wsd', 'threeBet', 'foldTo3Bet', 'cbet', 'foldToCbet'] as const) {
+      const share = mine.body.stats![key];
+      expect(share.n, key).toBeGreaterThanOrEqual(0);
+      expect(share.n, key).toBeLessThanOrEqual(share.of);
+    }
     expect((await hud(a.client, a.me.id, 'cash')).body).toEqual(mine.body);
     expect((await hud(a.client, a.me.id, 'tournament')).body.stats).toMatchObject({ hands: 1, vpip: { n: 1, of: 1 }, threeBet: { n: 1, of: 1 }, counted: 1 });
     expect((await hud(a.client, a.me.id, 'mtt')).status).toBe(400);

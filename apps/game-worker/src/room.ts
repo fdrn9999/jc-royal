@@ -79,6 +79,7 @@ import {
 import { botBuyIn, botEvent, pickBot, readBotProfiles, within, type BotEventKind } from './bots';
 import { botManners, emptyManners } from './bot-manners';
 import { addShown, afterHandMs } from './muck';
+import { keptRabbitFor, keepRabbit, type KeptRabbit } from './rabbit';
 import { addHand, OPP_STATS_KEY, readOppStats, statsBySeat, type OppStats } from './opp-stats';
 import { countHand, countMove, type BotStatsAcc, type BotStatsFlush } from './bot-stats';
 import { LobbyFeed, placesMoved, placesOf } from './lobby-feed';
@@ -236,6 +237,12 @@ interface RoomState {
    * and never part of the hand's record or replay.
    */
   shown?: { handId: string; cards: Record<string, number[]> } | null;
+  /**
+   * The rabbit hunt of the hand before the one on the table (rabbit.ts): what its deck held for the rest of its board,
+   * for the players it dealt in, for a short while after the next deal, so a request that the deal overtook is still
+   * answered. Read only, like the hunt itself; gone when the next hand settles.
+   */
+  lastRabbit?: KeptRabbit | null;
   version: number;
   /** Member rooms: since when nobody has been seated (the room closes itself after MEMBER_IDLE_CLOSE_MS). */
   emptySince?: number | null;
@@ -1208,7 +1215,12 @@ export class TableRoom extends DurableObject<Env> {
         if (i === null) throw new CommandError('forbidden', 'not seated');
         const h = this.hand;
         if (!h || !h.isSettled || this.room.settledHandId !== h.handId || msg.handId !== h.handId) {
-          throw new CommandError('conflict', 'no finished hand to rabbit hunt');
+          // The hand before this one, asked for as (or just after) the next was dealt: the request and the deal crossed.
+          // Its cards are kept for a short while (rabbit.ts), for the players it dealt in who still hold that seat.
+          const kept = keptRabbitFor(this.room.lastRabbit, msg.handId, Date.now());
+          if (!kept) throw new CommandError('conflict', 'no finished hand to rabbit hunt');
+          if (kept.seats[a.userId] !== i) throw new CommandError('forbidden', 'not dealt in');
+          return this.send(ws, { t: 'rabbit', reqId: msg.reqId, handId: kept.handId, cards: kept.cards });
         }
         if (!this.dealtInAt(h, a.userId, i)) throw new CommandError('forbidden', 'not dealt in');
         const cards = h.rabbitHunt();
@@ -1974,6 +1986,7 @@ export class TableRoom extends DurableObject<Env> {
       const stacks = h.finalStacks();
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
+      this.room.lastRabbit = null;
       this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
       this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
       // A tournament hand is not recorded (no hand history, statistics or replay): its result is the tournament's —
@@ -1993,6 +2006,7 @@ export class TableRoom extends DurableObject<Env> {
       // the stack saved with it (a top-up taken for them included), not the hand's.
       for (const s of this.room.seats) if (s && s.phase !== 'cashing' && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
+      this.room.lastRabbit = null;
       this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
       this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
       // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
@@ -2729,6 +2743,8 @@ export class TableRoom extends DurableObject<Env> {
       if (tn?.closeAt && tn.closeAt <= now && !this.room.closing) await this.beginClose();
       // Next hand.
       if (this.room.nextHandAt && this.room.nextHandAt <= now && (!this.hand || this.hand.isSettled)) {
+        // What the hand that goes now would have shown a rabbit hunt stays answerable a little longer (saved with the deal).
+        this.room.lastRabbit = this.hand && this.room.settledHandId === this.hand.handId ? keepRabbit(this.hand, now) : null;
         this.hand = null;
         await this.startHand();
       }
@@ -3153,6 +3169,7 @@ export class TableRoom extends DurableObject<Env> {
     this.room.closed = true;
     this.room.closedAt = Date.now();
     this.room.nextHandAt = null;
+    this.room.lastRabbit = null;
     this.hand = null;
     await this.save();
     // What the bots learned of the members here is of no use once the table is closed. Only a table where they counted a

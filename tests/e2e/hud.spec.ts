@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import type { PlayerHudDto } from '@jc/types';
-import { playOneHand, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
+import { expectHudBars, playOneHand, signUp, sitWith, standUp, test, widerThanDevice } from './helpers';
 
 /** The pick button on the seat of the member named `nickname` (it carries their name). */
 const seatOf = (page: Page, nickname: string) => page.locator(`[data-testid^="seat-pick-"][aria-label="${nickname}"]`);
@@ -60,6 +60,8 @@ test('table HUD: inside the card a seat opens and never on the table; private un
   // Closed: the four basic figures only; each ratio's hands and the rest until asked for.
   await expect(hud.getByTestId('seat-hud-vpip')).not.toContainText('/');
   await expect(hud.getByTestId('seat-hud-cbet')).toHaveCount(0);
+  // A bar under each of the three shares, none under the sample.
+  await expect.poll(() => expectHudBars(hud)).toBe(3);
   await expect(hud.getByTestId('seat-hud-more')).toHaveAttribute('aria-expanded', 'false');
   await hud.getByTestId('seat-hud-more').click();
   await expect(hud.getByTestId('seat-hud-more')).toHaveAttribute('aria-expanded', 'true');
@@ -74,7 +76,17 @@ test('table HUD: inside the card a seat opens and never on the table; private un
     await expect(hud.getByTestId(id), id).toContainText(`${n}/${of}`);
     if (of === 0) await expect(hud.getByTestId(id), id).toContainText('—');
     else await expect(hud.getByTestId(id), id).toContainText(`${Math.round((n / of) * 1000) / 10}%`);
+    // The bar is filled from the same hands: none of them an idle track, all of them as much as the server counted.
+    await expect(hud.getByTestId(`${id}-bar`), id).toHaveAttribute('data-fill', of === 0 ? 'none' : String(Math.round((n / of) * 1000) / 10));
   }
+  // Opened: all eight shares have their bar; AF is a factor with its counts and no bar.
+  await expect.poll(() => expectHudBars(hud)).toBe(8);
+  await expect(hud.getByTestId('seat-hud-af')).toContainText(`${dto.stats!.aggression.bets}/${dto.stats!.aggression.calls}`);
+  // Closed again: the basic figures and their bars stay, the rest goes.
+  await hud.getByTestId('seat-hud-more').click();
+  await expect(hud.getByTestId('seat-hud-later')).toHaveCount(0);
+  await expect.poll(() => expectHudBars(hud)).toBe(3);
+  await hud.getByTestId('seat-hud-more').click();
   await expect(card).toBeInViewport();
   await fits(b.page, card);
   await b.page.screenshot({ path: 'test-results/hud-card-desktop.png', animations: 'disabled' });
@@ -88,9 +100,11 @@ test('table HUD: inside the card a seat opens and never on the table; private un
   await showStats(b.page, true);
   await seatOf(a.page, b.nickname).tap();
   await expect(mine.getByTestId('seat-hud-hands')).toContainText('1');
+  await mine.getByTestId('seat-hud-more').tap();
   for (const [width, height] of [[390, 844], [320, 568], [667, 375]] as const) {
     await a.page.setViewportSize({ width, height });
     await fits(a.page, mine);
+    await expect.poll(() => expectHudBars(mine.getByTestId('seat-hud'))).toBe(8);
     await a.page.screenshot({ path: `test-results/hud-card-${width}x${height}.png`, animations: 'disabled' });
   }
   await a.page.setViewportSize({ width: 390, height: 844 });
@@ -109,6 +123,9 @@ test('table HUD: inside the card a seat opens and never on the table; private un
   const botHud = botCard.getByTestId('seat-hud');
   await expect(botHud).toHaveAttribute('data-bot', 'true');
   await expect(botHud.getByTestId('seat-hud-bot')).toHaveText('봇 기록');
+  // A bot's figures with the same bars as a member's (or, before its first hand here, the empty state and none).
+  if (await botHud.getByTestId('seat-hud-none').count()) await expect(botHud.locator('[data-fill]')).toHaveCount(0);
+  else await expect.poll(() => expectHudBars(botHud)).toBe(3);
   // What a bot acts on is the card's own line, said once.
   await expect(botCard).toContainText('자기 카드와 모두에게 공개된 정보만 보고 행동합니다');
   await expect(botCard).toBeInViewport({ ratio: 1 });

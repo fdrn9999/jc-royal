@@ -139,10 +139,9 @@ describe('rabbit hunting', () => {
     for (const p of [b, c, spec]) for (const m of p.ws.messages) for (const card of mine) expect(JSON.stringify(m)).not.toContain(JSON.stringify(card));
     for (const p of [a, c, spec]) for (const m of p.ws.messages) for (const card of theirs) expect(JSON.stringify(m)).not.toContain(JSON.stringify(card));
 
-    // The next deal: the old hand is refused, the new one is being played, and its cards are its own deck's.
+    // The next deal: it is not offered, and the hand being played tells nobody what is to come.
     const next = await a.ws.waitState((s) => !!s.hand && s.hand.id !== handId, 20_000, 'next hand');
     expect(next.you.canRabbit).toBe(false);
-    expect(await rabbit(a, handId)).toMatchObject({ t: 'error', code: 'conflict' });
     expect(await rabbit(a, next.hand!.id)).toMatchObject({ t: 'error', code: 'conflict' });
 
     // The record is the hand as it was played: no board, and the cards kept hidden stay hidden.
@@ -183,6 +182,93 @@ describe('rabbit hunting', () => {
       expect(a.ws.state!.hand!.board).toEqual(board);
     }
   });
+});
+
+// A request sent in the last moment of that gap (or held up on the way) reaches the room after the deal. The game waits
+// for nobody; the hand that went stays answerable for a short while instead (apps/game-worker/src/rabbit.ts).
+describe('rabbit hunting: a request the next deal overtook', () => {
+  it('the hand before is still answered, with the same cards, to its players alone, and changes nothing of the hand played now; gone once that hand settles', async () => {
+    const { ps, handId } = await seated('it-rabbit-2', 2);
+    const [a, b] = ps as [Player, Player];
+    const spec = await player('it-rabbit-2');
+    await foldAt([a, b], 'preflop');
+    const before = (await rabbit(b, handId)) as Rabbit;
+    expect(before.cards).toHaveLength(5);
+
+    const next = await a.ws.waitState((s) => !!s.hand && s.hand.id !== handId && live(s), 20_000, 'next hand');
+    await b.ws.waitState((s) => s.hand?.id === next.hand!.id);
+    const nextId = next.hand!.id;
+    const seen = { version: a.ws.state!.version, seq: a.ws.state!.hand!.seq, pot: a.ws.state!.hand!.potTotal, stacks: a.ws.state!.seats.map((s) => s.stack), mine: a.ws.state!.seats[seatOf(a)]!.holeCards };
+
+    // Late, twice, and from both players: the cards the hand's own deck held, as they were told before the deal.
+    const late = (await Promise.all([rabbit(a, handId), rabbit(a, handId), rabbit(b, handId)])) as Rabbit[];
+    for (const r of late) expect(r).toMatchObject({ t: 'rabbit', handId, cards: before.cards });
+    // Nothing of the hand played now is told or changed: it is refused its own rabbit hunt, and no state went out.
+    expect(await rabbit(a, nextId)).toMatchObject({ t: 'error', code: 'conflict' });
+    expect(await rabbit(a, 'some-other-hand')).toMatchObject({ t: 'error', code: 'conflict' });
+    expect(a.ws.state!.version).toBe(seen.version);
+    expect(a.ws.state!.hand).toMatchObject({ id: nextId, seq: seen.seq, potTotal: seen.pot, board: [] });
+    expect(a.ws.state!.seats.map((s) => s.stack)).toEqual(seen.stacks);
+    expect(a.ws.state!.seats[seatOf(a)]!.holeCards).toEqual(seen.mine);
+    expect(a.ws.state!.you.canRabbit).toBe(false);
+
+    // Not to a spectator, nor to a player who sat down after that hand.
+    expect(await rabbit(spec, handId)).toMatchObject({ t: 'error', code: 'forbidden' });
+    const c = await player('it-rabbit-2');
+    expect(await c.ws.request({ t: 'sit', seatIndex: 2, buyIn: 1000 })).toMatchObject({ t: 'ack' });
+    expect(await rabbit(c, handId)).toMatchObject({ t: 'error', code: 'forbidden' });
+    for (const p of [c, spec]) expect(p.ws.messages.some((m) => m.t === 'rabbit')).toBe(false);
+
+    // The hand played now ends: from then on it is the one with a rabbit hunt, and the one before it has none.
+    for (const p of [a, b]) await p.ws.waitState((s) => s.hand?.id === nextId);
+    await foldAt([a, b], 'preflop');
+    expect(await rabbit(a, handId)).toMatchObject({ t: 'error', code: 'conflict' });
+    const own = (await rabbit(a, nextId)) as Rabbit;
+    expect(own).toMatchObject({ t: 'rabbit', handId: nextId });
+    expect(own.cards).toHaveLength(5);
+
+    // Chips are where the two hands put them: none made or lost by asking.
+    expect(a.ws.state!.seats.reduce((n, s) => n + s.stack, 0)).toBe(3000);
+    const rec = await recorded(a, handId);
+    expect(rec.board).toEqual([]);
+  });
+
+  it('a hand that left a turn and a river behind answers those two; a hand with a full board leaves nothing', async () => {
+    const { ps, handId } = await seated('it-rabbit-3', 2);
+    const [a, b] = ps as [Player, Player];
+    const [va] = (await foldAt([a, b], 'flop')) as [TableView, TableView];
+    const board = va.hand!.board;
+    expect(board).toHaveLength(3);
+    const second = await a.ws.waitState((s) => !!s.hand && s.hand.id !== handId && live(s), 20_000, 'next hand');
+    await b.ws.waitState((s) => s.hand?.id === second.hand!.id);
+    const late = (await rabbit(a, handId)) as Rabbit;
+    expect(late).toMatchObject({ t: 'rabbit', handId });
+    expect(late.cards).toHaveLength(2);
+    expect(new Set<Card>([...board, ...late.cards]).size).toBe(5);
+
+    // Checked down to a showdown: the board is complete, and nothing is kept of it.
+    const secondId = second.hand!.id;
+    const [vs] = (await foldAt([a, b], 'never')) as [TableView, TableView];
+    expect(vs.hand!.board).toHaveLength(5);
+    const third = await a.ws.waitState((s) => !!s.hand && s.hand.id !== secondId && live(s), 20_000, 'third hand');
+    expect(third.you.canRabbit).toBe(false);
+    expect(await rabbit(a, secondId)).toMatchObject({ t: 'error', code: 'conflict' });
+    expect(await rabbit(a, handId)).toMatchObject({ t: 'error', code: 'conflict' });
+  });
+
+  it('it is answered for a short while only: 20 s after the deal the hand before is refused, with the next still being played', async () => {
+    const { ps, handId } = await seated('it-rabbit-4', 2);
+    const [a, b] = ps as [Player, Player];
+    await foldAt([a, b], 'preflop');
+    const next = await a.ws.waitState((s) => !!s.hand && s.hand.id !== handId && live(s), 20_000, 'next hand');
+    const dealtBy = Date.now();
+    expect(await rabbit(a, handId)).toMatchObject({ t: 'rabbit', handId });
+    // (Turns here are 60 s: nobody acts, so the hand is still the one being played when the time is up.)
+    await new Promise((r) => setTimeout(r, Math.max(0, dealtBy + 20_500 - Date.now())));
+    expect(a.ws.state!.hand).toMatchObject({ id: next.hand!.id, stage: 'preflop' });
+    expect(await rabbit(a, handId)).toMatchObject({ t: 'error', code: 'conflict' });
+    expect(await rabbit(b, handId)).toMatchObject({ t: 'error', code: 'conflict' });
+  }, 90_000);
 });
 
 describe('minimum raise: double the highest bet of the street, enforced by the room', () => {

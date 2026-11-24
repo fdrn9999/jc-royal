@@ -168,3 +168,60 @@ export function dealtCards(page: Page, seat: string): Promise<string[]> {
     });
   }, seat);
 }
+
+/**
+ * A HUD's bars as they are drawn (apps/web SeatHud): every share shown has one, 4 to 6 px high, filled as far as the
+ * number beside it says (a dash: an idle track with nothing in it; 0%: an empty one), inside its cell. The sample and
+ * AF have none, and AF is never a percentage. Returns how many shares were looked at.
+ */
+export async function expectHudBars(hud: Locator) {
+  const seen = await hud.evaluate((root) => {
+    const cells = Array.from(root.querySelectorAll<HTMLElement>('[data-testid^="seat-hud-"][data-small]'));
+    return {
+      strays: root.querySelectorAll('[data-testid="seat-hud-hands"] [data-fill], [data-testid="seat-hud-af"] [data-fill]').length,
+      af: root.querySelector('[data-testid="seat-hud-af"]')?.textContent ?? null,
+      titles: root.querySelectorAll('[title]').length,
+      cells: cells.map((cell) => {
+        const id = cell.dataset.testid!;
+        const bar = cell.querySelector<HTMLElement>(`[data-testid="${id}-bar"]`);
+        const fill = bar?.firstElementChild as HTMLElement | null;
+        const track = bar?.getBoundingClientRect();
+        const box = cell.getBoundingClientRect();
+        return {
+          id,
+          text: cell.querySelector('dd')?.textContent ?? '',
+          small: cell.dataset.small,
+          mark: bar?.dataset.fill ?? null,
+          height: track?.height ?? 0,
+          width: track?.width ?? 0,
+          filled: fill ? fill.getBoundingClientRect().width : 0,
+          gold: fill ? fill.className.includes('gold') : null,
+          inside: !!track && track.left >= box.left - 0.5 && track.right <= box.right + 0.5,
+        };
+      }),
+    };
+  });
+  expect(seen.strays).toBe(0);
+  expect(seen.titles).toBe(0);
+  if (seen.af !== null) expect(seen.af).not.toContain('%');
+  expect(seen.cells.length).toBeGreaterThanOrEqual(3);
+  for (const c of seen.cells) {
+    expect(c.mark, c.id).not.toBeNull();
+    expect(c.height, c.id).toBeGreaterThanOrEqual(4);
+    expect(c.height, c.id).toBeLessThanOrEqual(6);
+    expect(c.width, c.id).toBeGreaterThan(40);
+    expect(c.inside, c.id).toBe(true);
+    if (c.text === '—') {
+      expect(c.mark, c.id).toBe('none');
+      expect(c.filled, c.id).toBe(0);
+      continue;
+    }
+    expect(c.text, c.id).toMatch(/^\d+(\.\d)?%$/);
+    const share = Number(c.text.replace('%', ''));
+    expect(Number(c.mark), c.id).toBe(share);
+    // The page was drawn with its animations at rest or still running: the end of the bar is where the number says.
+    expect(Math.abs(c.filled - (c.width * share) / 100), c.id).toBeLessThanOrEqual(1);
+    if (share > 0) expect(c.gold, c.id).toBe(c.small === 'true');
+  }
+  return seen.cells.length;
+}

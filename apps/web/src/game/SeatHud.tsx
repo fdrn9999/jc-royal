@@ -2,6 +2,7 @@
  * A seat's HUD, inside the card a tap or click on the seat opens (docs/SOCIAL.md "테이블 HUD"): nothing is drawn over the table, so no
  * card, stack, button, blind, bet, turn mark or action button is ever covered. VPIP, PFR, 3-bet and the sample first;
  * opened, every ratio's hands and the rest. A dash where there was no chance (never 0%), gold under 30 hands.
+ * Every share has a thin bar under its number, filled from the same hands the number is made of (no chart library).
  * The figures come from the server behind the card's gate (GET /api/players/:id/hud), or, at a practice table, from
  * the browser's own count of that session. Loaded on demand, so the text lives here.
  */
@@ -68,15 +69,39 @@ const tr = createTranslator({ ko, en });
 
 export type HudKind = HudScope | 'practice';
 
-/** One figure: its name and the share (a dash with no chance), and opened, the hands behind it. */
+/**
+ * How much of a share's bar is filled, 0 to 1, from the hands the share is made of; null with no chance to measure
+ * (the bar is then an idle track: that is not 0%). Counts that cannot be (more than there were, below nothing, not a
+ * number) are held inside the bar.
+ */
+export function barFill(ratio: StatRatio): number | null {
+  if (!(ratio.of > 0) || !Number.isFinite(ratio.of)) return null;
+  const share = ratio.n / ratio.of;
+  return Number.isFinite(share) ? Math.min(1, Math.max(0, share)) : 0;
+}
+
+/** The columns the figures stand in: two, down to the narrowest phone (each figure's bar is as wide as its column). */
+const FIGURES = 'grid grid-cols-2 gap-x-4 gap-y-2.5';
+
+/**
+ * One share: its name, the share (a dash with no chance), its bar, and opened, the hands behind it. The bar says the
+ * same as the number and nothing more (the number is what is read out). Teal, or gold with the number while the hands
+ * behind it are few; never a colour that calls a figure good or bad.
+ */
 function Cell({ label, ratio, testid, open }: { label: string; ratio: StatRatio; testid: string; open: boolean }) {
   const small = ratio.of > 0 && ratio.of < SMALL_RATIO;
+  const fill = barFill(ratio);
   return (
     <div className="min-w-0" data-testid={testid} data-small={small}>
-      <dt className="truncate text-[11px] text-ink-400">{label}</dt>
-      <dd className={cx('font-mono text-base font-semibold tabular-nums', small ? 'text-gold-300' : 'text-ivory')}>{pct(ratio.n, ratio.of)}</dd>
+      <div className="flex items-baseline justify-between gap-2">
+        <dt className="truncate text-[11px] text-ink-400">{label}</dt>
+        <dd className={cx('shrink-0 font-mono text-sm font-semibold tabular-nums', small ? 'text-gold-300' : 'text-ivory')}>{pct(ratio.n, ratio.of)}</dd>
+      </div>
+      <dd className={cx('mt-1 h-[5px] overflow-hidden rounded-full', fill === null ? 'bg-white/[0.04]' : 'bg-white/10')} aria-hidden data-testid={`${testid}-bar`} data-fill={fill === null ? 'none' : Math.round(fill * 1000) / 10}>
+        {fill !== null && fill > 0 && <div className={cx('h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none', small ? 'bg-gold-400' : 'bg-[#5fbfae]')} style={{ width: `${fill * 100}%` }} />}
+      </dd>
       {open && (
-        <dd className="font-mono text-[11px] tabular-nums text-ink-400">
+        <dd className="mt-0.5 text-right font-mono text-[11px] tabular-nums text-ink-400">
           {formatChips(ratio.n)}/{formatChips(ratio.of)}
         </dd>
       )}
@@ -120,13 +145,14 @@ export function HudFigures({ stats, kind, bot }: { stats: HudStatsDto; kind: Hud
         <p className="text-sm text-ink-300" data-testid="seat-hud-none">{m('none')}</p>
       ) : (
         <>
-          <dl className="grid grid-cols-4 gap-2">
+          <dl className={FIGURES}>
             <Cell label="VPIP" ratio={stats.vpip} testid="seat-hud-vpip" open={open} />
             <Cell label="PFR" ratio={stats.pfr} testid="seat-hud-pfr" open={open} />
             <Cell label={m('threeBet')} ratio={stats.threeBet} testid="seat-hud-3bet" open={open} />
-            <div className="min-w-0" data-testid="seat-hud-hands">
+            {/* A count, not a share: no bar. */}
+            <div className="flex min-w-0 items-baseline justify-between gap-2" data-testid="seat-hud-hands">
               <dt className="truncate text-[11px] text-ink-400">{m('sample')}</dt>
-              <dd className="font-mono text-base font-semibold tabular-nums text-ivory">
+              <dd className="shrink-0 font-mono text-sm font-semibold tabular-nums text-ivory">
                 {formatChips(stats.hands)}
                 <span className="ml-1 font-sans text-[11px] font-normal text-ink-400">{m('hands')}</span>
               </dd>
@@ -138,14 +164,17 @@ export function HudFigures({ stats, kind, bot }: { stats: HudStatsDto; kind: Hud
             </p>
           )}
           {open && (
-            <dl className="grid grid-cols-3 gap-2" data-testid="seat-hud-later">
+            <dl className={FIGURES} data-testid="seat-hud-later">
               <Cell label={m('foldTo3Bet')} ratio={stats.foldTo3Bet} testid="seat-hud-fold-3bet" open />
               <Cell label={m('cbet')} ratio={stats.cbet} testid="seat-hud-cbet" open />
               <Cell label={m('foldToCbet')} ratio={stats.foldToCbet} testid="seat-hud-fold-cbet" open />
+              {/* A factor (bets and raises for each call), not a share of anything: the number alone, no bar. */}
               <div className="min-w-0" data-testid="seat-hud-af">
-                <dt className="text-[11px] text-ink-400">{m('af')}</dt>
-                <dd className="font-mono text-base font-semibold tabular-nums text-ivory">{aggressionFactor(stats.aggression)}</dd>
-                <dd className="font-mono text-[11px] tabular-nums text-ink-400">
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="truncate text-[11px] text-ink-400">{m('af')}</dt>
+                  <dd className="shrink-0 font-mono text-sm font-semibold tabular-nums text-ivory">{aggressionFactor(stats.aggression)}</dd>
+                </div>
+                <dd className="mt-0.5 text-right font-mono text-[11px] tabular-nums text-ink-400">
                   {formatChips(stats.aggression.bets)}/{formatChips(stats.aggression.calls)}
                 </dd>
               </div>

@@ -4,7 +4,7 @@
  * animate the same; it only renders the TableView it is given.
  */
 import { handLabelKey, type Card, type SeatView, type TableView } from '@jc/types';
-import { ChipStack, cx, Logo, PlayingCard } from '@jc/ui';
+import { ChipStack, cx, Logo, PlayingCard, RabbitIcon } from '@jc/ui';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts, type AmountUnit } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -331,9 +331,10 @@ export const TableScene = memo(function TableScene({
   // Chips already gathered in the middle; after settlement they have been paid out.
   const collected = staged?.pot ?? collectedOf(s);
   const boardShown = staged?.board ?? hand?.board.length ?? 0;
-  // Rabbit cards only once the settled hand's own board and result are all shown.
+  // Rabbit cards once the settled hand's own board is all shown. They do not wait for the staged result (a hand with a
+  // rabbit hunt ended by a fold: they say nothing of who won), which could take what is left of the time to the deal.
   const dealt = hand?.board.length ?? 0;
-  const hunted = rabbit?.length && hand?.stage === 'settled' && result && boardShown === dealt && dealt + rabbit.length <= 5 ? rabbit : null;
+  const hunted = rabbit?.length && hand?.stage === 'settled' && boardShown === dealt && dealt + rabbit.length <= 5 ? rabbit : null;
   // The board cards drawn last time (this hand's): the ones drawn now for the first time are the ones that turn.
   const drawn = useRef({ hand: '', n: 0 });
   const before = drawn.current.hand === hand?.id ? drawn.current.n : 0;
@@ -401,7 +402,8 @@ export const TableScene = memo(function TableScene({
         <div className="pointer-events-auto relative flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
           {hunted && (
             // On the board's own edge, so the cards under it are never taken for the hand's.
-            <span className="pointer-events-none absolute -top-2 right-1 z-10 rounded-full bg-gold-400 px-1.5 text-[9px] font-bold leading-4 tracking-[0.08em] text-ink-950 shadow" data-testid="rabbit-label">
+            <span className="pointer-events-none absolute -top-2 right-1 z-10 inline-flex items-center gap-1 rounded-full bg-gold-400 px-1.5 text-[9px] font-bold leading-4 tracking-[0.08em] text-ink-950 shadow" data-testid="rabbit-label">
+              <RabbitIcon className="size-3" strokeWidth={2.2} />
               RABBIT HUNT
             </span>
           )}
