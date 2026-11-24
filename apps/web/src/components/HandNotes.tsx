@@ -74,7 +74,14 @@ export function HandRow({ hand, onChange }: { hand: HandSummaryDto; onChange: (h
         ))}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold">{hand.tableName}</div>
+        <div className="flex items-center gap-1.5 text-sm font-semibold">
+          <span className="truncate">{hand.tableName}</span>
+          {hand.tournament && (
+            <span className="shrink-0 rounded-full border border-gold-400/40 px-1.5 py-px text-[10px] font-medium text-gold-300" data-testid="hand-tournament">
+              {t('hands.tournament')}
+            </span>
+          )}
+        </div>
         <div className="text-xs text-ink-400">
           #{hand.handNumber} · {formatDate(hand.endedAt, locale)}
           {hand.position && ` · ${t(`me.pos.${hand.position}` as MsgKey)}`}

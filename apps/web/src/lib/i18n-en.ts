@@ -600,6 +600,7 @@ export const en: Dict = {
   'hands.potNote': 'Pot size counts in the table’s current big blind.',
   'hands.memoMark': 'Has a memo',
   'hands.bookmark': 'Bookmark',
+  'hands.tournament': 'Tournament chips',
   'hands.tags.review': 'Review',
   'hands.tags.bluff': 'Bluff',
   'hands.tags.hardCall': 'Hard call',

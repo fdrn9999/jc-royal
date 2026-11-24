@@ -288,7 +288,17 @@ export async function recordHand(
   handNumber: number,
   rec: HandRecord,
   engineLog: unknown,
-  opts: { bots?: number; botPolicy?: boolean; timeBank?: Partial<Record<TimeBankMetric, number>>; botStats?: { day: number; n: Record<string, number> }[] } = {},
+  opts: {
+    bots?: number;
+    botPolicy?: boolean;
+    timeBank?: Partial<Record<TimeBankMetric, number>>;
+    botStats?: { day: number; n: Record<string, number> }[];
+    /**
+     * A tournament's hand: recorded under its tournament, apart from cash play (tournament chips are not wallet chips).
+     * It earns no achievement and no challenge progress, which are about cash hands.
+     */
+    tournament?: { id: string; meta: unknown };
+  } = {},
 ): Promise<{ maintenance: Maintenance | null; botPolicyOn: boolean | null; timeBank: TimeBankPolicy | null; social: SocialPolicy | null }> {
   const eventLog = JSON.stringify({
     actions: rec.actions,
@@ -299,6 +309,7 @@ export async function recordHand(
     engine: await gzipBase64(JSON.stringify(engineLog)),
   });
   const policy = opts.botPolicy ? [d1.prepare(`SELECT (${BOT_POLICY_ON}) AS botPolicyOn`)] : [];
+  const tournamentId = opts.tournament?.id ?? null;
   const stmts: D1PreparedStatement[] = [
     maintenanceQuery(d1, Date.now()),
     ...policy,
@@ -311,15 +322,28 @@ export async function recordHand(
       .bind(tableId, rec.handId),
     d1
       .prepare(
-        `INSERT OR IGNORE INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log, bots)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+        `INSERT OR IGNORE INTO hands (id, table_id, hand_number, started_at, ended_at, board, pot_total, engine_version, event_log, bots, tournament_id, tournament)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
       )
-      .bind(rec.handId, tableId, handNumber, rec.startedAt, rec.endedAt, JSON.stringify(rec.board), rec.potTotal, rec.engineVersion, eventLog, opts.bots ?? 0),
+      .bind(
+        rec.handId,
+        tableId,
+        handNumber,
+        rec.startedAt,
+        rec.endedAt,
+        JSON.stringify(rec.board),
+        rec.potTotal,
+        rec.engineVersion,
+        eventLog,
+        opts.bots ?? 0,
+        tournamentId,
+        opts.tournament ? JSON.stringify(opts.tournament.meta) : null,
+      ),
     ...rec.players.map((p) =>
       d1
         .prepare(
-          `INSERT OR IGNORE INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, rank_class, rank_value, best_five, went_to_showdown, ended_at, shown)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
+          `INSERT OR IGNORE INTO hand_players (hand_id, user_id, seat_index, hole_cards, stack_start, stack_end, net, won, rank_class, rank_value, best_five, went_to_showdown, ended_at, shown, tournament_id)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)`,
         )
         .bind(
           rec.handId,
@@ -337,6 +361,7 @@ export async function recordHand(
           rec.endedAt,
           // A record kept from before muck existed has no flag: NULL reads as went_to_showdown, which it was.
           p.shown === undefined ? null : p.shown ? 1 : 0,
+          tournamentId,
         ),
     ),
   ];
@@ -356,14 +381,14 @@ export async function recordHand(
   }
   try {
     // Achievements (packages/db/src/achievementsSql.ts), from the hand's record and the statistics above; idempotent.
-    await d1.batch(achievementsForHand(d1, rec.handId));
+    if (!opts.tournament) await d1.batch(achievementsForHand(d1, rec.handId));
   } catch (e) {
     console.error('achievements failed', tableId, rec.handId, e);
   }
   try {
     // Challenges (packages/db/src/challengesSql.ts) for the day and week the hand ended in: from the hand's record only,
     // once per member, code and period whatever runs again.
-    await d1.batch(challengeStatements(d1, CHALLENGES, 'hand', rec.handId, rec.endedAt, CHALLENGE_ACHIEVEMENT_AT));
+    if (!opts.tournament) await d1.batch(challengeStatements(d1, CHALLENGES, 'hand', rec.handId, rec.endedAt, CHALLENGE_ACHIEVEMENT_AT));
   } catch (e) {
     console.error('challenges failed', tableId, rec.handId, e);
   }

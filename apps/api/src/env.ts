@@ -48,6 +48,11 @@ export interface Env {
   PUSH_SINK_URL?: string;
   /** `1` opens multi-table tournaments (docs/TOURNAMENT_MTT.md): off unless set, and Sit & Gos never depend on it. */
   MTT_ENABLED?: string;
+  /**
+   * `1` records the hands of tournaments opened from then on (hand history, replay, tournament statistics;
+   * docs/TOURNAMENT.md "대회 핸드 기록"): off unless set. A tournament keeps what it was opened with.
+   */
+  TOURNAMENT_HANDS_ENABLED?: string;
 }
 
 export interface AuthUser {

@@ -100,7 +100,8 @@ export const meRoutes = new Hono<AppEnv>()
    * Only the user's own hand_players rows: a seat dealt into a hand, never a hand watched. vpip, pfr, saw_flop,
    * position and pot_won come from HAND_STATS_SQL (packages/db/src/handStats.ts), the 3-bet, c-bet, aggression and big
    * blind columns from the game worker's detail-stats.ts; rows not filled yet are left out of the figures that
-   * need them, so nothing is estimated.
+   * need them, so nothing is estimated. Cash hands only (`tournament_id IS NULL`): a recorded tournament hand is played
+   * with tournament chips, which are no part of a member's chips won or lost (its figures: the HUD's tournament scope).
    */
   .get('/stats', async (c) => {
     const uid = c.var.user!.id;
@@ -116,7 +117,7 @@ export const meRoutes = new Hono<AppEnv>()
                 COALESCE(MAX(CASE WHEN net > 0 THEN net END), 0) AS biggestWin,
                 ${PLAY_STATS_COLUMNS},
                 TOTAL(CASE WHEN big_blind > 0 THEN net * 1.0 / big_blind END) AS bbWon
-         FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2`,
+         FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2 AND tournament_id IS NULL`,
       ).bind(uid, from),
       // Chips a player put in are won - net (payouts include uncalled chips handed back). The contested pot is all chips
       // put in minus the part of the largest contribution nobody matched; only hands the user put chips into count.
@@ -124,7 +125,7 @@ export const meRoutes = new Hono<AppEnv>()
         `WITH c AS (
            SELECT hp.hand_id, hp.user_id, hp.won - hp.net AS put,
                   ROW_NUMBER() OVER (PARTITION BY hp.hand_id ORDER BY hp.won - hp.net DESC) AS rk
-           FROM hand_players hp WHERE hp.hand_id IN (SELECT hand_id FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2)
+           FROM hand_players hp WHERE hp.hand_id IN (SELECT hand_id FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2 AND tournament_id IS NULL)
          ), pots AS (
            SELECT SUM(put) - MAX(CASE WHEN rk = 1 THEN put ELSE 0 END) + MAX(CASE WHEN rk = 2 THEN put ELSE 0 END) AS pot,
                   MAX(CASE WHEN user_id = ?1 THEN put ELSE 0 END) AS myPut
@@ -134,13 +135,13 @@ export const meRoutes = new Hono<AppEnv>()
       ).bind(uid, from),
       c.env.DB.prepare(
         `SELECT rank_class AS rankClass, rank_value AS rankValue, best_five AS bestFive FROM hand_players
-         WHERE user_id = ?1 AND ended_at >= ?2 AND went_to_showdown = 1 AND rank_value IS NOT NULL
+         WHERE user_id = ?1 AND ended_at >= ?2 AND tournament_id IS NULL AND went_to_showdown = 1 AND rank_value IS NOT NULL
          ORDER BY rank_value DESC LIMIT 1`,
       ).bind(uid, from),
       c.env.DB.prepare(
         `SELECT position, COUNT(*) AS hands, COALESCE(SUM(vpip), 0) AS vpip, COALESCE(SUM(pfr), 0) AS pfr, COALESCE(SUM(net), 0) AS net,
                 COUNT(big_blind) AS counted, TOTAL(CASE WHEN big_blind > 0 THEN net * 1.0 / big_blind END) AS bbWon
-         FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2 AND position IS NOT NULL GROUP BY position`,
+         FROM hand_players WHERE user_id = ?1 AND ended_at >= ?2 AND tournament_id IS NULL AND position IS NOT NULL GROUP BY position`,
       ).bind(uid, from),
     ]);
     type Agg = PlayStatsRow & Record<'played' | 'measured' | 'won' | 'totalWon' | 'net' | 'biggestWin' | 'bbWon', number>;
@@ -188,7 +189,7 @@ export const meRoutes = new Hono<AppEnv>()
               COALESCE(SUM(saw_flop), 0) AS sawFlop, COALESCE(SUM(saw_flop AND went_to_showdown), 0) AS wtsd,
               COALESCE(SUM(went_to_showdown AND pot_won IS NOT NULL), 0) AS showdowns, COALESCE(SUM(went_to_showdown AND pot_won > 0), 0) AS wsd,
               COUNT(big_blind) AS counted, TOTAL(CASE WHEN big_blind > 0 THEN net * 1.0 / big_blind END) AS bbWon
-       FROM hand_players WHERE user_id = ?1 AND ended_at >= ?3 GROUP BY d ORDER BY d`,
+       FROM hand_players WHERE user_id = ?1 AND ended_at >= ?3 AND tournament_id IS NULL GROUP BY d ORDER BY d`,
     )
       .bind(c.var.user!.id, off, from)
       .all<Record<'d' | 'hands' | 'net' | 'dealt' | 'vpip' | 'pfr' | 'sawFlop' | 'wtsd' | 'showdowns' | 'wsd' | 'counted' | 'bbWon', number>>();

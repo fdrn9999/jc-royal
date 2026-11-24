@@ -90,7 +90,7 @@ export const playerRoutes = new Hono<AppEnv>()
         `SELECT COUNT(*) AS hands, ${PLAY_STATS_COLUMNS},
                 (SELECT COUNT(*) FROM tournament_entries te JOIN tournaments tt ON tt.id = te.tournament_id
                   WHERE te.user_id = ?1 AND te.status = 'won' AND tt.is_private = 0) AS wins
-           FROM hand_players WHERE user_id = ?1 AND ?2`,
+           FROM hand_players WHERE user_id = ?1 AND tournament_id IS NULL AND ?2`,
       ).bind(id, showStats ? 1 : 0),
     ]);
     const codes = new Set<string>(ACHIEVEMENTS);

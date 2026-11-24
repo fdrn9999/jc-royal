@@ -13,7 +13,7 @@ import {
   type TournamentStructure,
 } from '@jc/types';
 import { describe, expect, it } from 'vitest';
-import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, toTournamentRow, type TournamentRow, type TourneyState } from './tournament';
+import { bustOut, markAborted, playersLeft, runClock, seedTourney, stopClock, toTournamentRow, tournamentHandMeta, type TournamentRow, type TourneyState } from './tournament';
 
 const MIN = 60_000;
 const structure: TournamentStructure = {
@@ -289,3 +289,32 @@ function seeded(users: string[]): TourneyState {
 function dealt(stacks: Record<string, number>) {
   return Object.entries(stacks).map(([playerId, stack]) => ({ playerId, displayName: playerId, stack }));
 }
+
+describe("a tournament hand's record", () => {
+  it('is kept only by a tournament opened with hand recording', () => {
+    const off = seeded(['a', 'b', 'c']);
+    expect(off.record).toBeUndefined();
+    expect(tournamentHandMeta(off, off.levels[0]!.sb, off.levels[0]!.bb, false)).toBeNull();
+    // What the room reads from D1 says so: 1, nothing else.
+    expect(toTournamentRow(JSON.stringify({ ...rowJson(), recordHands: 1 }))!.recordHands).toBe(true);
+    expect(toTournamentRow(JSON.stringify({ ...rowJson(), recordHands: 0 }))!.recordHands).toBe(false);
+    expect(toTournamentRow(JSON.stringify(rowJson()))!.recordHands).toBe(false);
+  });
+
+  it('names the tournament, the level the hand was dealt at, its number and the players then in', () => {
+    const t = seedTourney(row({ recordHands: true, entries: ['a', 'b', 'c'].map((u) => entry(u, 'playing', null)) }), 0);
+    expect(t.record).toBe(true);
+    t.hands = 7;
+    // The clock moved on during the hand: the level is the one whose blinds the hand was dealt with.
+    t.level = 1;
+    const first = t.levels[0]!;
+    expect(tournamentHandMeta(t, first.sb, first.bb, false)).toEqual({
+      id: 'tn1',
+      meta: { format: 'sng', level: 0, sb: first.sb, bb: first.bb, hand: 7, left: 3, startStack: 1500 },
+    });
+    // Blinds that are no level's (never dealt, but not guessed at either): the level now.
+    expect(tournamentHandMeta(t, 1, 3, false)!.meta).toMatchObject({ level: 1, sb: 1, bb: 3 });
+    // One table of several does not know the tournament's hand count or field: its coordinator does.
+    expect(tournamentHandMeta({ ...t, format: 'mtt' }, first.sb, first.bb, true)!.meta).toMatchObject({ format: 'mtt', hand: null, left: null });
+  });
+});

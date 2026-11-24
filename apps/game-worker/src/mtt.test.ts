@@ -39,6 +39,7 @@ function row(entries: TournamentEntryRow[], over: Partial<TournamentRow> = {}): 
     levelLeftMs: null,
     pausedAt: T0,
     hands: 0,
+    recordHands: false,
     entries,
     ...over,
   };

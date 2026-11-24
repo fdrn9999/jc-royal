@@ -96,6 +96,21 @@ export function savedMetrics(input: HandNoteInput): HandNoteMetric[] {
 export const isFiltered = (q: HandListQuery) =>
   q.from !== undefined || q.to !== undefined || !!q.position || !!q.result || q.minPot !== undefined || !!q.tag || !!q.bookmarked;
 
+/** A listed hand's big blind: the level's for a tournament hand (hands.tournament), else the table's. */
+const HAND_BB = `CASE WHEN h.tournament_id IS NULL THEN t.big_blind ELSE COALESCE(json_extract(h.tournament, '$.bb'), t.big_blind) END`;
+
+/** The tournament a listed hand was played in (HandSummaryDto.tournament); nothing for a cash hand. */
+function tournamentOf(r: { tournamentId: string | null; tournament: string | null }): Pick<HandSummaryDto, 'tournament'> {
+  if (!r.tournamentId) return {};
+  let meta: { format?: unknown; level?: unknown } = {};
+  try {
+    meta = (JSON.parse(r.tournament ?? '{}') ?? {}) as typeof meta;
+  } catch {
+    // An unreadable note of the tournament: the hand is still marked as a tournament's.
+  }
+  return { tournament: { id: r.tournamentId, format: meta.format === 'mtt' ? 'mtt' : 'sng', level: Number.isSafeInteger(meta.level) ? (meta.level as number) : 0 } };
+}
+
 interface ListRow {
   id: string;
   tableId: string;
@@ -105,6 +120,8 @@ interface ListRow {
   board: string;
   potTotal: number;
   bigBlind: number;
+  tournamentId: string | null;
+  tournament: string | null;
   net: number;
   won: number;
   holeCards: string;
@@ -135,7 +152,7 @@ export async function listHands(db: D1Database, userId: string, q: HandListQuery
   if (q.to !== undefined) where.push(`${o}.ended_at < ${arg(q.to)}`);
   if (q.position) where.push(`hp.position = ${arg(q.position)}`);
   if (q.result) where.push(q.result === 'up' ? 'hp.net > 0' : q.result === 'down' ? 'hp.net < 0' : 'hp.net = 0');
-  if (q.minPot !== undefined) where.push(`h.pot_total >= ${arg(q.minPot)} * t.big_blind`);
+  if (q.minPot !== undefined) where.push(`h.pot_total >= ${arg(q.minPot)} * ${HAND_BB}`);
   if (q.bookmarked) where.push('n.bookmarked = 1');
   if (q.tag) where.push(`(n.tags & ${arg(1 << HAND_TAGS.indexOf(q.tag))}) != 0`);
   const from = byNote
@@ -144,7 +161,7 @@ export async function listHands(db: D1Database, userId: string, q: HandListQuery
   const { results } = await db
     .prepare(
       `SELECT hp.hand_id AS id, h.table_id AS tableId, t.name AS tableName, h.hand_number AS handNumber, hp.ended_at AS endedAt,
-         h.board, h.pot_total AS potTotal, t.big_blind AS bigBlind, hp.net, hp.won, hp.hole_cards AS holeCards,
+         h.board, h.pot_total AS potTotal, ${HAND_BB} AS bigBlind, h.tournament_id AS tournamentId, h.tournament, hp.net, hp.won, hp.hole_cards AS holeCards,
          hp.rank_class AS rankClass, hp.position, n.bookmarked, n.tags, n.memo IS NOT NULL AS hasMemo
        FROM ${from}
        JOIN hands h ON h.id = hp.hand_id
@@ -169,6 +186,7 @@ export async function listHands(db: D1Database, userId: string, q: HandListQuery
     rankClass: r.rankClass,
     position: r.position,
     bigBlind: r.bigBlind,
+    ...tournamentOf(r),
     bookmarked: r.bookmarked === 1,
     tags: tagList(r.tags ?? 0),
     hasMemo: r.hasMemo === 1,

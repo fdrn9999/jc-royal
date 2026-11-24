@@ -52,8 +52,11 @@ export const ACTIVE_TOURNAMENT = `('registering', 'closed', 'running')`;
 export const ELSEWHERE_SQL = (user: string) => `EXISTS (SELECT 1 FROM tournament_entries o JOIN tournaments ot ON ot.id = o.tournament_id
   WHERE o.user_id = ${user} AND o.tournament_id != ?1 AND o.status IN ${HOLDING_ENTRY} AND ot.status IN ${ACTIVE_TOURNAMENT})`;
 
-/** Hands the member has played, counted up to `limit` (an index range on hp_user_idx, never the whole history). */
-export const HANDS_SQL = (user: string, limit: string) => `CASE WHEN ${limit} > 0 THEN (SELECT COUNT(*) FROM (SELECT 1 FROM hand_players h WHERE h.user_id = ${user} LIMIT ${limit})) ELSE 0 END`;
+/**
+ * Cash hands the member has played, counted up to `limit` (an index range on hp_user_idx, never the whole history).
+ * A recorded tournament hand does not count: the entry condition is about play at the cash tables, as before.
+ */
+export const HANDS_SQL = (user: string, limit: string) => `CASE WHEN ${limit} > 0 THEN (SELECT COUNT(*) FROM (SELECT 1 FROM hand_players h WHERE h.user_id = ${user} AND h.tournament_id IS NULL LIMIT ${limit})) ELSE 0 END`;
 
 export const parseLevels = (raw: unknown): BlindLevel[] => {
   try {
@@ -288,6 +291,12 @@ export async function reloadTournament(env: Env, t: { id: string; format?: strin
 
 /** Whether multi-table tournaments may be opened and started (MTT_ENABLED, off unless set). */
 export const mttEnabled = (env: Pick<Env, 'MTT_ENABLED'>) => env.MTT_ENABLED === '1';
+
+/**
+ * What a tournament opened now gets as `record_hands` (TOURNAMENT_HANDS_ENABLED, off unless set): 1 or 0, safe to put
+ * into SQL as it is. Fixed at opening so that a tournament's hands are recorded whole or not at all.
+ */
+export const recordHandsSql = (env: Pick<Env, 'TOURNAMENT_HANDS_ENABLED'>): '1' | '0' => (env.TOURNAMENT_HANDS_ENABLED === '1' ? '1' : '0');
 
 /** A random whole number from 0 to n − 1 (crypto). */
 const cryptoRand: Rand = (n) => {
