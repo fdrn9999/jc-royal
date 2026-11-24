@@ -6703,7 +6703,7 @@ Codex(codex-cli 0.162.1)는 이 PC에서 샌드박스가 프로세스를 띄우�
 | 단위 | `pnpm test` | 1,331 / 1,331(admin 89, api 256, poker-engine 134, game-worker 122, web 730) |
 | 통합 | `pnpm test:integration` | 542 / 543(69개 파일 중 68). 실패 1건은 `social-policy.test.ts`의 `d1 execute failed`(시험 도구가 D1에 쓰다 실패, 이 변경과 무관한 파일). 그 파일만 다시 5/5 |
 | E2E 데스크톱 | `pnpm test:e2e --project=desktop --retries=0` | 172 / 172(1.5시간) |
-| E2E 모바일 | `pnpm test:e2e --project=mobile --retries=0` | MOBILE |
+| E2E 모바일 | `pnpm test:e2e --project=mobile --retries=0` | 74 / 74(16.1분, 다시 시도 없이. 데스크톱 바로 뒤에 이어 돌린 첫 실행은 결과 없이 끝나 따로 다시 돌린 것). 전체 E2E 뒤에 시험 파일의 형 오류(`[...NodeList]` → `Array.from`)만 고쳤고 닿는 4개 파일은 데스크톱에서 다시 10/10 |
 | 번들 가드 | `pnpm --filter @jc/web build && pnpm check:bundle` | 통과. 첫 화면 JS 647 KB(한도 650 KB). 다시 빌드해도 같은 값. HUD는 전처럼 따로 받는 청크(`SeatHud-*.js` 7.7 KB) |
 
 ### 재현과 원인
