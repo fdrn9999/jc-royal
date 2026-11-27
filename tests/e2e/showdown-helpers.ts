@@ -167,6 +167,12 @@ export async function openRoom(page: Page, over: Record<string, unknown> = {}): 
 const ORDER = ['dimming', 'title', 'reveal', 'highlight', 'settlement', 'restore'];
 
 /** The phases of the page's `n`th scene (from 0), in the order it went through them. */
+/** The phases long enough for any page to draw: the grey coming (0.18s) and going (0.32s) can pass a busy one by. */
+export const SEEN = ['title', 'reveal', 'highlight', 'settlement'];
+
+/** The scene's phases that last (SEEN), in the order they came. */
+export const lasting = (ph: string[]) => ph.filter((p) => SEEN.includes(p));
+
 export function phasesOf(w: Watched, n: number): string[] {
   const out: string[][] = [[]];
   for (const p of w.phases) {

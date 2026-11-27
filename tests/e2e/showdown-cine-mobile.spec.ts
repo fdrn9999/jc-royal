@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test';
 import { checkOrCall, signUp, sitWith, test, widerThanDevice } from './helpers';
-import { expectLit, expectRestored, expectScene, openRoom, phasesOf, scene, scenesDone, shootPhases, truth, watchShowdown } from './showdown-helpers';
+import { expectLit, expectRestored, expectScene, lasting, openRoom, phasesOf, scene, scenesDone, SEEN, shootPhases, truth, watchShowdown } from './showdown-helpers';
 
 test('mobile: 쇼다운 연출이 휴대폰 화면 안에서 자리를 바꾸지 않고 한 번 나오고, 탭을 막지 않는다', async ({ browser }) => {
   test.setTimeout(300_000);
@@ -39,7 +39,7 @@ test('mobile: 쇼다운 연출이 휴대폰 화면 안에서 자리를 바꾸지
   expect(during.wide).toBe(false);
   await a.page.waitForTimeout(900);
   const w = await scene(a.page);
-  expect(phasesOf(w, 0)).toEqual(['dimming', 'title', 'reveal', 'highlight', 'settlement', 'restore']);
+  expect(lasting(phasesOf(w, 0))).toEqual(SEEN);
   expectScene(w, 0, played()!, ta.mySeat);
   // The title: inside the phone's screen, in the display face, taking no tap.
   const under = w.styles.find((s) => s.phase === 'title')!;
