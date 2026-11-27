@@ -187,14 +187,15 @@ export function phasesOf(w: Watched, n: number): string[] {
  * the hands the showdown turned over; the winner's mark on every pot's winner and nobody else; the board's gold on the
  * winners' five; and no card of a hand kept face down (other than this page's own).
  */
-export function expectScene(w: Watched, n: number, t: Truth['settled'][number], mySeat: number | null) {
+export function expectScene(w: Watched, n: number, t: Truth['settled'][number], mySeat: number | null, photographed = false) {
   const ph = phasesOf(w, n);
-  expect(ph.length, `phases of scene ${n}: ${JSON.stringify(w.phases)}`).toBeGreaterThanOrEqual(4);
+  // (A page photographed at each phase is held up while it is: it can pass a phase by. What it did draw is checked.)
+  expect(ph.length, `phases of scene ${n}: ${JSON.stringify(w.phases)}`).toBeGreaterThanOrEqual(photographed ? 2 : 4);
   expect(new Set(ph).size, `no phase twice: ${ph}`).toBe(ph.length);
   expect([...ph].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b)), 'in order').toEqual(ph);
   // (The colour coming back lasts a third of a second: a page too busy to draw it in time goes from the result
   // straight to the scene's end, like a next hand that cuts it short. What is left then is checked by expectRestored.)
-  for (const must of ['title', 'reveal']) expect(ph, `phases: ${ph}`).toContain(must);
+  if (!photographed) for (const must of ['title', 'reveal']) expect(ph, `phases: ${ph}`).toContain(must);
   const snaps = w.snaps.filter((_, i) => {
     // The snaps of this scene: as many as its phases, after those of the scenes before it.
     let from = 0;
@@ -204,9 +205,10 @@ export function expectScene(w: Watched, n: number, t: Truth['settled'][number], 
   const at = (phase: string) => snaps.find((s) => s.phase === phase);
   const shown = new Set(t.shown.map((x) => x.seatIndex));
   // Until the hands turn, every seat is grey and the title is the only thing added.
-  const title = at('title')!;
-  expect(title.title).toBe(true);
-  for (const s of Object.values(title.seats)) expect(s.sd).toBe('out');
+  const title = at('title');
+  if (!photographed) expect(title, `phases: ${ph}`).toBeTruthy();
+  if (title) expect(title.title).toBe(true);
+  for (const s of Object.values(title?.seats ?? {})) expect(s.sd).toBe('out');
   // From then on: the showdown's hands in colour, every other seat grey.
   const lit = at('highlight') ?? at('settlement')!;
   expect(lit, `a snap with the result: ${ph}`).toBeTruthy();

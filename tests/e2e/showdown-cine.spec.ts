@@ -31,7 +31,7 @@ test('쇼다운 연출: 폴드 승리에는 없고, 쇼다운에서 한 번(회�
   await a.page.screenshot({ path: 'test-results/showdown-foldwin.png' });
 
   // 2. A hand checked down to its showdown: the scene, once, on both players' pages and the spectator's.
-  const shots = shootPhases(a.page, 'showdown-hu', 0);
+  const shots = shootPhases(b.page, 'showdown-hu', 0);
   const played = () => ta.settled.find((h) => h.showdown);
   await expect(async () => {
     if (!played()) (await checkOrCall(a.page)) || (await checkOrCall(b.page));
@@ -42,9 +42,9 @@ test('쇼다운 연출: 폴드 승리에는 없고, 쇼다운에서 한 번(회�
   console.log('phases photographed (asked:in):', (await shots).join(' '));
   await a.page.waitForTimeout(900);
   const wa = await scene(a.page);
-  // (Order, and no phase twice, are expectScene's to check: here, that none of the lasting ones was passed by. On
-  // the other player's page: this one is photographed at each phase, which holds its drawing up past a phase or two.)
-  expect(lasting(phasesOf(await scene(b.page), 0)), 'an unhurried showdown goes through every phase').toEqual(SEEN);
+  // (Order, and no phase twice, are expectScene's to check: here, that none of the lasting ones was passed by. The
+  // pictures are taken of the other player's page: a page photographed at each phase is held up past a phase or two.)
+  expect(lasting(phasesOf(wa, 0)), 'an unhurried showdown goes through every phase').toEqual(SEEN);
   expect(wa.titles).toBe(1);
   for (const [p, t] of [
     [a.page, ta],
@@ -54,8 +54,8 @@ test('쇼다운 연출: 폴드 승리에는 없고, 쇼다운에서 한 번(회�
     const w = await scene(p);
     const mine = t.settled.find((h) => h.id === hand.id)!;
     expect(mine, 'the same hand on every page').toBeTruthy();
-    expectScene(w, 0, mine, t.mySeat);
-    expect(w.titles).toBe(1);
+    expectScene(w, 0, mine, t.mySeat, p === b.page);
+    if (p !== b.page) expect(w.titles).toBe(1);
   }
   expect(tc.mySeat).toBeNull();
   // What the page had drawn: grey everywhere under the title; then the board, the pot and the showdown's hands in
@@ -108,7 +108,7 @@ test('쇼다운 연출: 올인 런아웃은 패를 먼저 펴고 보드를 차�
   // (Whoever loses everything buys in again by their own standing order: a seat left mid-scene ends the staging.)
   await sitRebuy(a.page, id, 300);
   await sitRebuy(b.page, id, 300);
-  const shots = shootPhases(a.page, 'showdown-allin', 0);
+  const shots = shootPhases(b.page, 'showdown-allin', 0);
   const played = () => ta.settled.find((h) => h.showdown);
   await expect(async () => {
     if (!played()) (await shove(a.page)) || (await shove(b.page));
@@ -124,7 +124,9 @@ test('쇼다운 연출: 올인 런아웃은 패를 먼저 펴고 보드를 차�
     [b.page, tb],
   ] as const) {
     const w = await scene(p);
-    expectScene(w, 0, t.settled.find((h) => h.id === hand.id)!, t.mySeat);
+    expectScene(w, 0, t.settled.find((h) => h.id === hand.id)!, t.mySeat, p === b.page);
+    // (The page photographed may have passed a phase by: the order of things is read on the other.)
+    if (p === b.page) continue;
     // The hands turned over before the board was run out, the board complete before anyone was marked a winner.
     const snaps = w.snaps;
     const turned = snaps.find((s) => s.phase === 'reveal')!;
@@ -210,7 +212,8 @@ test('쇼다운 연출: 세 명 올인의 메인·사이드 팟마다 실제 승
   console.log('phases photographed (asked:in):', (await shots).join(' '), 'winners:', hand.winners.join(','), 'pots:', hand.pots);
   for (const [i, p] of [...players, d.page].entries()) {
     const t = ts[i]!;
-    expectScene(await scene(p), 0, t.settled.find((h) => h.id === hand.id)!, t.mySeat);
+    expectScene(await scene(p), 0, t.settled.find((h) => h.id === hand.id)!, t.mySeat, p === d.page);
   }
-  expectLit(await scene(d.page), 0, hand);
+  // (Not the spectator's page: it is the one photographed.)
+  expectLit(await scene(a.page), 0, hand);
 });
