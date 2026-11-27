@@ -1,5 +1,6 @@
 import { sound } from '@jc/audio';
 import type { ActionType, AutoBuyRequest, PublicUserDto, SeatView, TableView, TournamentDetailDto } from '@jc/types';
+import { bgmOf } from '@jc/types';
 import {
   ArrowDownIcon,
   ArrowUpFromLineIcon,
@@ -247,6 +248,11 @@ export function TablePage() {
     sound.music.enter();
     return () => sound.music.leave();
   }, []);
+  // Which music is the room's choice, known once its state arrives (a room from before the choice plays the default).
+  const bgm = sock.state ? bgmOf(sock.state.table.bgmId) : null;
+  useEffect(() => {
+    if (bgm) sound.music.enter(bgm);
+  }, [bgm]);
   // iOS Safari ignores user-scalable=no; block pinch zoom on the game screen except in the chat panel.
   useEffect(() => {
     const block = (e: Event) => {
@@ -630,11 +636,11 @@ export function TablePage() {
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }}>
+    <div className="jc-sd-page fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'var(--t-bg)' }}>
       {/* top bar */}
       <header
         className={cx(
-          'jc-game-surface flex shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 backdrop-blur-md',
+          'jc-game-surface jc-sd-ui flex shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 backdrop-blur-md',
           // The stand-up question hangs below the header, over the lines that follow it (each at z-40) and over the chat
           // beside the table (z-50, the phone's drawer it also is, and later on the page).
           leaveAsk || lobbyAsk ? 'z-[60]' : 'z-40',

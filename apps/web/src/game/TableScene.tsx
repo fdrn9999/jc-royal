@@ -13,6 +13,7 @@ import { planForText, planHeight, planTable, scalePlan, type Density, type PlanI
 import type { SeatReaction } from './Reactions';
 import { revealSpots } from './reveal';
 import { Seat } from './Seat';
+import { seatSpot, showdownSeats, winningCards } from './showdown';
 import { collected as collectedOf } from './staging';
 import type { CueEvent } from './useTableSocket';
 import { wonFrom } from './won';
@@ -308,7 +309,11 @@ export const TableScene = memo(function TableScene({
   const hand = s.hand;
   // The server state, as the cues that brought it play out (CueLayer): bets land, then go to the pot, cards turn in
   // order, the hands show before the result, the result before the payouts.
-  const { staged, flights, start, arrival } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion);
+  const { staged, flights, start, arrival, titleMs } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion);
+  // A showdown's scene (staging's `cine`): only while its plan runs, so a hand found settled (a reload, a reconnect)
+  // or won by a fold has none, and a new hand, a hidden tab or leaving the page ends it with the plan.
+  const cine = staged?.cine ?? null;
+  const inShowdown = useMemo(() => showdownSeats(hand?.result), [hand?.result]);
   const result = !staged || staged.result;
   const reveal = !staged || staged.reveal;
   // Before the frame is painted, so a page holding its word never shows it a frame early.
@@ -317,8 +322,8 @@ export const TableScene = memo(function TableScene({
   const won = useMemo(() => (result ? wonFrom(hand?.result) : []), [hand?.result, result]);
   const winners = useMemo(() => new Map(won.map((w) => [w.seatIndex, w.amount])), [won]);
   const showdown = useMemo(() => new Map(result ? (hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x]) : []), [hand?.result, result]);
-  const topWinner = won[0]?.seatIndex;
-  const winningFive = topWinner !== undefined ? (showdown.get(topWinner)?.bestFive ?? []) : [];
+  // Every pot's winners' cards (a side pot's, both halves of a split), not the first winner's only.
+  const winningFive = useMemo(() => (result ? winningCards(hand?.result, won.map((w) => w.seatIndex)) : []), [hand?.result, result, won]);
   // Where winners' cards shown after the hand come to rest by the board (reveal.ts), worked out once per plan and set
   // of such winners.
   const showing = s.seats.filter((x) => (winners.get(x.seatIndex) ?? 0) > 0 && x.shown?.some(Boolean)).map((x) => x.seatIndex);
@@ -380,9 +385,9 @@ export const TableScene = memo(function TableScene({
   const show = useCallback((card: 0 | 1) => latest.current.onShow?.(card), []);
 
   return (
-    <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'} data-density={density}>
+    <div className="relative" style={{ width: box.w, height: box.h }} data-testid="table" data-portrait={portrait ? '1' : '0'} data-density={density} data-showdown={cine ?? undefined}>
       {/* rail + felt, around the seats' middles */}
-      <div className="absolute rounded-[50%] p-[1.2%] shadow-[0_30px_80px_rgba(0,0,0,0.7)]" style={{ left: plan.felt.x, top: plan.felt.y, width: plan.felt.w, height: plan.felt.h, background: 'var(--t-rail)' }}>
+      <div className="jc-sd-dim absolute rounded-[50%] p-[1.2%] shadow-[0_30px_80px_rgba(0,0,0,0.7)]" style={{ left: plan.felt.x, top: plan.felt.y, width: plan.felt.w, height: plan.felt.h, background: 'var(--t-rail)' }}>
         <div className="relative size-full rounded-[50%] p-[0.6%]" style={{ background: 'var(--t-rail-inner)' }}>
           <div className="relative size-full overflow-hidden rounded-[50%] shadow-[inset_0_6px_30px_rgba(0,0,0,0.7)]" style={{ background: 'var(--t-felt)' }} data-testid="felt">
             <div className="absolute inset-[9%] rounded-[50%] border" style={{ borderColor: 'var(--t-felt-line)' }} />
@@ -396,10 +401,10 @@ export const TableScene = memo(function TableScene({
       {/* pot, board and the status line, in the room the layout kept for them. The room takes no taps, only what it
           draws: on a small table it reaches over the seats beside it, whose level and style open a bot's card. */}
       <div className="pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={{ left: plan.block.x, top: plan.block.y, width: plan.block.w, height: plan.block.h }}>
-        <div className="flex shrink-0 items-center justify-center [&>*]:pointer-events-auto" style={{ height: plan.potRowH }} data-testid="pot">
+        <div className="jc-sd-lit flex shrink-0 items-center justify-center [&>*]:pointer-events-auto" style={{ height: plan.potRowH }} data-testid="pot">
           {collected > 0 && <ChipStack amount={collected} size={`${plan.potChip}px`} text={amounts.fmt(collected, true)} />}
         </div>
-        <div className="pointer-events-auto relative flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
+        <div className="jc-sd-lit pointer-events-auto relative flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
           {hunted && (
             // On the board's own edge, so the cards under it are never taken for the hand's.
             <span className="pointer-events-none absolute -top-2 right-1 z-10 inline-flex items-center gap-1 rounded-full bg-gold-400 px-1.5 text-[9px] font-bold leading-4 tracking-[0.08em] text-ink-950 shadow" data-testid="rabbit-label">
@@ -413,7 +418,7 @@ export const TableScene = memo(function TableScene({
             // One after another, in the order they would have come; dimmed and ringed, never the winning five.
             if (!c && r)
               return (
-                <div key={`${hand!.id}-rabbit-${r}`} className="rounded-[calc(var(--card-size)*0.12)] opacity-80 outline-2 outline-offset-1 outline-dashed outline-gold-400/80" style={{ ['--card-size' as string]: boardSize }} data-testid="rabbit-card" data-card={r}>
+                <div key={`${hand!.id}-rabbit-${r}`} className="jc-sd-dim rounded-[calc(var(--card-size)*0.12)] opacity-80 outline-2 outline-offset-1 outline-dashed outline-gold-400/80" style={{ ['--card-size' as string]: boardSize }} data-testid="rabbit-card" data-card={r}>
                   <BoardCard card={r} size={boardSize} animate={reducedMotion ? false : 'flip'} delay={(i - dealt) * 220} />
                 </div>
               );
@@ -436,7 +441,7 @@ export const TableScene = memo(function TableScene({
             a hand note. */}
         {layout.footer && (
           // As wide as what it says (up to the block's width), so nothing round it counts as drawn.
-          <div className="pointer-events-auto flex h-6 max-w-full shrink-0 flex-col items-center justify-center text-center text-ink-200/80" data-testid="table-status" aria-live="polite">
+          <div className="jc-sd-dim pointer-events-auto flex h-6 max-w-full shrink-0 flex-col items-center justify-center text-center text-ink-200/80" data-testid="table-status" aria-live="polite">
             {status ? (
               <span className="text-xs tracking-[0.06em]">{status}</span>
             ) : (
@@ -484,7 +489,8 @@ export const TableScene = memo(function TableScene({
               blind={hand && hand.stage === 'preflop' ? (hand.sbSeat === seat.seatIndex ? 'SB' : hand.bbSeat === seat.seatIndex ? 'BB' : null) : null}
               winAmount={winners.get(seat.seatIndex) ?? null}
               handLabel={label}
-              bestFive={sd?.bestFive ?? null}
+              // (The gold is the winners': a hand turned over and beaten shows its name, not a ring on its cards.)
+              bestFive={sd && winners.has(seat.seatIndex) ? sd.bestFive : null}
               newHandKey={hand?.id ?? null}
               deal={arrival?.deal?.[seat.seatIndex] ?? null}
               still={arrival?.still ?? null}
@@ -498,10 +504,11 @@ export const TableScene = memo(function TableScene({
               startCut={cut[seat.seatIndex]}
               density={density}
               amounts={amounts}
+              spot={seatSpot(cine, inShowdown.has(seat.seatIndex))}
               style={places[seat.seatIndex]!}
             />
             {bet > 0 && (
-              <div className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
+              <div className="jc-sd-dim absolute z-20 flex -translate-x-1/2 -translate-y-1/2" style={{ left: `${g.bet.x}%`, top: `${g.bet.y}%` }} data-testid={`bet-${seat.seatIndex}`}>
                 <ChipStack amount={bet} size={`${d.chip}px`} text={amounts.fmt(bet, true)} />
               </div>
             )}
@@ -510,6 +517,18 @@ export const TableScene = memo(function TableScene({
       })}
 
       <Flights flights={flights} start={start} geometry={placed} pot={layout.pot} box={box} amounts={amounts} />
+      {/* The showdown's title, over the middle of the table for the moment before the hands turn: it takes no tap and
+          no room, and is gone (unmounted) once they do. */}
+      {cine === 'title' && (
+        <div
+          aria-hidden
+          className="jc-showdown-title"
+          style={{ left: plan.block.x + plan.block.w / 2, top: plan.block.y + plan.block.h / 2, fontSize: Math.round(Math.max(18, Math.min(56, box.w * 0.07))), animationDuration: `${titleMs}ms` }}
+          data-testid="showdown-title"
+        >
+          SHOWDOWN
+        </div>
+      )}
     </div>
   );
 });

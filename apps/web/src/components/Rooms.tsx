@@ -2,7 +2,8 @@
  * Members' own rooms: the create dialog (lobby) and the host's room dialog (table). The server checks every
  * value; the host can rename the room, change spectating and the join code, share the link and close it.
  */
-import { MAX_ACTIVE_ROOMS, ROOM_BIG_BLINDS, SUPPORTED_MAX_SEATS, type TableView } from '@jc/types';
+import { sound } from '@jc/audio';
+import { BGM_IDS, BGM_TITLES, DEFAULT_BGM, MAX_ACTIVE_ROOMS, ROOM_BIG_BLINDS, SUPPORTED_MAX_SEATS, type BgmId, type TableView } from '@jc/types';
 import { Button, cx, Field, formatChips, Input, Modal } from '@jc/ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
@@ -57,6 +58,10 @@ export function CreateRoomModal({ open, onClose }: { open: boolean; onClose: () 
   const [allowSpectators, setAllowSpectators] = useState(true);
   const [isPrivate, setIsPrivate] = useState(false);
   const [code, setCode] = useState('');
+  const [bgmId, setBgmId] = useState<BgmId>(DEFAULT_BGM);
+  // The track being listened to before choosing, if any. It plays through the table music's own element (so never
+  // beside it) and stops when the dialog closes, the room is made or another track is picked.
+  const [preview, setPreview] = useState<BgmId | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const paused = useMaintenance().games;
@@ -65,6 +70,23 @@ export function CreateRoomModal({ open, onClose }: { open: boolean; onClose: () 
     setName(me ? t('room.defaultName', { name: me.nickname }).slice(0, 30) : '');
     setError(null);
   }, [open, me, t]);
+  useEffect(() => {
+    if (!open) setPreview(null);
+  }, [open]);
+  useEffect(() => {
+    sound.music.preview(preview);
+    return () => sound.music.preview(null);
+  }, [preview]);
+  const pickBgm = (v: BgmId) => {
+    setBgmId(v);
+    setPreview((p) => (p && v !== 'none' ? v : null));
+  };
+  const togglePreview = () => {
+    // Inside the tap: audio starts only from a gesture.
+    sound.unlock();
+    setPreview((p) => (p ? null : bgmId));
+  };
+  const silent = !sound.settings.musicOn || sound.settings.muted || sound.settings.music <= 0;
 
   const codeOk = !isPrivate || code.trim().length >= 4;
   const valid = name.trim().length >= 2 && maxBb >= minBb && codeOk;
@@ -74,8 +96,9 @@ export function CreateRoomModal({ open, onClose }: { open: boolean; onClose: () 
     setError(null);
     try {
       const { id } = await api<{ id: string }>('/api/rooms', {
-        body: { name: name.trim(), maxSeats, bigBlind, minBuyIn: minBb * bigBlind, maxBuyIn: maxBb * bigBlind, allowSpectators, isPrivate, ...(isPrivate ? { joinCode: code.trim() } : {}) },
+        body: { name: name.trim(), maxSeats, bigBlind, minBuyIn: minBb * bigBlind, maxBuyIn: maxBb * bigBlind, allowSpectators, isPrivate, bgmId, ...(isPrivate ? { joinCode: code.trim() } : {}) },
       });
+      setPreview(null);
       onClose();
       // The host needs no join code for their own room, so none goes in the address.
       nav(`/table/${id}?sit=1`);
@@ -135,6 +158,27 @@ export function CreateRoomModal({ open, onClose }: { open: boolean; onClose: () 
           </Field>
         </div>
         {maxBb < minBb && <p className="text-sm text-[#f3b0b2]">{t('room.buyInOrder')}</p>}
+        <Field label={t('room.bgm')}>
+          {() => (
+            <div className="flex flex-col gap-2">
+              <Choice label={t('room.bgm')} value={bgmId} options={BGM_IDS} onChange={pickBgm} render={(v) => (v === 'none' ? t('room.bgmNone') : BGM_TITLES[v])} testid="room-bgm" />
+              {bgmId !== 'none' && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <button
+                    type="button"
+                    onClick={togglePreview}
+                    aria-pressed={!!preview}
+                    data-testid="room-bgm-preview"
+                    className="jc-tap min-h-11 rounded-lg border border-white/10 px-3 text-sm text-ink-300 transition hover:text-ivory"
+                  >
+                    {preview ? `■ ${t('room.bgmStop')}` : `▶ ${t('room.bgmPreview')}`}
+                  </button>
+                  {preview && silent && <span className="text-xs text-ink-400">{t('room.bgmSilent')}</span>}
+                </div>
+              )}
+            </div>
+          )}
+        </Field>
         <div className="flex flex-col">
           <Check checked={allowSpectators} onChange={setAllowSpectators} testid="room-spectators">
             {t('room.spectators')}

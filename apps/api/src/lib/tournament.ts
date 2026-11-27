@@ -494,8 +494,8 @@ export async function startTournament(env: Env, id: string, opts: StartOptions):
         db
           .prepare(
             `INSERT OR IGNORE INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, allow_spectators,
-                    entry_blocked, room_type, bots_enabled, tournament_id, created_by, created_at, updated_at)
-             SELECT ?2, ?3, ?10, ?4, ?5, ?6, ?6, ?7, ?11, 1, 1, 'tournament', 0, ?12, ?8, ?9, ?9 WHERE ${mine}`,
+                    entry_blocked, room_type, bots_enabled, tournament_id, created_by, created_at, updated_at, bgm_id)
+             SELECT ?2, ?3, ?10, ?4, ?5, ?6, ?6, ?7, ?11, 1, 1, 'tournament', 0, ?12, ?8, ?9, ?9, (SELECT bgm_id FROM tournaments WHERE id = ?1) WHERE ${mine}`,
           )
           .bind(id, tid, mtt ? `${t.name} #${k + 1}` : t.name, first.sb, first.bb, t.startStack, t.turnSeconds, opts.actorId, now, seatCount, t.isPrivate ? 1 : 0, mtt ? id : null),
       ),

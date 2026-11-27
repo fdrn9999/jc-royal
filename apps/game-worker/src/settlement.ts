@@ -7,7 +7,7 @@
  */
 import { achievementsForHand, applyLedger, botStatsIncrement, challengeStatements, HAND_STATS_SQL, handStatsIncrements, LEDGER_GUARD, opsUpserts, SOCIAL_POLICY_JSON, statsDay, type LedgerOp, type OpsCount, type TimeBankMetric } from '@jc/db';
 import type { HandRecord } from '@jc/poker-engine';
-import { BOT_LEVELS, BOT_TABLE_STYLES, CHALLENGE_ACHIEVEMENT_AT, CHALLENGES, toSocialPolicy, type BotLevel, type BotTableStyle, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
+import { BOT_LEVELS, BOT_TABLE_STYLES, CHALLENGE_ACHIEVEMENT_AT, CHALLENGES, toSocialPolicy, bgmOf, type BgmId, type BotLevel, type BotTableStyle, type SocialPolicy, type TimeBankPolicy } from '@jc/types';
 import { DETAIL_STATS_SQL, detailStatsBinds } from './detail-stats';
 import { TOURNAMENT_JSON, toTournamentRow, type TournamentRow } from './tournament';
 
@@ -27,6 +27,8 @@ export interface TableRow {
   handsPaused: boolean;
   status: 'open' | 'closing' | 'closed';
   roomType: 'official' | 'member' | 'tournament';
+  /** The table's background music: a known id (an unknown or missing one reads as the default). */
+  bgmId: BgmId;
   /** The member who opened a member room (or the admin who opened an official table). */
   createdBy: string | null;
   /** Hash of a private table's current join code. Never sent to clients. */
@@ -81,7 +83,7 @@ export async function loadTable(d1: D1Database, tableId: string, now = Date.now(
         `SELECT id, name, max_seats AS maxSeats, small_blind AS smallBlind, big_blind AS bigBlind,
                 min_buy_in AS minBuyIn, max_buy_in AS maxBuyIn, turn_seconds AS turnSeconds,
                 is_private AS isPrivate, allow_spectators AS allowSpectators, entry_blocked AS entryBlocked, hands_paused AS handsPaused, status,
-                room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash,
+                room_type AS roomType, created_by AS createdBy, join_code_hash AS joinCodeHash, bgm_id AS bgmId,
                 bots_enabled AS botsEnabled, bot_level AS botLevel, bot_style AS botStyle, bot_min_humans AS botMinHumans, bot_max AS botMax,
                 bot_fill_to AS botFillTo, bot_yield AS botYield, (${BOT_POLICY_ON}) AS botPolicyOn, (${TIME_BANK_POLICY}) AS timeBank,
                 (${SOCIAL_POLICY_JSON}) AS social, (${TOURNAMENT_JSON}) AS tournament
@@ -111,6 +113,7 @@ function toTableRow(r: Record<string, unknown>): TableRow {
     status: r.status as TableRow['status'],
     roomType: r.roomType === 'member' ? 'member' : r.roomType === 'tournament' ? 'tournament' : 'official',
     createdBy: r.createdBy == null ? null : String(r.createdBy),
+    bgmId: bgmOf(r.bgmId),
     joinCodeHash: r.joinCodeHash == null ? null : String(r.joinCodeHash),
     bots: {
       enabled: !!r.botsEnabled,

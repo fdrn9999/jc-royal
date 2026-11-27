@@ -1,7 +1,7 @@
 import type { ActionType, Card, HandStage, TableCue, TableView } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import { FreeSession } from '../src/academy/practice/free';
-import { BUDGET, boundaries, collected, dealDelays, MAX_CUES, plan, quickSounds, sig, stagedAt, type Plan, type StageCue } from '../src/game/staging';
+import { BUDGET, SHOWDOWN_BUDGET, boundaries, collected, dealDelays, MAX_CUES, plan, quickSounds, sig, stagedAt, type Plan, type StageCue } from '../src/game/staging';
 
 interface SeatIn {
   bet?: number;
@@ -225,7 +225,8 @@ describe('staging: chips', () => {
       { kind: 'handEnd' },
     );
     const p = plan(prev, cues, next, 1)!;
-    expect(p.end).toBe(BUDGET);
+    // (A showdown's plan: its own budget.)
+    expect(p.end).toBe(SHOWDOWN_BUDGET);
     // Until the last bet lands a stack may already show it gone; from then on every chip is somewhere, once.
     const lastBet = Math.max(...p.flights.filter((f) => f.kind === 'bet').map((f) => f.at + f.dur));
     for (const t of moments(p)) {
@@ -297,7 +298,7 @@ describe('staging: chips nobody called', () => {
     );
     const p = plan(prev, cues, next, 0)!;
     expect(p).not.toBeNull();
-    expect(p.end).toBeLessThanOrEqual(BUDGET);
+    expect(p.end).toBeLessThanOrEqual(SHOWDOWN_BUDGET);
     expect(p.flights.map((f) => [f.kind, f.seat, f.amount])).toEqual([
       ['bet', 1, 490],
       ['return', 0, 500],
@@ -348,7 +349,7 @@ describe('staging: cards', () => {
     );
     const p = plan(prev, cues, next, 1)!;
     expect(p).not.toBeNull();
-    expect(p.end).toBeLessThanOrEqual(BUDGET);
+    expect(p.end).toBeLessThanOrEqual(SHOWDOWN_BUDGET);
     const [f1, f2, f3, turn, river] = p.board!.at;
     expect(p.board!.from).toBe(0);
     expect(p.reveal).toBeLessThan(f1!);
@@ -411,7 +412,9 @@ describe('staging: real hands', () => {
       expect(p, JSON.stringify(cues.map((c) => c.cue))).not.toBeNull();
       if (staged.some((c) => c.cue.kind === 'handStart')) return;
       seen++;
-      expect(p!.end).toBeLessThanOrEqual(BUDGET);
+      // A showdown takes its own budget; only the server's showdown cue makes a plan one.
+      expect(!!p!.cine).toBe(staged.some((c) => c.cue.kind === 'showdown'));
+      expect(p!.end).toBeLessThanOrEqual(p!.cine ? SHOWDOWN_BUDGET : BUDGET);
       const first = stagedAt(p!, 0, after)!;
       for (const x of before.seats) expect(first.bets[x.seatIndex] ?? (after.hand!.stage === 'settled' ? 0 : x.streetBet)).toBe(x.streetBet);
       expect(first.pot ?? collected(after)).toBe(collected(before));

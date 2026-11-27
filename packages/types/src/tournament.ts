@@ -8,6 +8,7 @@
  *   higher place.
  */
 import { z } from 'zod';
+import { BGM_IDS } from './bgm';
 import { TIME_BANK_LIMITS, timeBankProblem, type TimeBankRules } from './timebank';
 import type { VipColor } from './vip';
 
@@ -285,7 +286,12 @@ export const JOIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 /** POST /api/tournaments/private: a private tournament from an active Sit & Go template. */
 export const PrivateTournamentCreateSchema = z
-  .object({ templateId: z.string().regex(/^[a-z0-9-]{3,40}$/), name: z.string().trim().min(TOURNAMENT_LIMITS.name.min).max(TOURNAMENT_LIMITS.name.max).optional() })
+  .object({
+    templateId: z.string().regex(/^[a-z0-9-]{3,40}$/),
+    name: z.string().trim().min(TOURNAMENT_LIMITS.name.min).max(TOURNAMENT_LIMITS.name.max).optional(),
+    /** The background music of the tournament's tables (bgm.ts); the default when left out. */
+    bgmId: z.enum(BGM_IDS).optional(),
+  })
   .strict();
 /** POST /api/tournaments/join: registering with a private tournament's code. */
 export const TournamentJoinCodeSchema = z.object({ code: z.string().trim().min(4).max(20) }).strict();

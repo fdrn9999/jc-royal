@@ -1018,6 +1018,7 @@ const admin = new Hono<AppEnv>()
       joinCodeHash: body.isPrivate && body.joinCode ? await sha256(`${id}:${body.joinCode}`) : null,
       allowSpectators: body.allowSpectators,
       beginner: body.beginner,
+      bgmId: body.bgmId,
       botsEnabled: body.botsEnabled,
       botLevel: body.botLevel,
       botStyle: body.botStyle,

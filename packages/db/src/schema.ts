@@ -156,6 +156,8 @@ export const tables = sqliteTable(
     minBuyIn: integer('min_buy_in').notNull(),
     maxBuyIn: integer('max_buy_in').notNull(),
     turnSeconds: integer('turn_seconds').notNull().default(20),
+    /** The table's background music: one of BGM_IDS (packages/types bgm.ts). Read through bgmOf, so an unknown id plays the default. */
+    bgmId: text('bgm_id').notNull().default('black-table-rhythm'),
     isPrivate: integer('is_private', { mode: 'boolean' }).notNull().default(false),
     joinCodeHash: text('join_code_hash'),
     allowSpectators: integer('allow_spectators', { mode: 'boolean' }).notNull().default(true),
@@ -1193,6 +1195,8 @@ export const tournaments = sqliteTable(
     levels: text('levels').notNull(),
     levelMs: integer('level_ms').notNull(),
     turnSeconds: integer('turn_seconds').notNull(),
+    /** The background music of the tournament's tables, copied to each as it is made. */
+    bgmId: text('bgm_id').notNull().default('black-table-rhythm'),
     tbEnabled: integer('tb_enabled', { mode: 'boolean' }).notNull(),
     tbInitialMs: integer('tb_initial_ms').notNull(),
     tbMaxMs: integer('tb_max_ms').notNull(),

@@ -43,6 +43,7 @@ import {
   type ErrorCode,
   type HandStage,
   type LegalOption,
+  bgmOf,
   type MaxSeats,
   type MonitorRoom,
   type MonitorSeat,
@@ -3618,6 +3619,8 @@ export class TableRoom extends DurableObject<Env> {
         isPrivate: t.isPrivate,
         roomType: t.roomType,
         hostId: t.roomType === 'member' ? t.createdBy : null,
+        // (A room restored from before the choice existed has none: the default.)
+        bgmId: bgmOf(t.bgmId),
       },
       status: this.room.closed ? 'closed' : this.room.closing ? 'closing' : h && !h.isSettled ? 'playing' : 'waiting',
       seats,

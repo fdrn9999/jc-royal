@@ -161,6 +161,11 @@ export interface SeatProps {
    * a bot's mark goes after the name, on the part still drawn.
    */
   startCut?: boolean;
+  /**
+   * A showdown's scene (showdown.ts): 'out' greys the whole seat, 'in' (a hand the showdown turned over) keeps its
+   * cards, its hand's name and a winner's plate in colour. Absent: no scene.
+   */
+  spot?: 'in' | 'out' | null;
   density: Density;
   amounts: Amounts;
   style: CSSProperties;
@@ -281,6 +286,7 @@ function SeatPlace(p: SeatProps) {
       style={p.style}
       data-testid={`seat-${s.seatIndex}`}
       data-state={s.state}
+      data-sd={p.spot ?? undefined}
     >
       {/* A folded hand fades back in when its owner shows a card (quieter than a winner's: it stays where it is). */}
       <div className={cx('relative flex flex-col items-center transition-opacity duration-300', folded && !shown && 'opacity-55')}>
@@ -288,7 +294,7 @@ function SeatPlace(p: SeatProps) {
             seat is centred on its place, so its plate and status line would rise half a card as its cards fold away (a
             folded seat's bet then read as its neighbour's on a small phone) and drop as they are dealt. */}
         {cards.length > 0 ? (
-          <div className={cx('relative flex', z.cards, p.isMe ? 'gap-1' : z.spread)} key={p.newHandKey ?? 'cards'}>
+          <div className={cx('jc-sd-cards relative flex', z.cards, p.isMe ? 'gap-1' : z.spread)} key={p.newHandKey ?? 'cards'}>
             {drawn.map(({ i, c }, at) =>
               rests(i) ? (
                 <span key={`rest-${i}`} aria-hidden className="block shrink-0" style={{ width: cardSize, height: `calc(${cardSize} * 1.4)` }} />
@@ -391,7 +397,7 @@ function SeatPlace(p: SeatProps) {
         {/* plate */}
         <div
           className={cx(
-            'relative flex items-center rounded-full border shadow-xl backdrop-blur-sm',
+            'jc-sd-plate relative flex items-center rounded-full border shadow-xl backdrop-blur-sm',
             z.plate,
             p.isActor ? 'border-gold-400/80' : 'border-[var(--t-seat-border)]',
             // My turn: a gold ring that breathes (still under reduced motion), outside the plate so the seat keeps its size.
@@ -444,7 +450,7 @@ function SeatPlace(p: SeatProps) {
           )}
         </div>
         {/* status line: no wider than the seat (layout.ts); what does not fit is cut short, whole in its title */}
-        <div className={cx('flex items-center gap-1 overflow-hidden whitespace-nowrap font-bold tracking-wide [&>span]:min-w-0 [&>span]:truncate', z.status)} data-testid={`seat-status-${s.seatIndex}`}>
+        <div className={cx('jc-sd-status flex items-center gap-1 overflow-hidden whitespace-nowrap font-bold tracking-wide [&>span]:min-w-0 [&>span]:truncate', z.status)} data-testid={`seat-status-${s.seatIndex}`}>
           {p.turnNote ? (
             p.turnNote
           ) : winner ? (

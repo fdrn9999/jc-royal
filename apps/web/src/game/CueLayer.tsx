@@ -29,6 +29,8 @@ export interface Staging {
   /** When the running plan started (performance.now()): its flights are timed from it. */
   start: number;
   arrival: HandArrival | null;
+  /** How long the showdown's title shows, in ms (0: no showdown is staged). */
+  titleMs: number;
 }
 
 interface Run {
@@ -123,7 +125,14 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
 
   const active = staging ? next : run.current && sig(s) === run.current.plan.final ? run.current : null;
   const staged = active ? stagedAt(active.plan, performance.now() - active.start, s) : null;
-  return { staged, flights: staged ? active!.plan.flights : [], start: active?.start ?? 0, arrival: hand && arrival.current?.id === hand.id ? arrival.current : null };
+  const cine = staged?.cine ? active!.plan.cine : null;
+  return {
+    staged,
+    flights: staged ? active!.plan.flights : [],
+    start: active?.start ?? 0,
+    arrival: hand && arrival.current?.id === hand.id ? arrival.current : null,
+    titleMs: cine ? active!.plan.reveal - cine.title : 0,
+  };
 }
 
 /** The running plan's chips, each flying at its time in the plan. `box`: the table's size in px, which the flights move by. */
