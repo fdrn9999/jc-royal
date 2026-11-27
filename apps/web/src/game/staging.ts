@@ -120,6 +120,24 @@ function occupant(x: TableView['seats'][number] | undefined): string {
   return !x || x.state === 'empty' ? '' : (x.userId ?? x.nickname ?? '*');
 }
 
+/**
+ * `v` as a plan under way shows it: a seat its player left since the plan was made for `planned` (out of chips, or
+ * leaving after the hand: the room stands them up a moment after the result) stays as the plan found it, so the
+ * hand's end plays out with everyone who was in it. Only for the plan's own hand, and only a seat left empty: one
+ * someone else took is theirs. `v` itself when nobody left.
+ */
+export function holdSeats(planned: TableView, v: TableView): TableView {
+  if (!planned.hand || planned.hand.id !== v.hand?.id) return v;
+  let held = false;
+  const seats = v.seats.map((x) => {
+    const was = planned.seats.find((y) => y.seatIndex === x.seatIndex);
+    if (x.state !== 'empty' || !was || was.state === 'empty') return x;
+    held = true;
+    return was;
+  });
+  return held ? { ...v, seats } : v;
+}
+
 /** The chips in the middle that are not in front of a seat (none once settled: they have been paid). */
 export function collected(v: TableView): number {
   const h = v.hand;

@@ -1,7 +1,7 @@
 import type { ActionType, Card, HandStage, TableCue, TableView } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import { FreeSession } from '../src/academy/practice/free';
-import { BUDGET, SHOWDOWN_BUDGET, boundaries, collected, dealDelays, MAX_CUES, plan, quickSounds, sig, stagedAt, type Plan, type StageCue } from '../src/game/staging';
+import { BUDGET, SHOWDOWN_BUDGET, boundaries, collected, dealDelays, holdSeats, MAX_CUES, plan, quickSounds, sig, stagedAt, type Plan, type StageCue } from '../src/game/staging';
 
 interface SeatIn {
   bet?: number;
@@ -193,6 +193,29 @@ describe('staging: chips', () => {
     expect(stagedAt(p, t, taken)).toBeNull();
     const elsewhere = view({ seq: 5, stage: 'settled', potTotal: 15, seats: { 0: { stack: 995, cards: false }, 1: { stack: 1005 }, 4: { stack: 500, cards: false } }, winners });
     expect(stagedAt(p, t, elsewhere)).not.toBeNull();
+  });
+
+  it('a player the room stood up after the result (out of chips) stays in the scene of that hand, and only there', () => {
+    const prev = view({ seq: 4, stage: 'preflop', potTotal: 200, seats: { 0: { bet: 100, stack: 0 }, 1: { bet: 100, stack: 900 } } });
+    const winners = [{ seatIndex: 1, amount: 200, potIds: ['pot-main-0'] }];
+    const next = view({ seq: 5, stage: 'settled', potTotal: 200, seats: { 0: { stack: 0 }, 1: { stack: 1100 } }, winners });
+    const p = plan(prev, batch({ kind: 'showdown' }, { kind: 'payout', seatIndex: 1, amount: 200 }, { kind: 'handEnd' }), next, 1)!;
+    expect(p.cine).not.toBeNull();
+    const t = p.cine!.title + 1;
+    // The loser stood up: the state alone ends the plan, the state with the seat held does not.
+    const left = view({ seq: 5, stage: 'settled', potTotal: 200, seats: { 1: { stack: 1100 } }, winners });
+    expect(stagedAt(p, t, left)).toBeNull();
+    const held = holdSeats(next, left);
+    expect(held.seats[0]).toBe(next.seats[0]);
+    expect(held.seats[1]).toBe(left.seats[1]);
+    expect(stagedAt(p, t, held)?.cine).toBe('title');
+    // Nobody left: the state itself. A seat someone else took is theirs; another hand holds nothing.
+    expect(holdSeats(next, next)).toBe(next);
+    const taken = view({ seq: 5, stage: 'settled', potTotal: 200, seats: { 0: { stack: 500, user: 'u-new' }, 1: { stack: 1100 } }, winners });
+    expect(holdSeats(next, taken)).toBe(taken);
+    expect(stagedAt(p, t, holdSeats(next, taken))).toBeNull();
+    const after = view({ id: 'h-2', seq: 1, stage: 'preflop', seats: { 1: { stack: 1100 } } });
+    expect(holdSeats(next, after)).toBe(after);
   });
 
   it('stages nothing at a seat whose player changed within the batch itself: the chips are not for whoever sits there now', () => {

@@ -139,6 +139,43 @@ test('쇼다운 연출: 올인 런아웃은 패를 먼저 펴고 보드를 차�
   await expect(a.page.locator('[data-showdown]')).toHaveCount(0);
 });
 
+test('쇼다운 연출: 칩을 모두 잃은 플레이어가 자리에서 일어나도 연출은 끝까지 나온다', async ({ browser }) => {
+  test.setTimeout(300_000);
+  const a = await signUp(browser);
+  const b = await signUp(browser);
+  for (const p of [a.page, b.page]) await p.addInitScript(watchShowdown);
+  const ta = truth(a.page);
+  const tb = truth(b.page);
+  const id = await openRoom(a.page);
+  // No standing order to buy in again: whoever loses everything is stood up by the room right after the result.
+  await sitWith(a.page, id, 300);
+  await sitWith(b.page, id, 300);
+  const played = () => ta.settled.find((h) => h.showdown && h.winners.length === 1);
+  await expect(async () => {
+    if (!played()) (await shove(a.page)) || (await shove(b.page));
+    expect(ta.settled.some((h) => h.showdown)).toBe(true);
+  }).toPass({ timeout: 150_000 });
+  const hand = played();
+  test.skip(!hand, 'the pot was split: nobody lost everything');
+  const loser = [0, 1].find((s) => !hand!.winners.includes(s))!;
+  for (const [p, t] of [
+    [a.page, ta],
+    [b.page, tb],
+  ] as const) {
+    await expect.poll(() => scenesDone(p), { timeout: 20_000 }).toBe(1);
+    const w = await scene(p);
+    // The whole scene, the loser's seat in it to the end (their hand was turned over: all in).
+    expectScene(w, 0, t.settled.find((h) => h.id === hand!.id)!, t.mySeat === loser ? null : t.mySeat);
+    expect(phasesOf(w, 0)).toEqual(expect.arrayContaining(['title', 'reveal', 'settlement']));
+    const paid = w.snaps.find((s) => s.phase === 'settlement')!;
+    expect(paid.seats[String(loser)], 'the loser is still drawn while the pot is paid').toMatchObject({ sd: 'in' });
+    expect(paid.seats[String(loser)]!.cards).toHaveLength(2);
+    // Once it is over the seat is free, as the room said.
+    await expect(p.getByTestId(`seat-${loser}`)).toHaveCount(0);
+    await expect(p.locator('[data-showdown]')).toHaveCount(0);
+  }
+});
+
 test('쇼다운 연출: 세 명 올인의 메인·사이드 팟마다 실제 승자가 모두 표시된다', async ({ browser }) => {
   test.setTimeout(360_000);
   const a = await signUp(browser);

@@ -309,7 +309,7 @@ export const TableScene = memo(function TableScene({
   const hand = s.hand;
   // The server state, as the cues that brought it play out (CueLayer): bets land, then go to the pot, cards turn in
   // order, the hands show before the result, the result before the payouts.
-  const { staged, flights, start, arrival, titleMs } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion);
+  const { staged, flights, start, arrival, titleMs, seats } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion);
   // A showdown's scene (staging's `cine`): only while its plan runs, so a hand found settled (a reload, a reconnect)
   // or won by a fold has none, and a new hand, a hidden tab or leaving the page ends it with the plan.
   const cine = staged?.cine ?? null;
@@ -326,7 +326,7 @@ export const TableScene = memo(function TableScene({
   const winningFive = useMemo(() => (result ? winningCards(hand?.result, won.map((w) => w.seatIndex)) : []), [hand?.result, result, won]);
   // Where winners' cards shown after the hand come to rest by the board (reveal.ts), worked out once per plan and set
   // of such winners.
-  const showing = s.seats.filter((x) => (winners.get(x.seatIndex) ?? 0) > 0 && x.shown?.some(Boolean)).map((x) => x.seatIndex);
+  const showing = seats.filter((x) => (winners.get(x.seatIndex) ?? 0) > 0 && x.shown?.some(Boolean)).map((x) => x.seatIndex);
   const showingKey = showing.join();
   const spots = useMemo(
     () => (showing.length ? revealSpots(plan, showing.map((seat) => ({ seat, mine: seat === mySeat }))) : null),
@@ -464,7 +464,7 @@ export const TableScene = memo(function TableScene({
       </div>
 
       {/* seats, bets, dealer button */}
-      {s.seats.map((seat) => {
+      {seats.map((seat) => {
         const g = placed[seat.seatIndex]!;
         const sd = showdown.get(seat.seatIndex);
         const label = sd ? t(`hand.${handLabelKey(sd.rankClass, sd.bestFive)}` as MsgKey) : null;
