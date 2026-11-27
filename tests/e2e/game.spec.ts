@@ -47,9 +47,9 @@ test('two browsers: join, buy in, play a hand to showdown, refresh, stand up wit
 
   // Table chips are conserved.
   const stack = async (page: typeof a.page, seat: number) => Number(((await page.getByTestId(`stack-${seat}`).textContent()) ?? '0').replace(/[^\d]/g, ''));
-  const total = (await stack(a.page, 0)) + (await stack(a.page, 1));
   const buyIns = 10000 - (await balanceOf(a.page)) + 10000 - (await balanceOf(b.page));
-  expect(total).toBe(buyIns);
+  // (Once the pot has reached its winner: a stack shows what it had until its chips arrive.)
+  await expect.poll(async () => (await stack(a.page, 0)) + (await stack(a.page, 1)), { timeout: 5_000 }).toBe(buyIns);
 
   // Refresh keeps the seat and stack (server state is authoritative).
   const before = await stack(a.page, 0);
