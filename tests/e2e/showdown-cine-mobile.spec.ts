@@ -39,7 +39,8 @@ test('mobile: 쇼다운 연출이 휴대폰 화면 안에서 자리를 바꾸지
   expect(during.wide).toBe(false);
   await a.page.waitForTimeout(900);
   const w = await scene(a.page);
-  expect(lasting(phasesOf(w, 0))).toEqual(SEEN);
+  // (On the other player's page: this one is photographed at each phase, which holds its drawing up.)
+  expect(lasting(phasesOf(await scene(b.page), 0))).toEqual(SEEN);
   expectScene(w, 0, played()!, ta.mySeat);
   // The title: inside the phone's screen, in the display face, taking no tap.
   const under = w.styles.find((s) => s.phase === 'title')!;

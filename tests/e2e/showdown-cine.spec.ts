@@ -42,8 +42,9 @@ test('쇼다운 연출: 폴드 승리에는 없고, 쇼다운에서 한 번(회�
   console.log('phases photographed (asked:in):', (await shots).join(' '));
   await a.page.waitForTimeout(900);
   const wa = await scene(a.page);
-  // (Order, and no phase twice, are expectScene's to check: here, that none of the lasting ones was passed by.)
-  expect(lasting(phasesOf(wa, 0)), 'an unhurried showdown goes through every phase').toEqual(SEEN);
+  // (Order, and no phase twice, are expectScene's to check: here, that none of the lasting ones was passed by. On
+  // the other player's page: this one is photographed at each phase, which holds its drawing up past a phase or two.)
+  expect(lasting(phasesOf(await scene(b.page), 0)), 'an unhurried showdown goes through every phase').toEqual(SEEN);
   expect(wa.titles).toBe(1);
   for (const [p, t] of [
     [a.page, ta],
