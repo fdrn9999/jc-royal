@@ -1,5 +1,5 @@
 import { ArrowRightIcon, Badge, BotIcon, Button, Empty, Field, formatChips, formatDate, Input, Panel, PlayingCard, Stat, XIcon } from '@jc/ui';
-import { academyItemName, ageOn, BOT_LEVELS, BOT_TABLE_STYLES, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type BotTableStyle, type VipColor } from '@jc/types';
+import { academyItemName, ageOn, BGM_IDS, BGM_TITLES, BOT_LEVELS, BOT_TABLE_STYLES, botSettingsIssues, isoDate, isVipColor, type AcademyItemKind, type BotLevel, type BotTableStyle, type VipColor } from '@jc/types';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useHeardRevision } from '../adminChanges';
@@ -1037,7 +1037,7 @@ export function TablesPage() {
     setOffset(0);
   };
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false, ...BOT_DEFAULTS });
+  const [f, setF] = useState({ name: '', maxSeats: 6, smallBlind: 5, bigBlind: 10, minBuyIn: 200, maxBuyIn: 2000, turnSeconds: 20, isPrivate: false, joinCode: '', allowSpectators: true, beginner: false, bgmId: 'black-table-rhythm', ...BOT_DEFAULTS });
   const [note, setNote] = useState<Note>(null);
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -1135,6 +1135,11 @@ export function TablesPage() {
           <Field label={t('bigBlind')}>{(id) => <Input id={id} inputMode="numeric" value={f.bigBlind} onChange={num('bigBlind')} />}</Field>
           <Field label={t('minBuyIn')}>{(id) => <Input id={id} inputMode="numeric" value={f.minBuyIn} onChange={num('minBuyIn')} />}</Field>
           <Field label={t('maxBuyIn')}>{(id) => <Input id={id} inputMode="numeric" value={f.maxBuyIn} onChange={num('maxBuyIn')} />}</Field>
+          <div className="col-span-2"><Field label={t('bgm')}>{(id) => (
+            <select id={id} className="h-11 rounded-lg border border-white/10 bg-ink-850 px-3" value={f.bgmId} onChange={(e) => setF({ ...f, bgmId: e.target.value })} data-testid="table-bgm">
+              {BGM_IDS.map((b) => <option key={b} value={b}>{b === 'none' ? t('bgmNone') : BGM_TITLES[b]}</option>)}
+            </select>
+          )}</Field></div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.allowSpectators} onChange={(e) => setF({ ...f, allowSpectators: e.target.checked })} /> {t('spectators')}</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.beginner} onChange={(e) => setF({ ...f, beginner: e.target.checked })} data-testid="table-beginner" /> {t('beginnerTable')}</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.isPrivate} onChange={(e) => setF({ ...f, isPrivate: e.target.checked })} /> {t('private')}</label>

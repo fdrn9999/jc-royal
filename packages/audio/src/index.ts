@@ -17,11 +17,14 @@
  * coming back or a reconnect never sets off a pile of old sounds.
  */
 import { Mixer } from './mixer';
+import { BGM_TRACKS } from './bgm';
 import { Music, MUSIC_DEFAULT } from './music';
 
 export { AMBIENT, GAP_MS, LENGTH_MS, MAX_VOICES, Mixer } from './mixer';
 export { LEAVE_GRACE_MS, Music, MUSIC_DEFAULT, MUSIC_TRIM } from './music';
-export type { MusicHost, MusicSettings } from './music';
+export type { MusicHost, MusicSettings, MusicTrack, MusicTracks } from './music';
+export { BGM_TRACKS } from './bgm';
+export type { BgmTrackId } from './bgm';
 
 export type SoundId =
   | 'deal'
@@ -59,8 +62,6 @@ const KEY = 'jc.audio';
  */
 const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
 const DEFAULTS: AudioSettings = { master: 0.8, effects: 0.8, muted: false, musicOn: true, music: MUSIC_DEFAULT };
-/** Streamed by the page from its own static file (not in a script), only once a table opens with music on. */
-const MUSIC_URL = new URL('./music/black-table-rhythm.mp3', import.meta.url).href;
 
 /**
  * Recorded voices. The files are peak-normalised; `volume` brings each one to the loudness
@@ -106,14 +107,18 @@ class SoundEngine {
   private gesture: (() => void) | null = null;
   private listeners = new Set<(s: AudioSettings) => void>();
   settings: AudioSettings = typeof window === 'undefined' ? { ...DEFAULTS } : readSettings();
-  /** The table's background music: into the master fader once audio is unlocked; a refused start waits for a gesture. */
+  /**
+   * The table's background music: into the master fader once audio is unlocked; a refused start waits for a gesture.
+   * Each recording (bgm.ts) is streamed by the page from its own static file (not in a script), only once a table that
+   * chose it opens with music on.
+   */
   readonly music = new Music(
     {
       output: () => (this.unlocked && this.ctx && this.master && this.ctx.state !== 'closed' ? { ctx: this.ctx, into: this.master } : null),
       needGesture: () => this.listen(),
       settings: () => this.settings,
     },
-    MUSIC_URL,
+    BGM_TRACKS,
   );
 
   /** Must be called from a user gesture (click/keydown/touch). */

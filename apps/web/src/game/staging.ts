@@ -58,7 +58,19 @@ export interface Plan {
   stacks: Record<number, { before: number; until: number; stack: number; back?: { at: number; amount: number } }>;
   /** Per seat index the plan moves chips at, who sits there (occupant): a seat left or taken since ends the plan. */
   who: Record<number, string>;
+  /**
+   * The showdown's own scene, only when the server said the hand went to one (its `showdown` cue; never a pot won by a
+   * fold): the table goes grey at `dim`, the title shows from `title` until the hands turn (`reveal`), the result shows
+   * (`result`), the chips are paid from `settle`, and the colour comes back from `restore` to the plan's end.
+   */
+  cine: { dim: number; title: number; settle: number; restore: number } | null;
 }
+
+/**
+ * Where a showdown's scene stands: the table going grey, its title, the hands face up (an all-in's board runs out
+ * here), the winning cards marked, the chips paid, the colour coming back. Absent (null): no showdown is staged.
+ */
+export type CinePhase = 'dimming' | 'title' | 'reveal' | 'highlight' | 'settlement' | 'restore';
 
 /** What the scene shows at a moment of a plan (absent fields: the server state's). */
 export interface Staged {
@@ -68,6 +80,7 @@ export interface Staged {
   reveal: boolean;
   result: boolean;
   stacks: Record<number, number>;
+  cine: CinePhase | null;
 }
 
 const BET = 260; // a bet from the seat to its spot
@@ -81,8 +94,13 @@ const HOLD = 250; // the result before the chips move
 const PAY = 400; // a payout to its winner
 const PAY_GAP = 130; // between payouts
 const BACK = 280; // chips nobody called, back to their seat
+const DIM = 180; // a showdown: the table goes grey
+const TITLE = 570; // its title, until the hands turn
+const RESTORE = 320; // the colour comes back
 /** Everything is over well before the next hand, at least 4 s after the result (5.5 s when members played it). */
 export const BUDGET = 3300;
+/** A showdown takes a little longer (its title, the colour coming back), still over before the next hand. */
+export const SHOWDOWN_BUDGET = 3800;
 /** More cues than that at once (a reconnect, a tab that slept): the scene jumps to the state. */
 export const MAX_CUES = 30;
 
@@ -100,6 +118,24 @@ export function sig(v: TableView): string {
 /** Who sits at a seat: '' when empty, the same key for the same player. */
 function occupant(x: TableView['seats'][number] | undefined): string {
   return !x || x.state === 'empty' ? '' : (x.userId ?? x.nickname ?? '*');
+}
+
+/**
+ * `v` as a plan under way shows it: a seat its player left since the plan was made for `planned` (out of chips, or
+ * leaving after the hand: the room stands them up a moment after the result) stays as the plan found it, so the
+ * hand's end plays out with everyone who was in it. Only for the plan's own hand, and only a seat left empty: one
+ * someone else took is theirs. `v` itself when nobody left.
+ */
+export function holdSeats(planned: TableView, v: TableView): TableView {
+  if (!planned.hand || planned.hand.id !== v.hand?.id) return v;
+  let held = false;
+  const seats = v.seats.map((x) => {
+    const was = planned.seats.find((y) => y.seatIndex === x.seatIndex);
+    if (x.state !== 'empty' || !was || was.state === 'empty') return x;
+    held = true;
+    return was;
+  });
+  return held ? { ...v, seats } : v;
 }
 
 /** The chips in the middle that are not in front of a seat (none once settled: they have been paid). */
@@ -132,6 +168,7 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
   const back = new Map<number, { at: number; amount: number }>();
   let t = 0;
   let reveal = 0;
+  let cine: Plan['cine'] = null;
   let fid = 0;
 
   const sweep = () => {
@@ -150,8 +187,11 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
   const showHands = () => {
     if (reveal) return;
     t += GAP;
+    // Only ever reached with the server's showdown cue in the batch: the table goes grey, the title, then the hands.
+    cine = { dim: t, title: t + DIM, settle: 0, restore: 0 };
+    sounds.push({ at: cine.title, id: 'showdown' });
+    t += DIM + TITLE;
     reveal = t;
-    sounds.push({ at: t, id: 'showdown' });
     t += READ;
   };
 
@@ -216,6 +256,11 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
     });
     if (payouts.length) t += (payouts.length - 1) * PAY_GAP + PAY;
   }
+  if (cine) {
+    const c: NonNullable<Plan['cine']> = cine;
+    cine = { ...c, settle: settled ? result + HOLD : t, restore: t };
+    t += RESTORE;
+  }
   // A seat handed chips back waits for them too: before them it shows what it had left (and before its payout, also
   // what it got back).
   for (const [seat, b] of back) {
@@ -239,8 +284,9 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
     who[seat] = occupant(next.seats.find((x) => x.seatIndex === seat));
     if (who[seat] !== occupant(prev.seats.find((x) => x.seatIndex === seat))) return null;
   }
-  const p: Plan = { hand: h.id, final: sig(next), end: t + 60, flights, sounds, bets, pot: potT.length > 1 ? potT : null, board, reveal, result, stacks, who };
-  return p.end > BUDGET ? scale(p, BUDGET / p.end) : p;
+  const p: Plan = { hand: h.id, final: sig(next), end: t + 60, flights, sounds, bets, pot: potT.length > 1 ? potT : null, board, reveal, result, stacks, who, cine };
+  const budget = cine ? SHOWDOWN_BUDGET : BUDGET;
+  return p.end > budget ? scale(p, budget / p.end) : p;
 }
 
 /** A new hand: its cards go round from the seat after the button, one card each and then the second. */
@@ -250,7 +296,7 @@ function dealPlan(next: TableView, cues: StageCue[]): Plan {
   const step = dealStep(order.length);
   const sounds: Plan['sounds'] = [];
   if (cues.some((c) => c.cue.kind === 'deal') && order.length) sounds.push({ at: 0, id: 'deal' }, { at: order.length * step, id: 'deal' });
-  return { hand: h.id, final: sig(next), end: order.length * 2 * step, flights: [], sounds, bets: {}, pot: null, board: null, reveal: 0, result: 0, stacks: {}, who: {} };
+  return { hand: h.id, final: sig(next), end: order.length * 2 * step, flights: [], sounds, bets: {}, pot: null, board: null, reveal: 0, result: 0, stacks: {}, who: {}, cine: null };
 }
 
 function dealOrder(v: TableView): number[] {
@@ -289,6 +335,7 @@ function scale(p: Plan, f: number): Plan {
     board: p.board && { from: p.board.from, at: p.board.at.map(s) },
     reveal: s(p.reveal),
     result: s(p.result),
+    cine: p.cine && { dim: s(p.cine.dim), title: s(p.cine.title), settle: s(p.cine.settle), restore: s(p.cine.restore) },
     stacks: Object.fromEntries(Object.entries(p.stacks).map(([k, x]) => [k, { ...x, until: s(x.until), ...(x.back ? { back: { ...x.back, at: s(x.back.at) } } : {}) }])),
   };
 }
@@ -312,12 +359,24 @@ export function stagedAt(p: Plan | null, t: number, v: TableView): Staged | null
     if (t < x.until && v.seats.find((s) => s.seatIndex === +k)?.stack === x.stack) stacks[+k] = x.before + (x.back && t >= x.back.at ? x.back.amount : 0);
   }
   const board = p.board ? p.board.from + p.board.at.filter((a) => a <= t).length : null;
-  return { bets, pot: p.pot && at(p.pot, t), board, reveal: t >= p.reveal, result: t >= p.result, stacks };
+  return { bets, pot: p.pot && at(p.pot, t), board, reveal: t >= p.reveal, result: t >= p.result, stacks, cine: cineAt(p, t) };
+}
+
+/** Where the showdown's scene stands at `t` (null: none staged, or not begun). A hand not settled has no result to mark. */
+function cineAt(p: Plan, t: number): CinePhase | null {
+  const c = p.cine;
+  if (!c || t < c.dim) return null;
+  if (t < c.title) return 'dimming';
+  if (t < p.reveal) return 'title';
+  if (t >= c.restore) return 'restore';
+  if (!p.result || t < p.result) return 'reveal';
+  return t < c.settle ? 'highlight' : 'settlement';
 }
 
 /** The moments a plan's scene changes, after `t` (for the timers that redraw it). */
 export function boundaries(p: Plan): number[] {
   const out = new Set<number>([p.end, p.reveal, p.result]);
+  if (p.cine) for (const a of [p.cine.dim, p.cine.title, p.cine.settle, p.cine.restore]) out.add(a);
   for (const tr of Object.values(p.bets)) for (const [a] of tr) out.add(a);
   for (const [a] of p.pot ?? []) out.add(a);
   for (const a of p.board?.at ?? []) out.add(a);

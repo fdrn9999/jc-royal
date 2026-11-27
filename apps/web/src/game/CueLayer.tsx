@@ -11,7 +11,7 @@ import { ChipStack } from '@jc/ui';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react';
 import type { Amounts } from '../lib/amount';
 import type { Point, SeatGeometry } from './layout';
-import { boundaries, dealDelays, plan, quickSounds, sig, STAGED_KINDS, stagedAt, type Flight, type Plan, type Staged } from './staging';
+import { boundaries, dealDelays, holdSeats, plan, quickSounds, sig, STAGED_KINDS, stagedAt, type Flight, type Plan, type Staged } from './staging';
 import type { CueEvent } from './useTableSocket';
 
 /** How the current hand's cards came in: dealt in front of us (when each card lands), or already there when we arrived. */
@@ -29,11 +29,17 @@ export interface Staging {
   /** When the running plan started (performance.now()): its flights are timed from it. */
   start: number;
   arrival: HandArrival | null;
+  /** How long the showdown's title shows, in ms (0: no showdown is staged). */
+  titleMs: number;
+  /** The seats to draw: the state's, with a seat left while its hand's end plays out kept until it is over. */
+  seats: TableView['seats'];
 }
 
 interface Run {
   plan: Plan;
   start: number;
+  /** The state the plan was made for. */
+  view: TableView;
 }
 
 function cardsOf(v: TableView): Set<string> {
@@ -58,7 +64,7 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
   const next = useMemo<Run | null>(() => {
     if (!staging || reducedMotion || document.hidden) return null;
     const p = plan(prev.current, fresh, s, mySeat);
-    return p && { plan: p, start: performance.now() };
+    return p && { plan: p, start: performance.now(), view: s };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cues, s]);
 
@@ -92,7 +98,7 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
       // A seat taken or left, a reconnect: the plan goes on unless the hand moved on without it, or the plan no longer
       // applies (chips on their way to a seat left or taken), so its timers and sounds end with it.
       const r = run.current;
-      if (r && (sig(s) !== r.plan.final || !stagedAt(r.plan, performance.now() - r.start, s))) stop();
+      if (r && (sig(s) !== r.plan.final || !stagedAt(r.plan, performance.now() - r.start, holdSeats(r.view, s)))) stop();
       return;
     }
     // Anything new catches up: the old plan gives way, the new one starts from the state it left.
@@ -122,8 +128,18 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
   }, [stop]);
 
   const active = staging ? next : run.current && sig(s) === run.current.plan.final ? run.current : null;
-  const staged = active ? stagedAt(active.plan, performance.now() - active.start, s) : null;
-  return { staged, flights: staged ? active!.plan.flights : [], start: active?.start ?? 0, arrival: hand && arrival.current?.id === hand.id ? arrival.current : null };
+  // (A player the room stood up after the result, out of chips, stays in the scene until it is over.)
+  const shown = active ? holdSeats(active.view, s) : s;
+  const staged = active ? stagedAt(active.plan, performance.now() - active.start, shown) : null;
+  const cine = staged?.cine ? active!.plan.cine : null;
+  return {
+    staged,
+    flights: staged ? active!.plan.flights : [],
+    start: active?.start ?? 0,
+    arrival: hand && arrival.current?.id === hand.id ? arrival.current : null,
+    titleMs: cine ? active!.plan.reveal - cine.title : 0,
+    seats: staged ? shown.seats : s.seats,
+  };
 }
 
 /** The running plan's chips, each flying at its time in the plan. `box`: the table's size in px, which the flights move by. */

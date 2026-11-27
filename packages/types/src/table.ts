@@ -1,3 +1,4 @@
+import type { BgmId } from './bgm';
 import type { BotStyle } from './bots';
 import type { Card, HandRankClass } from './cards';
 import type { AutoBuyPolicy, ReactionRules } from './protocol';
@@ -142,6 +143,8 @@ export interface TableConfigView {
   roomType: 'official' | 'member' | 'tournament';
   /** The member who opened a member room; null for official tables. */
   hostId: string | null;
+  /** The table's background music (bgm.ts). Missing from an older room: read with bgmOf, as the default. */
+  bgmId?: BgmId;
 }
 
 export interface TableView {

@@ -4,6 +4,7 @@ import type { VipColor } from './vip';
 import { PushConsentSchema } from './notifications';
 import { BOT_TABLE_STYLES, type BotTableStyle } from './bots';
 import { BOT_LEVELS, SUPPORTED_MAX_SEATS, type BotLevel } from './table';
+import { BGM_IDS, DEFAULT_BGM } from './bgm';
 
 export const NICKNAME_RE = /^[\p{L}\p{N}_]{2,16}$/u;
 
@@ -132,6 +133,8 @@ export const TableInputSchema = z
     beginner: z.boolean().default(false),
     isPrivate: z.boolean().default(false),
     joinCode: z.string().trim().min(4).max(32).optional(),
+    /** The table's background music: one of the catalogue's ids, never a file or a URL. */
+    bgmId: z.enum(BGM_IDS).default(DEFAULT_BGM),
     ...BotSettingsShape,
   })
   .refine((t) => t.bigBlind >= t.smallBlind, { message: 'bigBlind must be >= smallBlind', path: ['bigBlind'] })
@@ -161,6 +164,8 @@ export const RoomCreateSchema = z
     allowSpectators: z.boolean().default(true),
     isPrivate: z.boolean().default(false),
     joinCode: RoomCodeSchema.optional(),
+    /** The room's background music: one of the catalogue's ids, never a file or a URL. */
+    bgmId: z.enum(BGM_IDS).default(DEFAULT_BGM),
   })
   .refine((t) => t.minBuyIn >= t.bigBlind * 10, { message: 'minBuyIn must be >= 10 BB', path: ['minBuyIn'] })
   .refine((t) => t.maxBuyIn <= t.bigBlind * 200, { message: 'maxBuyIn must be <= 200 BB', path: ['maxBuyIn'] })

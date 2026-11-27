@@ -14,6 +14,7 @@
  */
 import { IF_CHANGED, inboxStatement, realtimeOutboxStatement } from '@jc/db';
 import {
+  DEFAULT_BGM,
   JOIN_CODE_ALPHABET,
   normalizeJoinCode,
   PRIVATE_TOURNAMENT,
@@ -276,10 +277,10 @@ export const tournamentRoutes = new Hono<AppEnv>()
             .prepare(
               `INSERT INTO tournaments (id, template_id, name, status, capacity, min_players, start_stack, levels, level_ms, turn_seconds,
                       tb_enabled, tb_initial_ms, tb_max_ms, tb_unit_ms, tb_refill_hands, tb_refill_ms, min_hands, require_verified, auto_start,
-                      format, table_seats, is_private, host_id, join_code_hash, version, roster, level, hands, pause_requested, record_hands, created_by, created_at, updated_at)
+                      format, table_seats, is_private, host_id, join_code_hash, version, roster, level, hands, pause_requested, record_hands, created_by, created_at, updated_at, bgm_id)
                SELECT ?1, t.id, ?2, 'registering', t.capacity, t.min_players, t.start_stack, t.levels, t.level_ms, t.turn_seconds,
                       t.tb_enabled, t.tb_initial_ms, t.tb_max_ms, t.tb_unit_ms, t.tb_refill_hands, t.tb_refill_ms, t.min_hands, t.require_verified, t.auto_start,
-                      'sng', 0, 1, ?3, ?4, 1, 1, 0, 0, 0, ${recordHandsSql(c.env)}, ?3, ?5, ?5
+                      'sng', 0, 1, ?3, ?4, 1, 1, 0, 0, 0, ${recordHandsSql(c.env)}, ?3, ?5, ?5, ?10
                  FROM tournament_templates t
                 WHERE t.id = ?6 AND t.status = 'active' AND t.format = 'sng' AND t.min_hands = ?7
                   AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?3 AND u.status = 'active' AND u.is_bot = 0
@@ -289,7 +290,7 @@ export const tournamentRoutes = new Hono<AppEnv>()
                   AND (SELECT COUNT(*) FROM tournaments h WHERE h.host_id = ?3 AND h.status IN ${ACTIVE_TOURNAMENT}) < ?8
                   AND (SELECT COUNT(*) FROM tournaments p WHERE p.is_private = 1 AND p.status IN ('registering', 'closed')) < ?9`,
             )
-            .bind(id, name, me, await joinCodeHash(code), now, body.templateId, tpl.minHands, PRIVATE_TOURNAMENT.openPerHost, PRIVATE_OPEN_MAX),
+            .bind(id, name, me, await joinCodeHash(code), now, body.templateId, tpl.minHands, PRIVATE_TOURNAMENT.openPerHost, PRIVATE_OPEN_MAX, body.bgmId ?? DEFAULT_BGM),
           db
             .prepare(
               `INSERT INTO tournament_entries (tournament_id, user_id, status, registered_at, updated_at)

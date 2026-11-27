@@ -9,6 +9,10 @@
  */
 import { Badge, Button, Empty, Field, formatChips, formatDate, Input, Panel, Stat, TrophyIcon, XIcon } from '@jc/ui';
 import {
+  BGM_IDS,
+  BGM_TITLES,
+  DEFAULT_BGM,
+  type BgmId,
   TIME_BANK_LIMITS,
   TOURNAMENT_LIMITS,
   TOURNAMENT_STATUSES,
@@ -259,13 +263,14 @@ function CreatePanel({ onCreated }: { onCreated: (n: Note) => void }) {
   const templates = useData<{ templates: TournamentTemplateDto[]; hasMore: boolean }>('/api/admin/tournament-templates?status=active&limit=100');
   const [templateId, setTemplateId] = useState('');
   const [name, setName] = useState('');
+  const [bgmId, setBgmId] = useState<BgmId>(DEFAULT_BGM);
   const [pv, setPv] = useState<CreatePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const list = templates.data?.templates ?? [];
   const tpl = list.find((x) => x.id === templateId) ?? list[0] ?? null;
   const nameOk = !name.trim() || (name.trim().length >= TOURNAMENT_LIMITS.name.min && name.trim().length <= TOURNAMENT_LIMITS.name.max);
-  const body = tpl ? { templateId: tpl.id, templateVersion: tpl.version, ...(name.trim() ? { name: name.trim() } : {}) } : null;
+  const body = tpl ? { templateId: tpl.id, templateVersion: tpl.version, bgmId, ...(name.trim() ? { name: name.trim() } : {}) } : null;
   const fail = async (e: unknown) => {
     setPv(null);
     if (e instanceof ApiError && e.code === 'reauth_cancelled') return;
@@ -321,6 +326,13 @@ function CreatePanel({ onCreated }: { onCreated: (n: Note) => void }) {
             </Field>
             <Field label={t('tnNameOptional')} hint={tpl ? t('tnNameDefault', { name: tpl.name }) : undefined} error={nameOk ? null : t('tnNameLength')}>
               {(fid) => <Input id={fid} value={name} maxLength={TOURNAMENT_LIMITS.name.max} onChange={(e) => setName(e.target.value)} data-testid="tn-create-name" />}
+            </Field>
+            <Field label={t('bgm')}>
+              {(fid) => (
+                <select id={fid} className={selectCls} value={bgmId} onChange={(e) => setBgmId(e.target.value as BgmId)} data-testid="tn-create-bgm">
+                  {BGM_IDS.map((b) => <option key={b} value={b}>{b === 'none' ? t('bgmNone') : BGM_TITLES[b]}</option>)}
+                </select>
+              )}
             </Field>
           </div>
           <p className="text-xs text-ink-400">{t('tnCreateHint')}</p>

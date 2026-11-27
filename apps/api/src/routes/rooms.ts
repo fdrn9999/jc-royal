@@ -41,11 +41,11 @@ export const roomRoutes = new Hono<AppEnv>()
     // The per-member limit is checked in the same statement as the insert, so two creates at once cannot both pass.
     const r = await c.env.DB.prepare(
       `INSERT INTO tables (id, name, max_seats, small_blind, big_blind, min_buy_in, max_buy_in, turn_seconds, is_private, join_code_hash,
-                           allow_spectators, room_type, created_by, created_at, updated_at)
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'member', ?12, ?13, ?13
+                           allow_spectators, room_type, created_by, created_at, updated_at, bgm_id)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'member', ?12, ?13, ?13, ?15
         WHERE (SELECT COUNT(*) FROM tables WHERE created_by = ?12 AND room_type = 'member' AND status != 'closed') < ?14`,
     )
-      .bind(id, body.name, body.maxSeats, body.bigBlind / 2, body.bigBlind, body.minBuyIn, body.maxBuyIn, TURN_SECONDS, body.isPrivate ? 1 : 0, joinCodeHash, body.allowSpectators ? 1 : 0, me, now, MAX_ACTIVE_ROOMS)
+      .bind(id, body.name, body.maxSeats, body.bigBlind / 2, body.bigBlind, body.minBuyIn, body.maxBuyIn, TURN_SECONDS, body.isPrivate ? 1 : 0, joinCodeHash, body.allowSpectators ? 1 : 0, me, now, MAX_ACTIVE_ROOMS, body.bgmId)
       .run();
     if (!r.meta.changes) fail(409, 'room_limit', `at most ${MAX_ACTIVE_ROOMS} open rooms per member`);
     // Wake the room so its empty-room timer runs even if nobody comes. A room that cannot be woken would stay listed

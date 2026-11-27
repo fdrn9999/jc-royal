@@ -7,6 +7,10 @@
  * once, when made, and never put in a link.
  */
 import {
+  BGM_IDS,
+  BGM_TITLES,
+  DEFAULT_BGM,
+  type BgmId,
   blindsAt,
   type EntryStatus,
   type FriendDto,
@@ -401,6 +405,7 @@ function CreatePrivate({ open, onClose }: { open: boolean; onClose: () => void }
   const [data, setData] = useState<PrivateTemplatesDto | null>(null);
   const [pick, setPick] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [bgmId, setBgmId] = useState<BgmId>(DEFAULT_BGM);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -421,7 +426,7 @@ function CreatePrivate({ open, onClose }: { open: boolean; onClose: () => void }
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ ok: true; id: string; code: string }>('/api/tournaments/private', { body: { templateId: pick, ...(name.trim() ? { name: name.trim() } : {}) } });
+      const r = await api<{ ok: true; id: string; code: string }>('/api/tournaments/private', { body: { templateId: pick, bgmId, ...(name.trim() ? { name: name.trim() } : {}) } });
       onClose();
       nav(`/tournaments/${encodeURIComponent(r.id)}`, { state: { code: r.code } });
     } catch (x) {
@@ -480,6 +485,25 @@ function CreatePrivate({ open, onClose }: { open: boolean; onClose: () => void }
         )}
         {data && data.templates.length > 0 && (
           <Field label={tr('private.name')}>{(fid) => <Input id={fid} value={name} maxLength={40} autoComplete="off" onChange={(e) => setName(e.target.value)} data-testid="tn-private-name" />}</Field>
+        )}
+        {data && data.templates.length > 0 && (
+          <Field label={t('room.bgm')}>
+            {(fid) => (
+              <select
+                id={fid}
+                value={bgmId}
+                onChange={(e) => setBgmId(e.target.value as BgmId)}
+                className="h-11 w-full rounded-lg border border-white/10 bg-ink-850 px-2 text-base text-ivory focus:border-gold-500/70 focus:outline-none sm:text-sm"
+                data-testid="tn-private-bgm"
+              >
+                {BGM_IDS.map((b) => (
+                  <option key={b} value={b}>
+                    {b === 'none' ? t('room.bgmNone') : BGM_TITLES[b]}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
         )}
         {data && <p className="text-xs text-ink-400">{tr('private.limit', { n: data.openPerHost })} {tr('private.recordNote')}</p>}
         {error && (

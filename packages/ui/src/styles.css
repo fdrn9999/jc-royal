@@ -589,7 +589,69 @@
   color: var(--vip-badge-fg);
 }
 
+/* ------------------------------------------------------------------ showdown
+   A showdown's scene (web staging.ts `cine`, TableScene's data-showdown, a seat's data-sd). The table goes grey layer
+   by layer, each leaf on its own: never a filter on something that holds the showdown's cards, which would grey them
+   too. The felt, the bets and the status line stay grey to the end; the pot and the board only until the hands turn;
+   a seat out of the showdown wholly, a seat in it only its plate (a winner's keeps its glow). The colour comes back by
+   the same transition once the attributes go (the scene's `restore`, or its plan ending early). Nothing moves or
+   changes size, nothing takes a tap. */
+.jc-sd-dim,
+.jc-sd-lit,
+.jc-sd-cards,
+.jc-sd-plate,
+.jc-sd-status,
+.jc-sd-ui {
+  transition: filter 0.32s ease;
+}
+[data-showdown]:not([data-showdown='restore']) .jc-sd-dim,
+[data-showdown='dimming'] .jc-sd-lit,
+[data-showdown='title'] .jc-sd-lit,
+[data-sd='out'] .jc-sd-cards,
+[data-sd='out'] .jc-sd-plate,
+[data-sd='out'] .jc-sd-status,
+[data-sd='in'] .jc-sd-plate:not(.jc-winner),
+.jc-sd-page:has([data-showdown]:not([data-showdown='restore'])) .jc-sd-ui {
+  filter: grayscale(1) brightness(0.6);
+  transition-duration: 0.18s;
+}
+@keyframes jc-showdown-title {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.86); letter-spacing: 0.55em; padding-left: 0.55em; }
+  30% { opacity: 1; transform: translate(-50%, -50%) scale(1); letter-spacing: 0.28em; padding-left: 0.28em; }
+  75% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); letter-spacing: 0.3em; padding-left: 0.3em; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.06); letter-spacing: 0.34em; padding-left: 0.34em; }
+}
+.jc-showdown-title {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--color-gold-300);
+  text-shadow: 0 0 18px rgba(230, 197, 107, 0.55), 0 2px 6px rgba(0, 0, 0, 0.85);
+  transform: translate(-50%, -50%);
+  letter-spacing: 0.3em;
+  padding-left: 0.3em;
+  opacity: 0;
+  animation: jc-showdown-title 0.57s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .jc-sd-dim,
+  .jc-sd-lit,
+  .jc-sd-cards,
+  .jc-sd-plate,
+  .jc-sd-status,
+  .jc-sd-ui {
+    transition: none;
+  }
+  .jc-showdown-title {
+    animation: none !important;
+    opacity: 1;
+  }
   .jc-flip-in > .jc-card-turn,
   .jc-deal-in,
   .jc-reveal-in,

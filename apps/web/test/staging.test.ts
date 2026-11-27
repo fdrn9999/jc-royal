@@ -1,7 +1,7 @@
 import type { ActionType, Card, HandStage, TableCue, TableView } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import { FreeSession } from '../src/academy/practice/free';
-import { BUDGET, boundaries, collected, dealDelays, MAX_CUES, plan, quickSounds, sig, stagedAt, type Plan, type StageCue } from '../src/game/staging';
+import { BUDGET, SHOWDOWN_BUDGET, boundaries, collected, dealDelays, holdSeats, MAX_CUES, plan, quickSounds, sig, stagedAt, type Plan, type StageCue } from '../src/game/staging';
 
 interface SeatIn {
   bet?: number;
@@ -195,6 +195,29 @@ describe('staging: chips', () => {
     expect(stagedAt(p, t, elsewhere)).not.toBeNull();
   });
 
+  it('a player the room stood up after the result (out of chips) stays in the scene of that hand, and only there', () => {
+    const prev = view({ seq: 4, stage: 'preflop', potTotal: 200, seats: { 0: { bet: 100, stack: 0 }, 1: { bet: 100, stack: 900 } } });
+    const winners = [{ seatIndex: 1, amount: 200, potIds: ['pot-main-0'] }];
+    const next = view({ seq: 5, stage: 'settled', potTotal: 200, seats: { 0: { stack: 0 }, 1: { stack: 1100 } }, winners });
+    const p = plan(prev, batch({ kind: 'showdown' }, { kind: 'payout', seatIndex: 1, amount: 200 }, { kind: 'handEnd' }), next, 1)!;
+    expect(p.cine).not.toBeNull();
+    const t = p.cine!.title + 1;
+    // The loser stood up: the state alone ends the plan, the state with the seat held does not.
+    const left = view({ seq: 5, stage: 'settled', potTotal: 200, seats: { 1: { stack: 1100 } }, winners });
+    expect(stagedAt(p, t, left)).toBeNull();
+    const held = holdSeats(next, left);
+    expect(held.seats[0]).toBe(next.seats[0]);
+    expect(held.seats[1]).toBe(left.seats[1]);
+    expect(stagedAt(p, t, held)?.cine).toBe('title');
+    // Nobody left: the state itself. A seat someone else took is theirs; another hand holds nothing.
+    expect(holdSeats(next, next)).toBe(next);
+    const taken = view({ seq: 5, stage: 'settled', potTotal: 200, seats: { 0: { stack: 500, user: 'u-new' }, 1: { stack: 1100 } }, winners });
+    expect(holdSeats(next, taken)).toBe(taken);
+    expect(stagedAt(p, t, holdSeats(next, taken))).toBeNull();
+    const after = view({ id: 'h-2', seq: 1, stage: 'preflop', seats: { 1: { stack: 1100 } } });
+    expect(holdSeats(next, after)).toBe(after);
+  });
+
   it('stages nothing at a seat whose player changed within the batch itself: the chips are not for whoever sits there now', () => {
     // The winner stood up and someone else sat down there before the batch reached the table.
     const prev = view({ seq: 4, stage: 'preflop', potTotal: 15, seats: { 0: { bet: 5, stack: 995 }, 1: { bet: 10, stack: 990 } } });
@@ -225,7 +248,8 @@ describe('staging: chips', () => {
       { kind: 'handEnd' },
     );
     const p = plan(prev, cues, next, 1)!;
-    expect(p.end).toBe(BUDGET);
+    // (A showdown's plan: its own budget.)
+    expect(p.end).toBe(SHOWDOWN_BUDGET);
     // Until the last bet lands a stack may already show it gone; from then on every chip is somewhere, once.
     const lastBet = Math.max(...p.flights.filter((f) => f.kind === 'bet').map((f) => f.at + f.dur));
     for (const t of moments(p)) {
@@ -297,7 +321,7 @@ describe('staging: chips nobody called', () => {
     );
     const p = plan(prev, cues, next, 0)!;
     expect(p).not.toBeNull();
-    expect(p.end).toBeLessThanOrEqual(BUDGET);
+    expect(p.end).toBeLessThanOrEqual(SHOWDOWN_BUDGET);
     expect(p.flights.map((f) => [f.kind, f.seat, f.amount])).toEqual([
       ['bet', 1, 490],
       ['return', 0, 500],
@@ -348,7 +372,7 @@ describe('staging: cards', () => {
     );
     const p = plan(prev, cues, next, 1)!;
     expect(p).not.toBeNull();
-    expect(p.end).toBeLessThanOrEqual(BUDGET);
+    expect(p.end).toBeLessThanOrEqual(SHOWDOWN_BUDGET);
     const [f1, f2, f3, turn, river] = p.board!.at;
     expect(p.board!.from).toBe(0);
     expect(p.reveal).toBeLessThan(f1!);
@@ -411,7 +435,9 @@ describe('staging: real hands', () => {
       expect(p, JSON.stringify(cues.map((c) => c.cue))).not.toBeNull();
       if (staged.some((c) => c.cue.kind === 'handStart')) return;
       seen++;
-      expect(p!.end).toBeLessThanOrEqual(BUDGET);
+      // A showdown takes its own budget; only the server's showdown cue makes a plan one.
+      expect(!!p!.cine).toBe(staged.some((c) => c.cue.kind === 'showdown'));
+      expect(p!.end).toBeLessThanOrEqual(p!.cine ? SHOWDOWN_BUDGET : BUDGET);
       const first = stagedAt(p!, 0, after)!;
       for (const x of before.seats) expect(first.bets[x.seatIndex] ?? (after.hand!.stage === 'settled' ? 0 : x.streetBet)).toBe(x.streetBet);
       expect(first.pot ?? collected(after)).toBe(collected(before));

@@ -16,6 +16,8 @@
  *   member and kind (sent again: still one).
  */
 import {
+  BGM_IDS,
+  DEFAULT_BGM,
   isKstNight,
   tournamentRecovery,
   tournamentStructureProblem,
@@ -260,6 +262,8 @@ const CreateSchema = z.object({
   /** The template version the summary showed: a template changed meanwhile is a conflict. */
   templateVersion: BaseVersion,
   name: z.string().trim().min(2).max(40).optional(),
+  /** The background music of the tournament's tables; the default when left out. */
+  bgmId: z.enum(BGM_IDS).optional(),
   preview: z.boolean().optional(),
 });
 const VersionSchema = z.object({ baseVersion: BaseVersion, reason: ReasonSchema.optional() });
@@ -344,15 +348,15 @@ export const adminTournamentRoutes = new Hono<AppEnv>()
         .prepare(
           `INSERT INTO tournaments (id, template_id, name, status, capacity, min_players, start_stack, levels, level_ms, turn_seconds,
                   tb_enabled, tb_initial_ms, tb_max_ms, tb_unit_ms, tb_refill_hands, tb_refill_ms, min_hands, require_verified, auto_start,
-                  format, table_seats, version, roster, level, hands, pause_requested, record_hands, created_by, created_at, updated_at)
+                  format, table_seats, version, roster, level, hands, pause_requested, record_hands, created_by, created_at, updated_at, bgm_id)
            SELECT ?1, t.id, ?2, 'registering', t.capacity, t.min_players, t.start_stack, t.levels, t.level_ms, t.turn_seconds,
                   t.tb_enabled, t.tb_initial_ms, t.tb_max_ms, t.tb_unit_ms, t.tb_refill_hands, t.tb_refill_ms, t.min_hands, t.require_verified, t.auto_start,
-                  t.format, t.table_seats, 1, 0, 0, 0, 0, ${recordHandsSql(c.env)}, ?3, ?4, ?4
+                  t.format, t.table_seats, 1, 0, 0, 0, 0, ${recordHandsSql(c.env)}, ?3, ?4, ?4, ?8
              FROM tournament_templates t
             WHERE t.id = ?5 AND t.status = 'active' AND t.version = ?6
               AND (SELECT COUNT(*) FROM tournaments WHERE status IN ('registering', 'closed') AND is_private = 0) < ?7`,
         )
-        .bind(id, name, c.var.user!.id, now, tpl.id, tpl.version, TOURNAMENT_OPEN_MAX),
+        .bind(id, name, c.var.user!.id, now, tpl.id, tpl.version, TOURNAMENT_OPEN_MAX, body.bgmId ?? DEFAULT_BGM),
       changed.statement,
     ]);
     if (!r?.meta.changes) {
