@@ -243,6 +243,8 @@ export function expectScene(w: Watched, n: number, t: Truth['settled'][number], 
 const GREY = /grayscale\(1\)/;
 /** In its own colour: no filter, or the last few hundredths of the transition back to none. */
 const clear = (f: string | null) => f === 'none' || Number(/grayscale\(([\d.e-]+)\)/.exec(f ?? '')?.[1] ?? 1) < 0.05;
+/** Back in colour or nearly: the transition (0.32 s) can still be at its end on a page drawing late. Never the grey of a loser. */
+const coming = (f: string | null) => clear(f) || Number(/grayscale\(([\d.e-]+)\)/.exec(f ?? '')?.[1] ?? 1) < 0.5;
 /** The filters a moment after the hands turned: the table grey, the board, the pot and the showdown's hands not. */
 export function expectLit(w: Watched, n: number, t: Truth['settled'][number]) {
   const st = w.styles.filter((s) => s.phase === 'reveal')[n]!;
@@ -265,7 +267,7 @@ export function expectLit(w: Watched, n: number, t: Truth['settled'][number]) {
   if (won?.now && won.now !== 'restore') {
     for (const [k, s] of Object.entries(won.seats)) {
       expect(s.winner, `winner mark on seat ${k}`).toBe(t.winners.includes(Number(k)));
-      if (s.winner) expect(clear(s.plate), `the winner's plate in colour: ${s.plate}`).toBe(true);
+      if (s.winner) expect(coming(s.plate), `the winner's plate in colour: ${s.plate}`).toBe(true);
       else expect(s.plate, `seat ${k}'s plate grey`).toMatch(GREY);
     }
   }

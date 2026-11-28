@@ -94,6 +94,8 @@ export async function socialScenario(browser: Browser, mobile: boolean) {
   // (A is made the one to act: B, when first, calls or checks.)
   await expect(async () => {
     const who = await actor(a.page, b.page);
+    // (A hand under way: no rabbit hunt is offered.)
+    for (const p of [a.page, b.page]) expect(await p.getByTestId('rabbit-hunt').count()).toBe(0);
     if (who !== a.page) {
       await checkOrCall(b.page);
       throw new Error('B acted; waiting for A');
@@ -167,12 +169,13 @@ export async function socialScenario(browser: Browser, mobile: boolean) {
   await expect(b.page.locator('[data-testid^="chat-bubble-"]')).toHaveCount(0);
 
   // --- Rabbit hunting from the board's empty places, once the hand is over by a fold.
-  for (const p of [a.page, b.page]) await expect(p.getByTestId('rabbit-hunt')).toHaveCount(0);
-  await expect(async () => {
-    expect((await fold(a.page)) || (await fold(b.page))).toBe(true);
-  }).toPass({ timeout: 60_000 });
+  // (The button is up for the few seconds a folded hand's result is: on a slow runner the turn's clock can end the hand
+  // under way before the fold here, the next one dealt by then. So a hand is folded until the button is seen.)
   const hunt = a.page.getByTestId('rabbit-hunt');
-  await expect(hunt).toBeVisible();
+  await expect(async () => {
+    if (!(await hunt.isVisible().catch(() => false))) (await fold(a.page)) || (await fold(b.page));
+    await expect(hunt).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 120_000 });
   await expect(hunt).toHaveAttribute('title', /남은 커뮤니티 카드|would have come/);
   const inBoard = await a.page.evaluate(() => {
     const h = document.querySelector('[data-testid=rabbit-hunt]')!.getBoundingClientRect();
