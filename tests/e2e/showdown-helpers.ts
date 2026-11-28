@@ -173,6 +173,14 @@ export const SEEN = ['title', 'reveal', 'highlight', 'settlement'];
 /** The scene's phases that last (SEEN), in the order they came. */
 export const lasting = (ph: string[]) => ph.filter((p) => SEEN.includes(p));
 
+/**
+ * The phases every page draws, in order: SEEN but the quarter second the result stands before the chips move
+ * (`highlight`). The scene is drawn where its clock stands (CueLayer), so a page held up that long (a loaded runner)
+ * goes from the hands to the chips paid; the result it shows then is checked all the same (expectScene, expectLit).
+ */
+export const DRAWN = SEEN.filter((p) => p !== 'highlight');
+export const drawn = (ph: string[]) => ph.filter((p) => DRAWN.includes(p));
+
 export function phasesOf(w: Watched, n: number): string[] {
   const out: string[][] = [[]];
   for (const p of w.phases) {

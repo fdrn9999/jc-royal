@@ -248,6 +248,21 @@ export async function bustScenario(browser: Browser, mobile: boolean) {
   expect(await widerThanDevice(a.page)).toBe(false);
   await loser.page.screenshot({ path: test.info().outputPath(`ux-${tag}-bust-result-${loser === a ? 'A-loser' : 'B-loser'}.png`) });
   await a.page.screenshot({ path: test.info().outputPath(`ux-${tag}-bust-result-A.png`) });
+  // A window at 150% zoom (853×480 CSS pixels, the note in the narrow column): no line of the reason is cut short.
+  if (!mobile) {
+    const size = loser.page.viewportSize()!;
+    await loser.page.setViewportSize({ width: 853, height: 480 });
+    await expect(note).toBeVisible();
+    const cut = await note.evaluate((n) =>
+      Array.from(n.querySelectorAll<HTMLElement>('*'))
+        .filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible')
+        .map((e) => `${e.textContent} ${e.scrollWidth}>${e.clientWidth}`),
+    );
+    expect(await onScreen(loser.page, '[data-testid=outcome-note]')).toBe(true);
+    await loser.page.screenshot({ path: test.info().outputPath(`ux-${tag}-bust-result-loser-853x480.png`) });
+    expect(cut).toEqual([]);
+    await loser.page.setViewportSize(size);
+  }
 
   // Read at leisure: from the banner (the pot paid) the loser's seat stays six seconds or more, then is free.
   for (const p of [a.page, b.page]) await expect(p.getByTestId(`seat-${loserSeat}`)).toHaveCount(0, { timeout: 25_000 });

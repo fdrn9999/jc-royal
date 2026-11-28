@@ -125,9 +125,10 @@ export function OutcomeNote({ outcome, names, amounts, className }: { outcome: O
     >
       <div className={cx('text-[10px] font-bold tracking-[0.14em]', outcome.kind === 'lost' ? 'text-[#f3b0b2]' : outcome.kind === 'folded' ? 'text-ink-300' : 'text-gold-300')}>{title}</div>
       {lines.map((l) => (
-        <div key={l.id} className="flex gap-2" data-testid={`outcome-${l.id}`}>
+        // (In a narrow column the hand and the name go under their label, whole: never cut short.)
+        <div key={l.id} className="flex flex-wrap items-baseline gap-x-2" data-testid={`outcome-${l.id}`}>
           <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] text-ink-300">{l.label}</span>
-          <span className="min-w-0 truncate font-medium">{l.text}</span>
+          <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{l.text}</span>
         </div>
       ))}
       {note && (
