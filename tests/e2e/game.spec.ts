@@ -20,7 +20,7 @@ test('two browsers: join, buy in, play a hand to showdown, refresh, stand up wit
   const chat = a.page.getByRole('textbox', { name: /채팅|Chat/ });
   await chat.fill('gl hf');
   await chat.press('Enter');
-  for (const p of [a.page, b.page]) await expect(p.getByText('gl hf')).toBeVisible();
+  for (const p of [a.page, b.page]) await expect(p.getByText('gl hf').first()).toBeVisible();
 
   // The hand starts automatically; each player sees exactly two face-up cards of their own.
   for (const p of [a.page, b.page]) await expect(p.getByTestId('board')).toBeVisible();

@@ -689,7 +689,7 @@ export function TablePage() {
           'jc-game-surface jc-sd-ui flex shrink-0 items-center gap-2 border-b border-gold-500/10 bg-ink-950/70 backdrop-blur-md',
           // The stand-up question hangs below the header, over the lines that follow it (each at z-40) and over the chat
           // beside the table (z-50, the phone's drawer it also is, and later on the page).
-          leaveAsk || lobbyAsk ? 'z-[60]' : 'z-40',
+          leaveAsk || lobbyAsk || (short && myTurn && reactTray.open) ? 'z-[60]' : 'z-40',
           // Short, every pixel of height goes to the seats; the notch's side (a phone on its side) stays clear.
           short ? 'h-11 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]' : 'h-14 px-3',
         )}
@@ -768,6 +768,18 @@ export function TablePage() {
           );
         })()}
         <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
+          {/* My turn on a phone on its side: the seats take the table's corners and the bar the column, so the reaction
+              button stands here, its tray hanging below it while open (over no control of the turn). */}
+          {short && s && myTurn && seated && reactOn && (
+            <span className="relative flex" data-testid="react-turn">
+              <ReactionButton tray={reactTray} header />
+              {reactTray.open && (
+                <div className="absolute right-0 top-full z-10 mt-1 flex w-max">
+                  <ReactionTray state={reactTray} sender={reactSender} column={false} side />
+                </div>
+              )}
+            </span>
+          )}
           {seated && (
             <Button size="icon" variant="subtle" onClick={() => sock.send({ t: s!.you.sittingOut ? 'sitIn' : 'sitOut' })} data-testid="sitout-toggle" aria-label={s!.you.sittingOut ? t('table.sitIn') : t('table.sitOut')}>
               {/* What a tap does: play (come back) while away, pause (step away) while playing. */}
@@ -1242,16 +1254,14 @@ export function TablePage() {
           </div>
           {/* My turn: the action bar has the band, so the reaction button (the one of the status line, never a second)
               and its tray stand at the table's lower left, above the band: over no action control, the timer or my cards.
-              (A phone held upright has a seat there: the line over its bar holds them, see the bar's `bank`.) */}
-          {s && myTurn && seated && reactOn && (short || !phone) && (
+              (A phone held upright has a seat there: the line over its bar holds them, see the bar's `bank`; on its side,
+              the header does.) */}
+          {s && myTurn && seated && reactOn && !short && !phone && (
             <div
-              className={cx(
-                'pointer-events-none absolute z-40 flex flex-col items-start gap-1',
-                short ? 'bottom-[max(0.375rem,env(safe-area-inset-bottom))] left-[max(0.5rem,env(safe-area-inset-left))]' : 'bottom-[calc(var(--dock)+var(--dock-b)+0.25rem)] left-2 sm:left-6',
-              )}
+              className="pointer-events-none absolute bottom-[calc(var(--dock)+var(--dock-b)+0.25rem)] left-2 z-40 flex flex-col items-start gap-1 sm:left-6"
               data-testid="react-turn"
             >
-              {reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={short} side />}
+              {reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={false} side />}
               <ReactionButton tray={reactTray} solid />
             </div>
           )}

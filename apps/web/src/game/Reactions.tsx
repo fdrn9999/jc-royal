@@ -108,7 +108,8 @@ export function useReactionTray(off: boolean): ReactionTrayState {
 }
 
 /** Opens the tray: a finger's size (44px), in the status line (`solid`: on its own over the table, on my turn). */
-export function ReactionButton({ tray, solid }: { tray: ReactionTrayState; solid?: boolean }) {
+/** `header`: in the table's header (a phone on its side, on my turn), the size of the buttons beside it. */
+export function ReactionButton({ tray, solid, header }: { tray: ReactionTrayState; solid?: boolean; header?: boolean }) {
   const { t } = useI18n();
   return (
     <button
@@ -116,7 +117,8 @@ export function ReactionButton({ tray, solid }: { tray: ReactionTrayState; solid
       type="button"
       onClick={tray.toggle}
       className={cx(
-        'jc-tap grid size-11 shrink-0 place-items-center rounded-full border text-xl leading-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-gold-400',
+        'jc-tap grid shrink-0 place-items-center rounded-full border text-xl leading-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-gold-400',
+        header ? 'size-10' : 'size-11',
         tray.open ? 'border-gold-400/70 bg-gold-500/15' : 'border-white/10',
         solid && 'pointer-events-auto bg-ink-950/85 shadow-lg backdrop-blur',
       )}
