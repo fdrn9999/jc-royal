@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test';
 import { checkOrCall, signUp, sitWith, standUp, test } from './helpers';
-import { expectLit, expectRestored, expectScene, fold, lasting, openRoom, phasesOf, scene, scenesDone, SEEN, shootPhases, shove, sitRebuy, truth, watchShowdown } from './showdown-helpers';
+import { DRAWN, drawn, expectLit, expectRestored, expectScene, fold, openRoom, phasesOf, scene, scenesDone, shootPhases, shove, sitRebuy, truth, watchShowdown } from './showdown-helpers';
 
 /**
  * The showdown's scene in a real browser, against what the room sent each page: it plays for the server's showdown
@@ -42,9 +42,9 @@ test('쇼다운 연출: 폴드 승리에는 없고, 쇼다운에서 한 번(회�
   console.log('phases photographed (asked:in):', (await shots).join(' '));
   await a.page.waitForTimeout(900);
   const wa = await scene(a.page);
-  // (Order, and no phase twice, are expectScene's to check: here, that none of the lasting ones was passed by. The
+  // (Order, and no phase twice, are expectScene's to check: here, that none a page cannot pass by was left out. The
   // pictures are taken of the other player's page: a page photographed at each phase is held up past a phase or two.)
-  expect(lasting(phasesOf(wa, 0)), 'an unhurried showdown goes through every phase').toEqual(SEEN);
+  expect(drawn(phasesOf(wa, 0)), 'a showdown goes through every phase a page cannot pass by').toEqual(DRAWN);
   expect(wa.titles).toBe(1);
   for (const [p, t] of [
     [a.page, ta],

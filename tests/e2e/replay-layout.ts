@@ -134,7 +134,8 @@ export function measureReplay(page: Page, scroll: 'table' | 'bottom' | 'controls
               [0.75, 0.6],
             ];
         const by = new Set<string>();
-        for (const [fx, fy] of pts) {
+        // A hit test passes through what takes no pointer (the winner's banner where the pot lay), as table-layout.ts has it.
+        for (const [fx, fy] of getComputedStyle(it.el).pointerEvents === 'none' ? [] : pts) {
           const x = r.left + r.width * fx!;
           const y = r.top + r.height * fy!;
           // Within a pixel of the screen's edge Chrome rounds the point out of the viewport and finds nothing there.

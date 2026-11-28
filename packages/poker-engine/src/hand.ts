@@ -362,6 +362,13 @@ export class HandEngine {
   get startingSeats(): readonly HandSeat[] {
     return this.meta.seats;
   }
+  /** How the settled hand ended, for its pace only: the hands its showdown compared (none: won by a fold), and how many of them were all in. */
+  ending(): { hands: number; allIn: number } {
+    const sd = this.snapshot.hand.showdown?.evaluatedHands ?? [];
+    if (sd.length < 2) return { hands: 0, allIn: 0 };
+    const allIn = this.allInPlayers();
+    return { hands: sd.length, allIn: sd.filter((x) => allIn.has(x.playerId)).length };
+  }
   /** Engine snapshot version; increases with every accepted event. */
   get version(): number {
     return this.snapshot.index;

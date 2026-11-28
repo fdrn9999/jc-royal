@@ -18,7 +18,9 @@ for (const f of initial) for (const m of ENGINE_MARKERS) if (has(f, m)) problems
 const engineChunks = files.filter((f) => !initial.includes(f) && ENGINE_MARKERS.every((m) => has(f, m)));
 if (engineChunks.length === 0) problems.push('no lazy chunk contains the engine (academy chunk missing?)');
 const kb = Math.round(initial.reduce((n, f) => n + statSync(join(dist, 'assets', f)).size, 0) / 1024);
-const LIMIT_KB = 650;
+// 656 since the in-game UX work: main stood at the old 650 exactly, and the table's new Korean lines (the result's
+// reason, the showdown settings) ride in the entry's dictionary (+4 KB).
+const LIMIT_KB = 656;
 if (kb > LIMIT_KB) problems.push(`entry bundle ${kb} KB exceeds ${LIMIT_KB} KB`);
 console.log(`entry ${initial.join(' + ')}: ${kb} KB; engine in: ${engineChunks.join(', ') || '—'}`);
 if (problems.length) {

@@ -6,7 +6,7 @@
  * it with its sounds). Cues delivered again with a state of the same version never get here (useTableSocket).
  */
 import { sound } from '@jc/audio';
-import type { TableView } from '@jc/types';
+import { RESULT_HOLD_MS, SCENE_MS, type ShowdownMode, type TableView } from '@jc/types';
 import { ChipStack } from '@jc/ui';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react';
 import type { Amounts } from '../lib/amount';
@@ -31,9 +31,19 @@ export interface Staging {
   arrival: HandArrival | null;
   /** How long the showdown's title shows, in ms (0: no showdown is staged). */
   titleMs: number;
-  /** The seats to draw: the state's, with a seat left while its hand's end plays out kept until it is over. */
+  /**
+   * The seats to draw: the state's, with a seat left after its hand's result (out of chips, or leaving) kept as the
+   * result found it until the next hand, so the hand's end reads with everyone who was in it.
+   */
   seats: TableView['seats'];
+  /** My seat among those kept, once the room stood me up after the result (null: I sit where the state says, or nowhere). */
+  mine: number | null;
+  /** Ends the running scene on this screen only: the state shows at once (nothing is sent, nothing else changes). */
+  skip: () => void;
 }
+
+/** The longest a seat left after the result stays in the picture: the longest the room leaves before a deal (pace.ts). */
+export const SEAT_HOLD_MS = SCENE_MS.runout + RESULT_HOLD_MS.bust;
 
 interface Run {
   plan: Plan;
@@ -48,7 +58,7 @@ function cardsOf(v: TableView): Set<string> {
   return out;
 }
 
-export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: number) => void, mySeat: number | null, reducedMotion: boolean): Staging {
+export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: number) => void, mySeat: number | null, reducedMotion: boolean, mode: ShowdownMode = 'cinematic'): Staging {
   const last = useRef(0);
   const prev = useRef<TableView | null>(null);
   const run = useRef<Run | null>(null);
@@ -63,7 +73,9 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
   // Planned while rendering (it is pure), so the batch's first frame already shows where it starts, not where it ends.
   const next = useMemo<Run | null>(() => {
     if (!staging || reducedMotion || document.hidden) return null;
-    const p = plan(prev.current, fresh, s, mySeat);
+    // (The fast setting stages nothing of a hand's end: its result shows at once.)
+    if (mode === 'fast' && s.hand?.stage === 'settled') return null;
+    const p = plan(prev.current, fresh, s, mySeat, mode);
     return p && { plan: p, start: performance.now(), view: s };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cues, s]);
@@ -75,6 +87,21 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
     const dealt = !reducedMotion && fresh.some((e) => e.cue.kind === 'handStart');
     arrival.current = { id: hand.id, deal: dealt ? dealDelays(s) : null, still: dealt ? null : cardsOf(s) };
   }
+
+  // The hand's end as the result found it: the state the room sent everybody with the result (nothing a client could
+  // not already see), kept for that hand only. A seat its player left since stays in the picture until the next deal.
+  // Never longer than the longest time the room leaves before a deal (a table left with nobody to deal to keeps its
+  // last hand's result: the seat is free there, and shows as free).
+  const settledAs = useRef<{ view: TableView; at: number } | null>(null);
+  if (!hand || hand.stage !== 'settled') settledAs.current = null;
+  else if (settledAs.current?.view.hand?.id !== hand.id) settledAs.current = { view: s, at: performance.now() };
+  const heldId = settledAs.current ? hand!.id : null;
+  useEffect(() => {
+    if (!heldId) return;
+    const h = setTimeout(redraw, SEAT_HOLD_MS + 50);
+    return () => clearTimeout(h);
+  }, [heldId]);
+  const kept = settledAs.current && performance.now() - settledAs.current.at < SEAT_HOLD_MS ? settledAs.current.view : null;
 
   const clear = () => {
     for (const h of timers.current) clearTimeout(h);
@@ -129,7 +156,7 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
 
   const active = staging ? next : run.current && sig(s) === run.current.plan.final ? run.current : null;
   // (A player the room stood up after the result, out of chips, stays in the scene until it is over.)
-  const shown = active ? holdSeats(active.view, s) : s;
+  const shown = kept ? holdSeats(kept, s, true) : active ? holdSeats(active.view, s) : s;
   const staged = active ? stagedAt(active.plan, performance.now() - active.start, shown) : null;
   const cine = staged?.cine ? active!.plan.cine : null;
   return {
@@ -138,8 +165,18 @@ export function useCueStaging(s: TableView, cues: CueEvent[], consume: (upToId: 
     start: active?.start ?? 0,
     arrival: hand && arrival.current?.id === hand.id ? arrival.current : null,
     titleMs: cine ? active!.plan.reveal - cine.title : 0,
-    seats: staged ? shown.seats : s.seats,
+    seats: shown.seats,
+    mine: heldMine(kept, s, shown),
+    skip: stop,
   };
+}
+
+/** My seat while the picture keeps it after the room stood me up: the one I had at the result, still empty since. */
+function heldMine(was: TableView | null, now: TableView, shown: TableView): number | null {
+  const i = was?.you.seatIndex;
+  if (i == null || now.you.seatIndex !== null || shown === now) return null;
+  const kept = shown.seats.find((x) => x.seatIndex === i);
+  return kept && kept.state !== 'empty' && now.seats.find((x) => x.seatIndex === i)?.state === 'empty' ? i : null;
 }
 
 /** The running plan's chips, each flying at its time in the plan. `box`: the table's size in px, which the flights move by. */

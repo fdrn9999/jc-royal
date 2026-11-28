@@ -4,7 +4,10 @@ import { keepSeats } from './keepSeats';
 import { Heartbeat, Outbox, type Outgoing } from './link';
 import { preActionSpot } from './preAction';
 import { againHunt, answerHunt, failHunt, huntAt, huntOverdue, pressHunt, refuseHunt, type RabbitHunt } from './rabbitHunt';
+import { addBubble, CHAT_BUBBLE_MS, dropBubble, type ChatBubble } from './chatBubbles';
 import { REACTION_SHOW_MS, type SeatReaction } from './Reactions';
+
+const NO_IDS: ReadonlySet<string> = new Set();
 import { RESTORED_MS, recoveryOf, type Recovery } from './recovery';
 import { RequestError, rid } from './request';
 
@@ -22,6 +25,8 @@ export interface TableSocketApi {
   status: ConnStatus;
   state: TableView | null;
   chat: ChatMessage[];
+  /** Live chat lines showing as speech bubbles now: the latest per player, each for CHAT_BUBBLE_MS (chatBubbles.ts). */
+  bubbles: ChatBubble[];
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
   /** Quick reactions showing now: the latest per seat, each for REACTION_SHOW_MS. */
@@ -132,6 +137,9 @@ export function useTableSocket(tableId: string): TableSocketApi {
   const [cues, setCues] = useState<CueEvent[]>([]);
   const [reactions, setReactions] = useState<SeatReaction[]>([]);
   const reactionSeq = useRef(0);
+  const [bubbles, setBubbles] = useState<ChatBubble[]>([]);
+  const bubbleSeen = useRef(new Set<string>());
+  const bubbleTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [lastError, setLastError] = useState<TableSocketApi['lastError']>(null);
   const [lastNotice, setLastNotice] = useState<TableSocketApi['lastNotice']>(null);
   const [acting, setActing] = useState(false);
@@ -267,9 +275,24 @@ export function useTableSocket(tableId: string): TableSocketApi {
           case 'chatHistory':
             setChat(m.messages);
             return;
-          case 'chat':
+          case 'chat': {
             setChat((c) => [...c, m.message].slice(-100));
+            // The same line as a bubble by its sender's seat, for a moment (none on a page in the background, which
+            // would only show them all at once on return; none for a line delivered twice).
+            const line = m.message;
+            if (document.hidden || bubbleSeen.current.has(line.id)) return;
+            bubbleSeen.current.add(line.id);
+            if (bubbleSeen.current.size > 200) bubbleSeen.current = new Set([...bubbleSeen.current].slice(-100));
+            setBubbles((q) => addBubble(q, line, NO_IDS));
+            bubbleTimers.current.set(
+              line.id,
+              setTimeout(() => {
+                bubbleTimers.current.delete(line.id);
+                setBubbles((q) => dropBubble(q, line.id));
+              }, CHAT_BUBBLE_MS),
+            );
             return;
+          }
           case 'react': {
             // A page in the background would only queue them up to play all at once on return.
             if (document.hidden) return;
@@ -451,6 +474,10 @@ export function useTableSocket(tableId: string): TableSocketApi {
       wsRef.current?.close();
       // Another table (or none): nothing of this one's is shown there.
       setHunt(null);
+      for (const h of bubbleTimers.current.values()) clearTimeout(h);
+      bubbleTimers.current.clear();
+      bubbleSeen.current.clear();
+      setBubbles([]);
     };
   }, [tableId, box, beat, setHunt]);
 
@@ -559,5 +586,5 @@ export function useTableSocket(tableId: string): TableSocketApi {
   // Only with the hand it belongs to: never over another hand's board.
   const hunted = rabbitHunt && !rabbitHunt.late && rabbitHunt.phase === 'success' && state?.hand?.id === rabbitHunt.handId && state.hand.stage === 'settled' ? rabbitHunt.cards : null;
 
-  return { status, state, chat, cues, consumeCues, reactions, lastError, lastNotice, request, send, act, preAct, acting, rabbit: hunted, rabbitHunt, hunt, huntAgain, endHunt, reconnect, reopen, synced, recovery };
+  return { status, state, chat, bubbles, cues, consumeCues, reactions, lastError, lastNotice, request, send, act, preAct, acting, rabbit: hunted, rabbitHunt, hunt, huntAgain, endHunt, reconnect, reopen, synced, recovery };
 }

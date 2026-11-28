@@ -189,7 +189,8 @@ export function measureTable(page: Page, dense?: RegExp): Promise<TableReport> {
         if (x < 0 || x > vw - 1 || y < top || y > bottom - 1) continue;
         let hit = 'nothing';
         for (const e of document.elementsFromPoint(x, y)) {
-          if (it.owner.contains(e)) {
+          // The rabbit hunt's button lies over the board's empty places by design (never over a card: rabbit-race.spec).
+          if (it.owner.contains(e) || (it.group === 'board' && it.el.matches('.jc-card.border-dashed') && e.closest('[data-testid=rabbit-hunt]'))) {
             hit = '';
             break;
           }
