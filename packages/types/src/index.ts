@@ -11,6 +11,7 @@ export * from './social';
 export * from './vip';
 export * from './service';
 export * from './settings';
+export * from './pace';
 export * from './timebank';
 export * from './tournament';
 export * from './presence';

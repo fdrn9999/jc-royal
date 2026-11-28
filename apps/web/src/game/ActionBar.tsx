@@ -60,6 +60,10 @@ const CHIPS = chipAmounts('chips', 0);
 
 /** Narrower than Tailwind's `sm`: a phone held upright, where the bar's own row stacks the time bank over the bar. */
 const PHONE_QUERY = 'not all and (min-width: 40rem)';
+/** Whether the screen is that phone (the bar's own row stacked): what stands in that row asks too (Table.tsx). */
+export function usePhone(): boolean {
+  return useSyncExternalStore(subscribePhone, readPhone, () => false);
+}
 function subscribePhone(onChange: () => void) {
   const m = window.matchMedia?.(PHONE_QUERY);
   m?.addEventListener?.('change', onChange);
@@ -131,7 +135,7 @@ export function ActionBar({
 }) {
   const { t } = useI18n();
   const prefs = usePrefs();
-  const phone = useSyncExternalStore(subscribePhone, readPhone, () => false);
+  const phone = usePhone();
   const legal = state.you.legal;
   const find = <K extends LegalOption['type']>(k: K) => legal.find((o) => o.type === k) as Extract<LegalOption, { type: K }> | undefined;
   const fold = find('fold');

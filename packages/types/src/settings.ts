@@ -18,6 +18,12 @@ export const SETTINGS_COLOR_VISIONS = ['normal', 'protan', 'deutan', 'tritan', '
 export type ColorVision = (typeof SETTINGS_COLOR_VISIONS)[number];
 /** The friends list order: by status (online, away, offline) or by the newest message. */
 export const SETTINGS_FRIEND_SORTS = ['presence', 'recent'] as const;
+/**
+ * How a showdown plays on this account's screens (packages/types/src/pace.ts): the whole scene, a shorter one without
+ * the title and the winner's banner, or the result at once. The room's time between hands is the same for all.
+ */
+export const SETTINGS_SHOWDOWN_MODES = ['cinematic', 'standard', 'fast'] as const;
+export type ShowdownMode = (typeof SETTINGS_SHOWDOWN_MODES)[number];
 
 export const SyncedPrefsSchema = z.object({
   theme: z.enum(SETTINGS_THEMES),
@@ -43,12 +49,17 @@ export const SyncedPrefsSchema = z.object({
    * made hand after). Shown with the beginner aids too, once.
    */
   showHand: z.boolean(),
+  showdownMode: z.enum(SETTINGS_SHOWDOWN_MODES),
+  /** The winner's banner and the effects of a strong winning hand. */
+  winEffects: z.boolean(),
+  /** Table chat lines as speech bubbles by the seats (the chat panel has them either way). */
+  chatBubbles: z.boolean(),
 });
 export type SyncedPrefs = z.infer<typeof SyncedPrefsSchema>;
 export type SyncedPrefKey = keyof SyncedPrefs;
 export const SYNCED_PREF_KEYS = Object.keys(SyncedPrefsSchema.shape) as SyncedPrefKey[];
 /** What a device shows for a setting the account has no value for. */
-export const SYNCED_PREF_DEFAULTS: SyncedPrefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips', reactions: true, colorVision: 'normal', friendSort: 'presence', turnVibrate: false, showHand: true };
+export const SYNCED_PREF_DEFAULTS: SyncedPrefs = { theme: 'royal', fourColor: false, confirmRisky: true, beginner: false, autoMuck: false, amountUnit: 'chips', reactions: true, colorVision: 'normal', friendSort: 'presence', turnVibrate: false, showHand: true, showdownMode: 'cinematic', winEffects: true, chatBubbles: true };
 
 /** Most favourite tables an account keeps (the newest win). */
 export const SETTINGS_FAV_MAX = 50;
@@ -104,6 +115,9 @@ export const SettingsSaveSchema = z
         friendSort: change(z.enum(SETTINGS_FRIEND_SORTS)),
         turnVibrate: change(z.boolean()),
         showHand: change(z.boolean()),
+        showdownMode: change(z.enum(SETTINGS_SHOWDOWN_MODES)),
+        winEffects: change(z.boolean()),
+        chatBubbles: change(z.boolean()),
       })
       .strict()
       .optional(),

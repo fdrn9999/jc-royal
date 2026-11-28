@@ -3,17 +3,19 @@
  * multiplayer table and the offline Academy practice table so both look and
  * animate the same; it only renders the TableView it is given.
  */
-import { handLabelKey, type Card, type SeatView, type TableView } from '@jc/types';
-import { ChipStack, cx, Logo, PlayingCard, RabbitIcon } from '@jc/ui';
+import { handLabelKey, type Card, type SeatView, type ShowdownMode, type TableView } from '@jc/types';
+import { ChipStack, cx, Logo, PlayingCard, RabbitIcon, Spinner } from '@jc/ui';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { amounts as chipAmounts, type Amounts, type AmountUnit } from '../lib/amount';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { Flights, useCueStaging } from './CueLayer';
 import { planForText, planHeight, planTable, scalePlan, type Density, type PlanInput, type Point, type SeatGeometry, type TablePlan } from './layout';
+import type { ChatBubble } from './chatBubbles';
 import type { SeatReaction } from './Reactions';
+import { WinnerBanner } from './ResultBanner';
 import { revealSpots } from './reveal';
 import { Seat } from './Seat';
-import { seatSpot, showdownSeats, winningCards } from './showdown';
+import { seatSpot, showdownSeats, winBanner, winningCards } from './showdown';
 import { collected as collectedOf } from './staging';
 import type { CueEvent } from './useTableSocket';
 import { wonFrom } from './won';
@@ -258,12 +260,17 @@ export const TableScene = memo(function TableScene({
   onShow,
   pickSelf = false,
   rabbit = null,
+  huntPhase = null,
+  onHunt,
   showOnCards = false,
   reactions,
+  chats,
   nextIn,
   cues,
   consumeCues,
   reducedMotion,
+  showdownMode = 'cinematic',
+  winEffects = true,
   amounts = CHIPS,
   onResultShown,
   turnNote,
@@ -285,14 +292,30 @@ export const TableScene = memo(function TableScene({
    * board's empty places and marked as such. They are no part of the hand: no result, hand name or highlight reads them.
    */
   rabbit?: readonly Card[] | null;
+  /**
+   * Rabbit hunting is offered to me now (the real table only; null: not offered): its button lies on the board's empty
+   * places, where the cards it asks for will show. `requesting`: asked, busy until the room answers; `error`: the same
+   * button asks again.
+   */
+  huntPhase?: 'idle' | 'requesting' | 'error' | null;
+  onHunt?: () => void;
   /** The show-card buttons lie on my cards instead of above them (a short screen keeps no room there: short.ts). */
   showOnCards?: boolean;
   /** Quick reactions showing now (the real table only), each at its sender's seat while that player still sits there. */
   reactions?: SeatReaction[];
+  /** Chat lines showing as speech bubbles now (the real table only), per seat index of the player who wrote them. */
+  chats?: ReadonlyMap<number, ChatBubble>;
   nextIn: number | null;
   cues: CueEvent[];
   consumeCues: (upToId: number) => void;
   reducedMotion: boolean;
+  /**
+   * How a hand's end plays on this screen (the member's setting; the Academy and replays keep the whole scene): the
+   * whole scene, one without the showdown's title and dimming, or the result at once. Only this screen's picture.
+   */
+  showdownMode?: ShowdownMode;
+  /** The winner's banner and the look of a rare winning hand (the member's setting). */
+  winEffects?: boolean;
   /** How amounts read (the player's unit at a real table or a replay; the Academy keeps chips, as its lessons do). */
   amounts?: Amounts;
   /** Told whether the hand's result shows yet: it waits for the hands to turn, so a page can hold its own word on it. */
@@ -309,7 +332,10 @@ export const TableScene = memo(function TableScene({
   const hand = s.hand;
   // The server state, as the cues that brought it play out (CueLayer): bets land, then go to the pot, cards turn in
   // order, the hands show before the result, the result before the payouts.
-  const { staged, flights, start, arrival, titleMs, seats } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion);
+  const { staged, flights, start, arrival, titleMs, seats, mine, skip } = useCueStaging(s, cues, consumeCues, mySeat, reducedMotion, showdownMode);
+  // My seat in the picture: the one I sit at, or the one the picture keeps for me until the next deal after the room
+  // stood me up (out of chips). Only what is drawn: nothing I can do reads it.
+  const me = mySeat ?? mine;
   // A showdown's scene (staging's `cine`): only while its plan runs, so a hand found settled (a reload, a reconnect)
   // or won by a fold has none, and a new hand, a hidden tab or leaving the page ends it with the plan.
   const cine = staged?.cine ?? null;
@@ -324,14 +350,22 @@ export const TableScene = memo(function TableScene({
   const showdown = useMemo(() => new Map(result ? (hand?.result?.showdown ?? []).map((x) => [x.seatIndex, x]) : []), [hand?.result, result]);
   // Every pot's winners' cards (a side pot's, both halves of a split), not the first winner's only.
   const winningFive = useMemo(() => (result ? winningCards(hand?.result, won.map((w) => w.seatIndex)) : []), [hand?.result, result, won]);
+  const banner = useMemo(() => (winEffects && hand?.stage === 'settled' ? winBanner(hand.result, won) : null), [winEffects, hand?.stage, hand?.result, won]);
+  const nameKey = seats.map((x) => x.nickname ?? '').join('\n');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `seats` is read through its names
+  const names = useMemo(() => new Map(seats.filter((x) => x.nickname).map((x) => [x.seatIndex, x.nickname!])), [nameKey]);
+  // The banner's names are the hand's: who sat there when its result came, not who took a winner's seat since.
+  const bannerNames = useRef<{ hand: string; names: Map<number, string> } | null>(null);
+  if (!banner || !hand) bannerNames.current = null;
+  else if (bannerNames.current?.hand !== hand.id) bannerNames.current = { hand: hand.id, names };
   // Where winners' cards shown after the hand come to rest by the board (reveal.ts), worked out once per plan and set
   // of such winners.
   const showing = seats.filter((x) => (winners.get(x.seatIndex) ?? 0) > 0 && x.shown?.some(Boolean)).map((x) => x.seatIndex);
   const showingKey = showing.join();
   const spots = useMemo(
-    () => (showing.length ? revealSpots(plan, showing.map((seat) => ({ seat, mine: seat === mySeat }))) : null),
+    () => (showing.length ? revealSpots(plan, showing.map((seat) => ({ seat, mine: seat === me }))) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `showing` is read through its key
-    [plan, showingKey, mySeat],
+    [plan, showingKey, me],
   );
   // Chips already gathered in the middle; after settlement they have been paid out.
   const collected = staged?.pot ?? collectedOf(s);
@@ -340,6 +374,8 @@ export const TableScene = memo(function TableScene({
   // rabbit hunt ended by a fold: they say nothing of who won), which could take what is left of the time to the deal.
   const dealt = hand?.board.length ?? 0;
   const hunted = rabbit?.length && hand?.stage === 'settled' && boardShown === dealt && dealt + rabbit.length <= 5 ? rabbit : null;
+  // The rabbit hunt's button, over the places the hand left empty (none after the river), once its result shows.
+  const huntAt = huntPhase && onHunt && result && hand?.stage === 'settled' && boardShown === dealt && dealt < 5 && !hunted ? dealt : null;
   // The board cards drawn last time (this hand's): the ones drawn now for the first time are the ones that turn.
   const drawn = useRef({ hand: '', n: 0 });
   const before = drawn.current.hand === hand?.id ? drawn.current.n : 0;
@@ -359,7 +395,7 @@ export const TableScene = memo(function TableScene({
   // Another player's bet once they fold, their cards gone, lies where it still reads as theirs (layout's `folds`), and
   // its chips fly to the pot from there.
   const foldedKey = s.seats
-    .filter((x) => x.state === 'folded' && x.seatIndex !== mySeat && geometry[x.seatIndex]?.fold)
+    .filter((x) => x.state === 'folded' && x.seatIndex !== me && geometry[x.seatIndex]?.fold)
     .map((x) => x.seatIndex)
     .join();
   const placed = useMemo(() => {
@@ -403,6 +439,8 @@ export const TableScene = memo(function TableScene({
       <div className="pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={{ left: plan.block.x, top: plan.block.y, width: plan.block.w, height: plan.block.h }}>
         <div className="jc-sd-lit flex shrink-0 items-center justify-center [&>*]:pointer-events-auto" style={{ height: plan.potRowH }} data-testid="pot">
           {collected > 0 && <ChipStack amount={collected} size={`${plan.potChip}px`} text={amounts.fmt(collected, true)} />}
+          {/* Once the pot is paid, where it lay: who won it, with what, how much. */}
+          {banner && result && collected === 0 && <WinnerBanner key={hand!.id} banner={banner} names={bannerNames.current?.names ?? names} amounts={amounts} effects={winEffects} still={reducedMotion} maxWidth={plan.block.w} />}
         </div>
         <div className="jc-sd-lit pointer-events-auto relative flex shrink-0 rounded-xl bg-black/35 shadow-[inset_0_1px_8px_rgba(0,0,0,0.45)]" style={{ gap: d.boardGap, padding: d.boardPad }} data-testid="board">
           {hunted && (
@@ -411,6 +449,29 @@ export const TableScene = memo(function TableScene({
               <RabbitIcon className="size-3" strokeWidth={2.2} />
               RABBIT HUNT
             </span>
+          )}
+          {huntAt !== null && (
+            // Over the empty places only, a finger's size at least (one narrow place left: it reaches past the board's
+            // edge, never over a card of the hand). Busy from the first tap until the room answers.
+            <button
+              type="button"
+              disabled={huntPhase === 'requesting'}
+              aria-busy={huntPhase === 'requesting'}
+              onClick={onHunt}
+              className="jc-tap jc-rabbit-slot absolute z-10 flex min-h-11 min-w-11 -translate-y-1/2 flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-gold-400/70 bg-ink-950/70 px-0.5 text-gold-300 hover:bg-gold-500/15 focus-visible:outline-2 focus-visible:outline-gold-400 disabled:opacity-80"
+              style={{ left: d.boardPad + huntAt * (plan.board + d.boardGap), top: '50%', width: (5 - huntAt) * plan.board + (4 - huntAt) * d.boardGap, height: plan.board * 1.4 }}
+              aria-label={t(huntPhase === 'requesting' ? 'table.rabbitAsking' : huntPhase === 'error' ? 'table.rabbitRetry' : 'table.rabbit')}
+              title={t('table.rabbitTip')}
+              data-testid="rabbit-hunt"
+              data-phase={huntPhase}
+            >
+              {huntPhase === 'requesting' ? <Spinner className="size-4" /> : <RabbitIcon className="size-5" />}
+              {huntAt < 4 && (
+                <span className="max-w-full truncate text-[10px] font-semibold leading-tight">
+                  {t(huntPhase === 'requesting' ? 'table.rabbitAsking' : huntPhase === 'error' ? 'table.rabbitRetry' : 'table.rabbit')}
+                </span>
+              )}
+            </button>
           )}
           {Array.from({ length: 5 }, (_, i) => {
             const c = i < boardShown ? (hand?.board[i] as Card | undefined) : undefined;
@@ -473,13 +534,13 @@ export const TableScene = memo(function TableScene({
         // The turn's clock goes only to the seat whose turn it is, the only one that reads it.
         const isActor = !!hand && hand.actorSeat === seat.seatIndex && hand.stage !== 'settled';
         // Other players' showdown cards stay face down until the hands show; a winner's stack until its chips arrive.
-        const hide = !reveal && seat.seatIndex !== mySeat && !!seat.holeCards?.length;
+        const hide = !reveal && seat.seatIndex !== me && !!seat.holeCards?.length;
         const shownSeat = held !== undefined || hide ? { ...seat, ...(held !== undefined && { stack: held }), ...(hide && { holeCards: null }) } : seat;
         return (
           <div key={seat.seatIndex}>
             <Seat
               seat={shownSeat}
-              isMe={seat.seatIndex === mySeat}
+              isMe={seat.seatIndex === me}
               isActor={isActor}
               turnNote={seat.seatIndex === mySeat && isActor ? turnNote : undefined}
               deadline={isActor ? (hand.deadline ?? null) : null}
@@ -501,6 +562,8 @@ export const TableScene = memo(function TableScene({
               showOver={showOnCards}
               reveal={spots?.get(seat.seatIndex) ?? null}
               reaction={seat.userId ? reactions?.find((r) => r.seatIndex === seat.seatIndex && r.userId === seat.userId) : null}
+              chat={seat.userId ? (chats?.get(seat.seatIndex) ?? null) : null}
+              chatAt={`${g.seat.y < 30 ? 'under' : 'over'}-${g.seat.x < 25 ? 'start' : g.seat.x > 75 ? 'end' : 'mid'}`}
               startCut={cut[seat.seatIndex]}
               density={density}
               amounts={amounts}
@@ -519,6 +582,12 @@ export const TableScene = memo(function TableScene({
       <Flights flights={flights} start={start} geometry={placed} pot={layout.pot} box={box} amounts={amounts} />
       {/* The showdown's title, over the middle of the table for the moment before the hands turn: it takes no tap and
           no room, and is gone (unmounted) once they do. */}
+      {/* The scene of a hand's end can be skipped: on this screen only, to the result as it stands. */}
+      {staged && hand?.stage === 'settled' && (cine || staged.board !== null || !staged.result) && (
+        <button type="button" onClick={skip} className="jc-tap absolute right-1 top-1 z-40 min-h-11 rounded-full border border-white/20 bg-ink-950/80 px-3 text-xs font-semibold text-ink-100 hover:bg-ink-800" data-testid="showdown-skip">
+          {t('table.skipScene')}
+        </button>
+      )}
       {cine === 'title' && (
         <div
           aria-hidden

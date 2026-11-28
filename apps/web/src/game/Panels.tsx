@@ -1,5 +1,5 @@
 import { sound, type AudioSettings } from '@jc/audio';
-import { SETTINGS_COLOR_VISIONS, type AutoBuyPolicy, type AutoBuyRequest, type ChatMessage, type TableView } from '@jc/types';
+import { SETTINGS_COLOR_VISIONS, SETTINGS_SHOWDOWN_MODES, type AutoBuyPolicy, type AutoBuyRequest, type ChatMessage, type TableView } from '@jc/types';
 import { Button, cx, Field, formatChips, Modal, MusicIcon, SendHorizontalIcon, THEMES } from '@jc/ui';
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -817,6 +817,41 @@ export function SettingsModal({ open, onClose, onLogout, top }: { open: boolean;
               <span className="text-xs text-ink-300">{t('settings.reactionsHint')}</span>
             </span>
             <input type="checkbox" checked={prefs.reactions} onChange={(e) => setPrefs({ reactions: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-reactions" />
+          </label>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5" id="showdown-mode-label">
+              {t('settings.showdownMode')}
+              <span className="text-xs text-ink-300">{t('settings.showdownModeHint')}</span>
+            </span>
+            <div className="flex shrink-0 rounded-lg border border-white/10 p-0.5" role="radiogroup" aria-labelledby="showdown-mode-label">
+              {SETTINGS_SHOWDOWN_MODES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={prefs.showdownMode === m}
+                  onClick={() => setPrefs({ showdownMode: m })}
+                  className={cx('jc-tap min-h-9 rounded-md px-2 text-xs font-semibold', prefs.showdownMode === m ? 'bg-gold-500/20 text-gold-300' : 'text-ink-300 hover:text-ivory')}
+                  data-testid={`settings-showdown-${m}`}
+                >
+                  {t(`settings.showdownMode.${m}` as MsgKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.winEffects')}
+              <span className="text-xs text-ink-300">{t('settings.winEffects.hint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.winEffects} onChange={(e) => setPrefs({ winEffects: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-win-effects" />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex flex-col gap-0.5">
+              {t('settings.chatBubbles')}
+              <span className="text-xs text-ink-300">{t('settings.chatBubbles.hint')}</span>
+            </span>
+            <input type="checkbox" checked={prefs.chatBubbles} onChange={(e) => setPrefs({ chatBubbles: e.target.checked })} className="size-4 shrink-0 accent-[var(--color-gold-500)]" data-testid="settings-chat-bubbles" />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="flex flex-col gap-0.5">

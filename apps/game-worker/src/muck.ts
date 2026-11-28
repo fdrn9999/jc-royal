@@ -5,6 +5,7 @@
  * uncontested, or lost and kept them face down) may show their first card, their second or both: a card once shown
  * stays shown.
  */
+import { showdownGapMs, wentToShowdown, type HandEnding } from '@jc/types';
 
 /** What the `show` command asks for: the first card, the second, or both. */
 export type ShowChoice = 0 | 1 | 'both';
@@ -26,5 +27,12 @@ export const BETWEEN_HANDS_MS = 4_000;
  */
 export const SHOW_DECISION_MS = 1_500;
 
-/** How long after a hand settles the next one is dealt. */
-export const afterHandMs = (memberDealtIn: boolean) => BETWEEN_HANDS_MS + (memberDealtIn ? SHOW_DECISION_MS : 0);
+/**
+ * How long after a hand settles the next one is dealt. A showdown (`ending`, counted from the hand) gets the time its
+ * scene takes and its result held to be read (packages/types pace.ts), never less than a hand won by a fold. The room's
+ * own clock: it waits for no client.
+ */
+export function afterHandMs(memberDealtIn: boolean, ending?: HandEnding | null): number {
+  const base = BETWEEN_HANDS_MS + (memberDealtIn ? SHOW_DECISION_MS : 0);
+  return ending && wentToShowdown(ending) ? Math.max(base, showdownGapMs(ending)) : base;
+}

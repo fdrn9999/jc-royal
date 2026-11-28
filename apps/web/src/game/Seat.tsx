@@ -14,6 +14,7 @@ import type { RevealSpot } from './reveal';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { serverNow } from '../lib/service';
 import { ReactionBubble, type SeatReaction } from './Reactions';
+import type { ChatBubble } from './chatBubbles';
 
 /** The server's clock (the deadline is the room's), so a device whose clock is off still shows the time the room allows. */
 function useNow(active: boolean) {
@@ -154,6 +155,13 @@ export interface SeatProps {
   reveal?: RevealSpot | null;
   /** The quick reaction this player sent, while it shows (sent from the status line under the table, Reactions.tsx). */
   reaction?: SeatReaction | null;
+  /**
+   * The chat line this player just wrote, as a speech bubble by the seat while it shows (chatBubbles.ts). Plain text
+   * only, two lines at most. `chatAt`: where it lies, so it stays inside the table: over the seat or under it (a seat
+   * along the top), from its start, its middle or its end (a seat at an edge).
+   */
+  chat?: ChatBubble | null;
+  chatAt?: `${'over' | 'under'}-${'start' | 'mid' | 'end'}`;
   /** Said in the status line in place of the rest (my turn's label on a phone upright, where the stack keeps no line). */
   turnNote?: ReactNode;
   /**
@@ -282,7 +290,8 @@ function SeatPlace(p: SeatProps) {
     <div
       // My own seat is above the board and the bets: where a cramped table (a raise panel open on a small phone) cannot
       // keep them apart, my cards stay in sight.
-      className={cx('absolute -translate-x-1/2 -translate-y-1/2', p.isMe ? 'z-[25]' : 'z-10')}
+      // (A seat saying something is above its neighbours for that moment, so its bubble is read whole.)
+      className={cx('absolute -translate-x-1/2 -translate-y-1/2', p.chat ? 'z-[26]' : p.isMe ? 'z-[25]' : 'z-10')}
       style={p.style}
       data-testid={`seat-${s.seatIndex}`}
       data-state={s.state}
@@ -495,6 +504,24 @@ function SeatPlace(p: SeatProps) {
           )}
         </div>
       </div>
+      {/* What the player just wrote in the table chat: beside the seat, over nothing that takes a tap, gone by itself.
+          Text only (React escapes it); the chat panel keeps the whole line and is what a screen reader hears. */}
+      {p.chat && (
+        <div
+          key={p.chat.id}
+          aria-hidden
+          className={cx(
+            'jc-chat-bubble pointer-events-none absolute z-30 w-max max-w-[9.5rem] rounded-xl border border-black/20 bg-ivory px-2 py-1 text-left text-[11px] font-medium leading-snug text-ink-950 shadow-lg',
+            // (Clear of the buttons that show my cards, which lie over them, and never faded with a folded hand.)
+            p.chatAt?.startsWith('under') ? 'top-full mt-0.5' : p.onShow && !p.showOver ? 'bottom-full mb-8' : 'bottom-full mb-0.5',
+            p.chatAt?.endsWith('start') ? 'left-0' : p.chatAt?.endsWith('end') ? 'right-0' : 'left-1/2 -translate-x-1/2',
+          )}
+          data-testid={`chat-bubble-${s.seatIndex}`}
+          data-at={p.chatAt}
+        >
+          <span className="line-clamp-2 [overflow-wrap:anywhere]">{p.chat.text}</span>
+        </div>
+      )}
     </div>
   );
 }

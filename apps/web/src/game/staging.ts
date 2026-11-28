@@ -9,7 +9,7 @@
  * state is not staged at all (the scene shows the server state at once).
  */
 import type { SoundId } from '@jc/audio';
-import type { TableCue, TableView } from '@jc/types';
+import { SCENE_MS, type ShowdownMode, type TableCue, type TableView } from '@jc/types';
 
 /** A cue as the scene receives it (useTableSocket's CueEvent, without the state each one carries). */
 export interface StageCue {
@@ -89,6 +89,7 @@ const GAP = 90; // between steps
 const SWEEP = 300; // street bets into the pot
 const CARD = 100; // between the cards of one street
 const STREET = 650; // between the streets of a run-out
+const RIVER = 450; // a run-out's last card waits that much longer
 const READ = 550; // the hands face up before the result
 const HOLD = 250; // the result before the chips move
 const PAY = 400; // a payout to its winner
@@ -97,10 +98,15 @@ const BACK = 280; // chips nobody called, back to their seat
 const DIM = 180; // a showdown: the table goes grey
 const TITLE = 570; // its title, until the hands turn
 const RESTORE = 320; // the colour comes back
-/** Everything is over well before the next hand, at least 4 s after the result (5.5 s when members played it). */
-export const BUDGET = 3300;
-/** A showdown takes a little longer (its title, the colour coming back), still over before the next hand. */
-export const SHOWDOWN_BUDGET = 3800;
+/**
+ * Everything is over well before the next hand: the room deals it a fixed time after the result, which for a showdown
+ * is its scene's budget and then the time its result is held (packages/types pace.ts, the room's and the scene's both).
+ */
+export const BUDGET = SCENE_MS.plain;
+/** A showdown takes a little longer (its title, the colour coming back). */
+export const SHOWDOWN_BUDGET = SCENE_MS.showdown;
+/** An all-in run-out, street by street, longer still. */
+export const RUNOUT_BUDGET = SCENE_MS.runout;
 /** More cues than that at once (a reconnect, a tab that slept): the scene jumps to the state. */
 export const MAX_CUES = 30;
 
@@ -126,12 +132,14 @@ function occupant(x: TableView['seats'][number] | undefined): string {
  * hand's end plays out with everyone who was in it. Only for the plan's own hand, and only a seat left empty: one
  * someone else took is theirs. `v` itself when nobody left.
  */
-export function holdSeats(planned: TableView, v: TableView): TableView {
+export function holdSeats(planned: TableView, v: TableView, dealtInOnly = false): TableView {
   if (!planned.hand || planned.hand.id !== v.hand?.id) return v;
   let held = false;
   const seats = v.seats.map((x) => {
     const was = planned.seats.find((y) => y.seatIndex === x.seatIndex);
     if (x.state !== 'empty' || !was || was.state === 'empty') return x;
+    // (Kept for the whole time the result shows: only a player the hand was dealt to, not one who sat it out.)
+    if (dealtInOnly && was.state !== 'active' && was.state !== 'folded' && was.state !== 'allin') return x;
     held = true;
     return was;
   });
@@ -145,7 +153,7 @@ export function collected(v: TableView): number {
 }
 
 /** Plans `cues`, which took the table from `prev` to `next`; null when they are not to be staged (the state shows at once). */
-export function plan(prev: TableView | null, cues: StageCue[], next: TableView, mySeat: number | null): Plan | null {
+export function plan(prev: TableView | null, cues: StageCue[], next: TableView, mySeat: number | null, mode: ShowdownMode = 'cinematic'): Plan | null {
   const h = next.hand;
   const ph = prev?.hand;
   const staged = cues.filter((c) => STAGED_KINDS.has(c.cue.kind));
@@ -188,9 +196,12 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
     if (reveal) return;
     t += GAP;
     // Only ever reached with the server's showdown cue in the batch: the table goes grey, the title, then the hands.
-    cine = { dim: t, title: t + DIM, settle: 0, restore: 0 };
-    sounds.push({ at: cine.title, id: 'showdown' });
-    t += DIM + TITLE;
+    // (The standard scene has neither: the hands turn at once.)
+    if (mode === 'cinematic') {
+      cine = { dim: t, title: t + DIM, settle: 0, restore: 0 };
+      sounds.push({ at: cine.title, id: 'showdown' });
+      t += DIM + TITLE;
+    } else sounds.push({ at: t, id: 'showdown' });
     reveal = t;
     t += READ;
   };
@@ -221,6 +232,8 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
       sweep();
       if (runout) showHands();
       t += GAP;
+      // The last card of a run-out is the one everybody waits for.
+      if (runout && c.stage === 'river' && mode === 'cinematic') t += RIVER;
       sounds.push({ at: t, id: 'flip' });
       c.cards.forEach((_, i) => boardAt.push(t + i * CARD));
       t += runout ? STREET : (c.cards.length - 1) * CARD;
@@ -285,7 +298,7 @@ export function plan(prev: TableView | null, cues: StageCue[], next: TableView, 
     if (who[seat] !== occupant(prev.seats.find((x) => x.seatIndex === seat))) return null;
   }
   const p: Plan = { hand: h.id, final: sig(next), end: t + 60, flights, sounds, bets, pot: potT.length > 1 ? potT : null, board, reveal, result, stacks, who, cine };
-  const budget = cine ? SHOWDOWN_BUDGET : BUDGET;
+  const budget = !reveal ? BUDGET : runout ? RUNOUT_BUDGET : SHOWDOWN_BUDGET;
   return p.end > budget ? scale(p, budget / p.end) : p;
 }
 

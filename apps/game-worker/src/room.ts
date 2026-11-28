@@ -1990,7 +1990,7 @@ export class TableRoom extends DurableObject<Env> {
       for (const s of this.room.seats) if (s && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
       this.room.lastRabbit = null;
-      this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
+      this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)), { ...h.ending(), runout: ranOut(cues), bust: h.startingSeats.some((p) => stacks.get(p.playerId) === 0) });
       this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
       // A tournament hand's result is the tournament's — places for those who lost their last chip, the winner once one
       // player is left — written to D1 below. Its record (hand history, replay, tournament statistics) is kept only by
@@ -2018,7 +2018,7 @@ export class TableRoom extends DurableObject<Env> {
       for (const s of this.room.seats) if (s && s.phase !== 'cashing' && stacks.has(s.userId)) s.stack = stacks.get(s.userId)!;
       this.room.settledHandId = h.handId;
       this.room.lastRabbit = null;
-      this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)));
+      this.room.nextHandAt = now + afterHandMs(h.startingSeats.some((p) => !this.botSeat(p.playerId)), { ...h.ending(), runout: ranOut(cues), bust: h.startingSeats.some((p) => stacks.get(p.playerId) === 0) });
       this.room.muck = { handId: h.handId, ids: h.startingSeats.map((p) => p.playerId) };
       // The record is kept with the result until D1 has it, so a failed write (or a crash) is retried, never lost.
       const key = `${UNRECORDED_PREFIX}${String(this.room.handNumber).padStart(10, '0')}`;
@@ -3802,6 +3802,11 @@ export class TableRoom extends DurableObject<Env> {
 }
 
 /** Time bank rules as players see them (the policy version stays with the admin status). */
+/** Board cards came with the showdown (an all-in run-out), as the batch that settled the hand tells it. */
+function ranOut(cues: readonly TableCue[]): boolean {
+  return cues.some((c) => c.kind === 'showdown') && cues.some((c) => c.kind === 'street');
+}
+
 function publicRules(r: TimeBankRules | null): TableView['timeBank'] {
   return r ? { initialMs: r.initialMs, maxMs: r.maxMs, unitMs: r.unitMs, refillHands: r.refillHands, refillMs: r.refillMs } : null;
 }

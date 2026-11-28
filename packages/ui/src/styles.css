@@ -486,6 +486,113 @@
 .jc-react {
   animation: jc-react 2.4s ease-out forwards;
 }
+/* The winner's banner (web ResultBanner), where the pot lay once it is paid: WINNER, who, with what, how much. It pops in
+   and stays until the next deal. A four of a kind, a straight flush and a royal flush have their own look (data-tier),
+   each a short glow that ends by itself: nothing of it outlasts the hand. Opacity, transform and a shadow only. */
+@keyframes jc-win-banner {
+  0% { opacity: 0; transform: translateY(6px) scale(0.92); }
+  60% { opacity: 1; transform: translateY(0) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes jc-win-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--win-ring), 0 0 10px 0 var(--win-glow); }
+  50% { box-shadow: 0 0 0 1px var(--win-ring), 0 0 26px 4px var(--win-glow); }
+}
+@keyframes jc-win-shine {
+  from { background-position: 200% 0; }
+  to { background-position: -100% 0; }
+}
+.jc-win-banner {
+  --win-ring: rgba(230, 197, 107, 0.45);
+  --win-glow: rgba(230, 197, 107, 0);
+  pointer-events: none;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 9999px;
+  background: rgba(8, 10, 14, 0.9);
+  padding: 0.2rem 0.7rem;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--color-ivory);
+  box-shadow: 0 0 0 1px var(--win-ring), 0 4px 14px rgba(0, 0, 0, 0.55);
+  animation: jc-win-banner 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.jc-win-banner-title {
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  color: var(--color-gold-300);
+}
+/* A phone's board is narrow: the title closes up so the winner's name keeps its room. */
+.jc-win-banner[data-tight] {
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+}
+.jc-win-banner[data-tight] .jc-win-banner-title {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.jc-win-banner[data-tight] .jc-win-banner-hand {
+  padding: 0 0.3rem;
+}
+.jc-win-banner-hand {
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0 0.45rem;
+  font-size: 11px;
+  font-weight: 600;
+}
+.jc-win-banner[data-tier] {
+  --win-glow: rgba(230, 197, 107, 0.65);
+  animation: jc-win-banner 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both, jc-win-glow 0.9s ease-in-out 0.32s 3;
+}
+.jc-win-banner[data-tier] .jc-win-banner-hand {
+  background: var(--color-gold-400);
+  color: var(--color-ink-950);
+  font-weight: 800;
+}
+.jc-win-banner[data-tier='straight-flush'] {
+  --win-ring: rgba(125, 211, 252, 0.7);
+  --win-glow: rgba(125, 211, 252, 0.7);
+}
+.jc-win-banner[data-tier='straight-flush'] .jc-win-banner-hand {
+  background: linear-gradient(90deg, #7dd3fc, #e6c56b);
+}
+.jc-win-banner[data-tier='royal'] {
+  --win-ring: rgba(255, 236, 170, 0.95);
+  --win-glow: rgba(255, 214, 102, 0.9);
+  animation: jc-win-banner 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both, jc-win-glow 0.8s ease-in-out 0.32s 4;
+}
+.jc-win-banner[data-tier='royal'] .jc-win-banner-hand {
+  background: linear-gradient(90deg, #e6c56b 0%, #fff6d6 25%, #e6c56b 50%, #f0a6ff 75%, #e6c56b 100%);
+  background-size: 300% 100%;
+  animation: jc-win-shine 1.6s linear 2;
+}
+/* A chat line as a speech bubble by its sender's seat (web Seat): pops in, holds, fades over the 4 s the table keeps it
+   (chatBubbles.ts CHAT_BUBBLE_MS). Opacity and transform only. */
+@keyframes jc-chat-bubble {
+  0% { opacity: 0; transform: scale(0.7); }
+  5% { opacity: 1; transform: scale(1.05); }
+  9% { transform: scale(1); }
+  90% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.96); }
+}
+.jc-chat-bubble {
+  animation: jc-chat-bubble 4s ease-out both;
+}
+/* The rabbit hunt's button on the board's empty places (web TableScene): it comes in softly once the result shows. */
+@keyframes jc-rabbit-slot {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.jc-rabbit-slot {
+  animation: jc-rabbit-slot 0.25s ease-out both;
+}
 /* Highlight ring the academy tour draws around a table element. */
 .jc-spot {
   position: absolute;
@@ -660,7 +767,12 @@
   .jc-turn::after,
   .jc-pop,
   .jc-shake,
-  .jc-react {
+  .jc-react,
+  .jc-chat-bubble,
+  .jc-rabbit-slot,
+  .jc-win-banner,
+  .jc-win-banner[data-tier],
+  .jc-win-banner[data-tier] .jc-win-banner-hand {
     animation: none !important;
   }
   .jc-spot {

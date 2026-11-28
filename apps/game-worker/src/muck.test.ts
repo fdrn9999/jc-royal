@@ -33,4 +33,17 @@ describe('time between hands', () => {
     // A hand of table bots only: nobody to decide.
     expect(afterHandMs(false)).toBe(BETWEEN_HANDS_MS);
   });
+
+  it('a pot won by a fold keeps that pace; a showdown gets its scene and then its result held to be read', () => {
+    const end = { hands: 2, allIn: 0, runout: false, bust: false };
+    expect(afterHandMs(true, { ...end, hands: 1 })).toBe(BETWEEN_HANDS_MS + 1_500);
+    expect(afterHandMs(true, null)).toBe(BETWEEN_HANDS_MS + 1_500);
+    // Scene 3.8 s + result 4 s; all in 5 s; an all-in run-out's scene is 5.5 s; three hands or a player out of chips 6 s.
+    expect(afterHandMs(true, end)).toBe(7_800);
+    expect(afterHandMs(false, end)).toBe(7_800);
+    expect(afterHandMs(true, { ...end, allIn: 1 })).toBe(8_800);
+    expect(afterHandMs(true, { ...end, allIn: 2, runout: true })).toBe(10_500);
+    expect(afterHandMs(true, { ...end, hands: 3, allIn: 2, runout: true })).toBe(11_500);
+    expect(afterHandMs(true, { ...end, allIn: 2, runout: true, bust: true })).toBe(11_500);
+  });
 });

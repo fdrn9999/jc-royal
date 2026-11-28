@@ -26,7 +26,7 @@ import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { COACH_HANDS, coachActive, coachTip } from '../academy/coach';
 import { updateProgress, useProgress } from '../academy/progress';
-import { ActionBar } from '../game/ActionBar';
+import { ActionBar, usePhone } from '../game/ActionBar';
 import { RabbitPanel } from '../game/RabbitPanel';
 import { seatPolicy } from '../game/autoBuy';
 import { JoinCodeModal } from '../components/JoinCode';
@@ -41,7 +41,11 @@ import { PreActions } from '../game/PreActions';
 import { TimeBankButton } from '../game/TimeBank';
 import { TURN_LOW_MS, TurnBanner, useTurnCue } from '../game/TurnCue';
 import { legacyMuckStep } from '../game/olderRooms';
+import { seatBubbles } from '../game/chatBubbles';
 import { ReactionButton, ReactionTray, useReactionSender, useReactionTray } from '../game/Reactions';
+import { OutcomeNote } from '../game/ResultBanner';
+import { outcomeFor } from '../game/showdown';
+import { wonFrom } from '../game/won';
 import { RecoveryNote } from '../game/RecoveryNote';
 import { realTableOptions, useShortScreen } from '../game/short';
 import { amountChars, TableScene, useBoxSize, useTableLayout, useTableStatus } from '../game/TableScene';
@@ -102,6 +106,8 @@ const ARRIVAL_TEXT: Record<Arrival | 'gone' | 'waitGone', MsgKey> = {
 };
 
 /** Whole seconds to a time the room set (its clock: a device whose clock is off counts the same seconds). */
+/** A phone's reaction tray on my turn closes this long before the turn runs out (TimeBank.tsx's urgent time). */
+const TRAY_YIELD_MS = 8_000;
 const secondsTo = (target: number) => Math.max(0, Math.ceil((target - serverNow()) / 1000));
 
 /**
@@ -222,11 +228,36 @@ export function TablePage() {
   const reactOn = prefs.reactions && reactRules !== null;
   const reactSender = useReactionSender(sock.send, reactRules ?? undefined);
   const reactions = useMemo(() => (reactOn ? sock.reactions.filter((r) => !hiddenChat.has(r.userId)) : []), [reactOn, sock.reactions, hiddenChat]);
+  // Table chat as speech bubbles by the seats: the lines the chat panel shows (never a muted or blocked player's), for
+  // the players seated now; off in the settings, the panel alone has them.
+  const seatsNow = s?.seats;
+  const chats = useMemo(() => seatBubbles(sock.bubbles, prefs.chatBubbles, hiddenChat, seatsNow ?? []), [sock.bubbles, prefs.chatBubbles, hiddenChat, seatsNow]);
+  // Why the hand ended as it did for me, once its result shows (the scene tells when) and until the next deal: from the
+  // server's result alone. The seat I played the hand at is remembered for it, so it still reads after the room stood
+  // me up out of chips.
+  const [resultShown, setResultShown] = useState(false);
+  const played = useRef<{ hand: string; seat: number; state: string; settled: boolean } | null>(null);
+  const hNow = s?.hand ?? null;
+  if (!hNow || !s) played.current = null;
+  else if (played.current?.hand === hNow.id && played.current.settled) {
+    // (As the result found me: what the seat does afterwards, a rebuy or standing up, is no part of the hand.)
+  } else if (s.you.seatIndex !== null) played.current = { hand: hNow.id, seat: s.you.seatIndex, state: s.seats[s.you.seatIndex]?.state ?? '', settled: hNow.stage === 'settled' };
+  else if (played.current?.hand !== hNow.id) played.current = null;
+  const playedSeat = played.current?.seat ?? null;
+  const playedState = played.current?.state;
+  const settledResult = hNow?.stage === 'settled' && resultShown ? hNow.result : null;
+  const outcome = useMemo(() => (settledResult ? outcomeFor(settledResult, wonFrom(settledResult), playedSeat, playedState) : null), [settledResult, playedSeat, playedState]);
+  const nameKey = (seatsNow ?? []).map((x) => x.nickname ?? '').join('\n');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the seats are read through their names
+  const seatNames = useMemo(() => new Map((seatsNow ?? []).filter((x) => x.nickname).map((x) => [x.seatIndex, x.nickname!])), [nameKey]);
   const [toast, setToast] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // My rabbit hunt: of the hand on the table (its button and the board), or of the hand before (a panel of its own).
   const huntHere = sock.rabbitHunt && !sock.rabbitHunt.late && sock.rabbitHunt.handId === s?.hand?.id ? sock.rabbitHunt : null;
   const huntBefore = sock.rabbitHunt?.late ? sock.rabbitHunt : null;
+  // Its button lies on the board's empty places (TableScene): offered once a hand I was dealt into ended before the
+  // river, until the next is dealt. Asked: busy until the room answers; failed on the way: the same button asks again.
+  const huntPhase = !s?.you.canRabbit ? null : !huntHere ? 'idle' : huntHere.phase === 'requesting' || huntHere.phase === 'error' ? huntHere.phase : null;
   const [topUpOpen, setTopUpOpen] = useState(false);
   // Standing up mid-hand folds it, so the player says so first, beside the button (no dialog over the game).
   const [leaveAsk, setLeaveAsk] = useState(false);
@@ -533,8 +564,23 @@ export function TablePage() {
 
   const mySeat = s?.you.seatIndex ?? null;
   const seated = mySeat !== null;
-  // The reaction button is in the status line, which my turn's action bar replaces: the tray closes then.
-  const reactTray = useReactionTray(myTurn || !seated || !reactOn);
+  // The reaction button is in the status line; on my turn the action bar replaces that line, and the same button (with
+  // its tray) shows at the table's lower corner instead, so it is there whoever's turn it is.
+  const reactTray = useReactionTray(!seated || !reactOn);
+  const phone = usePhone();
+  // A phone's tray on my turn lies over the time bank's line: it makes way as the turn runs short (when the bank's
+  // button starts to pulse), so reaching for more time never lands on a reaction.
+  const closeTray = reactTray.close;
+  const trayOverBank = phone && !short && myTurn && reactTray.open;
+  const turnEnds = s?.hand?.deadline ?? null;
+  useEffect(() => {
+    if (!trayOverBank || turnEnds === null) return;
+    // (Opened later than that, it is the player's own choice and stays.)
+    const wait = turnEnds - TRAY_YIELD_MS - serverNow();
+    if (wait <= 0) return;
+    const h = setTimeout(closeTray, wait);
+    return () => clearTimeout(h);
+  }, [trayOverBank, turnEnds, closeTray]);
   // Seated, a page about something else opens in a new tab: leaving this one would leave the game behind (the
   // connection, then the hand), as the player's 1:1 chat does.
   const away = seated ? ({ target: '_blank', rel: 'noopener' } as const) : {};
@@ -856,13 +902,19 @@ export function TablePage() {
                 onSeatClick={onSeatClick}
                 pickSelf
                 rabbit={sock.rabbit}
+                huntPhase={huntPhase}
+                onHunt={sock.hunt}
                 onShow={onShow}
                 showOnCards={short}
                 reactions={reactions}
+                chats={chats}
                 nextIn={nextIn}
                 cues={sock.cues}
                 consumeCues={sock.consumeCues}
                 reducedMotion={reducedMotion}
+                showdownMode={prefs.showdownMode}
+                winEffects={prefs.winEffects}
+                onResultShown={setResultShown}
                 amounts={amt}
                 turnNote={turnNote}
                 handNote={handNote}
@@ -886,11 +938,12 @@ export function TablePage() {
           >
             {/* Passing word over the band's top, not a line of it: a toast (an error) shows over what is there; a notice
                 makes way for it, and for the raise panel, the reaction tray and the help, which need the band then. */}
-            {(toast || notice || huntBefore) && (
+            {(toast || notice || huntBefore || outcome) && (
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-center gap-1 px-2 pt-1 sm:items-end sm:px-6">
                 {/* The hand before's rabbit hunt, answered (or not) after the next was dealt: beside the game, never on
                     its board. */}
                 {huntBefore && <RabbitPanel hunt={huntBefore} onRetry={sock.huntAgain} onClose={sock.endHunt} narrow={short} className={STEP_ASIDE} />}
+                {outcome && !toast && <OutcomeNote outcome={outcome} names={seatNames} amounts={amt} className={STEP_ASIDE} />}
                 {toast && (
                   <div className="max-w-md rounded-lg border border-danger/40 bg-ink-950/95 px-3 py-1 text-xs text-[#f3b0b2] shadow-lg sm:py-2 sm:text-sm" role="alert">
                     {toast}
@@ -974,7 +1027,27 @@ export function TablePage() {
                   // holds both), and puts it in the presets' line while the raise panel is open (ActionBar's `bank`); wider,
                   // it is beside the bar.
                   <div className="pointer-events-none flex w-full shrink-0 flex-col items-center gap-1.5 sm:w-auto sm:flex-row sm:items-end sm:justify-end sm:gap-2">
-                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column={false} bank={(chip) => <TimeBankButton s={s} onUse={addBankTime} locked={!sock.synced} chip={chip} />} />
+                    <ActionBar state={s} onAct={onAct} busy={sock.acting || !sock.synced} amounts={amt} column={false} bank={(chip) =>
+                        // A phone's line over the bar holds the reaction button too, at its left (a neighbour's seat stands
+                        // at the table's lower corner there), and the tray over that line while open; with the raise panel
+                        // open the line is the panel's and both wait.
+                        chip || !phone || !seated || !reactOn ? (
+                          <TimeBankButton s={s} onUse={addBankTime} locked={!sock.synced} chip={chip} />
+                        ) : (
+                          <div className="pointer-events-none relative flex min-h-11 w-full items-center justify-center" data-testid="react-turn">
+                            <TimeBankButton s={s} onUse={addBankTime} locked={!sock.synced} />
+                            <span className="absolute left-0 top-1/2 flex -translate-y-1/2">
+                              <ReactionButton tray={reactTray} solid />
+                            </span>
+                            {reactTray.open && (
+                              <div className="absolute inset-x-0 bottom-0 z-10 flex">
+                                <ReactionTray state={reactTray} sender={reactSender} column={false} row />
+                              </div>
+                            )}
+                          </div>
+                        )
+                      }
+                    />
                   </div>
                 )}
               </>
@@ -983,18 +1056,11 @@ export function TablePage() {
                 reaction tray takes its line while open. */}
             {s && !myTurn && seated && !s.you.leaving && !reactTray.open && <PreActions s={s} onPick={sock.preAct} column={short} />}
             {/* A line of its own right above its button, in the band kept for it: it covers nothing and moves nothing. */}
-            {s && reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={short} />}
+            {s && reactTray.open && !myTurn && <ReactionTray state={reactTray} sender={reactSender} column={short} />}
             {s && !myTurn && (
               <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/5 bg-ink-950/80 px-3 py-2 text-sm backdrop-blur sm:self-end">
-                {/* Rabbit hunting: offered once a hand I was dealt into ended before the river, until the next is dealt.
-                    The cards go to the board's empty places (TableScene); here, what they are. */}
-                {s.you.canRabbit && (!huntHere || huntHere.phase === 'requesting' || huntHere.phase === 'error') && (
-                  // Asked: busy until the room answers. Failed on the way: the same button asks again.
-                  <Button size="sm" variant="outline" className="min-h-10" disabled={huntHere?.phase === 'requesting'} aria-busy={huntHere?.phase === 'requesting'} onClick={sock.hunt} data-testid="rabbit-hunt" data-phase={huntHere?.phase ?? 'idle'}>
-                    {huntHere?.phase === 'requesting' ? <Spinner className="size-4" /> : <RabbitIcon />}
-                    {t(huntHere?.phase === 'requesting' ? 'table.rabbitAsking' : huntHere?.phase === 'error' ? 'table.rabbitRetry' : 'table.rabbit')}
-                  </Button>
-                )}
+                {/* Rabbit hunting: its button and its cards are on the board's empty places (TableScene); here, what came
+                    of it. */}
                 {huntHere?.phase === 'error' && (
                   <span className="text-center text-xs text-[#f3b0b2]" role="status" data-testid="rabbit-failed">
                     {t('table.rabbitFailed')}
@@ -1174,6 +1240,21 @@ export function TablePage() {
               </div>
             )}
           </div>
+          {/* My turn: the action bar has the band, so the reaction button (the one of the status line, never a second)
+              and its tray stand at the table's lower left, above the band: over no action control, the timer or my cards.
+              (A phone held upright has a seat there: the line over its bar holds them, see the bar's `bank`.) */}
+          {s && myTurn && seated && reactOn && (short || !phone) && (
+            <div
+              className={cx(
+                'pointer-events-none absolute z-40 flex flex-col items-start gap-1',
+                short ? 'bottom-[max(0.375rem,env(safe-area-inset-bottom))] left-[max(0.5rem,env(safe-area-inset-left))]' : 'bottom-[calc(var(--dock)+var(--dock-b)+0.25rem)] left-2 sm:left-6',
+              )}
+              data-testid="react-turn"
+            >
+              {reactTray.open && <ReactionTray state={reactTray} sender={reactSender} column={short} side />}
+              <ReactionButton tray={reactTray} solid />
+            </div>
+          )}
         </div>
 
         {/* chat sidebar (desktop) / drawer (mobile) */}

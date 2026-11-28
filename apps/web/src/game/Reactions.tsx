@@ -73,8 +73,9 @@ export interface ReactionTrayState {
  * The button lies in the status line under the table and the tray is a line of its own above it (Table.tsx), not over my
  * seat: the dock's band under the table holds it with the status line (the pre-actions step aside while it is open), so
  * opening it moves nothing and it covers neither my cards nor a seat nor the wallet beside the button. Closes after a
- * pick, on a tap elsewhere, on Escape (the button gets its focus back) and on my turn, when the button goes with the
- * status line and the focus is left on the page rather than put on an action button.
+ * pick, on a tap elsewhere and on Escape (the button gets its focus back). On my turn the action bar takes the band, so
+ * the same button and tray move to the table's lower corner beside it (`side`), over no action control: sending a
+ * reaction never depends on whose turn it is. `off`: not seated, or reactions off.
  */
 export function useReactionTray(off: boolean): ReactionTrayState {
   const [open, setOpen] = useState(false);
@@ -106,8 +107,8 @@ export function useReactionTray(off: boolean): ReactionTrayState {
   return useMemo(() => ({ open: shown, toggle: () => setOpen((o) => !o), close: () => setOpen(false), opener, tray }), [shown]);
 }
 
-/** Opens the tray: a finger's size (44px), in the status line. */
-export function ReactionButton({ tray }: { tray: ReactionTrayState }) {
+/** Opens the tray: a finger's size (44px), in the status line (`solid`: on its own over the table, on my turn). */
+export function ReactionButton({ tray, solid }: { tray: ReactionTrayState; solid?: boolean }) {
   const { t } = useI18n();
   return (
     <button
@@ -117,6 +118,7 @@ export function ReactionButton({ tray }: { tray: ReactionTrayState }) {
       className={cx(
         'jc-tap grid size-11 shrink-0 place-items-center rounded-full border text-xl leading-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-gold-400',
         tray.open ? 'border-gold-400/70 bg-gold-500/15' : 'border-white/10',
+        solid && 'pointer-events-auto bg-ink-950/85 shadow-lg backdrop-blur',
       )}
       aria-label={t('react.open')}
       title={t('react.open')}
@@ -131,9 +133,12 @@ export function ReactionButton({ tray }: { tray: ReactionTrayState }) {
 
 /**
  * The eight reactions, a line of the stack above the status line's button: four to a row on a phone and in a short
- * screen's column (`column`, where each takes a quarter of its width), all eight in one row wider.
+ * screen's column (`column`, where each takes a quarter of its width), all eight in one row wider. `side`: on my turn,
+ * above its button at the table's lower corner, four to a row. `row`: on my turn on a phone, where a neighbour's seat
+ * stands in that corner: one row of all eight over the line above the action bar (the button's and the time bank's),
+ * each an eighth of it wide.
  */
-export function ReactionTray({ state, sender, column }: { state: ReactionTrayState; sender: ReactionSender; column: boolean }) {
+export function ReactionTray({ state, sender, column, side, row }: { state: ReactionTrayState; sender: ReactionSender; column: boolean; side?: boolean; row?: boolean }) {
   const { t } = useI18n();
   const wait = sender.wait();
   const [, tick] = useState(0);
@@ -151,11 +156,12 @@ export function ReactionTray({ state, sender, column }: { state: ReactionTraySta
       id="react-tray"
       role="group"
       aria-label={t('react.title')}
-      className={cx('pointer-events-auto rounded-2xl border border-gold-500/30 bg-ink-950/95 shadow-2xl backdrop-blur sm:self-end', column ? 'p-1' : 'p-1.5')}
+      className={cx('pointer-events-auto rounded-2xl border border-gold-500/30 bg-ink-950/95 shadow-2xl backdrop-blur', !side && !row && 'sm:self-end', row ? 'w-full p-0' : column && !side ? 'p-1' : 'p-1.5')}
       data-testid="react-tray"
+      data-side={side || row ? '' : undefined}
       data-momentary
     >
-      <div className={cx('grid', column ? 'grid-cols-4 gap-0.5' : 'grid-cols-4 gap-1 sm:grid-cols-8')}>
+      <div className={cx('grid', row ? 'grid-cols-8' : side ? 'grid-cols-4 gap-1' : column ? 'grid-cols-4 gap-0.5' : 'grid-cols-4 gap-1 sm:grid-cols-8')}>
         {REACTIONS.map((r, i) => (
           <button
             key={r}
@@ -168,7 +174,7 @@ export function ReactionTray({ state, sender, column }: { state: ReactionTraySta
             }}
             className={cx(
               'jc-tap grid place-items-center rounded-xl text-2xl leading-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-gold-400 disabled:opacity-35',
-              column ? 'h-11 w-full' : 'size-11',
+              row || (column && !side) ? 'h-11 w-full' : 'size-11',
             )}
             aria-label={t(`react.${r}` as MsgKey)}
             title={t(`react.${r}` as MsgKey)}

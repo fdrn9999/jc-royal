@@ -1,7 +1,7 @@
 import type { Card, HandStage, TableCue, TableView } from '@jc/types';
 import { describe, expect, it } from 'vitest';
 import { seatSpot, showdownSeats, winningCards } from '../src/game/showdown';
-import { BUDGET, boundaries, plan, SHOWDOWN_BUDGET, stagedAt, type CinePhase, type Plan, type StageCue } from '../src/game/staging';
+import { BUDGET, boundaries, plan, RUNOUT_BUDGET, SHOWDOWN_BUDGET, stagedAt, type CinePhase, type Plan, type StageCue } from '../src/game/staging';
 
 /**
  * The showdown's scene: that only the server's showdown starts it (never a pot won by a fold, never a hand found
@@ -133,7 +133,7 @@ describe('showdown scene: when it plays', () => {
     );
     const p = plan(prev, cues, next, 1)!;
     expect(p.cine).not.toBeNull();
-    expect(p.end).toBeLessThanOrEqual(SHOWDOWN_BUDGET);
+    expect(p.end).toBeLessThanOrEqual(RUNOUT_BUDGET);
     const [flop, , , turn, river] = p.board!.at;
     expect(p.cine!.dim).toBeLessThan(p.cine!.title);
     expect(p.cine!.title).toBeLessThan(p.reveal);
